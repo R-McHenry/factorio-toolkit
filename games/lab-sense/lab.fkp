@@ -1,0 +1,3 @@
+fkp 1 surface lab
+plot gears at 332,420 rot 0 size 16x16 module=gears
+plot iron at 310,420 rot 0 size 20x24 module=iron

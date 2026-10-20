@@ -132,6 +132,31 @@ class SenseTest(unittest.TestCase):
             adopt.adopt(mini, surface_lay.plots["mini"],
                         [scene.thing(name="iron-chest", x=16.5, y=3.5)], "iron", CAT)
 
+    def test_one_actors_keep_and_mark_in_one_look_are_two_marks(self):
+        # found live on the lab (2026-10-20): both were named unknown@<tick>, so writing them
+        # into the surface .fkp kept only one, and the kept fix came back as a new change
+        live = copy.deepcopy(self.live)
+        live["things"] += [scene.thing(name="transport-belt", x=25.5, y=3.5),        # sanctioned
+                           scene.thing(name="transport-belt", x=16.5, y=1.5, direction=8)]  # plot
+        rep = self.run_sense(live)
+        self.assertEqual([(m.name, m.until) for m in rep.marks],
+                         [("unknown@4200000", None), ("unknown@4200000.2", 4200000 + 432000)])
+        keys = {v.key for v in rep.verdicts if v.verdict == "MARKED"}
+        self.assertEqual(keys, {"nauvis:mark/unknown@4200000", "nauvis:mark/unknown@4200000.2"})
+        surface_lay = fkp.loads(SURFACE)
+        for m in rep.marks:
+            surface_lay.marks[m.name] = m
+        s = compose.compose(fkp.loads(fkp.dumps(surface_lay)), {"mini": fkp.loads(MINI)}, CAT)
+        again = sense.sense(s, live, CAT, AREA, WATCH, net_items=NETS)
+        self.assertEqual((again.counts(), again.marks, again.changes),
+                         ({"OK": 20, "MARKED": 2}, [], []))
+        self.assertEqual({v.actor for v in again.verdicts if v.verdict == "MARKED"}, {"unknown"})
+        # a name the surface already holds is not reused either
+        surface_lay = fkp.loads(SURFACE + "mark unknown@4200000 tiles 45,13\n")
+        s = compose.compose(surface_lay, {"mini": fkp.loads(MINI)}, CAT)
+        rep = sense.sense(s, live, CAT, AREA, WATCH, net_items=NETS)
+        self.assertEqual([m.name for m in rep.marks], ["unknown@4200000.2", "unknown@4200000.3"])
+
     def test_claims_existing_marks_expiry_enemies_and_nature(self):
         live = copy.deepcopy(self.live)
         extra = [scene.thing(name="iron-chest", x=31.5, y=1.5, last_user="computah"),     # claim

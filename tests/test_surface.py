@@ -50,11 +50,21 @@ class SurfaceFileTest(unittest.TestCase):
     def test_lab_defaults_to_notify_all(self):
         self.assertEqual(surface.loads("surface lab\nmode lab\n").notify_mode, "all")
 
+    def test_remind_is_the_alert_reminder_cadence(self):
+        sf = surface.loads("surface lab\nremind 20s   # a short one, for a test\n")
+        self.assertEqual((sf.remind, sf.remind_ticks), ("20s", 1200))
+        default = surface.loads("surface nauvis\n")
+        self.assertEqual((default.remind, default.remind_ticks), ("10min", 36000))  # open
+        for bad in ("remind soon\n", "remind 0s\n", "remind 1 min\n"):
+            with self.assertRaises(surface.SurfaceError):
+                surface.loads("surface s\n" + bad)
+
     def test_errors(self):
         for text, msg in (("mode play\n", "no surface line"),
                           ("surface s\nmode war\n", "mode is play or lab"),
                           ("surface s\nplace a = a plot 1,2 3y4\n", "expected WxH"),
                           ("surface s\nfly away\n", "unknown line"),
+                          ("surface s\nremind soon\n", "malformed remind line"),
                           ("surface s\nplace a = a plot 0,0 2x2\nplace a = b plot 5,5 2x2\n",
                            "placed twice")):
             with self.assertRaises(surface.SurfaceError) as cm:

@@ -1,4 +1,5 @@
-"""python -m fkcore <command> ...  (each command is one contained tool; nothing touches the game)
+"""python -m fkcore <command> ...  (each command is one contained tool; only the flow's diff and
+apply, look --source world, alerts, stats and chart use the game link, and only with FK_LINK=on)
 
     check FILE.fk                         netlist checks (report lines, never a gate)
     rates FILE.fk [--unbounded NET,...] [--share appetite|level] [--chain INST,...]
@@ -12,8 +13,21 @@
                                           run the flow; reports in out/, checkpoints out/<step>/
     look GAME_DIR [--source design] [--area X0,Y0,X1,Y1]
                                           the composed surface of a game codebase, as designed
+    look GAME_DIR --source world [--area X0,Y0,X1,Y1] [--notify nearby|all|off]
+         [--watch ACTION] [--write-marks]
+                                          the layout vs the game inside the area: verdicts,
+                                          changes here, design and live renders; notify all
+                                          pushes the changes to chat and out/inbox.txt
     sense GAME_DIR CAPTURE.json --area X0,Y0,X1,Y1 [--write-marks]
                                           the layout vs a captured scene inside the area only
+    alerts GAME_DIR [--force F]           the game's alert panel: new alerts, reminders (the
+                                          surface file's remind), cleared ones; state in
+                                          out/alerts.json; pushed to chat when notify is all
+    stats GAME_DIR [--items A,B] [--window 1min|10min|1h] [--force F]
+                                          production and consumption per item on the surface
+                                          (a free read, never an alert)
+    chart GAME_DIR [--force F]            the surface's charted chunks: count and bounding box
+                                          (a free read, never an alert)
     split-to-chest GAME_DIR FACTORY NET NAME --at X,Y [--requester --item I [--rate R]]
                                           a chest joins NET as one more endpoint; only NET
                                           is re-routed by the next build
@@ -64,26 +78,82 @@ def _flat(path, layout=None):
         raise SystemExit(2)
 
 
+def _area(text):
+    if not text:
+        return None
+    parts = [int(v) for v in text.split(",")]
+    if len(parts) != 4 or parts[2] <= parts[0] or parts[3] <= parts[1]:
+        raise SystemExit(f"error: an area is X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0, got {text}")
+    return tuple(parts)
+
+
+def _game_link(what):
+    """The game link, or None after saying why (it is used only with FK_LINK=on)."""
+    from . import link
+    r, why = link.open_from_env()
+    if r is None:
+        print(f"{what}: skipped, no game link ({why})")
+    return r
+
+
+def _world(a, cat, what, body):
+    """Run ``body(r)`` -> lines with the game link open; errors are one line, never a trace."""
+    from . import link, look
+    r = _game_link(what)
+    if r is None:
+        return 2
+    try:
+        with r:
+            lines = body(r)
+    except (look.LookError, surfacemod.SurfaceError, link.LinkError, OSError) as exc:
+        print(f"error: {what}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    return 0
+
+
+def _look_world(a, cat):
+    from . import look
+    area = _area(a.area)
+    return _world(a, cat, "look --source world", lambda r: look.run(
+        r, a.game, cat, area, a.notify, a.watch, a.write_marks).lines())
+
+
+def _alerts(a, cat):
+    from . import alerts
+    return _world(a, cat, "alerts", lambda r: alerts.check(r, a.game, a.force).report())
+
+
+def _free_read(a, cat):
+    from . import freereads
+    from .apply import force_for
+    try:
+        sf = surfacemod.load_game(a.game)
+    except (surfacemod.SurfaceError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    force = a.force or force_for(sf.mode)
+    if a.cmd == "chart":
+        return _world(a, cat, "chart", lambda r: freereads.chart_lines(
+            freereads.chart(r, force, sf.name)))
+    if a.window not in freereads.WINDOWS:
+        print(f"error: --window is one of {', '.join(freereads.WINDOWS)}", file=sys.stderr)
+        return 2
+    items = [i for i in (a.items or "").split(",") if i] or None
+    return _world(a, cat, "stats", lambda r: freereads.stats_lines(
+        freereads.stats(r, force, sf.name, items, a.window)))
+
+
 def _look(a, cat):
     if a.source == "world":
-        print("look --source world reads the game; this toolkit is offline", file=sys.stderr)
+        return _look_world(a, cat)
+    from . import look
+    try:
+        sf, _lay, _path, s = look.composed(a.game, cat)
+    except surfacemod.SurfaceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
-    surfaces = [f for f in sorted(os.listdir(a.game)) if f.endswith(".surface")]
-    if not surfaces:
-        print(f"error: no .surface file in {a.game}", file=sys.stderr)
-        return 2
-    sf = surfacemod.load(os.path.join(a.game, surfaces[0]))
-    lay_path = os.path.join(a.game, f"{sf.name}.fkp")
-    surface_lay = fkp.load(lay_path) if os.path.exists(lay_path) else surfacemod.floorplan(sf)
-    factories = {}
-    for p in sf.places.values():
-        path = os.path.join(a.game, f"{p.module}.fkp")
-        if os.path.exists(path):
-            lay = fkp.load(path)
-            lay.name = p.factory
-            factories[p.factory] = lay
-    s = compose.compose(surface_lay, factories, cat)
-    box = tuple(int(v) for v in a.area.split(",")) if a.area else None
+    box = _area(a.area)
     print(f"look {sf.name} --source design: {len(s.plots)} plots, {len(s.entities)} entities, "
           f"{len(s.problems)} invariant problems (. plot, : claim, ! mark, blank sanctioned)")
     print(compose.render(s, cat, box))
@@ -91,20 +161,11 @@ def _look(a, cat):
 
 
 def _composed(game, cat):
-    surfaces = [f for f in sorted(os.listdir(game)) if f.endswith(".surface")]
-    if not surfaces:
-        raise SystemExit(f"error: no .surface file in {game}")
-    sf = surfacemod.load(os.path.join(game, surfaces[0]))
-    lay_path = os.path.join(game, f"{sf.name}.fkp")
-    surface_lay = fkp.load(lay_path) if os.path.exists(lay_path) else surfacemod.floorplan(sf)
-    factories = {}
-    for p in sf.places.values():
-        path = os.path.join(game, f"{p.module}.fkp")
-        if os.path.exists(path):
-            lay = fkp.load(path)
-            lay.name = p.factory
-            factories[p.factory] = lay
-    return sf, surface_lay, lay_path, compose.compose(surface_lay, factories, cat)
+    from . import look
+    try:
+        return look.composed(game, cat)
+    except surfacemod.SurfaceError as exc:
+        raise SystemExit(f"error: {exc}") from None
 
 
 def _sense(a, cat):
@@ -124,23 +185,9 @@ def _sense(a, cat):
     return 0
 
 
-def _game_link():
-    """The game link for a command that needs it: only with FK_LINK=on (as the flow)."""
-    from . import link
-    if os.environ.get("FK_LINK", "off").lower() != "on":
-        print("this command uses the game link: run it on the game host with FK_LINK=on",
-              file=sys.stderr)
-        return None
-    try:
-        return link.Rcon()
-    except (OSError, link.LinkError) as exc:
-        print(f"no game link: {exc}", file=sys.stderr)
-        return None
-
-
 def _talk(a):
     from . import chat
-    r = _game_link()
+    r = _game_link(a.cmd)
     if r is None:
         return 2
     with r:
@@ -199,7 +246,7 @@ def _flats_and_models(game, sf, cat):
 
 def _measure(a, cat):
     from . import measure
-    r = _game_link()
+    r = _game_link("measure")
     if r is None:
         return 2
     sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
@@ -224,7 +271,7 @@ def _adopt(a, cat):
     if place is None or factory not in surface_lay.plots:
         print(f"error: no factory {factory} on {sf.name}", file=sys.stderr)
         return 2
-    r = _game_link()
+    r = _game_link("adopt")
     if r is None:
         return 2
     xs, ys = [t[0] for t in tiles], [t[1] for t in tiles]
@@ -287,6 +334,20 @@ def main(argv=None):
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
     lk.add_argument("--area")
+    lk.add_argument("--notify", choices=("nearby", "all", "off"))
+    lk.add_argument("--watch", help="strict | keep | revert | mark DUR, or plots=A,sanctioned=B")
+    lk.add_argument("--write-marks", action="store_true")
+    al = sub.add_parser("alerts")
+    al.add_argument("game")
+    al.add_argument("--force")
+    st = sub.add_parser("stats")
+    st.add_argument("game")
+    st.add_argument("--items")
+    st.add_argument("--window", default="1min")
+    st.add_argument("--force")
+    ch = sub.add_parser("chart")
+    ch.add_argument("game")
+    ch.add_argument("--force")
     se = sub.add_parser("sense")
     se.add_argument("game")
     se.add_argument("capture")
@@ -361,6 +422,10 @@ def main(argv=None):
         return code
     if a.cmd == "look":
         return _look(a, cat)
+    if a.cmd == "alerts":
+        return _alerts(a, cat)
+    if a.cmd in ("stats", "chart"):
+        return _free_read(a, cat)
     if a.cmd == "sense":
         return _sense(a, cat)
     if a.cmd == "split-to-chest":
