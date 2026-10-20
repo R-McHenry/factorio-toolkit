@@ -1,0 +1,17 @@
+# A deliberately bad sushi INPUT net: iron plates and gears on one belt past a pipe assembler that
+# takes only iron. SUSHI_SINK fires on `pipes`; `belts` takes both and stays quiet, and the sushi
+# output into one chest is quiet too.
+iron_mine = MinerRow<n=4, resource=iron-ore>
+coal      = MinerRow<n=1, resource=coal>
+smelt_a   = SmelterRow<n=2, recipe=iron-plate>
+smelt_b   = SmelterRow<n=2, recipe=iron-plate>
+gears     = AsmRow<n=1, recipe=iron-gear-wheel>
+belts     = AsmRow<n=1, recipe=transport-belt>
+pipes     = AsmRow<n=1, recipe=pipe>
+out       = Chest<provider>
+
+net ore:      iron_mine -> smelt_a, smelt_b
+net fuel:     coal -> smelt_a, smelt_b
+net plate_a:  smelt_a -> gears
+net feed:     smelt_b, gears -> belts, pipes        # sushi input: pipes takes no gears
+net products: belts, pipes -> out                   # sushi output: the chest takes everything

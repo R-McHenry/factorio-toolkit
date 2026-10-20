@@ -1,0 +1,40 @@
+# mall.fk: spm10's full mall (MallFull, TASK-4) as a V1 sub-module: one assembler per building.
+# Its inputs (iron, copper, steel, gears, circuits, adv circuits, stone) and its one sushi output join
+# the factory's nets from main.fk through `mall.*`; nothing here names a port, a lane or a tree.
+# The six intermediates were `=>` direct insertion; now they are nets, whose route may be a single
+# inserter (a layout choice, not a source one).
+module Mall {
+    furnaces  = Assembler<recipe=stone-furnace>
+    turrets   = Assembler<recipe=gun-turret>
+    cable_i   = Assembler<recipe=copper-cable>
+    mpoles    = Assembler<recipe=medium-electric-pole>
+    stick_i   = Assembler<recipe=iron-stick>
+    schests   = Assembler<recipe=steel-chest>
+    roboports = Assembler<recipe=roboport>
+    storage   = Assembler<recipe=storage-chest>
+    schest_i  = Assembler<recipe=steel-chest>
+    requester = Assembler<recipe=requester-chest>
+    repair    = Assembler<recipe=repair-pack>
+    asm1      = Assembler<recipe=assembling-machine-1>
+    drills    = Assembler<recipe=electric-mining-drill>
+    ins       = Assembler<recipe=inserter>
+    fast      = Assembler<recipe=fast-inserter>
+    ins_i     = Assembler<recipe=inserter>
+    long      = Assembler<recipe=long-handed-inserter>
+    splitters = Assembler<recipe=splitter>
+    belts_i   = Assembler<recipe=transport-belt>
+    ugs       = Assembler<recipe=underground-belt>
+    belts     = Assembler<recipe=transport-belt>
+    gearp     = Assembler<recipe=iron-gear-wheel>
+    pipes_i   = Assembler<recipe=pipe>
+    ptg       = Assembler<recipe=pipe-to-ground>
+    pipes     = Assembler<recipe=pipe>
+    ichests   = Assembler<recipe=iron-chest>
+
+    net m_cable: cable_i -> mpoles
+    net m_stick: stick_i -> mpoles
+    net m_belt:  belts_i -> ugs, splitters
+    net m_ins:   ins_i -> fast, long
+    net m_pipe:  pipes_i -> ptg
+    net m_chest: schest_i -> storage, requester
+}

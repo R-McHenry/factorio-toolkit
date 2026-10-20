@@ -1,0 +1,125 @@
+# main.fk: spm10 (v4-hand/live/v5/spm10.fk, 10 SPM red/green/blue) rewritten as ONE V1 factory.
+#
+# Same machines and counts as spm10. Gone: the 18 BeltSplit and 10 LaneMerge adapters, every port
+# (in/out/Belt[...]), the 48 link lines, ChestTap/ChestEnd as stamps, `~>`, in1/in2. Machines join
+# nets; a net's items are inferred from its drivers; routes, splitters and lanes are layout.
+# The mall's output is one sushi net into one chest; its inputs come off the factory's nets.
+import Mall from "mall.fk"
+
+module IronDistrict {
+    mine  = MinerRow<n=10, resource=iron-ore>
+    smelt = SmelterRow<n=16, recipe=iron-plate>
+    net ore: mine -> smelt
+}
+
+module CopperDistrict {
+    mine  = MinerRow<n=4, resource=copper-ore>
+    smelt = SmelterRow<n=6, recipe=copper-plate>
+    net ore: mine -> smelt
+}
+
+module CoalField {
+    for_iron   = MinerRow<n=2, resource=coal>
+    for_copper = MinerRow<n=1, resource=coal>
+    for_steel  = MinerRow<n=1, resource=coal>
+    for_oil    = MinerRow<n=1, resource=coal>          # plastic + explosives
+}
+
+module StoneOutpost {
+    mine = MinerRow<n=4, resource=stone>
+    drop = Chest<provider>                             # what the mall leaves goes to the network
+}
+
+module OilBlock {
+    # Fluids stay inside; plastic, sulfur and mines leave on the factory's nets.
+    wells  = Pumpjack<n=2, rate=30/s>                  # spm10's two pumpjacks (v4 default rate)
+    refine = Refinery<recipe=basic-oil-processing>
+    water  = OffshorePump
+    plast  = ChemPlant<recipe=plastic-bar>
+    sulf   = ChemPlant<recipe=sulfur>                  # blue
+    sulfx  = ChemPlant<recipe=sulfur>                  # explosives
+    expl   = ChemPlant<recipe=explosives>
+    mine   = Assembler<recipe=land-mine>
+
+    net crude:  wells -> refine
+    net petro:  refine -> plast, sulf, sulfx
+    net water_: water -> sulf, sulfx, expl
+    net sulf_x: sulfx -> expl
+    net boom:   expl -> mine
+}
+
+iron   = IronDistrict
+copper = CopperDistrict
+coal   = CoalField
+stone  = StoneOutpost
+oil    = OilBlock
+
+# the spine, red + green
+gears = AsmRow<n=3, recipe=iron-gear-wheel>
+cable = AsmRow<n=4, recipe=copper-cable>
+circ  = AsmRow<n=2, recipe=electronic-circuit>
+belts = AsmRow<n=1, recipe=transport-belt>
+ins   = AsmRow<n=1, recipe=inserter>
+red   = AsmRow<n=5, recipe=automation-science-pack>
+green = AsmRow<n=6, recipe=logistic-science-pack>
+labs  = LabRow<n=10>
+
+# blue (10 blue/min = 5 crafts/min: 10 engines, 15 adv circuits, 5 sulfur)
+steel   = SmelterRow<n=8, recipe=steel-plate>
+pipes   = AsmRow<n=1, recipe=pipe>
+engines = AsmRow<n=4, recipe=engine-unit>
+adv     = AsmRow<n=3, recipe=advanced-circuit>
+blue    = AsmRow<n=4, recipe=chemical-science-pack>
+
+# defense and the network
+mags       = AsmRow<n=3, recipe=firearm-magazine>
+mags_chest = Chest<storage, rate=0.2/s>               # yellow depot, filtered (Rory 2026-10-17)
+mine_chest = Chest<storage>                           # robots lay the mine ring from it
+bots_iron  = Chest<provider>                          # a small iron buffer the robots build from
+
+# the mall: one sushi output into one chest
+mall       = Mall<duty=0.02>                          # runs only while the network restocks
+mall_gears = AsmRow<n=1, recipe=iron-gear-wheel>      # the mall's own gear source
+circ_tap   = Chest<requester, item=electronic-circuit> # the packed circuit chest, as in spm10
+mall_chest = Chest<provider>                          # the one chest robots take buildings from
+
+# fuel
+net iron_fuel:   coal.for_iron -> iron.smelt
+net copper_fuel: coal.for_copper -> copper.smelt
+net steel_fuel:  coal.for_steel -> steel
+net oil_coal:    coal.for_oil -> oil.plast, oil.expl
+
+# plates
+net iron_plate:   iron.smelt -> gears, circ, belts, ins, pipes, steel, mags, mall_gears, mall.*, bots_iron
+net copper_plate: copper.smelt -> cable, red, mall.*
+net steel_plate:  steel -> engines, oil.mine, mall.*
+net stone_:       stone.mine -> mall.*, stone.drop
+
+# intermediates
+net gear:    gears -> red, belts, ins, engines
+net cable_:  cable -> circ, adv
+net circuit: circ -> ins, adv
+net belt:    belts -> green
+net inserter_: ins -> green
+net pipe:    pipes -> engines
+net engine:  engines -> blue
+net advc:    adv -> blue, mall.*
+net plastic: oil.plast -> adv
+net sulfur:  oil.sulf -> blue
+
+# science
+net packs:      red, green -> labs                   # sushi: labs take both packs
+net blue_packs: blue -> labs
+
+# defense, network, mall
+net magazines: mags -> mags_chest
+net mines:     oil.mine -> mine_chest
+net mall_gear: mall_gears -> mall.*
+net mall_circ: circ_tap -> mall.*
+net mall_out:  mall.* -> mall_chest                  # sushi: 20 products, the chest takes all
+
+power self: cover all, pole=medium-electric-pole
+
+assert red.rate >= 10/min
+assert green.rate >= 10/min
+assert blue.rate >= 6/min                             # spm10's own assert (engines steel-short in v4)

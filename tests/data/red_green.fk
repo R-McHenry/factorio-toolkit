@@ -1,0 +1,33 @@
+# The red-green core of spm10's spine: spm10's machine counts and supply, no blue, no oil, no mall.
+# Hand calc (tests/test_rates.py): red and green both run at full speed, 30/min each.
+iron_mine    = MinerRow<n=10, resource=iron-ore>
+iron_smelt   = SmelterRow<n=16, recipe=iron-plate>
+copper_mine  = MinerRow<n=4, resource=copper-ore>
+copper_smelt = SmelterRow<n=6, recipe=copper-plate>
+coal_iron    = MinerRow<n=2, resource=coal>
+coal_copper  = MinerRow<n=1, resource=coal>
+
+gears = AsmRow<n=3, recipe=iron-gear-wheel>
+cable = AsmRow<n=4, recipe=copper-cable>
+circ  = AsmRow<n=2, recipe=electronic-circuit>
+belts = AsmRow<n=1, recipe=transport-belt>
+ins   = AsmRow<n=1, recipe=inserter>
+red   = AsmRow<n=5, recipe=automation-science-pack>
+green = AsmRow<n=6, recipe=logistic-science-pack>
+labs  = LabRow<n=10>
+
+net iron_ore:    iron_mine -> iron_smelt
+net copper_ore:  copper_mine -> copper_smelt
+net iron_fuel:   coal_iron -> iron_smelt
+net copper_fuel: coal_copper -> copper_smelt
+net iron:   iron_smelt -> gears, circ, belts, ins
+net copper: copper_smelt -> cable, red
+net gear:   gears -> red, belts, ins
+net cable:  cable -> circ
+net circ:   circ -> ins
+net belt:   belts -> green
+net ins:    ins -> green
+net packs:  red, green -> labs          # sushi: labs take both packs, so no SUSHI_SINK
+
+assert red.rate >= 10/min
+assert green.rate >= 10/min
