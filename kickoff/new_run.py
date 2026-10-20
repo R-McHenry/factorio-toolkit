@@ -60,7 +60,7 @@ LAUNCH = {
     "first": ("Play Factorio as your AGENTS.md describes.\n\n"
               "The base works, you can get started.\n\n"
               "You're free to act: no permission needed and no finished plan needed. Get something "
-              "small running early (docs\\EXAMPLES.md has three that build cleanly), then grow it."),
+              "small running early (docs\\EXAMPLES.md has a few that build cleanly), then grow it."),
 }
 
 

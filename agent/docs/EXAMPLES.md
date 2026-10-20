@@ -1,6 +1,6 @@
 # Examples
 
-Three small factories that build cleanly, each in `docs\examples\`. Copy one into `game\`, give it
+Small factories that build cleanly, each in `docs\examples\`. Copy one into `game\`, give it
 a plot in `nauvis.surface`, check it on paper, build it:
 
 ```
@@ -12,7 +12,7 @@ fk build                             # the paste
 fk look 68,-42 88,-22
 ```
 
-All three together on plots next to each other give 9 nets, all routed and connected, 0 LEAK.
+The first three together on plots next to each other give 9 nets, all routed and connected, 0 LEAK.
 Their power joins the plant's grid (`floorplan --bridge-power`).
 
 ## smelting.fk: ore to plates (26x26)
@@ -67,3 +67,28 @@ assert red.rate >= 9/min
 On paper: 18 red science/min (three assemblers at full speed), the assert passes. `red` takes two
 belts (gears and copper); every row's head is at x = 8, so the router has the columns 0..7 for
 its belts. To grow it: more `red` (n=5), and a second `gears` row feeding the same `gear` net.
+
+## steam.fk: a steam power plant, 3.6 MW (16x26)
+
+```
+pump = OffshorePump<rate=1200/s>               @(0, 17, rot 3)
+b1   = Boiler<fuel=coal>                       @(2, 13)
+b2   = Boiler<fuel=coal>                       @(10, 13)
+e1   = SteamEngine                             @(2, 0)
+e2   = SteamEngine                             @(2, 5)
+e3   = SteamEngine                             @(10, 0)
+e4   = SteamEngine                             @(10, 5)
+coal = Chest<requester, item=coal, rate=1/s>   @(6, 22)
+
+net water: pump -> b1, b2
+net steam: b1, b2 -> e1, e2, e3, e4
+net fuel:  coal -> b1, b2
+```
+
+On paper: two boilers at full speed (120 steam/s, 0.9 coal/s) run four engines at 900 kW each.
+The router lays the water and the steam as pipes (pipe-to-ground where they cross), and the coal
+as a belt with an inserter into each boiler; `cover power` joins the engines to the grid. Place
+the plot so the pump stands on the shore: at rot 3 it faces west, so water must lie west of its
+tile (`game\map.terrain.json` has the water). One pump feeds 20 boilers and each boiler runs two
+engines: to grow it, add boilers and engines to the same water and steam nets. Coal by belt from
+coal drills works the same way (`net fuel: drills -> b1, b2`).

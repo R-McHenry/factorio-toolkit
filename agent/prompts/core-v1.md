@@ -29,7 +29,8 @@ repeating.
 
 - `docs\TOOLKIT.md` has the commands — read the "When you need something" list once, it is the map of
   the whole toolkit
-- `docs\EXAMPLES.md` has three small factories that build cleanly: a good place to start
+- `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them: a
+  good place to start
 - `docs\LANGUAGE.md` describes the factory language
 - `game\nauvis.surface` says where each factory goes on the map
 
