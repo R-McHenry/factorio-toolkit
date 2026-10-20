@@ -28,7 +28,8 @@ import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_destroy", "lua_produced", "assert_safe", "snapshot", "paste", "OUT_DIR"]
+           "lua_destroy", "lua_produced", "lua_generate", "assert_safe", "snapshot", "paste",
+           "OUT_DIR"]
 
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
@@ -211,6 +212,21 @@ local n = 0
 for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}{filt}}}) do
   if e.type ~= 'character' and e.destroy() then n = n + 1 end
 end
+rcon.print(n)
+"""
+
+
+def lua_generate(surface, force, center, radius_chunks):
+    """Generate (and chart for ``force``) the chunks around ``center``: a paste can only build on
+    generated ground, and a new surface has almost none."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+s.request_to_generate_chunks({{{center[0]}, {center[1]}}}, {radius_chunks})
+s.force_generate_chunk_requests()
+local r = {radius_chunks} * 32
+game.forces[{_q(force)}].chart(s, {{{{{center[0]} - r, {center[1]} - r}}, {{{center[0]} + r, {center[1]} + r}}}})
+local n = 0
+for _ in s.get_chunks() do n = n + 1 end
 rcon.print(n)
 """
 
