@@ -1,0 +1,10 @@
+# sulfur.fk: water + petroleum gas -> a chemical plant (sulfur), a two-input fluid machine.
+# Both inputs are on the plant's north face (water left, gas right, the game's box order), the
+# water comes from the east and the gas from the west, so one net crosses the other. The gas
+# is an infinity pipe (the lab's free materials). The sulfur has no net yet (UNCONSUMED).
+pump = OffshorePump<rate=1200/s>      @(14, 0)
+gas  = InfinityPipe<fluid=petroleum-gas, rate=30/s> @(2, 4)
+chem = ChemPlant<recipe=sulfur>       @(8, 8)
+
+net water: pump -> chem
+net gas:   gas -> chem
