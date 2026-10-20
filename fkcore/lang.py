@@ -1,0 +1,352 @@
+"""fkcore.lang: tokenizer and parser for V1 factory source (.fk). Grammar: CORE.md "`.fk`".
+
+    file    := (import | module | stmt)*        # the file's top level is the factory body
+    import  := 'import' Name (',' Name)* 'from' STRING
+    module  := 'module' Name '{' stmt* '}'
+    stmt    := inst | net | assert | cover
+    inst    := name '=' Kind ('<' param (',' param)* '>')? hint*
+    net     := 'net' name ('items' item (',' item)*)? ':' refs '->' refs
+    refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
+    assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
+    cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
+    param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
+    value   := number ('/' unit)? | word ('|' word)* | STRING
+    hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word ')'
+
+The tokenizer is the one in C:\\fk-lead\\repo\\fkc\\lang.py (d6018d3), with ``*`` added for ``X.*``.
+Words may contain dashes (item names); instance, module and net names may not. Every node keeps its
+source line. Pure, stdlib only.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+__all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Assert", "Cover", "Module",
+           "File"]
+
+
+class FkSyntaxError(Exception):
+    def __init__(self, path, line, msg):
+        super().__init__(f"{path}:{line}: {msg}")
+        self.path, self.line, self.msg = path, line, msg
+
+
+_TOKEN = re.compile(r"""
+    (?P<ws>[ \t\r]+) | (?P<nl>\n) | (?P<comment>\#[^\n]*)
+  | (?P<string>"[^"\n]*")
+  | (?P<num>-?\d+(?:\.\d+)?(?![A-Za-z_\-]))
+  | (?P<op>->|>=|<=|==|[{}()\[\]<>,:=|@./*])
+  | (?P<word>[A-Za-z_](?:[A-Za-z0-9_]|-(?!>))*)
+""", re.X)
+
+_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_UNITS = {"s": 1.0, "min": 60.0, "h": 3600.0}
+_COVER_KINDS = ("power", "robots")
+
+
+@dataclass
+class Tok:
+    kind: str
+    text: str
+    line: int
+
+
+def tokenize(text, path="<fk>"):
+    toks, line, pos = [], 1, 0
+    while pos < len(text):
+        m = _TOKEN.match(text, pos)
+        if not m:
+            raise FkSyntaxError(path, line, f"unexpected character {text[pos]!r}")
+        kind = m.lastgroup
+        if kind == "nl":
+            line += 1
+        elif kind not in ("ws", "comment"):
+            toks.append(Tok(kind, m.group(), line))
+        pos = m.end()
+    toks.append(Tok("eof", "", line))
+    return toks
+
+
+# -- AST ------------------------------------------------------------------------------------------
+@dataclass
+class Ref:
+    parts: list          # ["mall", "belts"]
+    star: bool           # X.* : X's free endpoints
+    line: int
+
+    def __str__(self):
+        return ".".join(self.parts) + (".*" if self.star else "")
+
+
+@dataclass
+class Inst:
+    name: str
+    kind: str
+    params: dict
+    hints: dict
+    line: int
+
+
+@dataclass
+class Net:
+    name: str
+    items: list | None   # declared items, or None (inferred from the drivers)
+    drivers: list        # [Ref]
+    consumers: list      # [Ref]
+    line: int
+
+
+@dataclass
+class Assert:
+    ref: Ref
+    op: str
+    rate: float          # items/s
+    line: int
+
+
+@dataclass
+class Cover:
+    kind: str            # "power" | "robots"
+    name: str
+    targets: list | None  # None = all
+    params: dict
+    line: int
+
+
+@dataclass
+class Module:
+    name: str
+    line: int
+    insts: list = field(default_factory=list)
+    nets: list = field(default_factory=list)
+    asserts: list = field(default_factory=list)
+    covers: list = field(default_factory=list)
+
+
+@dataclass
+class File:
+    path: str
+    body: Module
+    modules: dict = field(default_factory=dict)    # Name -> Module
+    imports: list = field(default_factory=list)    # [(names, file, line)]
+
+
+# -- parser ---------------------------------------------------------------------------------------
+class _P:
+    def __init__(self, toks, path):
+        self.t, self.i, self.path = toks, 0, path
+
+    def peek(self, k=0):
+        return self.t[min(self.i + k, len(self.t) - 1)]
+
+    def err(self, msg, tok=None):
+        tok = tok or self.peek()
+        raise FkSyntaxError(self.path, tok.line, msg)
+
+    def next(self):
+        tok = self.peek()
+        self.i += 1
+        return tok
+
+    def accept(self, text):
+        if self.peek().text == text and self.peek().kind in ("op", "word"):
+            return self.next()
+        return None
+
+    def expect(self, text):
+        tok = self.next()
+        if tok.text != text:
+            self.err(f"expected {text!r}, got {tok.text or tok.kind!r}", tok)
+        return tok
+
+    def word(self, what="name"):
+        tok = self.next()
+        if tok.kind != "word":
+            self.err(f"expected {what}, got {tok.text or tok.kind!r}", tok)
+        return tok
+
+    def name(self, what="name"):
+        tok = self.word(what)
+        if not _NAME.match(tok.text):
+            self.err(f"{what} {tok.text!r} may not contain dashes", tok)
+        return tok
+
+    def number(self):
+        tok = self.next()
+        if tok.kind != "num":
+            self.err(f"expected a number, got {tok.text or tok.kind!r}", tok)
+        v = float(tok.text)
+        return int(v) if v.is_integer() and "." not in tok.text else v
+
+    def rate(self):
+        n = self.number()
+        if self.accept("/"):
+            unit = self.word("a rate unit (s, min, h)").text
+            if unit not in _UNITS:
+                self.err(f"unknown rate unit {unit!r}")
+            return float(n) / _UNITS[unit]
+        return n
+
+    # stmt-level
+    def file(self):
+        body = Module("<factory>", 1)
+        f = File(self.path, body)
+        while self.peek().kind != "eof":
+            tok = self.peek()
+            if tok.text == "import" and tok.kind == "word":
+                f.imports.append(self.import_())
+            elif tok.text == "module" and tok.kind == "word":
+                mod = self.module()
+                if mod.name in f.modules:
+                    self.err(f"module {mod.name} defined twice", tok)
+                f.modules[mod.name] = mod
+            else:
+                self.stmt(body)
+        return f
+
+    def import_(self):
+        line = self.expect("import").line
+        names = [self.name("module name").text]
+        while self.accept(","):
+            names.append(self.name("module name").text)
+        self.expect("from")
+        tok = self.next()
+        if tok.kind != "string":
+            self.err("expected a file name in quotes", tok)
+        return names, tok.text[1:-1], line
+
+    def module(self):
+        line = self.expect("module").line
+        mod = Module(self.name("module name").text, line)
+        self.expect("{")
+        while not self.accept("}"):
+            if self.peek().kind == "eof":
+                self.err(f"module {mod.name} is not closed")
+            self.stmt(mod)
+        return mod
+
+    def stmt(self, mod):
+        tok = self.peek()
+        if tok.kind != "word":
+            self.err(f"expected a statement, got {tok.text or tok.kind!r}")
+        if tok.text == "net" and self.peek(1).kind == "word":
+            mod.nets.append(self.net())
+        elif tok.text == "assert":
+            mod.asserts.append(self.assert_())
+        elif tok.text in _COVER_KINDS and self.peek(1).kind == "word" and self.peek(2).text == ":":
+            mod.covers.append(self.cover())
+        elif self.peek(1).text == "=":
+            mod.insts.append(self.inst())
+        else:
+            self.err(f"expected an instance, net, assert or cover, got {tok.text!r}")
+
+    def ref(self):
+        tok = self.name("instance name")
+        parts, star = [tok.text], False
+        while self.peek().text == ".":
+            self.next()
+            if self.accept("*"):
+                star = True
+                break
+            parts.append(self.name("instance name").text)
+        return Ref(parts, star, tok.line)
+
+    def refs(self):
+        out = [self.ref()]
+        while self.peek().text == "," and self.peek(1).kind == "word" and self.peek(2).text != "=":
+            self.next()
+            out.append(self.ref())
+        return out
+
+    def net(self):
+        line = self.expect("net").line
+        name = self.name("net name").text
+        items = None
+        if self.accept("items"):
+            items = [self.word("item").text]
+            while self.accept(","):
+                items.append(self.word("item").text)
+        self.expect(":")
+        drivers = self.refs()
+        self.expect("->")
+        consumers = self.refs()
+        return Net(name, items, drivers, consumers, line)
+
+    def assert_(self):
+        line = self.expect("assert").line
+        ref = self.ref()
+        if ref.star or len(ref.parts) < 2 or ref.parts[-1] != "rate":
+            self.err("assert needs <instance or net>.rate", self.t[self.i - 1])
+        ref.parts = ref.parts[:-1]
+        op = self.next()
+        if op.text not in (">=", "<=", ">", "<", "=="):
+            self.err(f"expected a comparison, got {op.text!r}", op)
+        return Assert(ref, op.text, float(self.rate()), line)
+
+    def cover(self):
+        tok = self.next()
+        name = self.name("coverage name").text
+        self.expect(":")
+        self.expect("cover")
+        targets = None
+        if not self.accept("all"):
+            targets = self.refs()
+        params = {}
+        while self.accept(","):
+            k, v = self.param()
+            params[k] = v
+        return Cover(tok.text, name, targets, params, tok.line)
+
+    def inst(self):
+        tok = self.name("instance name")
+        self.expect("=")
+        kind = self.name("template or module").text
+        params, hints = {}, {}
+        if self.accept("<"):
+            if not self.accept(">"):
+                while True:
+                    k, v = self.param()
+                    if k in params:
+                        self.err(f"parameter {k} given twice")
+                    params[k] = v
+                    if self.accept(">"):
+                        break
+                    self.expect(",")
+        while self.peek().text == "@":
+            self.next()
+            if self.accept("patch"):
+                self.expect("(")
+                hints["patch"] = self.word("resource").text
+                self.expect(")")
+            else:
+                self.expect("(")
+                x = self.number()
+                self.expect(",")
+                y = self.number()
+                rot = 0
+                if self.accept(","):
+                    self.expect("rot")
+                    rot = self.number()
+                self.expect(")")
+                hints["at"] = (x, y, rot)
+        return Inst(tok.text, kind, params, hints, tok.line)
+
+    def param(self):
+        key = self.name("parameter").text
+        if not self.accept("="):
+            return key, True
+        tok = self.peek()
+        if tok.kind == "num":
+            return key, self.rate()
+        if tok.kind == "string":
+            self.next()
+            return key, tok.text[1:-1]
+        words = [self.word("value").text]
+        while self.accept("|"):
+            words.append(self.word("value").text)
+        return key, words[0] if len(words) == 1 else words
+
+
+def parse(text, path="<fk>") -> File:
+    return _P(tokenize(text, path), path).file()
