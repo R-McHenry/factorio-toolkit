@@ -73,6 +73,9 @@ rcon.print(helpers.table_to_json({tick = game.tick, level = script.level.level_n
   surfaces = surfaces, forces = forces, lab_researched = done, lab_techs = total,
   lab_tiles = ls and ls.generate_with_lab_tiles or false, lab_peaceful = ls and ls.peaceful_mode or false,
   players = #game.players, connected = #game.connected_players}))""")
+    if "lab" in info.get("surfaces", []):
+        info["lab_chunks"] = int(r.lua(link.lua_generate(SURF, FORCE, (a.plot[0] + 20, a.plot[1] + 25),
+                                                          4)).strip())
     out("info", **info)
     return info
 
