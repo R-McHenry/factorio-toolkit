@@ -20,8 +20,10 @@ the area that no layout entity explains is one of:
 - a foreign change, handled by the surface's watch policy for its region (plots: ``keep``,
   sanctioned space: ``mark <duration>``, or ``revert`` / ``strict``). It is attributed to its
   ``last_user``. ``keep`` and ``mark`` write a mark (``<actor>@<tick>``, its tiles, no expiry for
-  keep), so the next look says ``MARKED``, not ``NOBODY``. ``revert`` leaves it ``NOBODY`` for
-  the next apply to steamroll, and ``strict`` leaves it ``NOBODY``, loud.
+  keep), so the next look says ``MARKED``, not ``NOBODY``. One actor's ``keep`` and ``mark`` in
+  one look are two marks, so a name already taken (in this look or on the surface) gets a
+  suffix, ``<actor>@<tick>.2``. ``revert`` leaves it ``NOBODY`` for the next apply to
+  steamroll, and ``strict`` leaves it ``NOBODY``, loud.
 
 Enemies and nature (neutral force) are separate and never judged. Each foreign change gets a
 "changes here" line with who, what and a hint: built by a player; an unkeyed ghost; a carrier next
@@ -190,7 +192,7 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None) -> SenseR
         verdicts.append(Verdict("MISSING", e.name, e.x, e.y, e.key,
                                 "not built or destroyed; the next apply restores it"))
 
-    by_actor, changes = {}, []
+    pending, changes = {}, []         # (actor, action) -> the mark it writes, named at the end
     carrier_tiles = {}
     for e in surface.entities.values():
         if e.attrs.get("net") and cat.kind(e.name) in _CARRIERS:
@@ -219,18 +221,20 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None) -> SenseR
         hint = _hint(t, cat, carrier_tiles)
         what = f"{'a ghost of ' if t['ghost'] else ''}{t['name']} at {_fmt(t['x'])},{_fmt(t['y'])}"
         if action in ("mark", "keep"):
-            name = f"{actor}@{tick}"
-            mark = by_actor.setdefault((name, action), fkpmod.Mark(
-                name, [], None if action == "keep" else
-                (None if tick is None else tick + (duration_ticks(dur) or 0))))
+            p = pending.setdefault((actor, action), {
+                "mark": fkpmod.Mark(None, [], None if action == "keep" else
+                                    (None if tick is None else
+                                     tick + (duration_ticks(dur) or 0))),
+                "verdicts": [], "things": []})
             for tile in t["tiles"]:
-                if (tile[0], tile[1]) not in mark.tiles:
-                    mark.tiles.append((tile[0], tile[1]))
-            owners[i] = f"{surface.name}:mark/{name}"
-            verdicts.append(Verdict("MARKED", t["name"], t["x"], t["y"],
-                                    f"{surface.name}:mark/{name}",
-                                    "kept in the plot until its owner decides" if action == "keep"
-                                    else f"TEMP {actor}, marked for {dur}", actor, action))
+                if (tile[0], tile[1]) not in p["mark"].tiles:
+                    p["mark"].tiles.append((tile[0], tile[1]))
+            v = Verdict("MARKED", t["name"], t["x"], t["y"], None,
+                        "kept in the plot until its owner decides" if action == "keep"
+                        else f"TEMP {actor}, marked for {dur}", actor, action)
+            p["verdicts"].append(v)
+            p["things"].append(i)
+            verdicts.append(v)
         else:
             owners[i] = "NOBODY"
             verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], None,
@@ -238,7 +242,19 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None) -> SenseR
                                     "unattributed (strict)", actor, action))
         changes.append(f"{what}: {'built by ' + actor if actor != 'unknown' else 'no last_user'}"
                        f" ({region}, {action}){'; ' + hint if hint else ''}")
-    marks = [m for (_n, _a), m in sorted(by_actor.items())]
+    marks, taken = [], set(surface.marks)
+    for actor_action in sorted(pending):
+        p = pending[actor_action]
+        name, n = f"{actor_action[0]}@{tick}", 2
+        while name in taken:
+            name, n = f"{actor_action[0]}@{tick}.{n}", n + 1
+        taken.add(name)
+        p["mark"].name = name
+        for v in p["verdicts"]:
+            v.key = f"{surface.name}:mark/{name}"
+        for i in p["things"]:
+            owners[i] = f"{surface.name}:mark/{name}"
+        marks.append(p["mark"])
     expired = sorted(m.name for m in surface.marks.values()
                      if m.until is not None and tick is not None and m.until < tick
                      and _in_area([(math.floor(x), math.floor(y)) for x, y in m.tiles], area))

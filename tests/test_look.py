@@ -163,6 +163,18 @@ class LookTest(unittest.TestCase):
         self.assertEqual((again.rep.marks, again.rep.changes, again.pushed, r.said()),
                          ([], [], [], []))
 
+    def test_one_actor_kept_and_marked_writes_two_marks(self):
+        # the lab look of 2026-10-20: both belts placed through RCON, so both are 'unknown'
+        both = [dict(row) for row in self.foreign]
+        both[0].pop("lu")
+        _r, lk = self.run_look(both, write_marks=True)
+        lay = fkp.load(os.path.join(self.dir, "lab.fkp"))
+        self.assertEqual(sorted(lay.marks), [f"unknown@{TICK}", f"unknown@{TICK}.2"])
+        self.assertEqual(lay.marks[f"unknown@{TICK}"].until, None)              # kept
+        r, again = self.run_look(both)
+        self.assertEqual((again.rep.counts(), again.rep.changes, r.said()),
+                         ({"OK": 120, "MARKED": 2}, [], []))
+
     def test_fair_play_a_play_look_needs_an_area(self):
         path = os.path.join(self.dir, "lab.surface")
         with open(path, encoding="utf-8") as fh:
