@@ -42,6 +42,7 @@ class Catalog:
         self.version = version
         self._entities = entities
         self._recipes = recipes
+        self._fluids = None
 
     # -- construction ---------------------------------------------------------------------
     @classmethod
@@ -95,6 +96,18 @@ class Catalog:
     def kind(self, name) -> str:
         """The prototype's entity type (``transport-belt``, ``inserter``, ``assembling-machine``...)."""
         return self.entity(name).get("type", "")
+
+    def is_fluid(self, name) -> bool:
+        """A fluid: a recipe names it with ``type: fluid``; water, steam and crude oil also come
+        from machines without a recipe (offshore pump, boiler, pumpjack)."""
+        if self._fluids is None:
+            names = {"water", "steam", "crude-oil"}
+            for rec in self._recipes.values():
+                for row in list(rec.get("ingredients") or ()) + list(rec.get("products") or ()):
+                    if row.get("type") == "fluid":
+                        names.add(row["name"])
+            self._fluids = frozenset(names)
+        return name in self._fluids
 
     def recipe_rates(self, recipe, speed) -> tuple[dict, dict]:
         """``(needs, makes)`` per second for one machine crafting ``recipe`` at ``speed``.

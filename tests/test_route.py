@@ -95,6 +95,41 @@ class SmallTest(unittest.TestCase):
         self.assertEqual(sorted(again.kept), ["fuel", "ore_", "plate"])
         self.assertEqual(fkp.dumps(again.layout), fkp.dumps(first.layout))
 
+    def test_blocked_ground_is_avoided(self):
+        # terrain (water, cliffs) comes in as blocked tiles: the route goes round them
+        flat, lay = build(BASE + "net plate: smelt -> pipes\n")
+        first = route.route_layout(flat, lay, CAT)
+        belts = sorted(k for k, e in first.layout.entities.items()
+                       if k.startswith("~plate/b") and e.name == "transport-belt")
+        e = first.layout.entities[belts[len(belts) // 2]]
+        tile = (int(e.x), int(e.y))
+        r = route.route_layout(flat, lay, CAT, blocked=[tile])
+        self.assertEqual(r.failed, {}, r.lines)
+        used = set()
+        for k, x in r.layout.entities.items():
+            if k.startswith("~"):
+                used |= fkp.tiles_of(CAT, x)
+        self.assertNotIn(tile, used)
+        status, rep = judged(flat, r)
+        self.assertEqual(set(status.values()), {"connected"}, rep.lines())
+
+    def test_a_fluid_net_goes_to_the_fluid_plug_in(self):
+        # pipes are not belts: a fluid net is never laid as a belt route by this router
+        flat, lay = build(BASE + """
+            water = OffshorePump        @(30, 12)
+            chem  = ChemPlant<recipe=sulfur> @(30, 20)
+            net plate: smelt -> pipes
+            net w: water -> chem
+        """)
+        self.assertEqual(route.fluid_nets(flat, CAT), {"w"})
+        r = route.route_layout(flat, lay, CAT)
+        self.assertIn("plate", r.routed)
+        carriers = {e.name for k, e in r.layout.entities.items() if k.startswith("~w/")}
+        self.assertLessEqual(carriers, {"pipe", "pipe-to-ground"})
+        if route._fluid_plugin() is None:                  # until fkcore.fluid_route is built
+            line = next(l for l in r.lines if " w:" in l)
+            self.assertTrue(line.startswith("skipped   w: a fluid net"), line)
+
     def test_deterministic(self):
         flat, lay = build(BASE + "net plate: smelt -> pipes\n")
         a = route.route_layout(flat, lay, CAT)

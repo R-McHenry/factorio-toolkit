@@ -19,12 +19,18 @@ feeding a row) works the same way on a reversed tree, so its inserter turns roun
 the machine; that needs exactly one consumer. Several drivers AND several consumers are not
 routed yet (reported).
 
+A **fluid net** (every item a fluid) is not a belt job: it goes to the fluid plug-in,
+``fkcore.fluid_route.route(flat, lay, cat, nets, blocked, box, limit) -> (added, how, failed)``
+(``{net: [Entity]}``, ``{net: report text}``, ``{net: reason}``), called after the belt nets
+with the belts already laid. Without the plug-in a fluid net is reported, not routed.
+
 Per net the ground is: every entity tile, every placed instance's whole frame (the empty tiles
 inside a row are kept for poles), every other net's start and end tiles, every tile another
-net's belt points into, and everything outside ``bounds``. Nets are routed one at a time, each
-seeing the ones before it; a net that fails moves to the front and the pass is retried, and
-the pass that routes the most nets is kept. ``fkcore.connect`` is the judge: a routed layout is
-done when every net is connected with no LEAK. Pure, stdlib only, deterministic.
+net's belt points into, ``blocked`` (terrain: water, cliffs) and everything outside ``bounds``.
+Nets are routed one at a time, each seeing the ones before it; a net that fails moves to the
+front and the pass is retried, and the pass that routes the most nets is kept.
+``fkcore.connect`` is the judge: a routed layout is done when every net is connected with no
+LEAK. Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
@@ -52,6 +58,7 @@ class NetJob:
     sources: list = field(default_factory=list)    # [(machine key, tile rect)] a machine driver
     owners: list = field(default_factory=list)     # "<inst>.<role>" per start/goal, for the report
     skip: str | None = None
+    fluid: bool = False                            # a fluid net: the fluid plug-in routes it
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals]
@@ -82,14 +89,32 @@ class _Bounded(Grid):
         return not (x0 <= t[0] < x1 and y0 <= t[1] < y1) or t in self.occ
 
 
+def fluid_nets(flat, cat) -> set:
+    """The nets whose items are all fluids (pipes, not belts)."""
+    return {name for name, net in flat.nets.items()
+            if net.items and all(cat.is_fluid(i) for i in net.items)}
+
+
+def _fluid_plugin():
+    try:
+        from . import fluid_route
+    except ImportError:
+        return None
+    return fluid_route
+
+
 def jobs(flat, lay, cat) -> dict:
-    """{net: NetJob} from every placed instance's attach points."""
+    """{net: NetJob} from every placed instance's attach points (a fluid net: flagged only)."""
     out = {}
+    fluids = fluid_nets(flat, cat)
+    for name in sorted(fluids):
+        out[name] = NetJob(name, fluid=True,
+                           skip="a fluid net: pipes are routed by the fluid plug-in, not built yet")
     for path, rec in sorted(lay.insts.items()):
         if rec.kind == "Literal" or path not in flat.insts:
             continue
         for role, side, net, (x, y, d) in attach_points(flat, lay, path, cat):
-            if net is None:
+            if net is None or net in fluids:
                 continue
             job = out.setdefault(net, NetJob(net))
             if d is None:
@@ -155,8 +180,8 @@ def _ug_spans(cat, ents):
     return spans
 
 
-def _ground(cat, ents, frames, js, net):
-    blocked = set(frames)
+def _ground(cat, ents, frames, js, net, terrain=()):
+    blocked = set(frames) | set(terrain)
     for e in ents:
         blocked |= fkpmod.tiles_of(cat, e)
     for tile, owner in _belt_fronts(cat, ents).items():
@@ -188,9 +213,9 @@ def _clean(v):
     return int(v) if float(v).is_integer() else v
 
 
-def _route_one(cat, job, ents, frames, js, box, limit):
+def _route_one(cat, job, ents, frames, js, box, limit, terrain=()):
     net = job.net
-    blocked = _ground(cat, ents, frames, js, net)
+    blocked = _ground(cat, ents, frames, js, net, terrain)
     grid = _Bounded(blocked, box, _ug_spans(cat, ents))
     # several drivers, or a machine driver: grow from the one consumer, lay it reversed
     reverse = len(job.starts) + len(job.sources) > 1 or bool(job.sources)
@@ -224,12 +249,15 @@ def _route_one(cat, job, ents, frames, js, box, limit):
     return _carriers(job, plan, net), how
 
 
-def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000) -> Routed:
+def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
+                 blocked=()) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
-    tiles east and south (the frame starts at 0, 0)."""
+    tiles east and south (the frame starts at 0, 0). ``blocked``: ground no carrier may use,
+    in the factory frame (terrain: water, cliffs)."""
     js = jobs(flat, lay, cat)
+    terrain = frozenset(tuple(t) for t in blocked)
     have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
     kept = sorted(n for n in js if n in have)
     todo = [n for n in js if n not in have and js[n].skip is None]
@@ -249,7 +277,7 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
         ents = list(lay.entities.values())
         added, failed, how = {}, {}, {}
         for net in order:
-            got, why = _route_one(cat, js[net], ents, frames, js, box, limit)
+            got, why = _route_one(cat, js[net], ents, frames, js, box, limit, terrain)
             if got is None:
                 failed[net] = why
                 continue
@@ -268,6 +296,17 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
+    fluid_todo = sorted(n for n in js if js[n].fluid and n not in have)
+    plugin = _fluid_plugin() if fluid_todo else None
+    if plugin is not None:
+        f_added, f_how, f_failed = plugin.route(flat, new, cat, fluid_todo, terrain, box, limit)
+        for net in fluid_todo:
+            js[net].skip = None
+            for e in f_added.get(net, ()):
+                new.add(e)
+        added.update(f_added)
+        how.update(f_how)
+        failed.update(f_failed)
     xs = [t[0] + 1 for e in new.entities.values() for t in fkpmod.tiles_of(cat, e)]
     ys = [t[1] + 1 for e in new.entities.values() for t in fkpmod.tiles_of(cat, e)]
     new.size = (max(xs + [w]), max(ys + [h]))
@@ -278,6 +317,8 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
             lines.append(f"kept      {net}: its carriers are already laid (pinned)")
         elif job.skip:
             lines.append(f"skipped   {net}: {job.skip}")
+        elif net in added and job.fluid:
+            lines.append(f"routed    {net}: {how[net]}")
         elif net in added:
             lines.append(f"routed    {net}: {len(job.starts) + len(job.sources)} -> "
                          f"{job.consumers()}, {how[net]}")
