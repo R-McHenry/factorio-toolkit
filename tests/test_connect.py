@@ -4,13 +4,16 @@ Each case is a small hand-built layout in .fkp text. Directions follow the .fkp:
 inserter faces the side it picks from (v4 convention), a long-handed one reaches two tiles; both
 ends of an underground face the flow.
 """
+import os
 import unittest
 
-from fkcore import compose, fkp
+from fkcore import compose, expand, fkp
 from fkcore.catalog import Catalog
-from fkcore.connect import connect, graph
+from fkcore.connect import connect, endpoints, graph
+from fkcore.elaborate import elaborate_file
 
 CAT = Catalog.load()
+GAME = os.path.join(os.path.dirname(__file__), "..", "games", "spm10")
 
 
 def L(text, name="t"):
@@ -304,6 +307,61 @@ class LeakTest(unittest.TestCase):
         self.assertEqual(sorted(rep.nets), ["boot/a", "main/a"])
         self.assertEqual(leaks(rep), ["LEAK        net main/a: s:main/x/b2 feeds s:boot/x/b0 "
                                       "(net boot/a)"])
+
+
+class RedgreenTest(unittest.TestCase):
+    """games/spm10/redgreen.fkp: the rows' own segments, no routes between them yet."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.flat = elaborate_file(os.path.join(GAME, "redgreen.fk"), CAT)
+        cls.lay = fkp.load(os.path.join(GAME, "redgreen.fkp"))
+        cls.rep = connect(cls.lay, CAT, endpoints(cls.flat))
+
+    def test_every_row_segment_connects_its_attach_point_to_its_machines(self):
+        g = self.rep.graph
+        machines = {k for k, n in g.nodes.items() if not n.carrier}
+        roles = 0
+        for path, rec in self.lay.insts.items():
+            frag, binding = expand.fragment_of(self.flat, path, CAT)
+            for name, role in frag.roles.items():
+                (ax, ay, ad), = role.attach
+                x, y, _d = compose.turn(ax, ay, ad, rec.rot, frag.size)
+                at = g.at[(int(x + rec.x), int(y + rec.y))]
+                self.assertEqual(g.nodes[at].net, binding[name], (path, name))
+                reached = g.reach({at}, binding[name], forward=role.side == "in")
+                self.assertEqual(reached & machines, {f"{path}/{m}" for m in role.machines},
+                                 (path, name))
+                roles += 1
+        self.assertEqual((len(self.lay.insts), roles), (14, 31))
+
+    def test_every_net_between_rows_is_unrouted(self):
+        self.assertEqual(len(self.rep.nets), 12)
+        self.assertEqual({n: r.status for n, r in self.rep.nets.items()},
+                         {n: "unrouted" for n in self.flat.nets})
+        self.assertEqual(leaks(self.rep), [])
+        self.assertEqual(self.rep.graph.problems, [])
+        # (segments, carriers, driver->consumer pairs): one segment per row role on the net
+        segs = {n: (r.segments, r.carriers, r.pairs) for n, r in self.rep.nets.items()}
+        self.assertEqual(segs, {
+            "iron_ore": (2, 62, 160), "copper_ore": (2, 23, 24), "iron_fuel": (2, 50, 32),
+            "copper_fuel": (2, 20, 6), "iron": (5, 76, 112), "copper": (3, 54, 54),
+            "gear": (4, 37, 21), "cable": (2, 23, 8), "circ": (2, 11, 2), "belt": (2, 28, 6),
+            "ins_": (2, 27, 6), "packs": (3, 84, 110)})
+        self.assertEqual([r.missing for r in self.rep.nets.values()], [[]] * 12)
+        self.assertEqual(self.rep.summary(), "12 nets: 0 connected, 0 open, 12 unrouted; 0 LEAK; "
+                         "566 entities, 617 edges, 0 underground pairs")
+
+    def test_the_same_on_a_surface(self):
+        surface = fkp.loads("fkp 1 surface nauvis\nplot redgreen at 100,50 rot 1 size 43x46\n")
+        s = compose.compose(surface, {"redgreen": self.lay}, CAT)
+        rep = connect(s, CAT, endpoints(self.flat, surface="nauvis", factory="redgreen"))
+        self.assertEqual({n: r.status for n, r in rep.nets.items()},
+                         {f"redgreen/{n}": "unrouted" for n in self.flat.nets})
+        self.assertEqual(leaks(rep), [])
+        self.assertEqual({n[len("redgreen/"):]: (r.segments, r.carriers, r.pairs)
+                          for n, r in rep.nets.items()},
+                         {n: (r.segments, r.carriers, r.pairs) for n, r in self.rep.nets.items()})
 
 
 if __name__ == "__main__":
