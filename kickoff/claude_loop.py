@@ -18,6 +18,15 @@ The player runs headless in auto mode, the permission mode of the app sessions: 
 classifier decides each action, and one it refuses comes back to the player as an error (nothing
 waits for an answer). No MCP servers. This window and <run>\\play.log show what it does;
 <run>\\claude-events.jsonl has the raw events.
+
+What the player must not miss reaches it after its next shell command, whatever that command's
+output kept (the 0534 player cut fk's footer off 199 of 245 times and never saw Rory's chat): a
+watcher reads the game every 30 s and notes game chat and <run>\\INBOX.md (a message for the
+player: the file is taken and moved into .loop), each once; and it keeps the world line in
+.loop\\world.txt (the ghosts that wait and what the network lacks, idle robots, the research),
+rewritten when what blocks changes (at most every 2 minutes) or every 10 minutes while something
+does. claude_hook.py, a PostToolUse hook, hands over the notes and the world line when it is new;
+each round's message starts with them too.
 """
 import argparse
 import atexit
@@ -25,6 +34,7 @@ import ctypes
 import glob
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -32,9 +42,45 @@ import threading
 import time
 from datetime import datetime
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import claude_hook  # noqa: E402  (beside this file: the hook that hands the notes over)
+
 MODEL = "claude-opus-5-5"
 BACKOFF = [2, 5, 10, 20, 30]  # minutes, after the 1st, 2nd, ... failed round in a row
 MIN_ROUND = 60                # seconds: a quicker round waits out the rest before the next one
+WATCH = 30                    # seconds between two reads of the game
+REMIND = 600                  # seconds: the world line again while something stays blocked
+SETTLE = 120                  # seconds: the world line changes at most this often
+
+#: one free read of the game: the ghosts per item (with the network's stock and whether the
+#: recipe is locked), the construction robots, the research, and the game chat after CURSOR
+STATUS_LUA = r"""
+local s, f = game.surfaces.nauvis, game.forces.player
+local net
+for _, r in pairs(s.find_entities_filtered{name = "roboport", force = f}) do
+  if r.logistic_network then net = r.logistic_network break end
+end
+local count = {}
+for _, e in pairs(s.find_entities_filtered{type = "entity-ghost", force = f}) do
+  local it = e.ghost_prototype.items_to_place_this
+  local n = (it and it[1] and it[1].name) or e.ghost_name
+  count[n] = (count[n] or 0) + 1
+end
+local ghosts = {}
+for n, c in pairs(count) do
+  local r = f.recipes[n]
+  ghosts[#ghosts + 1] = {item = n, ghosts = c, stock = net and net.get_item_count(n) or 0,
+                         locked = (r ~= nil and not r.enabled)}
+end
+local chat = {}
+for _, m in pairs(storage.fk_chat or {}) do
+  if (m.tick or 0) > CURSOR then chat[#chat + 1] = m end
+end
+local res = f.current_research
+rcon.print(helpers.table_to_json{tick = game.tick, ghosts = ghosts, chat = chat,
+  robots = net and {idle = net.available_construction_robots, all = net.all_construction_robots},
+  research = res and {name = res.name, pct = math.floor(f.research_progress * 100)}})
+"""
 
 
 def claude_bin():
@@ -119,7 +165,7 @@ def feed(ev, log, state):
 def turn(run, sid, text, model, cap_min, log, events):
     """One claude -p turn on the run's conversation -> (state, exit code, why it was cut short)."""
     cmd = [claude_bin(), "-p", "--output-format", "stream-json", "--verbose", "--model", model,
-           "--permission-mode", "auto", "--strict-mcp-config"]
+           "--permission-mode", "auto", "--strict-mcp-config", "--settings", settings(run)]
     if sid:
         cmd += ["--resume", sid]
     state = {"sid": sid, "tools": 0, "result": None}
@@ -175,6 +221,144 @@ def ensure_login(run, log):
     log("Claude Code is signed in")
 
 
+def host_status(cfg, cursor):
+    """The STATUS_LUA read through the run's own toolkit on the game host (no footer: the
+    player's alert and chat cursors stay where they are), or None."""
+    lua = STATUS_LUA.replace("CURSOR", str(int(cursor)))
+    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
+           f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} timeout 15 python3 -m fkcore lua . "
+           + shlex.quote(lua))
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", cfg["host"], cmd], capture_output=True,
+                       text=True, encoding="utf-8", errors="replace", timeout=30)
+    for line in reversed(r.stdout.splitlines()):
+        if line.startswith("{"):
+            return json.loads(line)
+    return None
+
+
+def status_line(st):
+    """-> (the world line, the key of what blocks: SHORT and LOCKED ghost items, no research)."""
+    gh = sorted(st.get("ghosts") or [], key=lambda g: -g["ghosts"])
+    total = sum(g["ghosts"] for g in gh)
+    blocked, parts = [], []
+    if total:
+        items = []
+        for g in gh[:8]:
+            if g.get("stock"):
+                why = f"{g['stock']} in the network"
+            elif g.get("locked"):
+                why = "LOCKED: the network holds none and its recipe needs research"
+                blocked.append(g["item"] + ":locked")
+            else:
+                why = "SHORT: the network holds none"
+                blocked.append(g["item"] + ":short")
+            items.append(f"{g['ghosts']} {g['item']} ({why})")
+        more = f", and {len(gh) - 8} more kinds" if len(gh) > 8 else ""
+        parts.append(f"{total} ghosts wait for the robots: " + ", ".join(items) + more)
+    else:
+        parts.append("no ghosts wait")
+    rb = st.get("robots")
+    if rb:
+        parts.append(f"construction robots: {rb['idle']} of {rb['all']} idle")
+    r = st.get("research")
+    if r:
+        parts.append(f"research: {r['name']} {r['pct']}%")
+    else:
+        parts.append("RESEARCH: NONE, nothing researches")
+        blocked.append("research:none")
+    return "; ".join(parts) + ".", ",".join(sorted(blocked))
+
+
+class Watch(threading.Thread):
+    """Every WATCH seconds: INBOX.md, new game chat, and the world line when what blocks changes
+    (or every REMIND seconds while something does), as notes for the hook and the next round."""
+
+    def __init__(self, folder, log):
+        super().__init__(daemon=True)
+        self.folder, self.log = folder, log
+        self.dir = os.path.join(folder, ".loop")
+        os.makedirs(self.dir, exist_ok=True)
+        with open(os.path.join(folder, "run.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        self.cfg = None if cfg.get("host", "computah-ct") == "local" else cfg
+        self.cursor_file = os.path.join(self.dir, "chat-cursor")
+        # no cursor yet: the chat so far is not news, the first read only sets the cursor
+        self.cursor = int(open(self.cursor_file).read()) if os.path.exists(self.cursor_file) else None
+        self.key, self.said = None, 0.0
+        self.mutex = threading.Lock()
+
+    def note(self, text):
+        with open(os.path.join(self.dir, "notes-pending.txt"), "a", encoding="utf-8") as f:
+            f.write(text.rstrip() + "\n\n")
+
+    def world(self, line):
+        """The world line now (one file, rewritten: lines never stack up while the player waits)."""
+        path = os.path.join(self.dir, "world.txt")
+        with open(path + ".new", "w", encoding="utf-8") as f:
+            f.write(f"[World now, {datetime.now():%H:%M}] {line}\n")
+        os.replace(path + ".new", path)
+
+    def take(self):
+        """The pending notes and the world line if new, for a round's message (claude_hook.take)."""
+        with self.mutex:
+            return claude_hook.take(self.folder)
+
+    def run(self):
+        while True:
+            try:
+                self.check()
+            except Exception as exc:  # the watch never stops the player
+                self.log(f"  (watch: {type(exc).__name__}: {short(exc, 200)})")
+            time.sleep(WATCH)
+
+    def check(self, world=False):
+        """One read; ``world``: note the world line whatever it says (a round's start)."""
+        with self.mutex:
+            inbox = os.path.join(self.folder, "INBOX.md")
+            if os.path.exists(inbox):
+                with open(inbox, encoding="utf-8") as f:
+                    text = f.read().strip()
+                os.replace(inbox, os.path.join(self.dir, f"inbox-{datetime.now():%Y%m%d-%H%M%S}.md"))
+                if text:
+                    self.note(f"[A message for you, from INBOX.md]\n{text}")
+                    self.log("inbox: " + short(text, 300))
+            if not self.cfg:
+                return
+            st = host_status(self.cfg, self.cursor or 0)
+            if not st:
+                return
+            if self.cursor is None:
+                self.cursor = max([int(m.get("tick", 0)) for m in st.get("chat") or []] + [0])
+                with open(self.cursor_file, "w") as f:
+                    f.write(str(self.cursor))
+                st["chat"] = []
+            for m in sorted(st.get("chat") or [], key=lambda m: m.get("tick", 0)):
+                self.note(f"[{m.get('name', '?')} in game chat] {m.get('message', '')}\n"
+                          '(Answer with fk say "text".)')
+                self.log(f"chat {m.get('name', '?')}: {short(m.get('message', ''), 200)}")
+                self.cursor = max(self.cursor, int(m.get("tick", 0)))
+                with open(self.cursor_file, "w") as f:
+                    f.write(str(self.cursor))
+            line, key = status_line(st)
+            since = time.time() - self.said
+            due = (key != self.key and since > SETTLE) or (key and since > REMIND)
+            if world or (due and (key or self.key)):
+                self.world(line)
+                self.log("world: " + line)
+                self.said, self.key = time.time(), key
+
+
+def settings(folder):
+    """The --settings file: claude_hook.py after every shell command."""
+    hook = os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude_hook.py")
+    cmd = f'python "{hook}" "{folder}"'.replace("\\", "/")
+    path = os.path.join(folder, ".loop", "settings.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"hooks": {"PostToolUse": [{"matcher": "Bash|PowerShell", "hooks": [
+            {"type": "command", "command": cmd, "timeout": 10}]}]}}, f, indent=1)
+    return path
+
+
 def lock(run):
     path = os.path.join(run, "claude-loop.lock")
     if os.path.exists(path):
@@ -210,8 +394,11 @@ def main():
     with open(os.path.join(run, "launch.json"), encoding="utf-8") as f:
         first = json.load(f)["first"] + (f"\n\n{a.note}" if a.note else "")
     goal_path, stop_path = os.path.join(run, "GOAL.md"), os.path.join(run, "STOP")
+    watch = Watch(run, log)
+    watch.start()
     end = time.time() + a.hours * 3600
     n, fails, cut = 0, 0, None
+    restarted = bool(sid)  # a loop started again on a conversation: its last turn was cut
     log(f"loop start: {run}, {a.model}, conversation {sid or 'new'}; it stops on a STOP file, "
         f"an empty GOAL.md, {a.rounds} rounds or {a.hours:g} h")
     while True:
@@ -232,6 +419,16 @@ def main():
         if cut == "cap":
             text = (f"Your last turn was stopped after {a.turn_cap:g} minutes (the loop's cap on one "
                     f"turn). Carry on from where it was cut off.\n\n{text}")
+        try:
+            watch.check(world=True)
+        except Exception as exc:
+            log(f"  (watch: {type(exc).__name__}: {short(exc, 200)})")
+        notes = watch.take()
+        if notes:
+            text = f"{notes}\n\n{text}"
+        if restarted:
+            text = f"The loop restarted and stopped your last turn; carry on from where you were.\n\n{text}"
+            restarted = False
         n += 1
         log(f"=== round {n} ({'conversation ' + sid[:8] if sid else 'new conversation'})")
         t0 = time.time()
