@@ -17,6 +17,10 @@ toolkit (also pinned: files a running session uses never change under it). Each 
 ``fk build`` splits the flow at ``write_layout``: design here (``--to write_layout``), then on the
 host the steps after it (``--from diff``: the floorplan is replayed on the checkpoints). Stdlib
 only. ``FK_RUN`` names the run folder (default: the folder above this file's).
+
+A run whose ``run.json`` says ``"host": "local"`` plays a game on this machine (a laptop test
+server, ``tools/laptop_server.py``): nothing is copied, and the game steps run here with the
+link settings in ``run.json``'s ``env`` (FK_RCON_PORT, FK_RCON_PW_FILE, FK_SCRIPT_OUTPUT).
 """
 from __future__ import annotations
 
@@ -63,6 +67,8 @@ def _host_made(rel):
 
 def push(cfg):
     """Send the files of game\\ changed here since the last sync (host-made files excepted)."""
+    if cfg["host"] == "local":
+        return 0
     since = os.path.getmtime(STAMP) if os.path.exists(STAMP) else 0
     buf, n = io.BytesIO(), 0
     with tarfile.open(fileobj=buf, mode="w") as tar:
@@ -83,6 +89,8 @@ def push(cfg):
 
 def pull(cfg):
     """Bring the host's copy of game\\ back here (what the host steps wrote)."""
+    if cfg["host"] == "local":
+        return
     r = _ssh(cfg, f"tar -cf - -C {shlex.quote(cfg['host_game'])} .", capture=True)
     if r.returncode:
         sys.exit(f"fk: pull from {cfg['host']} failed")
@@ -103,6 +111,13 @@ def local(cfg, args):
 
 
 def remote(cfg, args, footer=True):
+    if cfg["host"] == "local":
+        env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"), FK_LINK="on",
+                   PYTHONDONTWRITEBYTECODE="1", **{k: v for k, v in cfg.get("env", {}).items() if v})
+        code = subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env).returncode
+        if footer:
+            subprocess.run([sys.executable, "-m", "fkcore", "poll", "."], cwd=GAME, env=env)
+        return code
     cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
            f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} python3 -m fkcore "
            + " ".join(shlex.quote(a) for a in args))
@@ -160,7 +175,7 @@ def main(argv):
         return 0
     cfg = _config()
     cmd, rest = argv[0], argv[1:]
-    if not os.path.exists(STAMP):
+    if not os.path.exists(STAMP) and cfg["host"] != "local":
         pull(cfg)                          # first use: start from the host's copy
     if cmd == "build":
         code = build(cfg, rest)
