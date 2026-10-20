@@ -62,7 +62,8 @@ def new_lines(r, game_dir):
     """The chat lines since the last call (and move the cursor). Empty when nothing is new."""
     got = read(r, _cursor(game_dir))
     if not got.get("journal"):
-        return ["chat: this map keeps no chat journal (it was not made from the fk-play scenario)"]
+        return ["chat: this map keeps no chat journal (its scenario script predates fk_chat.lua; "
+                "a map made from today's fk-play scenario has one)"]
     msgs = got["messages"]
     if msgs:
         _save_cursor(game_dir, max(int(m.get("tick", 0)) for m in msgs))
