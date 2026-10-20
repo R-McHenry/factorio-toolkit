@@ -1,0 +1,15 @@
+# lab.surface: fluid nets in the lab (V1: pipes and pipe-to-ground as route carriers), on the
+# fluids worker's region of the lab surface (x 740..860, y 400..560; the surface is 2048x2048,
+# x and y from -1024 to 1023). The lab rules: free materials, direct building. The two claims
+# are the offshore pumps' water: lab ground has none, so tools/lab_fluids.py sets their tiles to
+# water before the apply, and nothing (a bridge pole) is ever planned on them.
+surface  lab
+mode     lab
+terrain  none
+catalog  base
+
+place steam  = steam  plot 780,452 20x24
+place sulfur = sulfur plot 810,455 20x16
+
+claim lake-steam box 774,464 780,475 "water for the steam pump (lab: set_tiles)"
+claim lake-sulfur box 820,448 829,455 "water for the sulfur pump (lab: set_tiles)"

@@ -2,9 +2,11 @@
 the test game games/lab-fluids (water -> boilers -> steam engines; water + petroleum gas -> a
 chemical plant), judged by fkcore.connect; and that game through its own build script on paper."""
 import os
+import shutil
+import tempfile
 import unittest
 
-from fkcore import codec, connect, expand, fkp, lang, route
+from fkcore import codec, connect, expand, fkp, flow, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate, elaborate_file
 
@@ -89,6 +91,41 @@ class FluidRouteTest(unittest.TestCase):
         by_key = {row["src"]: row for row in rows}
         self.assertEqual(by_key["~steam/g1"]["direction"], 12)
         self.assertIsNone(by_key["~steam/p0"]["direction"])
+
+
+class LabFluidsFlowTest(unittest.TestCase):
+    """games/lab-fluids through its own build script, on paper (no game link)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp(prefix="fkfluids-")
+        for name in ("steam.fk", "sulfur.fk", "lab.surface", "lab.build.fkb"):
+            shutil.copy(os.path.join(GAME, name), cls.dir)
+        cls.code, cls.ctx = flow.run(os.path.join(cls.dir, "lab.build.fkb"), cat=CAT,
+                                     echo=lambda _l: None)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def read(self, name):
+        with open(os.path.join(self.dir, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_it_builds_with_only_the_known_warnings(self):
+        self.assertEqual(self.code, 0, self.ctx.log)
+        self.assertEqual(sorted((c.code, c.where) for _s, c in self.ctx.checks),
+                         [("UNCONSUMED", "sulfur chem"), ("UNFED", "steam b1"),
+                          ("UNFED", "steam b2")])
+        text = self.read("out/report_checks.txt")
+        self.assertIn("steam: 2 nets: 2 connected, 0 open, 0 unrouted; 0 LEAK", text)
+        self.assertIn("sulfur: 2 nets: 2 connected, 0 open, 0 unrouted; 0 LEAK", text)
+        self.assertIn("power: 1 wire network, 1 with generation", self.read("out/floorplan.txt"))
+
+    def test_the_committed_layouts_are_what_the_flow_writes(self):
+        for name in ("steam.fkp", "sulfur.fkp", "lab.fkp"):
+            with open(os.path.join(GAME, name), encoding="utf-8") as fh:
+                self.assertEqual(self.read(name), fh.read(), name)
 
 
 if __name__ == "__main__":

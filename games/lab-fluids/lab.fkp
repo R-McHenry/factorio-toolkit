@@ -1,0 +1,9 @@
+fkp 1 surface lab
+cover bridge power pole=medium-electric-pole
+plot steam at 780,452 rot 0 size 20x24 module=steam
+plot sulfur at 810,455 rot 0 size 20x16 module=sulfur
+claim lake-steam box 774,464 780,475 "water for the steam pump (lab: set_tiles)"
+claim lake-sulfur box 820,448 829,455 "water for the sulfur pump (lab: set_tiles)"
+e bridge/p0 medium-electric-pole 792.5,447.5
+e bridge/p1 medium-electric-pole 800.5,451.5
+e bridge/p2 medium-electric-pole 808.5,455.5

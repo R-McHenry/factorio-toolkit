@@ -1,0 +1,27 @@
+fkp 1 factory sulfur
+size 15x11
+inst chem ChemPlant recipe=sulfur at 8,8 rot 0 sig cb2af034c9
+inst gas InfinityPipe fluid=petroleum-gas rate=30 at 2,4 rot 0 sig 7f55c0d470
+inst pump OffshorePump rate=1200 at 14,0 rot 0 sig a632356411
+cover power power pole=medium-electric-pole
+e chem/m0 chemical-plant 9.5,9.5 N recipe=sulfur
+e gas/m0 infinity-pipe 2.5,4.5 fluid=petroleum-gas rate=30
+e power/p0 medium-electric-pole 5.5,5.5
+e pump/m0 offshore-pump 14.5,0.5 N rate=1200
+e ~gas/g0 pipe-to-ground 9.5,6.5 E net=gas
+e ~gas/g1 pipe-to-ground 3.5,6.5 W net=gas
+e ~gas/p0 pipe 10.5,7.5 net=gas
+e ~gas/p1 pipe 10.5,6.5 net=gas
+e ~gas/p2 pipe 2.5,6.5 net=gas
+e ~gas/p3 pipe 2.5,5.5 net=gas
+e ~water/g0 pipe-to-ground 8.5,1.5 W net=water
+e ~water/g1 pipe-to-ground 13.5,1.5 E net=water
+e ~water/p0 pipe 8.5,7.5 net=water
+e ~water/p1 pipe 7.5,7.5 net=water
+e ~water/p2 pipe 7.5,6.5 net=water
+e ~water/p3 pipe 7.5,5.5 net=water
+e ~water/p4 pipe 7.5,4.5 net=water
+e ~water/p5 pipe 7.5,3.5 net=water
+e ~water/p6 pipe 7.5,2.5 net=water
+e ~water/p7 pipe 7.5,1.5 net=water
+e ~water/p8 pipe 14.5,1.5 net=water

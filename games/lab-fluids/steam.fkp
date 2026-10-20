@@ -1,0 +1,35 @@
+fkp 1 factory steam
+size 13x18
+inst b1 Boiler fuel=coal at 2,13 rot 0 sig c2e0722573
+inst b2 Boiler fuel=coal at 10,13 rot 0 sig c2e0722573
+inst e1 SteamEngine at 2,0 rot 0 sig 4a53661345
+inst e2 SteamEngine at 2,5 rot 0 sig 4a53661345
+inst e3 SteamEngine at 10,0 rot 0 sig 4a53661345
+inst e4 SteamEngine at 10,5 rot 0 sig 4a53661345
+inst pump OffshorePump rate=1200 at 0,17 rot 3 sig a632356411
+cover power power pole=medium-electric-pole
+e b1/m0 boiler 3.5,14 N fuel=coal rate=60
+e b2/m0 boiler 11.5,14 N fuel=coal rate=60
+e e1/m0 steam-engine 3.5,2.5 N role=engine
+e e2/m0 steam-engine 3.5,7.5 N role=engine
+e e3/m0 steam-engine 11.5,2.5 N role=engine
+e e4/m0 steam-engine 11.5,7.5 N role=engine
+e power/p0 medium-electric-pole 7.5,2.5
+e pump/m0 offshore-pump 0.5,17.5 W rate=1200
+e ~steam/g0 pipe-to-ground 10.5,12.5 E net=steam
+e ~steam/g1 pipe-to-ground 4.5,12.5 W net=steam
+e ~steam/p0 pipe 3.5,10.5 net=steam
+e ~steam/p1 pipe 3.5,11.5 net=steam
+e ~steam/p2 pipe 3.5,12.5 net=steam
+e ~steam/p3 pipe 11.5,12.5 net=steam
+e ~steam/p4 pipe 11.5,10.5 net=steam
+e ~steam/p5 pipe 11.5,11.5 net=steam
+e ~water/p0 pipe 1.5,14.5 net=water
+e ~water/p1 pipe 1.5,15.5 net=water
+e ~water/p2 pipe 1.5,16.5 net=water
+e ~water/p3 pipe 1.5,17.5 net=water
+e ~water/p4 pipe 9.5,14.5 net=water
+e ~water/p5 pipe 8.5,14.5 net=water
+e ~water/p6 pipe 7.5,14.5 net=water
+e ~water/p7 pipe 6.5,14.5 net=water
+e ~water/p8 pipe 5.5,14.5 net=water
