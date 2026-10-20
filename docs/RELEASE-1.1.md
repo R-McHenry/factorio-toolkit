@@ -50,6 +50,12 @@ as `fk-v5-SHA`: it swaps `.toolkit`, `bin`, `docs`, `AGENTS.md` and `CLAUDE.md` 
 in `.upgrade-<old>`), keeps a player's plain direct insertion (`route --hand inserter`), and prints
 the note for the player (a Claude player gets it through `INBOX.md`).
 
+## 1.1.1 (same day)
+
+`fk fresh` also takes up inserters that hold an item the assembling machine they feed doesn't use
+(a recipe switch leaves one in the hand), so it covers what the 0534 player's `scripts/unjam.py`
+did by moving items, the way the game allows. The live read found none stuck at release.
+
 Left for later (FRICTION.md): re-laying a belt automatically when its net changes, plot moves and
 shrinks that leave the old entities, `cover robots` and the kit's network, a new plot over an old
 power bridge.

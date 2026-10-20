@@ -102,8 +102,9 @@ fixing in the source.
 ```
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
-fk fresh X0,Y0,X1,Y1             belts there with old items on them are taken up; the next build
-                                 lays them fresh
+fk fresh X0,Y0,X1,Y1             belts there with old items on them, and inserters stuck holding an
+                                 item their machine doesn't use, are taken up; the next build lays
+                                 them fresh
 fk merge . A,B --into C          two factories become one, both kept where they stand
 fk chests-to-net . C PROV REQ    a robot link (provider chest to requester chest) becomes a belt
 fk net-to-chests . C NET --provider P --requester R
@@ -150,10 +151,10 @@ game host and read there. For a script of your own, the game host is `computah-c
 the RCON client) and your game codebase there (`host_game`).
 
 Use it to look and to understand. Changes go through the game: `fk build` (ghosts and robots),
-and a script of yours can fix things the same way, by taking up the belts that carry stale items
-so the next build lays them again (`fk fresh` does just that). Nothing is created, refilled or
-moved by script. The link refuses Lua that registers an event handler, a command or an
-interface: that made every save unjoinable once.
+and a script of yours can fix things the same way, by taking up the belts and inserters that hold
+stale items so the next build lays them again (`fk fresh` does just that). Nothing is created,
+refilled or moved by script. The link refuses Lua that registers an event handler, a command or
+an interface: that made every save unjoinable once.
 
 ## The surface file
 

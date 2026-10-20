@@ -57,8 +57,8 @@ out by hand:
 - can you afford the next piece → `fk build` says it before it pastes (`out\report_bom.txt`)
 - what to research → `fk research`, then `fk research TECH`
 - a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
-- old items left on a rebuilt belt jam it → `fk fresh X0,Y0,X1,Y1` takes those belts up, and the
-  next `fk build` lays them fresh
+- old items left on a rebuilt belt or in an inserter's hand jam it → `fk fresh X0,Y0,X1,Y1` takes
+  those up, and the next `fk build` lays them fresh
 - what is the factory really making → `fk stats`
 - anything else → `fk lua` reads the game for you
 
