@@ -1,0 +1,9 @@
+# lab.surface: the k -> m game (games/lab-kxm) on the lab surface of the test map, inside the
+# router worker's lab region (x 880..1010, y 400..640), so fk build's diff and apply can be
+# watched live (/lab). The lab rules: free materials, direct building.
+surface  lab
+mode     lab
+terrain  none
+catalog  base
+
+place kxm = kxm plot 890,410 30x24

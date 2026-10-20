@@ -1,0 +1,10 @@
+# kxm.fk: one k -> m net, to watch on the lab surface: three drivers of three items (two drill
+# rows and a chest) into two chests, one sushi net. The router merges every driver into a hub and
+# splits it to every consumer, so each chest must end up holding every driver's item.
+fe   = MinerRow<n=1, resource=iron-ore>       @(2, 2)
+cu   = MinerRow<n=1, resource=copper-ore>     @(2, 10)
+gear = Chest<requester, item=iron-gear-wheel> @(3, 18)
+x    = Chest<provider>                        @(24, 6)
+y    = Chest<provider>                        @(24, 14)
+
+net mix: fe, cu, gear -> x, y

@@ -1,0 +1,63 @@
+fkp 1 factory kxm
+size 25x19
+inst cu MinerRow n=1 resource=copper-ore at 2,10 rot 0 sig 32f400ec73
+inst fe MinerRow n=1 resource=iron-ore at 2,2 rot 0 sig 32f400ec73
+inst gear Chest item=iron-gear-wheel requester=true at 3,18 rot 0 sig 61565a40ca
+inst x Chest provider=true at 24,6 rot 0 sig c724e6c441
+inst y Chest provider=true at 24,14 rot 0 sig c724e6c441
+cover power power pole=medium-electric-pole
+e cu/m0 electric-mining-drill 3.5,11.5 S resource=copper-ore
+e cu/outb0 transport-belt 3.5,13.5 E net=mix
+e cu/outb1 transport-belt 4.5,13.5 E net=mix
+e fe/m0 electric-mining-drill 3.5,3.5 S resource=iron-ore
+e fe/outb0 transport-belt 3.5,5.5 E net=mix
+e fe/outb1 transport-belt 4.5,5.5 E net=mix
+e gear/c0 requester-chest 3.5,18.5 item=iron-gear-wheel role=requester
+e power/p0 medium-electric-pole 6.5,1.5
+e power/p1 medium-electric-pole 14.5,5.5
+e power/p2 medium-electric-pole 0.5,7.5
+e power/p3 medium-electric-pole 21.5,10.5
+e power/p4 medium-electric-pole 0.5,14.5
+e x/c0 passive-provider-chest 24.5,6.5 role=provider
+e y/c0 passive-provider-chest 24.5,14.5 role=provider
+e ~mix/b0 transport-belt 7.5,12.5 E net=mix
+e ~mix/b1 transport-belt 5.5,11.5 E net=mix
+e ~mix/b2 transport-belt 5.5,10.5 S net=mix
+e ~mix/b3 transport-belt 4.5,8.5 S net=mix
+e ~mix/b4 transport-belt 3.5,8.5 E net=mix
+e ~mix/b5 transport-belt 3.5,15.5 N net=mix
+e ~mix/b6 transport-belt 3.5,16.5 N net=mix
+e ~mix/b7 transport-belt 5.5,8.5 S net=mix
+e ~mix/b8 transport-belt 5.5,7.5 S net=mix
+e ~mix/b9 transport-belt 5.5,6.5 S net=mix
+e ~mix/b10 transport-belt 5.5,5.5 S net=mix
+e ~mix/b11 transport-belt 5.5,12.5 E net=mix
+e ~mix/b12 transport-belt 5.5,13.5 N net=mix
+e ~mix/b13 transport-belt 8.5,12.5 E net=mix
+e ~mix/b14 transport-belt 9.5,12.5 E net=mix
+e ~mix/b15 transport-belt 10.5,12.5 E net=mix
+e ~mix/b16 transport-belt 11.5,12.5 E net=mix
+e ~mix/b17 transport-belt 12.5,12.5 E net=mix
+e ~mix/b18 transport-belt 13.5,12.5 E net=mix
+e ~mix/b19 transport-belt 14.5,12.5 E net=mix
+e ~mix/b20 transport-belt 15.5,12.5 E net=mix
+e ~mix/b21 transport-belt 16.5,12.5 E net=mix
+e ~mix/b22 transport-belt 17.5,12.5 E net=mix
+e ~mix/b23 transport-belt 18.5,12.5 E net=mix
+e ~mix/b24 transport-belt 19.5,12.5 E net=mix
+e ~mix/b25 transport-belt 20.5,12.5 E net=mix
+e ~mix/b26 transport-belt 21.5,12.5 E net=mix
+e ~mix/b27 transport-belt 22.5,12.5 E net=mix
+e ~mix/b28 transport-belt 23.5,12.5 E net=mix
+e ~mix/b29 transport-belt 24.5,12.5 N net=mix
+e ~mix/b30 transport-belt 24.5,11.5 N net=mix
+e ~mix/b31 transport-belt 24.5,10.5 N net=mix
+e ~mix/b32 transport-belt 24.5,9.5 N net=mix
+e ~mix/b33 transport-belt 24.5,8.5 N net=mix
+e ~mix/i0 fast-inserter 3.5,17.5 S net=mix
+e ~mix/i1 fast-inserter 24.5,13.5 N net=mix
+e ~mix/i2 fast-inserter 24.5,7.5 S net=mix
+e ~mix/s0 splitter 6.5,12 E net=mix
+e ~mix/s1 splitter 5,9.5 S net=mix
+e ~mix/u0 underground-belt 3.5,9.5 N net=mix ug=out
+e ~mix/u1 underground-belt 3.5,14.5 N net=mix ug=in

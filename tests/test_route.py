@@ -1,13 +1,17 @@
 import os
+import shutil
+import tempfile
 import unittest
+from unittest import mock
 
-from fkcore import connect, expand, fkp, lang, route
+from fkcore import connect, expand, fkp, flow, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate, elaborate_file
 
 CAT = Catalog.load()
 REDGREEN = os.path.join(os.path.dirname(__file__), "..", "games", "redgreen", "main.fk")
 SPM10 = os.path.join(os.path.dirname(__file__), "..", "games", "spm10", "main.fk")
+LAB_KXM = os.path.join(os.path.dirname(__file__), "..", "games", "lab-kxm")
 
 BASE = """
 ore   = MinerRow<n=2, resource=iron-ore>  @(14, 0, rot 2)
@@ -295,6 +299,30 @@ class Spm10Test(unittest.TestCase):
             self.assertTrue(net.connected or net.missing or any(
                 d not in self.r.layout.entities or c not in self.r.layout.entities
                 for d, c in net.unreached), (name, net.unreached[:3]))
+
+
+class LabKxmTest(unittest.TestCase):
+    """games/lab-kxm, the k -> m game applied on the lab surface: its flow on paper (no game link)
+    writes the committed layout, and the one sushi net connects every driver to every chest."""
+
+    def test_the_flow_on_paper(self):
+        with tempfile.TemporaryDirectory(prefix="fkkxm-") as d:
+            for name in ("kxm.fk", "lab.surface", "lab.build.fkb"):
+                shutil.copy(os.path.join(LAB_KXM, name), d)
+            with mock.patch.dict(os.environ, {"FK_LINK": "off"}):
+                code, ctx = flow.run(os.path.join(d, "lab.build.fkb"), cat=CAT,
+                                     echo=lambda _l: None)
+            self.assertEqual(code, 0, ctx.log)
+            for name in ("kxm.fkp", "lab.fkp"):
+                with open(os.path.join(d, name), encoding="utf-8") as a, \
+                        open(os.path.join(LAB_KXM, name), encoding="utf-8") as b:
+                    self.assertEqual(a.read(), b.read(), name)
+        rep = connect.connect(ctx.layouts["kxm"], CAT, connect.endpoints(ctx.flats["kxm"]))
+        mix = rep.nets["mix"]
+        self.assertEqual((mix.status, mix.reached, mix.pairs), ("connected", 6, 6))
+        self.assertEqual(rep.leaks, [])
+        self.assertEqual(sorted(ctx.flats["kxm"].nets["mix"].items),
+                         ["copper-ore", "iron-gear-wheel", "iron-ore"])
 
 
 class RedgreenTest(unittest.TestCase):
