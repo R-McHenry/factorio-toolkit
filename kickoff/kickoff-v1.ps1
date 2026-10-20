@@ -50,7 +50,12 @@ if (-not $NoReset) {
 }
 
 # the run's folder, from the same commit
-python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player
+# the last player's notes go to the next one: the newest NOTES.md of an earlier run
+$notes = @()
+$last = Get-ChildItem (Join-Path $P "runs\*\NOTES.md") -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($last) { $notes = @("--notes", $last.FullName); Write-Host "notes: $($last.FullName)" }
+python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player @notes
 if ($LASTEXITCODE -ne 0) { throw "new_run.py failed" }
 # the folder is made by this (Admin) account; DSH's sandbox, running as computah, rewrites the
 # workspace ACL at start (kickoff.ps1, 2026-10-18 09:53)

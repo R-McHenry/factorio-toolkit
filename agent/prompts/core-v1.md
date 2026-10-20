@@ -85,6 +85,12 @@ If something in the tools seems broken, just say so in `FRICTION.md`: that's use
 
 Have fun!
 
+## Notes for the next player
+
+`NOTES.md` in this folder, if there is one, is what the players before you wrote down: what worked,
+what to watch for, tricks worth keeping. Read it after this brief. Keep your own version of it as
+you go: the next player starts on a fresh map from what you write there.
+
 ## Your goal file
 
 `GOAL.md` in this folder is yours. Whenever you finish a turn, its text comes back to you as the next

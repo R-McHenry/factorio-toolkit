@@ -21,6 +21,8 @@ RUN_DIR gets:
                        plays directly, no DeepSeek)
   play.cmd             with --player claude: starts the goal loop (.toolkit/claude_loop.py and
                        its hook claude_hook.py, from SHA) for this folder; kickoff-v1.ps1 opens it
+  NOTES.md             with --notes FILE: what the players before wrote down for the next one
+                       (kickoff-v1.ps1 passes the newest run's NOTES.md)
 
 Everything comes from the toolkit at SHA (git archive: the brief, the docs, bin, the template and
 fkcore), so a run is what that commit says, whatever the working tree holds. The toolkit is
@@ -77,7 +79,8 @@ pause
 #: a Claude Code player's own file: it reads CLAUDE.md in its folder
 CLAUDE = """# Your Factorio run
 
-`AGENTS.md` is your brief: read it first, then `docs\\TOOLKIT.md`.
+`AGENTS.md` is your brief: read it first, then `NOTES.md` if there is one (what the players before
+you wrote down), then `docs\\TOOLKIT.md`.
 
 `fk` is your command: `bin\\fk.cmd <command>` in PowerShell, or `python bin/fk.py <command>` in
 Git Bash.
@@ -85,7 +88,7 @@ Git Bash.
 
 
 def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
-         host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek"):
+         host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek", notes=None):
     if os.path.exists(run) and os.listdir(run):
         raise SystemExit(f"new_run: {run} exists and is not empty")
     sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", sha], stdout=subprocess.PIPE,
@@ -100,6 +103,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     shutil.copy(brief, os.path.join(run, "AGENTS.md"))
     for name in ("GOAL.md", "FRICTION.md"):
         shutil.copy(os.path.join(agent, "run", name), os.path.join(run, name))
+    if notes:
+        shutil.copy(notes, os.path.join(run, "NOTES.md"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))
     os.makedirs(os.path.join(run, "bin"))
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
@@ -126,6 +131,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
         md5 = hashlib.md5(fh.read()).hexdigest()
     cfg = {"prompt": prompt, "prompt_md5": md5, "toolkit_sha": sha, "player": player,
            "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if notes:
+        cfg["notes_from"] = os.path.abspath(notes)
     if local:
         cfg.update(host="local", env=local)
     else:
@@ -148,12 +155,13 @@ def main(argv=None):
     ap.add_argument("--rcon-port")
     ap.add_argument("--pw-file")
     ap.add_argument("--script-output")
+    ap.add_argument("--notes", help="a NOTES.md to start the run with (the last player's)")
     a = ap.parse_args(argv)
     local = None
     if a.local:
         local = {"FK_RCON_PORT": a.rcon_port, "FK_RCON_PW_FILE": a.pw_file,
                  "FK_SCRIPT_OUTPUT": a.script_output}
-    cfg = make(a.run, a.prompt, a.sha, a.host, a.host_root, local, a.player)
+    cfg = make(a.run, a.prompt, a.sha, a.host, a.host_root, local, a.player, a.notes)
     print(json.dumps(cfg, indent=1))
     return 0
 

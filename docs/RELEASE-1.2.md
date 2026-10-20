@@ -47,6 +47,15 @@ All six items are fixed, each with tests; none is deferred.
   stdin to `fkcore lua . --file -`. And it goes to the game as written: the link joined a chunk's
   lines with spaces, so a comment at the end of a line took the rest of the chunk with it.
 
+## Also in 1.2
+
+- **Steam power in the player docs**: the boiler and steam engine geometry in LANGUAGE.md and a
+  3.6 MW plant in EXAMPLES.md (`docs\examples\steam.fk`). The templates were there since the
+  fluids work; built offline in play mode it routes clean, coal by belt into each boiler.
+- **Notes from run to run** (Rory, 2026-10-20): the player keeps `NOTES.md` in its folder, and a
+  kickoff copies the newest one into the next run (`new_run.py --notes`); the brief and CLAUDE.md
+  point to it.
+
 ## The player's side
 
 TOOLKIT.md says it in plain words: a build takes back what it built and the design no longer has;
