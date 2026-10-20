@@ -61,7 +61,13 @@ ExecStart=/bin/bash -c '$BIN \\
 EOF
 }
 
-say "1. stop the server (the running map saves itself)"
+say "1. the running map saved under a known name (before-v1-$stamp), its autosaves kept; stop"
+# a process started from a scenario saves itself under the scenario's name (fk-play.zip), not the
+# save its drop-in names: the 2026-10-20 kickoff found the test map's last state only there
+run su computah -c "'$AS timeout 10 python3 $TK/kickoff/save_map.py before-v1-$stamp'" || say "   (no answer: nothing to save)"
+run mkdir -p "$OLD/autosaves"
+run cp -p $F/server/factorio/saves/_autosave*.zip "$OLD/autosaves/" 2>/dev/null || true
+[ "$DRY" = "--dry" ] || sleep 3
 run systemctl stop factorio
 say "2. drop-ins: lab.conf -> $OLD/, v1.conf: a new map from fk-play; the scenario from $TK"
 run mkdir -p "$OLD"
@@ -100,8 +106,17 @@ pin() {    # save the running map and make v1.conf start that save from now on (
     systemctl daemon-reload
   fi
 }
-say "   the new map pinned: saved, and v1.conf starts the save"
+say "   the new map pinned: saved, v1.conf starts the save, and the server restarts from it (so"
+say "   its exits and autosaves go to that save, not to the scenario's name)"
 pin
+run systemctl restart factorio
+if [ "$DRY" != "--dry" ]; then
+  SECONDS=0
+  until su computah -c "$AS timeout 4 python3 $TK/kickoff/setup_v1.py --dry" > /dev/null 2>&1; do
+    [ $SECONDS -lt 40 ] || { say "the server did not come back within 40 s"; exit 1; }
+    sleep 1
+  done
+fi
 say "4. the starter world: bootstrap, kit, rules"
 run su computah -c "'$AS timeout 20 python3 $TK/kickoff/setup_v1.py'"
 say "5. the run's game codebase $G, the bare ground, the plant"
