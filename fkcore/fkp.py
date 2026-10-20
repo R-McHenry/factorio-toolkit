@@ -13,6 +13,9 @@ A key is ``<owner>/<local>``; the owner is an inst path, ``~<net>`` or a cover n
 canonical form (what :func:`dumps` writes) is the header, ``size``, then the records by kind and
 name, then the ``e`` lines in natural key order; comments are dropped, because the .fkp is
 tool-written. ``loads(dumps(x)) == x`` and ``dumps(loads(t)) == t`` for canonical ``t``.
+A ``k=v`` value with whitespace, a quote, a backslash or ``#`` in it (a Literal's ``config=`` JSON)
+is written in shell-style single quotes, and a line is read the shell way, so a quoted ``#`` is
+data, not a comment.
 
 :func:`invariants` lists what makes a layout malformed: two entities on a tile, an entity outside
 the factory's size, an owner that does not resolve, a carrier with no net or two nets. The writer
@@ -187,7 +190,18 @@ def _kv(tokens, where):
 
 def _kv_text(d, first=()):
     keys = [k for k in first if k in d] + sorted(k for k in d if k not in first)
-    return [f"{k}={d[k]}" for k in keys]
+    return [f"{k}={_quote(d[k])}" for k in keys]
+
+
+_PLAIN = re.compile(r"[^\s'\"\\#]*")
+
+
+def _quote(v):
+    """``v`` as one shell word: as it is when nothing in it is special, else single-quoted."""
+    v = str(v)
+    if _PLAIN.fullmatch(v):
+        return v
+    return "'" + v.replace("'", "'\"'\"'") + "'"
 
 
 def natural_key(s):
@@ -198,14 +212,13 @@ def natural_key(s):
 def loads(text, path="<fkp>") -> Layout:
     lay = None
     for n, raw in enumerate(text.splitlines(), 1):
-        line = raw.split("#", 1)[0].strip() if '"' not in raw else _strip_comment(raw)
-        if not line:
-            continue
         where = f"{path}:{n}"
         try:
-            t = shlex.split(line, posix=True)
+            t = shlex.split(raw, comments=True, posix=True)
         except ValueError as exc:
             raise FkpError(where, str(exc)) from None
+        if not t:
+            continue
         if lay is None:
             if len(t) != 4 or t[0] != "fkp" or t[1] != "1" or t[2] not in ("factory", "surface"):
                 raise FkpError(where, "the first line must be: fkp 1 factory|surface <name>")
@@ -271,17 +284,6 @@ def loads(text, path="<fkp>") -> Layout:
     if lay is None:
         raise FkpError(path, "empty file: the first line must be: fkp 1 factory|surface <name>")
     return lay
-
-
-def _strip_comment(raw):
-    out, quoted = [], False
-    for ch in raw:
-        if ch == '"':
-            quoted = not quoted
-        elif ch == "#" and not quoted:
-            break
-        out.append(ch)
-    return "".join(out).strip()
 
 
 def _put(table, key, rec, where):

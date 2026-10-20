@@ -1,10 +1,13 @@
 """CORE-V1 step 6, on paper: a nauvis surface with main, a standalone plant and a boot factory."""
+import base64
+import json
 import os
 import shutil
 import tempfile
 import unittest
+import zlib
 
-from fkcore import compose, connect, cover, fkp, flow
+from fkcore import codec, compose, connect, cover, fkp, flow
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate_file
 
@@ -68,6 +71,24 @@ class NauvisTest(unittest.TestCase):
                          {"fuel": "connected", "ore": "connected", "plates": "connected"})
         self.assertEqual([e.name for k, e in lay.entities.items() if k.startswith("~plates/i")],
                          ["fast-inserter"])
+
+    def test_the_committed_plant_is_what_the_flow_writes(self):
+        with open(os.path.join(self.dir, "plant.fkp"), encoding="utf-8") as fh, \
+                open(os.path.join(GAME, "plant.fkp"), encoding="utf-8") as committed:
+            self.assertEqual(fh.read(), committed.read())
+
+    def test_the_surface_blueprint_wires_the_fuel_inserter_to_the_reactor(self):
+        # what an apply pastes: the composed rows, the derived pole wires, the plant's red wire
+        rows = self.ctx.composed.rows()
+        bp = codec.blueprint(rows, wires=codec.pole_wires(rows, CAT))
+        doc = json.loads(zlib.decompress(base64.b64decode(bp[1:])))["blueprint"]
+        num = {e["tags"]["src"]: e["entity_number"] for e in doc["entities"]}
+        self.assertEqual([w for w in doc["wires"] if w[1] != codec.POLE_COPPER],
+                         [[num["nauvis:plant/reactor/inserter1"], 1,
+                           num["nauvis:plant/reactor/nuclear-reactor0"], 1]])
+        chest = doc["entities"][num["nauvis:plant/reactor/requester-chest0"] - 1]
+        self.assertEqual(chest["request_filters"]["sections"][0]["filters"][0]["name"],
+                         "uranium-fuel-cell")
 
     def test_written_files_and_a_second_build(self):
         files = {n: open(os.path.join(self.dir, n), encoding="utf-8").read()

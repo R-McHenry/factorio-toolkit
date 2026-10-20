@@ -1,9 +1,20 @@
+import base64
+import json
 import unittest
+import zlib
 
 from fkcore import codec, compose, fkp
 from fkcore.catalog import Catalog
 
 CAT = Catalog.load()
+
+
+def decode(bp):
+    return json.loads(zlib.decompress(base64.b64decode(bp[1:])))["blueprint"]
+
+
+def encode(doc):
+    return "0" + base64.b64encode(zlib.compress(json.dumps({"blueprint": doc}).encode())).decode()
 
 # A 7x7 factory: two gear assemblers fed from an iron belt along the top, an underground pair, a
 # splitter and an output belt, all in the factory's own frame. Hand-written, canonical.
@@ -43,6 +54,18 @@ mark Rory_618@4512000 tiles 3,4 3,5 until 4620000
 e robots/r0 roboport 2,10
 """
 
+# A Literal's game settings: a chest and two inserters on one red network, the inserters also on
+# a green one with a lamp. Each wire is on the end whose key sorts first. Canonical.
+CIRCUIT = """\
+fkp 1 factory circuit
+size 4x1
+inst c Literal at 0,0 rot 0 sig -
+e c/chest0 iron-chest 0.5,0.5 config='{"bar":3}' wire=1,ins0,1
+e c/ins0 inserter 1.5,0.5 E net=c/hand0 config='{"control_behavior":{"circuit_condition":{"comparator":">","constant":5,"first_signal":{"name":"iron-plate","type":"item"}},"circuit_enabled":true}}' wire=1,ins1,1;2,ins1,2
+e c/ins1 inserter 2.5,0.5 E net=c/hand1 wire=2,lamp0,2
+e c/lamp0 small-lamp 3.5,0.5 config='{"control_behavior":{"use_colors":true}}'
+"""
+
 
 def surface_with(text=SURFACE, factories=None):
     lay = fkp.loads(text)
@@ -62,6 +85,15 @@ class FormatTest(unittest.TestCase):
         messy = "# hand edit\n" + "\n".join(reversed(MINI.splitlines()[2:])) + "\n"
         messy = MINI.splitlines()[0] + "\n" + MINI.splitlines()[1] + "  # the frame\n" + messy
         self.assertEqual(fkp.dumps(fkp.loads(messy)), MINI)
+
+    def test_quoted_values(self):
+        # whitespace, a quote, a backslash or # in a value: single-quoted, shell style
+        lay = fkp.loads(MINI)
+        lay.entities["gears/m0"].attrs.update(note="it's # 1 \"x\" \\ y", config='{"a":"b c"}')
+        text = fkp.dumps(lay, CAT)
+        self.assertIn(""" config='{"a":"b c"}' note='it'"'"'s # 1 "x" \\ y'\n""", text)
+        self.assertEqual(fkp.loads(text), lay)
+        self.assertEqual(fkp.dumps(fkp.loads(text + "# a comment, then 'one quote\n")), text)
 
     def test_parse_errors_name_the_line(self):
         for text, msg in (("fkp 2 factory x\n", "first line"),
@@ -116,6 +148,56 @@ class BlueprintRoundTripTest(unittest.TestCase):
         s = surface_with()
         rows, _desc = codec.read_blueprint(codec.blueprint(s.rows()))
         self.assertEqual(rows, s.rows())
+
+
+class GameSettingsTest(unittest.TestCase):
+    """``config`` and ``wire`` (a Literal's settings) are written as the game's own fields."""
+
+    def test_written_as_game_fields_and_read_back(self):
+        lay = fkp.loads(CIRCUIT)
+        self.assertEqual(fkp.dumps(lay, CAT), CIRCUIT)
+        bp = codec.fkp_to_blueprint(lay, CAT)
+        doc = decode(bp)
+        ents = {e["tags"]["src"]: e for e in doc["entities"]}
+        self.assertEqual(ents["c/chest0"]["bar"], 3)
+        self.assertEqual(ents["c/ins0"]["control_behavior"]["circuit_condition"]["constant"], 5)
+        self.assertEqual(ents["c/ins0"]["tags"], {"src": "c/ins0", "net": "c/hand0"})
+        self.assertEqual(doc["wires"], [[1, 1, 2, 1], [2, 1, 3, 1], [2, 2, 3, 2], [3, 2, 4, 2]])
+        self.assertEqual(fkp.dumps(codec.blueprint_to_fkp(bp)), CIRCUIT)
+        self.assertEqual(codec.fkp_to_blueprint(codec.blueprint_to_fkp(bp), CAT), bp)
+
+    def test_wires_read_canonical_whichever_way_round(self):
+        doc = decode(codec.fkp_to_blueprint(fkp.loads(CIRCUIT)))
+        doc["wires"] = [[b, cb, a, ca] for a, ca, b, cb in reversed(doc["wires"])] + doc["wires"]
+        self.assertEqual(fkp.dumps(codec.blueprint_to_fkp(encode(doc))), CIRCUIT)
+
+    def test_a_self_wire_and_a_wire_out_of_the_rows(self):
+        rows = [{"src": "d/comb0", "name": "decider-combinator", "x": 0.5, "y": 1,
+                 "direction": 0, "attrs": {"wire": "3,comb0,1;1,lamp9,1"}}]
+        bp = codec.blueprint(rows)
+        self.assertEqual(decode(bp)["wires"], [[1, 1, 1, 3]])       # lamp9 is not in it
+        self.assertEqual(codec.read_blueprint(bp)[0][0]["attrs"], {"wire": "1,comb0,3"})
+
+    def test_a_config_the_codec_cannot_write(self):
+        for attrs in ({"config": '{"position":{"x":0,"y":0}}'},
+                      {"recipe": "iron-gear-wheel", "config": '{"recipe":"inserter"}'},
+                      {"config": "[1]"}, {"config": "{bar: 3}"}, {"wire": "red,x"}):
+            row = {"src": "a/m0", "name": "assembling-machine-1", "x": 1.5, "y": 1.5,
+                   "direction": None, "attrs": attrs}
+            with self.assertRaises(codec.CodecError, msg=attrs):
+                codec.blueprint([row])
+
+    def test_wires_resolve_on_a_turned_plot(self):
+        lay = fkp.loads("fkp 1 surface s\nplot circuit at 10,0 rot 1 size 1x4\n")
+        s = compose.compose(lay, {"circuit": fkp.loads(CIRCUIT)}, CAT)
+        self.assertEqual(s.problems, [])
+        rows = s.rows()
+        doc = decode(codec.blueprint(rows))
+        src = {e["entity_number"]: e["tags"]["src"][len("s:circuit/c/"):] for e in doc["entities"]}
+        self.assertEqual([(src[a], ca, src[b], cb) for a, ca, b, cb in doc["wires"]],
+                         [("chest0", 1, "ins0", 1), ("ins0", 1, "ins1", 1), ("ins0", 2, "ins1", 2),
+                          ("ins1", 2, "lamp0", 2)])
+        self.assertEqual(codec.read_blueprint(codec.blueprint(rows))[0], rows)
 
 
 class InvariantTest(unittest.TestCase):
