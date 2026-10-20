@@ -26,11 +26,13 @@ FUEL_VALUE_J = {"coal": 4e6, "wood": 2e6, "solid-fuel": 12e6, "rocket-fuel": 100
 #: Mining time per resource (an electric drill at mining speed 0.5 makes 0.5/s of a time-1 ore).
 MINING_TIME = {"iron-ore": 1.0, "copper-ore": 1.0, "coal": 1.0, "stone": 1.0, "uranium-ore": 2.0}
 
-# Entity types that are powered by electricity. Inserter is slightly special: the burner-inserter
-# shares the type but burns fuel, so it is checked by name.
-_ELECTRIC_TYPES = frozenset({"assembling-machine", "lab", "roboport"})
-_BURNER_INSERTER = "burner-inserter"
-_ELECTRIC_DRILL = "electric-mining-drill"
+# Entity types that are powered by electricity. Inserters, mining drills and furnaces hold burner
+# and electric prototypes alike, so there the burners are named: every other inserter, drill
+# (pumpjack, big drill) and furnace (electric furnace, recycler) runs on the grid.
+_ELECTRIC_TYPES = frozenset({"assembling-machine", "lab", "roboport", "beacon", "radar", "lamp",
+                             "electric-turret", "pump"})
+_MIXED_TYPES = frozenset({"inserter", "mining-drill", "furnace"})
+_BURNERS = frozenset({"burner-inserter", "burner-mining-drill", "stone-furnace", "steel-furnace"})
 
 
 class Catalog:
@@ -157,10 +159,8 @@ class Catalog:
         etype = row.get("type")
         if etype in _ELECTRIC_TYPES:
             return True
-        if etype == "inserter":
-            return name != _BURNER_INSERTER
-        if etype == "mining-drill":
-            return name == _ELECTRIC_DRILL
+        if etype in _MIXED_TYPES:
+            return name not in _BURNERS
         return False
 
     def craft_rate(self, recipe, machine) -> dict[str, float]:
