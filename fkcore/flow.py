@@ -435,6 +435,7 @@ def s_floorplan(ctx, args):
             keep |= {(x, y) for x in range(c.x0, c.x1) for y in range(c.y0, c.y1)}
         for m in s.marks.values():
             keep |= {(int(x), int(y)) for x, y in m.tiles}
+        keep |= ctx.terrain                          # no bridge pole on water or a cliff
         poles, blines = cover.bridge(list(s.entities.values()), ctx.cat, keep, pole)
         if poles and "bridge" not in ctx.surface_lay.covers:
             ctx.surface_lay.covers["bridge"] = fkp.Cover("bridge", "power", {"pole": pole})

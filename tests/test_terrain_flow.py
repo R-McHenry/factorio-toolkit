@@ -5,9 +5,10 @@ import shutil
 import tempfile
 import unittest
 
-from fkcore import connect, fkp, flow, route, terrain
+from fkcore import connect, cover, fkp, flow, route, terrain
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate_file
+from tests.test_nauvis import CHAIN, GAME as NAUVIS, SOURCES as NAUVIS_SOURCES
 
 CAT = Catalog.load()
 
@@ -148,6 +149,46 @@ class TerrainFlowTest(unittest.TestCase):
         off = [c for _s, c in ctx.checks if c.code == "OFF_ORE"]
         self.assertEqual(len(off), 4, [str(c) for c in off])
         self.assertIn("0/4 drills with ore under every tile", self.read("floorplan.txt"))
+
+
+class BridgeTest(unittest.TestCase):
+    """floorplan --bridge-power keeps its shared poles off the terrain too (games/nauvis)."""
+
+    def run_nauvis(self, water=None):
+        folder = tempfile.mkdtemp(prefix="fkbridge-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        for name in NAUVIS_SOURCES:
+            shutil.copy(os.path.join(NAUVIS, name), folder)
+        with open(os.path.join(folder, "nauvis.fkp"), "w", newline="\n") as fh:
+            fh.write(CHAIN)
+        if water is not None:
+            terrain.save(terrain.Terrain("nauvis", (-60, -60, 100, 100), 1, water=frozenset(water)),
+                         os.path.join(folder, "map.terrain.json"))
+            for name, old, new in (("nauvis.surface", "terrain  none", "terrain  map"),
+                                   ("nauvis.build.fkb", "read_terrain    none",
+                                    "read_terrain    map ")):
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+                self.assertIn(old, text)
+                with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(text.replace(old, new))
+        code, ctx = flow.run(os.path.join(folder, "nauvis.build.fkb"), cat=CAT,
+                             echo=lambda _l: None)
+        self.assertEqual(code, 0, ctx.log)
+        s = ctx.composed
+        return s, {k: set(s.entities[k].tiles) for k in s.entities
+                   if k.startswith("nauvis:bridge/p") and int(k[15:]) >= 7}
+
+    def test_bridge_poles_avoid_water(self):
+        _s, first = self.run_nauvis()
+        wet = set().union(*first.values())
+        self.assertEqual(len(first), 3)
+        s, again = self.run_nauvis(water=wet)
+        self.assertTrue(again)
+        self.assertFalse(set().union(*again.values()) & wet)
+        nets = cover.networks(list(s.entities.values()), CAT)
+        self.assertEqual(len(nets), 1)                    # still one grid with the plant
 
 
 if __name__ == "__main__":

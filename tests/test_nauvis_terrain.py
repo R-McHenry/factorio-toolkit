@@ -80,6 +80,30 @@ class NauvisTerrainTest(unittest.TestCase):
         self.assertGreater(ugs[1][0], 183)
 
 
+class BadPlacementTest(unittest.TestCase):
+    def test_smelters_pinned_in_the_pond_give_on_terrain_and_the_flow_goes_on(self):
+        folder = tempfile.mkdtemp(prefix="fknauvisbad-")
+        try:
+            for name in SOURCES:
+                shutil.copy(os.path.join(GAME, name), folder)
+            path = os.path.join(folder, "iron.fk")
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(src.replace("@(75, 60)", "@(95, 100)"))     # into the pond's body
+            code, ctx = flow.run(os.path.join(folder, "nauvis.build.fkb"), cat=CAT,
+                                 echo=lambda _l: None)
+            self.assertEqual(code, 0, ctx.log)                     # a check, never a gate
+            on = [c for _s, c in ctx.checks if c.code == "ON_TERRAIN"]
+            smelt = [c for c in on if c.where.startswith("nauvis:iron/smelt/")]
+            # 77 of the row's 100 entities; the rest stand on the shore
+            self.assertEqual(len(smelt), 77, [str(c) for c in on][:5])
+            self.assertIn("stone-furnace at -72,168 stands on 4 water tiles (first -73,167)",
+                          [c.msg for c in smelt])
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 class LabTerrainTest(unittest.TestCase):
     """games/lab-terrain: the same factories on the terrain transplanted to the lab and read
     back from it (2026-10-20); on paper here (the link is off), so diff and apply skip."""
