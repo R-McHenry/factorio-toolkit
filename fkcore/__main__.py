@@ -8,6 +8,10 @@
     explain FILE.fk INST                  one instance as a template and as entities and nets
     unfold FILE.fk INST                   INST becomes a Literal; .fk and .fkp rewritten, keys kept
     render FILE.fkp                       ASCII of a factory layout
+    build SCRIPT.fkb [--from STEP] [--to STEP]
+                                          run the flow; reports in out/, checkpoints out/<step>/
+    look GAME_DIR [--source design] [--area X0,Y0,X1,Y1]
+                                          the composed surface of a game codebase, as designed
 """
 from __future__ import annotations
 
@@ -15,7 +19,8 @@ import argparse
 import os
 import sys
 
-from . import compose, expand, fkp, rates
+from . import compose, expand, fkp, flow, rates
+from . import surface as surfacemod
 from .catalog import Catalog
 from .elaborate import ElabError, elaborate_file
 from .lang import FkSyntaxError
@@ -33,6 +38,32 @@ def _flat(path, layout=None):
     except (FkSyntaxError, ElabError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(2)
+
+
+def _look(a, cat):
+    if a.source == "world":
+        print("look --source world reads the game; this toolkit is offline", file=sys.stderr)
+        return 2
+    surfaces = [f for f in sorted(os.listdir(a.game)) if f.endswith(".surface")]
+    if not surfaces:
+        print(f"error: no .surface file in {a.game}", file=sys.stderr)
+        return 2
+    sf = surfacemod.load(os.path.join(a.game, surfaces[0]))
+    lay_path = os.path.join(a.game, f"{sf.name}.fkp")
+    surface_lay = fkp.load(lay_path) if os.path.exists(lay_path) else surfacemod.floorplan(sf)
+    factories = {}
+    for p in sf.places.values():
+        path = os.path.join(a.game, f"{p.module}.fkp")
+        if os.path.exists(path):
+            lay = fkp.load(path)
+            lay.name = p.factory
+            factories[p.factory] = lay
+    s = compose.compose(surface_lay, factories, cat)
+    box = tuple(int(v) for v in a.area.split(",")) if a.area else None
+    print(f"look {sf.name} --source design: {len(s.plots)} plots, {len(s.entities)} entities, "
+          f"{len(s.problems)} invariant problems (. plot, : claim, ! mark, blank sanctioned)")
+    print(compose.render(s, cat, box))
+    return 0
 
 
 def _render(lay, cat):
@@ -61,12 +92,29 @@ def main(argv=None):
         p.add_argument("inst")
     rd = sub.add_parser("render")
     rd.add_argument("file")
+    b = sub.add_parser("build")
+    b.add_argument("script")
+    b.add_argument("--from", dest="frm")
+    b.add_argument("--to")
+    lk = sub.add_parser("look")
+    lk.add_argument("game")
+    lk.add_argument("--source", default="design", choices=("design", "world"))
+    lk.add_argument("--area")
     a = ap.parse_args(argv)
     cat = Catalog.load()
 
     if a.cmd == "render":
         print(_render(fkp.load(a.file), cat))
         return 0
+    if a.cmd == "build":
+        try:
+            code, _ctx = flow.run(a.script, a.frm, a.to, cat)
+        except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return code
+    if a.cmd == "look":
+        return _look(a, cat)
     flat = _flat(a.file)
     if a.cmd in ("layout", "explain", "unfold"):
         previous = fkp.load(_fkp_path(a.file)) if os.path.exists(_fkp_path(a.file)) else None

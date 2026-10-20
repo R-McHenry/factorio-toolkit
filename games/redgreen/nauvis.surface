@@ -1,0 +1,12 @@
+# nauvis.surface: the paper surface of the redgreen game codebase (CORE-V1.md §11).
+surface  nauvis
+mode     play                                   # fair play on: attention-scoped, notify nearby
+terrain  none                                   # a paper surface: no ore, water or cliffs yet
+catalog  base
+
+place main = main plot 0,0 80x60                # the red-green part of spm10's main
+
+watch plots:      keep
+watch sanctioned: mark 2h
+
+target automation-science-pack 10/min, logistic-science-pack 10/min

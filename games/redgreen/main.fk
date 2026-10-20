@@ -3,23 +3,23 @@
 # Same rows and counts as games/spm10/redgreen.fk; only the placement differs. Every row is
 # counterflow with its attach points at its west head; the miners are turned 180 degrees (rot 2)
 # so their ore belts also leave west. Columns 0..15 are a corridor the router owns, and bands of
-# rows leave three-tile gaps between them. The router lays every net's belts; nothing here is a
-# route.
-iron_mine    = MinerRow<n=10, resource=iron-ore>   @(16, 0, rot 2)
-coal_iron    = MinerRow<n=2, resource=coal>        @(34, 0, rot 2)
-copper_mine  = MinerRow<n=4, resource=copper-ore>  @(40, 0, rot 2)
-coal_copper  = MinerRow<n=1, resource=coal>        @(49, 0, rot 2)
-iron_smelt   = SmelterRow<n=16, recipe=iron-plate>   @(16, 10)
-copper_smelt = SmelterRow<n=6, recipe=copper-plate>  @(51, 10)
+# rows leave three-tile gaps between them; rows 0-1 stay free so poles can reach the top miner
+# row. The router lays every net's belts; nothing here is a route.
+iron_mine    = MinerRow<n=10, resource=iron-ore>   @(16, 2, rot 2)
+coal_iron    = MinerRow<n=2, resource=coal>        @(34, 2, rot 2)
+copper_mine  = MinerRow<n=4, resource=copper-ore>  @(40, 2, rot 2)
+coal_copper  = MinerRow<n=1, resource=coal>        @(49, 2, rot 2)
+iron_smelt   = SmelterRow<n=16, recipe=iron-plate>   @(16, 12)
+copper_smelt = SmelterRow<n=6, recipe=copper-plate>  @(51, 12)
 
-gears = AsmRow<n=3, recipe=iron-gear-wheel>          @(16, 20)
-cable = AsmRow<n=4, recipe=copper-cable>             @(28, 20)
-circ  = AsmRow<n=2, recipe=electronic-circuit>       @(43, 20)
-belts = AsmRow<n=1, recipe=transport-belt>           @(52, 20)
-ins   = AsmRow<n=1, recipe=inserter>                 @(58, 20)
-red   = AsmRow<n=5, recipe=automation-science-pack>  @(16, 32)
-green = AsmRow<n=6, recipe=logistic-science-pack>    @(34, 32)
-labs  = LabRow<n=10>                                 @(16, 43)
+gears = AsmRow<n=3, recipe=iron-gear-wheel>          @(16, 22)
+cable = AsmRow<n=4, recipe=copper-cable>             @(28, 22)
+circ  = AsmRow<n=2, recipe=electronic-circuit>       @(43, 22)
+belts = AsmRow<n=1, recipe=transport-belt>           @(52, 22)
+ins   = AsmRow<n=1, recipe=inserter>                 @(58, 22)
+red   = AsmRow<n=5, recipe=automation-science-pack>  @(16, 34)
+green = AsmRow<n=6, recipe=logistic-science-pack>    @(34, 34)
+labs  = LabRow<n=10>                                 @(16, 45)
 
 net iron_ore:    iron_mine -> iron_smelt
 net copper_ore:  copper_mine -> copper_smelt
