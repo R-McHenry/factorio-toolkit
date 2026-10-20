@@ -244,7 +244,10 @@ def _lua(a):
     """A Lua chunk through the link: the player's own probe (Rory, 2026-10-20: the player may write
     code and read the game with Lua to investigate). The link still refuses Lua that registers a
     handler, a command or an interface: that made every save unjoinable on 2026-10-18.
-    ``--file -`` reads the chunk from stdin (agent/fk.py sends it that way, 1.2)."""
+    ``--file -`` reads the chunk from stdin (agent/fk.py sends it that way, 1.2). The chunk goes
+    with its lines as written (1.2): ``Rcon.lua`` joins lines with spaces, so a comment at the end
+    of a line took the rest of the chunk with it, and the game takes newlines in a command (a
+    40 kB chunk on a laptop test server, 2.0.77)."""
     from . import link
     code = a.code
     if a.file == "-":
@@ -260,7 +263,7 @@ def _lua(a):
         return 2
     with r:
         try:
-            print(r.lua(code))
+            print(r.call("/sc " + code))
         except link.LinkError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

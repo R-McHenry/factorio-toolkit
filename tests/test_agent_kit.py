@@ -126,8 +126,9 @@ class LuaTransportTest(unittest.TestCase):
         sent = []
 
         class FakeRcon:
-            def lua(self, body):
-                sent.append(body)
+            def call(self, cmd):
+                link.assert_safe(cmd)
+                sent.append(cmd)
                 return "ok 400"
 
             def __enter__(self):
@@ -141,7 +142,9 @@ class LuaTransportTest(unittest.TestCase):
         with mock.patch.object(link, "open_from_env", lambda: (FakeRcon(), None)), \
                 mock.patch.object(sys, "stdin", stdin), contextlib.redirect_stdout(out):
             self.assertEqual(cli.main(["lua", ".", "--file", "-"]), 0)
-        self.assertEqual(sent, [code])
+        # as written, lines and all: joined with spaces, the comment line's "--" ate the rest
+        self.assertEqual(sent, ["/sc " + code])
+        self.assertIn("-- a comment line\nlocal s", sent[0])
         self.assertIn("ok 400", out.getvalue())
 
 
