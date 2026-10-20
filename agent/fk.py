@@ -18,6 +18,10 @@ toolkit (also pinned: files a running session uses never change under it). Each 
 host the steps after it (``--from diff``: the floorplan is replayed on the checkpoints). Stdlib
 only. ``FK_RUN`` names the run folder (default: the folder above this file's).
 
+``fk lua`` sends its chunk (the argument, or ``--file F``'s text) over the ssh's stdin, never on
+the command line (1.2): Git for Windows' ssh, an MSYS program, gets at most about 8 kB of one
+argument, so a 13 kB chunk arrived cut, and its open single quote stopped the host's shell.
+
 A run whose ``run.json`` says ``"host": "local"`` plays a game on this machine (a laptop test
 server, ``tools/laptop_server.py``): nothing is copied, and the game steps run here with the
 link settings in ``run.json``'s ``env`` (FK_RCON_PORT, FK_RCON_PW_FILE, FK_SCRIPT_OUTPUT).
@@ -112,11 +116,13 @@ def local(cfg, args):
     return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env).returncode
 
 
-def remote(cfg, args, footer=True):
+def remote(cfg, args, footer=True, data=None):
+    """``fkcore ARGS`` on the host (``data``: bytes for its stdin)."""
     if cfg["host"] == "local":
         env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"), FK_LINK="on",
                    PYTHONDONTWRITEBYTECODE="1", **{k: v for k, v in cfg.get("env", {}).items() if v})
-        code = subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env).returncode
+        code = subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env,
+                              input=data).returncode
         if footer:
             subprocess.run([sys.executable, "-m", "fkcore", "poll", "."], cwd=GAME, env=env)
         return code
@@ -125,7 +131,7 @@ def remote(cfg, args, footer=True):
            + " ".join(shlex.quote(a) for a in args))
     if footer:
         cmd += f"; s=$?; PYTHONPATH={shlex.quote(cfg['host_toolkit'])} FK_LINK=on python3 -m fkcore poll .; exit $s"
-    return _ssh(cfg, cmd).returncode
+    return _ssh(cfg, cmd, data=data).returncode
 
 
 def footer(cfg):
@@ -198,11 +204,8 @@ def main(argv):
         push(cfg)
         footer(cfg)
         return code
-    if cmd == "lua" and "--file" in rest:
-        # the file is the player's (anywhere): its text travels as the argument
-        i = rest.index("--file")
-        with open(rest[i + 1], encoding="utf-8") as fh:
-            rest = rest[:i] + [fh.read()] + rest[i + 2:]
+    if cmd == "lua":
+        return lua(cfg, rest)
     if cmd in AREA_FIRST:
         rest = _area(rest)
     if cmd in HOST:
@@ -213,6 +216,24 @@ def main(argv):
         return code
     print(f"fk: unknown command {cmd!r} (fk --help)", file=sys.stderr)
     return 2
+
+
+def lua(cfg, rest):
+    """``fk lua CODE`` or ``fk lua --file F`` (the player's file, anywhere): the chunk goes to the
+    host's ``fkcore lua . --file -`` on stdin, so its size and quotes never meet a command line."""
+    if "--file" in rest:
+        i = rest.index("--file")
+        if i + 1 >= len(rest):
+            print("fk: lua --file needs a file", file=sys.stderr)
+            return 2
+        with open(rest[i + 1], encoding="utf-8") as fh:
+            code = fh.read()
+    else:
+        code = " ".join(rest)
+    push(cfg)
+    rc = remote(cfg, ["lua", ".", "--file", "-"], data=code.encode("utf-8"))
+    pull(cfg)
+    return rc
 
 
 def _area(rest):

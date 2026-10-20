@@ -243,10 +243,13 @@ def _research_footer(r, game):
 def _lua(a):
     """A Lua chunk through the link: the player's own probe (Rory, 2026-10-20: the player may write
     code and read the game with Lua to investigate). The link still refuses Lua that registers a
-    handler, a command or an interface: that made every save unjoinable on 2026-10-18."""
+    handler, a command or an interface: that made every save unjoinable on 2026-10-18.
+    ``--file -`` reads the chunk from stdin (agent/fk.py sends it that way, 1.2)."""
     from . import link
     code = a.code
-    if a.file:
+    if a.file == "-":
+        code = sys.stdin.buffer.read().decode("utf-8")
+    elif a.file:
         with open(a.file, encoding="utf-8") as fh:
             code = fh.read()
     if not code or not code.strip():

@@ -3,9 +3,14 @@
 rules against code and Lua are gone; the game rule is one plain sentence; save safety is the
 link's to enforce, not the brief's."""
 import contextlib
+import importlib.util
 import io
+import json
 import os
+import shutil
 import sys
+import tarfile
+import tempfile
 import unittest
 from unittest import mock
 
@@ -14,6 +19,10 @@ from fkcore import __main__ as cli, link
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(ROOT, "kickoff"))
 import new_run  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("fk_agent", os.path.join(ROOT, "agent", "fk.py"))
+fk_agent = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fk_agent)
 
 
 def read(*parts):
@@ -50,6 +59,90 @@ class AgentKitTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FK_LINK": "off"}), contextlib.redirect_stdout(out):
             self.assertEqual(cli.main(["lua", ".", "rcon.print(game.tick)"]), 2)
         self.assertIn("lua: skipped, no game link", out.getvalue())
+
+
+def long_chunk():
+    """A chunk shaped like the 0534 player's unjam script: 13 kB of JSON in single quotes."""
+    rows = ", ".join(f'[{22.5 + i % 9}, {132.5 + i // 9}, ["iron-plate"]]' for i in range(400))
+    return (f"local belts = helpers.json_to_table('[{rows}]')\n-- a comment line\n"
+            "local s = game.surfaces['nauvis']\nrcon.print('ok ' .. #belts)\n")
+
+
+class LuaTransportTest(unittest.TestCase):
+    """1.2: fk lua's chunk goes over the ssh's stdin. Git for Windows' ssh (an MSYS program) got
+    at most about 8 kB of one argument, so the 0534 player's 13 kB chunk arrived cut and its open
+    single quote stopped the host's shell ("unexpected EOF while looking for matching")."""
+
+    def setUp(self):
+        self.run_dir = tempfile.mkdtemp(prefix="fklua-")
+        self.addCleanup(shutil.rmtree, self.run_dir, True)
+        game = os.path.join(self.run_dir, "game")
+        os.makedirs(os.path.join(game, "out"))
+        with open(os.path.join(self.run_dir, "run.json"), "w", encoding="utf-8") as fh:
+            json.dump({"host": "gamehost", "host_game": "/srv/run/game",
+                       "host_toolkit": "/srv/tk"}, fh)
+        stamp = os.path.join(game, "out", ".synced")
+        with open(stamp, "w", encoding="utf-8") as fh:
+            fh.write("synced\n")
+        self.calls = []
+        for name, value in (("RUN", self.run_dir), ("GAME", game), ("STAMP", stamp)):
+            patcher = mock.patch.object(fk_agent, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def fake_run(self, argv, input=None, stdout=None, **_kw):
+        self.calls.append((argv, input))
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w"):
+            pass                                     # the pull: an empty copy of game\
+        return mock.Mock(returncode=0, stdout=buf.getvalue())
+
+    def lua_call(self):
+        (argv, data), = [(a, d) for a, d in self.calls if "fkcore lua" in a[-1]]
+        return argv[-1], data
+
+    def test_a_long_chunk_with_quotes_goes_over_stdin(self):
+        code = long_chunk()
+        self.assertGreater(len(code), 12000)
+        with mock.patch.object(fk_agent.subprocess, "run", self.fake_run):
+            self.assertEqual(fk_agent.main(["lua", code]), 0)
+        command, data = self.lua_call()
+        self.assertIn("python3 -m fkcore lua . --file -", command)
+        self.assertLess(len(command), 400)
+        self.assertNotIn("'", command.split("fkcore lua", 1)[1].split(";", 1)[0])
+        self.assertEqual(data, code.encode("utf-8"))
+
+    def test_a_file_goes_over_stdin_too(self):
+        code = long_chunk()
+        path = os.path.join(self.run_dir, "unjam.lua")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(code)
+        with mock.patch.object(fk_agent.subprocess, "run", self.fake_run):
+            self.assertEqual(fk_agent.main(["lua", "--file", path]), 0)
+        self.assertEqual(self.lua_call()[1], code.encode("utf-8"))
+
+    def test_fkcore_reads_the_chunk_from_stdin(self):
+        code = long_chunk()
+        sent = []
+
+        class FakeRcon:
+            def lua(self, body):
+                sent.append(body)
+                return "ok 400"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        stdin = mock.Mock(buffer=io.BytesIO(code.encode("utf-8")))
+        out = io.StringIO()
+        with mock.patch.object(link, "open_from_env", lambda: (FakeRcon(), None)), \
+                mock.patch.object(sys, "stdin", stdin), contextlib.redirect_stdout(out):
+            self.assertEqual(cli.main(["lua", ".", "--file", "-"]), 0)
+        self.assertEqual(sent, [code])
+        self.assertIn("ok 400", out.getvalue())
 
 
 if __name__ == "__main__":
