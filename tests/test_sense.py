@@ -107,6 +107,31 @@ class SenseTest(unittest.TestCase):
         self.assertIn("next to net mini/iron: looks like a fix to it", rep.changes[0])
         self.assertEqual(rep.owners[len(live["things"]) - 1], "nauvis:mark/Rory_618@4200000")
 
+    def test_a_kept_fix_is_adopted_and_then_sensed_ok(self):
+        from fkcore import adopt
+        live = copy.deepcopy(self.live)
+        fix = scene.thing(name="transport-belt", type="transport-belt", x=16.5, y=1.5,
+                          direction=8, last_user="Rory_618")
+        live["things"].append(fix)
+        rep = self.run_sense(live)
+        (mark,) = rep.marks
+        surface_lay = fkp.loads(SURFACE)
+        surface_lay.marks[mark.name] = mark
+        mini = fkp.loads(MINI)
+        keys, covered = adopt.adopt(mini, surface_lay.plots["mini"], [fix], "iron", CAT,
+                                    surface_lay.marks)
+        self.assertEqual((keys, covered), (["~iron/a0"], [mark.name]))
+        self.assertEqual(fkp.invariants(mini, CAT), [])
+        for name in covered:
+            del surface_lay.marks[name]
+        s = compose.compose(surface_lay, {"mini": mini}, CAT)
+        again = sense.sense(s, live, CAT, AREA, WATCH, net_items=NETS)
+        self.assertEqual(again.counts(), {"OK": 21})          # the fix is design now
+        self.assertEqual((again.marks, again.changes), ([], []))
+        with self.assertRaises(adopt.AdoptError):
+            adopt.adopt(mini, surface_lay.plots["mini"],
+                        [scene.thing(name="iron-chest", x=16.5, y=3.5)], "iron", CAT)
+
     def test_claims_existing_marks_expiry_enemies_and_nature(self):
         live = copy.deepcopy(self.live)
         extra = [scene.thing(name="iron-chest", x=31.5, y=1.5, last_user="computah"),     # claim

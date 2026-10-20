@@ -178,6 +178,27 @@ def _glyph(cat, name, d, attrs):
     return _GLYPH.get(kind, "?")
 
 
+def render_scene(sc, cat, box):
+    """ASCII of a scene (``fkcore.scene``: the design or the live game) inside ``box``, with the
+    same glyphs as :func:`render`; a ghost is drawn as its entity. Free tiles are ``.``. The
+    design and a live capture of a finished apply render the same text (look parity)."""
+    grid = {}
+    for t in sc["things"]:
+        if t["force"] in ("enemy", "neutral") or t["type"] in ("character", "item-entity", "corpse"):
+            continue
+        if not cat.has_entity(t["name"]):
+            glyph = "?"
+        else:
+            glyph = _glyph(cat, t["name"], t["direction"],
+                           {"ug": {"input": "in", "output": "out"}.get(t.get("ug"))})
+        for x, y in t["tiles"]:
+            grid[(x, y)] = glyph
+    rows = []
+    for y in range(box[1], box[3]):
+        rows.append("".join(grid.get((x, y), ".") for x in range(box[0], box[2])).rstrip("."))
+    return "\n".join(rows)
+
+
 def render(surface: Surface, cat, box=None) -> str:
     """ASCII of ``box`` (x0, y0, x1, y1; default: everything): entities by glyph, ``.`` a free
     tile in a plot, ``:`` a claim, ``!`` a mark, a space sanctioned ground."""

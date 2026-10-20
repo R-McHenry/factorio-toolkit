@@ -28,7 +28,7 @@ import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_destroy", "lua_produced", "assert_safe", "snapshot", "OUT_DIR"]
+           "lua_destroy", "lua_produced", "assert_safe", "snapshot", "paste", "OUT_DIR"]
 
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
@@ -223,6 +223,29 @@ local out = {{tick = game.tick}}
 for _, n in pairs({{{names}}}) do out[n] = st.get_input_count(n) end
 rcon.print(helpers.table_to_json(out))
 """
+
+
+CHUNK = 3000
+
+
+def paste(rcon, surface, force, bp, at, chunk=CHUNK):
+    """A named paste of any size: a long blueprint string travels in RCON-sized chunks into
+    ``storage.fk5_bp`` (save data only; nothing is registered), then one superforced build reads
+    it and clears it. -> the reply of the build (the number of entities placed)."""
+    if len(bp) <= chunk:
+        return rcon.lua(lua_paste(surface, force, bp, at))
+    parts = [bp[i:i + chunk] for i in range(0, len(bp), chunk)]
+    rcon.lua(f"storage.fk5_bp = {_q(parts[0])} rcon.print(#storage.fk5_bp)")
+    for p in parts[1:]:
+        rcon.lua(f"storage.fk5_bp = storage.fk5_bp .. {_q(p)} rcon.print(#storage.fk5_bp)")
+    got = rcon.lua("rcon.print(#storage.fk5_bp)").strip()
+    if got != str(len(bp)):
+        rcon.lua("storage.fk5_bp = nil rcon.print('cleared')")
+        raise LinkError(f"blueprint arrived with {got} of {len(bp)} characters")
+    body = lua_paste(surface, force, "__BP__", at).replace(_q("__BP__"), "storage.fk5_bp")
+    reply = rcon.lua(body)
+    rcon.lua("storage.fk5_bp = nil rcon.print('cleared')")
+    return reply
 
 
 def snapshot(rcon, surface, area, tag="snap"):
