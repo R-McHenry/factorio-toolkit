@@ -192,7 +192,7 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
             raise LookError("nothing is designed on this surface")
     items, notes = net_items(game, sf, cat)
     pol = policy(sf, notify, watch)
-    live = scene.from_capture(link.snapshot(r, sf.name, area, tag))
+    live = scene.from_capture(link.snapshot(r, sf.name, area, tag, keep=False))
     lk = report(s, live, cat, area, pol, items)
     lk.notes += notes + [f"composed surface: {p}" for p in s.problems]
     if write_marks and lk.rep.marks:

@@ -457,11 +457,12 @@ def read_output(rcon, lua, tag, what, keep=True):
     return data
 
 
-def snapshot(rcon, surface, area, tag="snap"):
+def snapshot(rcon, surface, area, tag="snap", keep=True):
     """Capture ``area``; -> the capture dict (read back from script-output). The file name
-    carries the process id, so several tools can snapshot at once."""
+    carries the process id, so several tools can snapshot at once; ``keep=False`` removes it
+    once read (a look, made on every agent command)."""
     tag = f"{tag}-{os.getpid()}"
-    return read_output(rcon, lua_snapshot(surface, area, tag), tag, "snapshot")
+    return read_output(rcon, lua_snapshot(surface, area, tag), tag, "snapshot", keep)
 
 
 def alerts(rcon, force, tag="alerts"):

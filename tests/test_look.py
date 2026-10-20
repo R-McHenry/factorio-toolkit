@@ -85,7 +85,8 @@ class LookTest(unittest.TestCase):
 
     def run_look(self, extra=(), **kw):
         r = FakeRcon()
-        snap = lambda _r, _surface, area, tag="snap": capture(self.s, area, extra=extra)
+        snap = lambda _r, _surface, area, tag="snap", keep=True: capture(self.s, area,
+                                                                          extra=extra)
         with mock.patch.object(link, "snapshot", snap):
             lk = look.run(r, self.dir, CAT, AREA, **kw)
         return r, lk
@@ -191,7 +192,8 @@ class LookTest(unittest.TestCase):
         r = FakeRcon()
         areas = []
 
-        def snap(_r, _surface, area, tag="snap"):
+        def snap(_r, _surface, area, tag="snap", keep=True):
+            self.assertFalse(keep)                                # a look leaves no file
             areas.append(tuple(area))
             return capture(self.s, area)
         with mock.patch.object(link, "snapshot", snap):
