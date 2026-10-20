@@ -1,6 +1,6 @@
 # CORE: the V1 core on one page
 
-The spec for Rory's sign-off. Reasons and history: `..\CORE-V1.md` (decisions 1-12). Marks: **[built]**
+The spec for Rory's sign-off. {RM - approved} Reasons and history: `..\CORE-V1.md` (decisions 1-12). Marks: **[built]**
 = implemented and tested in this repo (`python -m unittest`), **[spec]** = agreed, not built yet.
 
 ## Objects
