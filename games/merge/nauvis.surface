@@ -1,0 +1,10 @@
+# nauvis.surface: two small factories linked by robots (CORE-V1 step 7, on paper).
+surface  nauvis
+mode     play
+terrain  none
+catalog  base
+
+place iron  = iron  plot 0,0 20x24
+place gears = gears plot 22,0 16x16
+
+robots works: cover iron, gears
