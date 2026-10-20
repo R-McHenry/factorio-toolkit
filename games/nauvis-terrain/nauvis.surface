@@ -1,0 +1,17 @@
+# nauvis.surface: two small factories on the test map's real nauvis terrain (read 2026-10-20 by
+# python -m fkcore read-terrain, tick 279590). On paper only: nauvis is read-only for this game,
+# and its build script has no diff or apply.
+#   iron:  iron-ore#2 (329 tiles, 876k) and the pond south-east of it; the plates cross to a
+#          chest below the pond, so their belt and its pole chain must go round the water.
+#   gears: the map's one cliff wall (x 181..182, y 270..288): plates from a requester chest on
+#          its west side to a gear assembler on its east side.
+surface  nauvis
+mode     play
+terrain  map                                    # map.terrain.json: -176,56 .. 216,288
+catalog  base
+
+place iron  = iron  plot -168,64 144x140 patch iron-ore#2
+place gears = gears plot 160,256 48x32
+
+watch plots:      keep
+watch sanctioned: mark 2h

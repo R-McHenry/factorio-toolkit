@@ -1,0 +1,345 @@
+fkp 1 factory iron
+size 103x131
+inst coal Chest item=coal rate=0.25 requester=true at 70,56 rot 0 sig 61565a40ca
+inst ore MinerRow n=6 resource=iron-ore at 13,13 rot 0 sig d2c25e19b7
+inst out Chest provider=true at 102,130 rot 0 sig c724e6c441
+inst smelt SmelterRow n=10 recipe=iron-plate at 75,60 rot 0 sig 255f66c36d
+cover power power pole=medium-electric-pole
+e coal/c0 requester-chest 70.5,56.5 rate=0.25 role=requester
+e ore/m0 electric-mining-drill 14.5,14.5 S resource=iron-ore
+e ore/m1 electric-mining-drill 17.5,14.5 S resource=iron-ore
+e ore/m2 electric-mining-drill 20.5,14.5 S resource=iron-ore
+e ore/m3 electric-mining-drill 14.5,18.5 N resource=iron-ore
+e ore/m4 electric-mining-drill 17.5,18.5 N resource=iron-ore
+e ore/m5 electric-mining-drill 20.5,18.5 N resource=iron-ore
+e ore/outb0 transport-belt 14.5,16.5 E net=ore_
+e ore/outb1 transport-belt 15.5,16.5 E net=ore_
+e ore/outb2 transport-belt 16.5,16.5 E net=ore_
+e ore/outb3 transport-belt 17.5,16.5 E net=ore_
+e ore/outb4 transport-belt 18.5,16.5 E net=ore_
+e ore/outb5 transport-belt 19.5,16.5 E net=ore_
+e ore/outb6 transport-belt 20.5,16.5 E net=ore_
+e ore/outb7 transport-belt 21.5,16.5 E net=ore_
+e out/c0 passive-provider-chest 102.5,130.5 role=provider
+e power/p0 medium-electric-pole 16.5,8.5
+e power/p1 medium-electric-pole 22.5,14.5
+e power/p2 medium-electric-pole 31.5,14.5
+e power/p3 medium-electric-pole 13.5,16.5
+e power/p4 medium-electric-pole 39.5,17.5
+e power/p5 medium-electric-pole 47.5,20.5
+e power/p6 medium-electric-pole 55.5,24.5
+e power/p7 medium-electric-pole 63.5,28.5
+e power/p8 medium-electric-pole 67.5,36.5
+e power/p9 medium-electric-pole 67.5,45.5
+e power/p10 medium-electric-pole 67.5,54.5
+e power/p11 medium-electric-pole 74.5,57.5
+e power/p12 medium-electric-pole 79.5,59.5
+e power/p13 medium-electric-pole 78.5,65.5
+e power/p14 medium-electric-pole 86.5,65.5
+e power/p15 medium-electric-pole 92.5,65.5
+e power/p16 medium-electric-pole 83.5,69.5
+e power/p17 medium-electric-pole 87.5,77.5
+e power/p18 medium-electric-pole 91.5,85.5
+e power/p19 medium-electric-pole 91.5,94.5
+e power/p20 medium-electric-pole 91.5,103.5
+e power/p21 medium-electric-pole 91.5,112.5
+e power/p22 medium-electric-pole 93.5,120.5
+e power/p23 medium-electric-pole 98.5,127.5
+e smelt/f0 fast-inserter 75.5,62.5 N net=ore_
+e smelt/f1 fast-inserter 77.5,62.5 N net=ore_
+e smelt/f2 fast-inserter 79.5,62.5 N net=ore_
+e smelt/f3 fast-inserter 81.5,62.5 N net=ore_
+e smelt/f4 fast-inserter 83.5,62.5 N net=ore_
+e smelt/f5 fast-inserter 85.5,62.5 N net=ore_
+e smelt/f6 fast-inserter 87.5,62.5 N net=ore_
+e smelt/f7 fast-inserter 89.5,62.5 N net=ore_
+e smelt/f8 fast-inserter 91.5,62.5 N net=ore_
+e smelt/f9 fast-inserter 93.5,62.5 N net=ore_
+e smelt/in1b0 transport-belt 75.5,61.5 E net=ore_
+e smelt/in1b1 transport-belt 76.5,61.5 E net=ore_
+e smelt/in1b2 transport-belt 77.5,61.5 E net=ore_
+e smelt/in1b3 transport-belt 78.5,61.5 E net=ore_
+e smelt/in1b4 transport-belt 79.5,61.5 E net=ore_
+e smelt/in1b5 transport-belt 80.5,61.5 E net=ore_
+e smelt/in1b6 transport-belt 81.5,61.5 E net=ore_
+e smelt/in1b7 transport-belt 82.5,61.5 E net=ore_
+e smelt/in1b8 transport-belt 83.5,61.5 E net=ore_
+e smelt/in1b9 transport-belt 84.5,61.5 E net=ore_
+e smelt/in1b10 transport-belt 85.5,61.5 E net=ore_
+e smelt/in1b11 transport-belt 86.5,61.5 E net=ore_
+e smelt/in1b12 transport-belt 87.5,61.5 E net=ore_
+e smelt/in1b13 transport-belt 88.5,61.5 E net=ore_
+e smelt/in1b14 transport-belt 89.5,61.5 E net=ore_
+e smelt/in1b15 transport-belt 90.5,61.5 E net=ore_
+e smelt/in1b16 transport-belt 91.5,61.5 E net=ore_
+e smelt/in1b17 transport-belt 92.5,61.5 E net=ore_
+e smelt/in1b18 transport-belt 93.5,61.5 E net=ore_
+e smelt/in1b19 transport-belt 94.5,61.5 S net=ore_
+e smelt/in2b0 transport-belt 75.5,60.5 E net=fuel
+e smelt/in2b1 transport-belt 76.5,60.5 E net=fuel
+e smelt/in2b2 transport-belt 77.5,60.5 E net=fuel
+e smelt/in2b3 transport-belt 78.5,60.5 E net=fuel
+e smelt/in2b4 transport-belt 79.5,60.5 E net=fuel
+e smelt/in2b5 transport-belt 80.5,60.5 E net=fuel
+e smelt/in2b6 transport-belt 81.5,60.5 E net=fuel
+e smelt/in2b7 transport-belt 82.5,60.5 E net=fuel
+e smelt/in2b8 transport-belt 83.5,60.5 E net=fuel
+e smelt/in2b9 transport-belt 84.5,60.5 E net=fuel
+e smelt/in2b10 transport-belt 85.5,60.5 E net=fuel
+e smelt/in2b11 transport-belt 86.5,60.5 E net=fuel
+e smelt/in2b12 transport-belt 87.5,60.5 E net=fuel
+e smelt/in2b13 transport-belt 88.5,60.5 E net=fuel
+e smelt/in2b14 transport-belt 89.5,60.5 E net=fuel
+e smelt/in2b15 transport-belt 90.5,60.5 E net=fuel
+e smelt/in2b16 transport-belt 91.5,60.5 E net=fuel
+e smelt/in2b17 transport-belt 92.5,60.5 E net=fuel
+e smelt/in2b18 transport-belt 93.5,60.5 E net=fuel
+e smelt/in2b19 transport-belt 94.5,60.5 E net=fuel
+e smelt/l0 long-handed-inserter 76.5,62.5 N net=fuel
+e smelt/l1 long-handed-inserter 78.5,62.5 N net=fuel
+e smelt/l2 long-handed-inserter 80.5,62.5 N net=fuel
+e smelt/l3 long-handed-inserter 82.5,62.5 N net=fuel
+e smelt/l4 long-handed-inserter 84.5,62.5 N net=fuel
+e smelt/l5 long-handed-inserter 86.5,62.5 N net=fuel
+e smelt/l6 long-handed-inserter 88.5,62.5 N net=fuel
+e smelt/l7 long-handed-inserter 90.5,62.5 N net=fuel
+e smelt/l8 long-handed-inserter 92.5,62.5 N net=fuel
+e smelt/l9 long-handed-inserter 94.5,62.5 N net=fuel
+e smelt/m0 stone-furnace 76,64 recipe=iron-plate fuel=coal
+e smelt/m1 stone-furnace 78,64 recipe=iron-plate fuel=coal
+e smelt/m2 stone-furnace 80,64 recipe=iron-plate fuel=coal
+e smelt/m3 stone-furnace 82,64 recipe=iron-plate fuel=coal
+e smelt/m4 stone-furnace 84,64 recipe=iron-plate fuel=coal
+e smelt/m5 stone-furnace 86,64 recipe=iron-plate fuel=coal
+e smelt/m6 stone-furnace 88,64 recipe=iron-plate fuel=coal
+e smelt/m7 stone-furnace 90,64 recipe=iron-plate fuel=coal
+e smelt/m8 stone-furnace 92,64 recipe=iron-plate fuel=coal
+e smelt/m9 stone-furnace 94,64 recipe=iron-plate fuel=coal
+e smelt/o0 fast-inserter 75.5,65.5 N net=plates
+e smelt/o1 fast-inserter 77.5,65.5 N net=plates
+e smelt/o2 fast-inserter 79.5,65.5 N net=plates
+e smelt/o3 fast-inserter 81.5,65.5 N net=plates
+e smelt/o4 fast-inserter 83.5,65.5 N net=plates
+e smelt/o5 fast-inserter 85.5,65.5 N net=plates
+e smelt/o6 fast-inserter 87.5,65.5 N net=plates
+e smelt/o7 fast-inserter 89.5,65.5 N net=plates
+e smelt/o8 fast-inserter 91.5,65.5 N net=plates
+e smelt/o9 fast-inserter 93.5,65.5 N net=plates
+e smelt/outb0 transport-belt 75.5,66.5 W net=plates
+e smelt/outb1 transport-belt 76.5,66.5 W net=plates
+e smelt/outb2 transport-belt 77.5,66.5 W net=plates
+e smelt/outb3 transport-belt 78.5,66.5 W net=plates
+e smelt/outb4 transport-belt 79.5,66.5 W net=plates
+e smelt/outb5 transport-belt 80.5,66.5 W net=plates
+e smelt/outb6 transport-belt 81.5,66.5 W net=plates
+e smelt/outb7 transport-belt 82.5,66.5 W net=plates
+e smelt/outb8 transport-belt 83.5,66.5 W net=plates
+e smelt/outb9 transport-belt 84.5,66.5 W net=plates
+e smelt/outb10 transport-belt 85.5,66.5 W net=plates
+e smelt/outb11 transport-belt 86.5,66.5 W net=plates
+e smelt/outb12 transport-belt 87.5,66.5 W net=plates
+e smelt/outb13 transport-belt 88.5,66.5 W net=plates
+e smelt/outb14 transport-belt 89.5,66.5 W net=plates
+e smelt/outb15 transport-belt 90.5,66.5 W net=plates
+e smelt/outb16 transport-belt 91.5,66.5 W net=plates
+e smelt/outb17 transport-belt 92.5,66.5 W net=plates
+e smelt/outb18 transport-belt 93.5,66.5 W net=plates
+e smelt/outb19 transport-belt 94.5,66.5 W net=plates
+e ~fuel/b0 transport-belt 70.5,60.5 E net=fuel
+e ~fuel/b1 transport-belt 70.5,59.5 S net=fuel
+e ~fuel/b2 transport-belt 70.5,58.5 S net=fuel
+e ~fuel/i0 fast-inserter 70.5,57.5 N net=fuel
+e ~fuel/u0 underground-belt 74.5,60.5 E net=fuel ug=out
+e ~fuel/u1 underground-belt 71.5,60.5 E net=fuel ug=in
+e ~ore_/b0 transport-belt 22.5,16.5 E net=ore_
+e ~ore_/b1 transport-belt 23.5,16.5 E net=ore_
+e ~ore_/b2 transport-belt 24.5,16.5 E net=ore_
+e ~ore_/b3 transport-belt 25.5,16.5 E net=ore_
+e ~ore_/b4 transport-belt 26.5,16.5 E net=ore_
+e ~ore_/b5 transport-belt 27.5,16.5 E net=ore_
+e ~ore_/b6 transport-belt 28.5,16.5 E net=ore_
+e ~ore_/b7 transport-belt 29.5,16.5 E net=ore_
+e ~ore_/b8 transport-belt 30.5,16.5 E net=ore_
+e ~ore_/b9 transport-belt 31.5,16.5 E net=ore_
+e ~ore_/b10 transport-belt 32.5,16.5 E net=ore_
+e ~ore_/b11 transport-belt 33.5,16.5 E net=ore_
+e ~ore_/b12 transport-belt 34.5,16.5 E net=ore_
+e ~ore_/b13 transport-belt 35.5,16.5 E net=ore_
+e ~ore_/b14 transport-belt 36.5,16.5 E net=ore_
+e ~ore_/b15 transport-belt 37.5,16.5 E net=ore_
+e ~ore_/b16 transport-belt 38.5,16.5 E net=ore_
+e ~ore_/b17 transport-belt 39.5,16.5 E net=ore_
+e ~ore_/b18 transport-belt 40.5,16.5 E net=ore_
+e ~ore_/b19 transport-belt 41.5,16.5 E net=ore_
+e ~ore_/b20 transport-belt 42.5,16.5 E net=ore_
+e ~ore_/b21 transport-belt 43.5,16.5 E net=ore_
+e ~ore_/b22 transport-belt 44.5,16.5 E net=ore_
+e ~ore_/b23 transport-belt 45.5,16.5 E net=ore_
+e ~ore_/b24 transport-belt 46.5,16.5 E net=ore_
+e ~ore_/b25 transport-belt 47.5,16.5 E net=ore_
+e ~ore_/b26 transport-belt 48.5,16.5 E net=ore_
+e ~ore_/b27 transport-belt 49.5,16.5 E net=ore_
+e ~ore_/b28 transport-belt 50.5,16.5 E net=ore_
+e ~ore_/b29 transport-belt 51.5,16.5 E net=ore_
+e ~ore_/b30 transport-belt 52.5,16.5 E net=ore_
+e ~ore_/b31 transport-belt 53.5,16.5 E net=ore_
+e ~ore_/b32 transport-belt 54.5,16.5 E net=ore_
+e ~ore_/b33 transport-belt 55.5,16.5 E net=ore_
+e ~ore_/b34 transport-belt 56.5,16.5 E net=ore_
+e ~ore_/b35 transport-belt 57.5,16.5 E net=ore_
+e ~ore_/b36 transport-belt 58.5,16.5 E net=ore_
+e ~ore_/b37 transport-belt 59.5,16.5 E net=ore_
+e ~ore_/b38 transport-belt 60.5,16.5 E net=ore_
+e ~ore_/b39 transport-belt 61.5,16.5 E net=ore_
+e ~ore_/b40 transport-belt 62.5,16.5 E net=ore_
+e ~ore_/b41 transport-belt 63.5,16.5 E net=ore_
+e ~ore_/b42 transport-belt 64.5,16.5 E net=ore_
+e ~ore_/b43 transport-belt 65.5,16.5 E net=ore_
+e ~ore_/b44 transport-belt 66.5,16.5 E net=ore_
+e ~ore_/b45 transport-belt 67.5,16.5 E net=ore_
+e ~ore_/b46 transport-belt 68.5,16.5 E net=ore_
+e ~ore_/b47 transport-belt 69.5,16.5 E net=ore_
+e ~ore_/b48 transport-belt 70.5,16.5 E net=ore_
+e ~ore_/b49 transport-belt 71.5,16.5 E net=ore_
+e ~ore_/b50 transport-belt 72.5,16.5 E net=ore_
+e ~ore_/b51 transport-belt 73.5,16.5 S net=ore_
+e ~ore_/b52 transport-belt 73.5,17.5 S net=ore_
+e ~ore_/b53 transport-belt 73.5,18.5 S net=ore_
+e ~ore_/b54 transport-belt 73.5,19.5 S net=ore_
+e ~ore_/b55 transport-belt 73.5,20.5 S net=ore_
+e ~ore_/b56 transport-belt 73.5,21.5 S net=ore_
+e ~ore_/b57 transport-belt 73.5,22.5 S net=ore_
+e ~ore_/b58 transport-belt 73.5,23.5 S net=ore_
+e ~ore_/b59 transport-belt 73.5,24.5 S net=ore_
+e ~ore_/b60 transport-belt 73.5,25.5 S net=ore_
+e ~ore_/b61 transport-belt 73.5,26.5 S net=ore_
+e ~ore_/b62 transport-belt 73.5,27.5 S net=ore_
+e ~ore_/b63 transport-belt 73.5,28.5 S net=ore_
+e ~ore_/b64 transport-belt 73.5,29.5 S net=ore_
+e ~ore_/b65 transport-belt 73.5,30.5 S net=ore_
+e ~ore_/b66 transport-belt 73.5,31.5 S net=ore_
+e ~ore_/b67 transport-belt 73.5,32.5 S net=ore_
+e ~ore_/b68 transport-belt 73.5,33.5 S net=ore_
+e ~ore_/b69 transport-belt 73.5,34.5 S net=ore_
+e ~ore_/b70 transport-belt 73.5,35.5 S net=ore_
+e ~ore_/b71 transport-belt 73.5,36.5 S net=ore_
+e ~ore_/b72 transport-belt 73.5,37.5 S net=ore_
+e ~ore_/b73 transport-belt 73.5,38.5 S net=ore_
+e ~ore_/b74 transport-belt 73.5,39.5 S net=ore_
+e ~ore_/b75 transport-belt 73.5,40.5 S net=ore_
+e ~ore_/b76 transport-belt 73.5,41.5 S net=ore_
+e ~ore_/b77 transport-belt 73.5,42.5 S net=ore_
+e ~ore_/b78 transport-belt 73.5,43.5 S net=ore_
+e ~ore_/b79 transport-belt 73.5,44.5 S net=ore_
+e ~ore_/b80 transport-belt 73.5,45.5 S net=ore_
+e ~ore_/b81 transport-belt 73.5,46.5 S net=ore_
+e ~ore_/b82 transport-belt 73.5,47.5 S net=ore_
+e ~ore_/b83 transport-belt 73.5,48.5 S net=ore_
+e ~ore_/b84 transport-belt 73.5,49.5 S net=ore_
+e ~ore_/b85 transport-belt 73.5,50.5 S net=ore_
+e ~ore_/b86 transport-belt 73.5,51.5 S net=ore_
+e ~ore_/b87 transport-belt 73.5,52.5 S net=ore_
+e ~ore_/b88 transport-belt 73.5,53.5 S net=ore_
+e ~ore_/b89 transport-belt 73.5,54.5 S net=ore_
+e ~ore_/b90 transport-belt 73.5,55.5 S net=ore_
+e ~ore_/b91 transport-belt 73.5,56.5 S net=ore_
+e ~ore_/b92 transport-belt 73.5,57.5 S net=ore_
+e ~ore_/b93 transport-belt 73.5,58.5 S net=ore_
+e ~ore_/b94 transport-belt 73.5,59.5 S net=ore_
+e ~ore_/b95 transport-belt 73.5,60.5 S net=ore_
+e ~ore_/b96 transport-belt 73.5,61.5 E net=ore_
+e ~ore_/b97 transport-belt 74.5,61.5 E net=ore_
+e ~plates/b0 transport-belt 74.5,66.5 W net=plates
+e ~plates/b1 transport-belt 73.5,66.5 W net=plates
+e ~plates/b2 transport-belt 72.5,66.5 W net=plates
+e ~plates/b3 transport-belt 71.5,66.5 S net=plates
+e ~plates/b4 transport-belt 71.5,67.5 S net=plates
+e ~plates/b5 transport-belt 71.5,68.5 S net=plates
+e ~plates/b6 transport-belt 71.5,69.5 S net=plates
+e ~plates/b7 transport-belt 71.5,70.5 S net=plates
+e ~plates/b8 transport-belt 71.5,71.5 S net=plates
+e ~plates/b9 transport-belt 71.5,72.5 S net=plates
+e ~plates/b10 transport-belt 71.5,73.5 S net=plates
+e ~plates/b11 transport-belt 71.5,74.5 S net=plates
+e ~plates/b12 transport-belt 71.5,75.5 S net=plates
+e ~plates/b13 transport-belt 71.5,76.5 S net=plates
+e ~plates/b14 transport-belt 71.5,77.5 S net=plates
+e ~plates/b15 transport-belt 71.5,78.5 S net=plates
+e ~plates/b16 transport-belt 71.5,79.5 S net=plates
+e ~plates/b17 transport-belt 71.5,80.5 S net=plates
+e ~plates/b18 transport-belt 71.5,81.5 S net=plates
+e ~plates/b19 transport-belt 71.5,82.5 S net=plates
+e ~plates/b20 transport-belt 71.5,83.5 S net=plates
+e ~plates/b21 transport-belt 71.5,84.5 S net=plates
+e ~plates/b22 transport-belt 71.5,85.5 S net=plates
+e ~plates/b23 transport-belt 71.5,86.5 S net=plates
+e ~plates/b24 transport-belt 71.5,87.5 S net=plates
+e ~plates/b25 transport-belt 71.5,88.5 S net=plates
+e ~plates/b26 transport-belt 71.5,89.5 S net=plates
+e ~plates/b27 transport-belt 71.5,90.5 S net=plates
+e ~plates/b28 transport-belt 71.5,97.5 S net=plates
+e ~plates/b29 transport-belt 71.5,98.5 S net=plates
+e ~plates/b30 transport-belt 71.5,99.5 S net=plates
+e ~plates/b31 transport-belt 71.5,100.5 S net=plates
+e ~plates/b32 transport-belt 71.5,101.5 S net=plates
+e ~plates/b33 transport-belt 71.5,102.5 S net=plates
+e ~plates/b34 transport-belt 71.5,103.5 S net=plates
+e ~plates/b35 transport-belt 71.5,104.5 S net=plates
+e ~plates/b36 transport-belt 71.5,105.5 S net=plates
+e ~plates/b37 transport-belt 71.5,106.5 S net=plates
+e ~plates/b38 transport-belt 71.5,107.5 S net=plates
+e ~plates/b39 transport-belt 71.5,108.5 S net=plates
+e ~plates/b40 transport-belt 71.5,109.5 S net=plates
+e ~plates/b41 transport-belt 71.5,110.5 S net=plates
+e ~plates/b42 transport-belt 71.5,111.5 S net=plates
+e ~plates/b43 transport-belt 71.5,112.5 S net=plates
+e ~plates/b44 transport-belt 71.5,113.5 S net=plates
+e ~plates/b45 transport-belt 71.5,114.5 S net=plates
+e ~plates/b46 transport-belt 71.5,115.5 S net=plates
+e ~plates/b47 transport-belt 71.5,116.5 S net=plates
+e ~plates/b48 transport-belt 71.5,117.5 S net=plates
+e ~plates/b49 transport-belt 71.5,118.5 S net=plates
+e ~plates/b50 transport-belt 71.5,119.5 S net=plates
+e ~plates/b51 transport-belt 71.5,120.5 S net=plates
+e ~plates/b52 transport-belt 71.5,121.5 S net=plates
+e ~plates/b53 transport-belt 71.5,122.5 S net=plates
+e ~plates/b54 transport-belt 71.5,123.5 S net=plates
+e ~plates/b55 transport-belt 71.5,124.5 S net=plates
+e ~plates/b56 transport-belt 71.5,125.5 S net=plates
+e ~plates/b57 transport-belt 71.5,126.5 S net=plates
+e ~plates/b58 transport-belt 71.5,127.5 S net=plates
+e ~plates/b59 transport-belt 71.5,128.5 S net=plates
+e ~plates/b60 transport-belt 71.5,129.5 S net=plates
+e ~plates/b61 transport-belt 71.5,130.5 E net=plates
+e ~plates/b62 transport-belt 72.5,130.5 E net=plates
+e ~plates/b63 transport-belt 73.5,130.5 E net=plates
+e ~plates/b64 transport-belt 74.5,130.5 E net=plates
+e ~plates/b65 transport-belt 75.5,130.5 E net=plates
+e ~plates/b66 transport-belt 76.5,130.5 E net=plates
+e ~plates/b67 transport-belt 77.5,130.5 E net=plates
+e ~plates/b68 transport-belt 78.5,130.5 E net=plates
+e ~plates/b69 transport-belt 79.5,130.5 E net=plates
+e ~plates/b70 transport-belt 80.5,130.5 E net=plates
+e ~plates/b71 transport-belt 81.5,130.5 E net=plates
+e ~plates/b72 transport-belt 82.5,130.5 E net=plates
+e ~plates/b73 transport-belt 83.5,130.5 E net=plates
+e ~plates/b74 transport-belt 84.5,130.5 E net=plates
+e ~plates/b75 transport-belt 85.5,130.5 E net=plates
+e ~plates/b76 transport-belt 86.5,130.5 E net=plates
+e ~plates/b77 transport-belt 87.5,130.5 E net=plates
+e ~plates/b78 transport-belt 88.5,130.5 E net=plates
+e ~plates/b79 transport-belt 89.5,130.5 E net=plates
+e ~plates/b80 transport-belt 90.5,130.5 E net=plates
+e ~plates/b81 transport-belt 91.5,130.5 E net=plates
+e ~plates/b82 transport-belt 92.5,130.5 E net=plates
+e ~plates/b83 transport-belt 93.5,130.5 E net=plates
+e ~plates/b84 transport-belt 94.5,130.5 E net=plates
+e ~plates/b85 transport-belt 95.5,130.5 E net=plates
+e ~plates/b86 transport-belt 96.5,130.5 E net=plates
+e ~plates/b87 transport-belt 97.5,130.5 E net=plates
+e ~plates/b88 transport-belt 98.5,130.5 E net=plates
+e ~plates/b89 transport-belt 99.5,130.5 E net=plates
+e ~plates/b90 transport-belt 100.5,130.5 E net=plates
+e ~plates/i0 fast-inserter 101.5,130.5 W net=plates
+e ~plates/u0 underground-belt 71.5,91.5 S net=plates ug=in
+e ~plates/u1 underground-belt 71.5,96.5 S net=plates ug=out

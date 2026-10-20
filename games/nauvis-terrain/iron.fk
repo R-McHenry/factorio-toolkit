@@ -1,0 +1,11 @@
+# iron.fk: an iron outpost on a real patch. The miners are placed on the ore by @patch; the
+# smelters stand north of the pond and the plates go to a chest south of it (frame = plot,
+# x 0..143, y 0..139; the pond is at x 70..113, y 90..124).
+ore   = MinerRow<n=6, resource=iron-ore>          @patch(iron-ore)
+smelt = SmelterRow<n=10, recipe=iron-plate>       @(75, 60)
+coal  = Chest<requester, item=coal, rate=0.25/s>  @(70, 56)
+out   = Chest<provider>                           @(102, 130)
+
+net ore_:   ore -> smelt
+net fuel:   coal -> smelt
+net plates: smelt -> out

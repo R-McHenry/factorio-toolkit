@@ -1,0 +1,3 @@
+fkp 1 surface nauvis
+plot gears at 160,256 rot 0 size 48x32 module=gears
+plot iron at -168,64 rot 0 size 144x140 module=iron patch=iron-ore#2
