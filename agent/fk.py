@@ -1,0 +1,202 @@
+"""fk: the agent's one command, on the laptop. The game host is an implementation detail.
+
+A run folder holds ``game\\`` (the game codebase the agent edits: ``.fk`` modules, the surface file,
+the build script), ``bin\\`` (this file and ``fk.cmd``), ``.toolkit\\`` (the toolkit, pinned for the
+run) and ``run.json``, which names the game host, the host's copy of the run and the host's
+toolkit (also pinned: files a running session uses never change under it). Each command:
+
+1. runs where it belongs. Design and every pure command run here, where the CPU is (elaborate,
+   rates, place, route, cover, floorplan, checks, write_layout). Whatever reads or writes the game
+   runs on the host, where RCON is: diff, apply, a live look, measure, alerts, stats, chart,
+   terrain, chat.
+2. keeps the two copies of ``game\\`` in step: what changed here is pushed before a host step, and
+   what the host wrote is pulled after it.
+3. ends with the footer, ``fkcore poll``: chat lines that are new since the last command, and the
+   game's new alerts and reminders.
+
+``fk build`` splits the flow at ``write_layout``: design here (``--to write_layout``), then on the
+host the steps after it (``--from diff``: the floorplan is replayed on the checkpoints). Stdlib
+only. ``FK_RUN`` names the run folder (default: the folder above this file's).
+"""
+from __future__ import annotations
+
+import io
+import json
+import os
+import shlex
+import subprocess
+import sys
+import tarfile
+import time
+
+RUN = os.path.abspath(os.environ.get("FK_RUN") or os.path.join(os.path.dirname(__file__), ".."))
+GAME = os.path.join(RUN, "game")
+STAMP = os.path.join(GAME, "out", ".synced")
+
+#: commands that are pure: they run here, on the run's own toolkit
+LOCAL = {"rates", "check", "explain", "unfold", "render", "layout", "split-to-chest", "merge",
+         "insert", "chests-to-net", "net-to-chests"}
+#: commands that need the game: they run on the host, with the link on
+HOST = {"chat", "say", "poll", "alerts", "stats", "chart", "read-terrain", "measure", "adopt",
+        "sense"}
+#: files only the host writes: pulled, never pushed
+HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/alerts.json", "out/inbox.txt")
+#: the build steps that read or write the game
+LINK_STEPS = ("diff", "apply")
+
+
+def _config():
+    with open(os.path.join(RUN, "run.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    cfg.setdefault("host", "computah-ct")
+    return cfg
+
+
+def _ssh(cfg, command, data=None, capture=False):
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", cfg["host"], command], input=data,
+                          stdout=subprocess.PIPE if capture else None)
+
+
+def _host_made(rel):
+    return any(rel == h or rel.startswith(h.rstrip("/") + "/") for h in HOST_MADE)
+
+
+def push(cfg):
+    """Send the files of game\\ changed here since the last sync (host-made files excepted)."""
+    since = os.path.getmtime(STAMP) if os.path.exists(STAMP) else 0
+    buf, n = io.BytesIO(), 0
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for root, _dirs, files in os.walk(GAME):
+            for name in files:
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, GAME).replace("\\", "/")
+                if not _host_made(rel) and os.path.getmtime(full) > since:
+                    tar.add(full, arcname=rel)
+                    n += 1
+    if n:
+        r = _ssh(cfg, f"mkdir -p {shlex.quote(cfg['host_game'])} && "
+                      f"tar -xf - -C {shlex.quote(cfg['host_game'])}", data=buf.getvalue())
+        if r.returncode:
+            sys.exit(f"fk: push to {cfg['host']} failed")
+    return n
+
+
+def pull(cfg):
+    """Bring the host's copy of game\\ back here (what the host steps wrote)."""
+    r = _ssh(cfg, f"tar -cf - -C {shlex.quote(cfg['host_game'])} .", capture=True)
+    if r.returncode:
+        sys.exit(f"fk: pull from {cfg['host']} failed")
+    with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tar:
+        safe = [m for m in tar.getmembers() if (m.isfile() or m.isdir())
+                and not (m.name.startswith("/") or ".." in m.name.split("/"))]
+        tar.extractall(GAME, members=safe, filter="data")
+    os.makedirs(os.path.dirname(STAMP), exist_ok=True)
+    with open(STAMP, "w", encoding="utf-8") as fh:
+        fh.write(f"last sync with {cfg['host']}:{cfg['host_game']} at {time.ctime()}\n")
+    # the sync stamp is newer than everything pulled, so the next push sends only real edits
+
+
+def local(cfg, args):
+    env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"), PYTHONDONTWRITEBYTECODE="1")
+    env.pop("FK_LINK", None)
+    return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env).returncode
+
+
+def remote(cfg, args, footer=True):
+    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
+           f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} python3 -m fkcore "
+           + " ".join(shlex.quote(a) for a in args))
+    if footer:
+        cmd += f"; s=$?; PYTHONPATH={shlex.quote(cfg['host_toolkit'])} FK_LINK=on python3 -m fkcore poll .; exit $s"
+    return _ssh(cfg, cmd).returncode
+
+
+def footer(cfg):
+    return remote(cfg, ["poll", "."], footer=False)
+
+
+def _script():
+    found = sorted(f for f in os.listdir(GAME) if f.endswith(".build.fkb"))
+    if not found:
+        sys.exit("fk: no <surface>.build.fkb in game\\")
+    return found[0]
+
+
+def _steps(script):
+    names = []
+    with open(os.path.join(GAME, script), encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.split("#", 1)[0].split()
+            if line:
+                names.append(f"cover_{line[1]}" if line[0] == "cover" and len(line) > 1 else line[0])
+    return names
+
+
+def build(cfg, args):
+    """Design here up to write_layout, then the game steps (diff, apply) on the host."""
+    script = _script()
+    names = _steps(script)
+    frm = args[args.index("--from") + 1] if "--from" in args else names[0]
+    to = args[args.index("--to") + 1] if "--to" in args else names[-1]
+    i, j = names.index(frm), names.index(to)
+    link_at = [k for k, n in enumerate(names) if n in LINK_STEPS]
+    split = link_at[0] if link_at else len(names)
+    code = 0
+    if i < split:
+        code = local(cfg, ["build", script, "--from", frm, "--to", names[min(j, split - 1)]])
+    if code == 0 and j >= split:
+        push(cfg)
+        code = remote(cfg, ["build", script, "--from", names[max(i, split)], "--to", to],
+                      footer=False)
+        pull(cfg)
+    else:
+        push(cfg)
+    return code
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cfg = _config()
+    cmd, rest = argv[0], argv[1:]
+    if not os.path.exists(STAMP):
+        pull(cfg)                          # first use: start from the host's copy
+    if cmd == "build":
+        code = build(cfg, rest)
+        footer(cfg)
+        return code
+    if cmd == "look":
+        if "--design" in rest:
+            rest = [a for a in rest if a != "--design"]
+            code = local(cfg, ["look", ".", "--source", "design"] + _area(rest))
+            footer(cfg)
+            return code
+        push(cfg)
+        code = remote(cfg, ["look", ".", "--source", "world"] + _area(rest))
+        pull(cfg)
+        return code
+    if cmd in LOCAL:
+        code = local(cfg, [cmd] + rest)
+        push(cfg)
+        footer(cfg)
+        return code
+    if cmd in HOST:
+        push(cfg)
+        code = remote(cfg, [cmd] + ([] if cmd == "say" else ["."]) + rest,
+                      footer=cmd not in ("poll", "chat"))
+        pull(cfg)
+        return code
+    print(f"fk: unknown command {cmd!r} (fk --help)", file=sys.stderr)
+    return 2
+
+
+def _area(rest):
+    """``fk look X0,Y0,X1,Y1`` or ``--area X0,Y0,X1,Y1`` -> the fkcore arguments."""
+    if rest and not rest[0].startswith("--"):
+        return ["--area", rest[0]] + rest[1:]
+    return rest
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -17,6 +17,13 @@
     split-to-chest GAME_DIR FACTORY NET NAME --at X,Y [--requester --item I [--rate R]]
                                           a chest joins NET as one more endpoint; only NET
                                           is re-routed by the next build
+
+  with the game link (FK_LINK=on, on the game host):
+    chat GAME_DIR [--all]                 the chat lines since the last read (--all: the journal)
+    say TEXT...                           one line in the game chat, as [agent]
+    poll GAME_DIR                         what every agent command ends with: new chat lines, and
+                                          the game's new and still-open alerts once fkcore.alerts
+                                          is built
 """
 from __future__ import annotations
 
@@ -105,6 +112,46 @@ def _sense(a, cat):
     return 0
 
 
+def _game_link():
+    """The game link for a command that needs it: only with FK_LINK=on (as the flow)."""
+    from . import link
+    if os.environ.get("FK_LINK", "off").lower() != "on":
+        print("this command uses the game link: run it on the game host with FK_LINK=on",
+              file=sys.stderr)
+        return None
+    try:
+        return link.Rcon()
+    except (OSError, link.LinkError) as exc:
+        print(f"no game link: {exc}", file=sys.stderr)
+        return None
+
+
+def _talk(a):
+    from . import chat
+    r = _game_link()
+    if r is None:
+        return 2
+    with r:
+        if a.cmd == "say":
+            chat.say(r, " ".join(a.text))
+            return 0
+        if a.cmd == "chat" and a.all:
+            got = chat.read(r, 0)
+            lines = [f"chat {m.get('name') or '?'}: {m.get('message', '')}" for m in got["messages"]]
+        else:
+            lines = chat.new_lines(r, a.game)
+        if a.cmd == "poll":
+            try:
+                from . import alerts
+            except ImportError:
+                alerts = None
+            if alerts is not None and hasattr(alerts, "poll"):
+                lines = alerts.poll(r, a.game) + lines
+        print("\n".join(lines) if lines else ("chat: nothing new" if a.cmd == "chat" else ""),
+              end="\n" if lines or a.cmd == "chat" else "")
+    return 0
+
+
 def _render(lay, cat):
     w, h = lay.size
     surface = fkp.loads(f"fkp 1 surface view\nplot {lay.name} at 0,0 rot 0 size {w}x{h}\n")
@@ -153,7 +200,16 @@ def main(argv=None):
     sp.add_argument("--requester", action="store_true")
     sp.add_argument("--item")
     sp.add_argument("--rate")
+    ch = sub.add_parser("chat")
+    ch.add_argument("game")
+    ch.add_argument("--all", action="store_true")
+    sy = sub.add_parser("say")
+    sy.add_argument("text", nargs="+")
+    po = sub.add_parser("poll")
+    po.add_argument("game")
     a = ap.parse_args(argv)
+    if a.cmd in ("chat", "say", "poll"):
+        return _talk(a)
     cat = Catalog.load()
 
     if a.cmd == "render":

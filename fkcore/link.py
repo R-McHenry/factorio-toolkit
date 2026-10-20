@@ -6,7 +6,9 @@ The Lua sent here only reads, or builds through a blueprint paste, or (lab only)
 save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
 
 - ``snapshot(surface, area)``: every entity in the area as v4's capture rows (n, t, x, y, d, g,
-  dc, force, hp, st, rc, it, ug, u, box) plus ``lu``, its last_user. The rows go through
+  dc, force, hp, st, rc, it, ug, u, box) plus ``lu``, its last_user; not the ground (resources:
+  the terrain read has those), characters, corpses, items on the ground or effects, which no
+  design owns and the diff never judges. The rows go through
   ``helpers.write_file`` into script-output and are read back from disk, so a big area never
   overflows an RCON reply; ``fkcore.scene.from_capture`` makes the scene.
 - ``paste(surface, force, bp, at)``: a superforced ``build_blueprint`` of a blueprint string from a
@@ -122,12 +124,20 @@ def _area(area):
     return f"{{{{{x0},{y0}}},{{{x1},{y1}}}}}"
 
 
+#: entity types a snapshot leaves out: the ground, the player's body, and what is not built
+_SKIP = "{" + ", ".join(f"'{t}'" for t in (
+    "resource", "fish", "character", "corpse", "character-corpse", "item-entity", "item-request-proxy",
+    "highlight-box", "speech-bubble", "explosion", "smoke-with-trigger", "particle-source",
+    "projectile", "beam", "stream", "sticker", "fire", "deconstructible-tile-proxy",
+    "tile-ghost")) + "}"
+
+
 def lua_snapshot(surface, area, tag="snap"):
     return f"""
 local s = game.get_surface({_q(surface)})
 if not s then rcon.print('no surface') return end
 local out = {{}}
-for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}}}) do
+for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, type = {_SKIP}, invert = true}}) do
   local g = e.type == 'entity-ghost'
   local t = g and e.ghost_type or e.type
   local row = {{n = g and e.ghost_name or e.name, t = t, x = e.position.x, y = e.position.y,
