@@ -1,0 +1,14 @@
+# lab.surface: the lab bench's red-green build (tools/lab_bench.py, 2026-10-20) as a game codebase,
+# so a diff or a live look can judge it. It was built once by the bench; this script has no apply.
+# Rory powered it with the editor (an energy interface at 217,200, on the plot's top edge): kept as
+# a mark of his (lab.fkp), never reverted.
+surface  lab
+mode     lab
+terrain  none
+catalog  base
+
+place main = main plot 200,200 63x50
+
+watch plots:      keep
+watch sanctioned: mark 2h
+notify            all
