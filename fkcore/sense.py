@@ -105,6 +105,11 @@ class SenseReport:
         return out
 
 
+#: a ``mark`` with no duration (the surface file's default ``watch sanctioned: mark``) lasts 2h,
+#: CORE-V1 §6.4's default; without it the mark expired at its own tick (worker sense, 2026-10-20)
+DEFAULT_MARK = "2h"
+
+
 def duration_ticks(text):
     """'2h', '30min', '90s' -> ticks (60 per second); None for no duration."""
     if not text:
@@ -224,14 +229,14 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None) -> SenseR
             p = pending.setdefault((actor, action), {
                 "mark": fkpmod.Mark(None, [], None if action == "keep" else
                                     (None if tick is None else
-                                     tick + (duration_ticks(dur) or 0))),
+                                     tick + duration_ticks(dur or DEFAULT_MARK))),
                 "verdicts": [], "things": []})
             for tile in t["tiles"]:
                 if (tile[0], tile[1]) not in p["mark"].tiles:
                     p["mark"].tiles.append((tile[0], tile[1]))
             v = Verdict("MARKED", t["name"], t["x"], t["y"], None,
                         "kept in the plot until its owner decides" if action == "keep"
-                        else f"TEMP {actor}, marked for {dur}", actor, action)
+                        else f"TEMP {actor}, marked for {dur or DEFAULT_MARK}", actor, action)
             p["verdicts"].append(v)
             p["things"].append(i)
             verdicts.append(v)
