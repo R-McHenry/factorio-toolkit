@@ -93,14 +93,14 @@ class LexerTest(unittest.TestCase):
 
 class LabScenarioTest(unittest.TestCase):
     def test_lua_files_are_well_formed(self):
-        for name in ("control.lua", "fk_lab.lua"):
+        for name in ("control.lua", "fk_lab.lua", "fk_chat.lua"):
             check_blocks(lex(read(name)))
 
     def test_control_is_freeplay_plus_the_lab(self):
         code = code_only(read("control.lua"))
         libs = re.findall(r'add_lib \( require \( "([^"]+)" \) \)', code)
         self.assertEqual(libs, ["__base__/script/freeplay/freeplay", "space-finish-script",
-                                "silo-script", "fk_lab"])
+                                "silo-script", "fk_lab", "fk_chat"])
         self.assertIn('script . active_mods [ "space-age" ]', code)
         desc = json.loads(read("description.json"))
         self.assertTrue(desc["multiplayer-compatible"])
@@ -128,6 +128,19 @@ class LabScenarioTest(unittest.TestCase):
             self.assertIn(needle, code)
         # no event handlers: the lab registers nothing that runs on game events
         self.assertIn("lab . events = { }", code)
+
+    def test_chat_journal_rules(self):
+        code = code_only(read("fk_chat.lua"))
+        # one handler, on console chat, through event_handler's events table (scenario code)
+        self.assertIn("chat . events = { [ defines . events . on_console_chat ] = function", code)
+        self.assertEqual(code.count("defines . events ."), 1)
+        self.assertNotIn("script . on_event", code)
+        self.assertNotIn("commands . add_command", code)
+        self.assertNotRegex(code.lower(), r"\brcon\b")
+        self.assertNotRegex(code, r"\bglobal\b")
+        self.assertIn("storage . fk_chat", code)
+        self.assertIn("local MAX = 200", code)
+        self.assertIn("table . remove ( t , 1 )", code)        # a ring: the oldest goes first
 
 
 if __name__ == "__main__":
