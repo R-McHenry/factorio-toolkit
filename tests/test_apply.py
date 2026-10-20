@@ -2,7 +2,7 @@
 import unittest
 from unittest import mock
 
-from fkcore import apply as applymod, link
+from fkcore import apply as applymod, compose, fkp, link
 from fkcore.catalog import Catalog
 from tests.test_sense import surface
 
@@ -76,6 +76,22 @@ class ApplyTest(unittest.TestCase):
         # (the paste's own script inventory is destroyed; no entity is)
         self.assertFalse(any("e.destroy()" in c or "g.revive()" in c for c in r.calls))
         self.assertIn("MISPLACED 19", "\n".join(rep.lines()))
+
+    def test_lab_seeds_ore_only_without_a_terrain(self):
+        # a real terrain (transplanted ore) is under the drills already: nothing is seeded
+        lay = fkp.loads("fkp 1 factory d\nsize 3x3\ninst m MinerRow n=1 resource=iron-ore at 0,0 "
+                        "rot 0 sig x\ne m/m0 electric-mining-drill 1.5,1.5 S resource=iron-ore\n")
+        s = compose.compose(fkp.loads("fkp 1 surface lab\nplot d at 0,0 rot 0 size 3x3\n"),
+                            {"d": lay}, CAT)
+        want = [("electric-mining-drill", 1.5, 1.5)]
+        for seed, seeds in ((True, 1), (False, 0)):
+            r = FakeRcon(want)
+            with mock.patch.object(link, "snapshot", fake_snapshot(want)):
+                rep = applymod.apply(r, s, CAT, mode="lab", seed=seed)
+            self.assertEqual(sum("amount =" in c for c in r.calls), seeds)
+            gen = next(c for c in r.calls if "request_to_generate_chunks" in c)
+            self.assertIn("request_to_generate_chunks({cx * 32 + 16, cy * 32 + 16}, 0)", gen)
+        self.assertIn("no ore seeded: the drills stand on the terrain's ore", rep.notes)
 
     def test_anchor_is_the_tile_box_centre(self):
         x0, y0, x1, y1 = applymod.scope_area(self.rows, CAT, margin=0)

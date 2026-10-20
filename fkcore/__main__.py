@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from . import compose, expand, fkp, flow, rates
@@ -140,6 +141,21 @@ def _render(lay, cat):
     return compose.render(compose.compose(surface, {lay.name: lay}, cat), cat, (0, 0, w, h))
 
 
+def _glue(argv):
+    """argparse reads ``--area -320,-288,256,288`` as two options: glue a coordinate list that
+    starts with a minus to its flag (``--area=-320,...``)."""
+    out, i = [], 0
+    while i < len(argv):
+        if argv[i] in ("--area", "--at") and i + 1 < len(argv) \
+                and re.fullmatch(r"-\d+(,-?\d+)+", argv[i + 1]):
+            out.append(f"{argv[i]}={argv[i + 1]}")
+            i += 2
+        else:
+            out.append(argv[i])
+            i += 1
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m fkcore", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -187,7 +203,7 @@ def main(argv=None):
     rt.add_argument("--surface", required=True)
     rt.add_argument("--area", required=True)
     rt.add_argument("--name", default="map")
-    a = ap.parse_args(argv)
+    a = ap.parse_args(_glue(sys.argv[1:] if argv is None else list(argv)))
     if a.cmd == "read-terrain":
         return _read_terrain(a)
     cat = Catalog.load()

@@ -1,11 +1,15 @@
 """fkcore.terrain: cliff tiles, patches, frames, the file and the block read (no game)."""
+import contextlib
+import io
 import json
 import os
 import re
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
+from fkcore import __main__ as cli
 from fkcore import compose, fkp, link, terrain
 from fkcore.catalog import Catalog
 from fkcore.surface import Place
@@ -162,6 +166,21 @@ class ReadTest(unittest.TestCase):
             self.assertEqual(d["water"], [[-100, -100], [28, -100], [-100, 28], [28, 28]])
             self.assertEqual(d["area"], [-100, -100, 100, 60])
             self.assertEqual(os.listdir(os.path.join(folder, "fk5")), [])   # read back, removed
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def test_the_command_needs_fk_link_on_and_takes_negative_corners(self):
+        self.assertEqual(cli._glue(["read-terrain", "g", "--area", "-320,-288,256,288"]),
+                         ["read-terrain", "g", "--area=-320,-288,256,288"])
+        folder = tempfile.mkdtemp(prefix="fkterrain-cli-")
+        try:
+            with mock.patch.dict(os.environ, {"FK_LINK": "off"}), \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                code = cli.main(["read-terrain", folder, "--surface", "nauvis", "--area",
+                                 "-1,-1,1,1"])
+            self.assertEqual(code, 2)
+            self.assertIn("FK_LINK is not on", err.getvalue())
+            self.assertEqual(os.listdir(folder), [])
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 

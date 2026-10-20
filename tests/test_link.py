@@ -17,7 +17,8 @@ class LinkLuaTest(unittest.TestCase):
                     link.lua_revive("lab", (0, 0, 10, 10)),
                     link.lua_decon("lab", "lab", (0, 0, 10, 10)),
                     link.lua_destroy("lab", (0, 0, 10, 10), ["transport-belt"]),
-                    link.lua_produced("lab", "lab", ["iron-gear-wheel"])):
+                    link.lua_produced("lab", "lab", ["iron-gear-wheel"]),
+                    link.lua_generate_area("lab", "lab", (480, 416, 600, 540))):
             link.assert_safe(lua)
             for line in lua.splitlines():
                 code = line.strip()
