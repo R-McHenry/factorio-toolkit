@@ -10,25 +10,34 @@
     claim <name> box <x0>,<y0> <x1>,<y1> [until <tick>] ["reason"]
     watch plots|sanctioned: keep | revert | strict | mark [<duration>]
     notify   nearby | all | off
+    remind   <duration>                       # 2h, 10min, 20s: the alert reminder cadence
     target   <item> <rate>/<unit>, ...
 
 A ``#`` starts a comment at the start of a line or after a space. ``<module>`` is a factory file of the game codebase (``<module>.fk`` beside the surface file); its
 layout record is ``<module>.fkp``. :func:`floorplan` turns the place and claim lines into the
 surface's own .fkp (plots and claims); composing it with the factories' layouts is
 ``fkcore.compose``. The defaults follow CORE-V1.md §6.4/6.5: ``play`` mode, watch ``plots: keep``
-and ``sanctioned: mark``, notify ``nearby`` in play and ``all`` in lab. Pure, stdlib only.
+and ``sanctioned: mark``, notify ``nearby`` in play and ``all`` in lab.
+
+``remind`` is how often a persisting alert of the game's alert panel is pushed again
+(``fkcore.alerts``; CORE-V1 §6.5, decision 11). Its default, **10min, is a placeholder: the
+default is still open with Rory** (CORE-V1 §13). Pure, stdlib only.
 """
 from __future__ import annotations
 
+import os
 import re
 import shlex
 from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
+from .sense import duration_ticks
 
-__all__ = ["SurfaceError", "Place", "SurfaceFile", "loads", "load", "floorplan"]
+__all__ = ["SurfaceError", "Place", "SurfaceFile", "loads", "load", "load_game", "floorplan"]
 
 _UNITS = {"s": 1.0, "min": 60.0, "h": 3600.0}
+#: The alert reminder cadence when the surface file has no ``remind`` line. Still open with Rory.
+DEFAULT_REMIND = "10min"
 
 
 class SurfaceError(ValueError):
@@ -62,10 +71,16 @@ class SurfaceFile:
     watch: dict = field(default_factory=lambda: {"plots": "keep", "sanctioned": "mark"})
     notify: str | None = None
     targets: dict = field(default_factory=dict)       # item -> items/s
+    remind: str = DEFAULT_REMIND                      # alert reminder cadence (open with Rory)
 
     @property
     def notify_mode(self):
         return self.notify or ("all" if self.mode == "lab" else "nearby")
+
+    @property
+    def remind_ticks(self):
+        """The reminder cadence in game ticks (60 per second)."""
+        return duration_ticks(self.remind)
 
 
 def _pair(s, where):
@@ -143,6 +158,10 @@ def loads(text, path="<surface>") -> SurfaceFile:
                 if t[2] not in ("keep", "revert", "strict", "mark"):
                     raise SurfaceError(f"{where}: a watch action is keep, revert, strict or mark")
                 sf.watch[region] = " ".join(t[2:])
+            elif head == "remind":
+                if len(t) != 2 or not duration_ticks(t[1]):
+                    raise SurfaceError(f"{where}: remind <duration>, like 10min or 20s")
+                sf.remind = t[1]
             elif head == "target":
                 for part in " ".join(t[1:]).split(","):
                     item, rate = part.split()
@@ -162,6 +181,14 @@ def loads(text, path="<surface>") -> SurfaceFile:
 def load(path) -> SurfaceFile:
     with open(path, encoding="utf-8") as fh:
         return loads(fh.read(), path)
+
+
+def load_game(game_dir) -> SurfaceFile:
+    """The surface file of a game codebase: its first ``*.surface`` (one surface per codebase)."""
+    names = sorted(f for f in os.listdir(game_dir) if f.endswith(".surface"))
+    if not names:
+        raise SurfaceError(f"no .surface file in {game_dir}")
+    return load(os.path.join(game_dir, names[0]))
 
 
 def floorplan(sf: SurfaceFile, infra=None) -> fkpmod.Layout:
