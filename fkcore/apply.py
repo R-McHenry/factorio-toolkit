@@ -13,8 +13,12 @@ marks that for deconstruction). Then, by mode:
 - ``own`` (1.2, ``fkcore.own``): the record of what the applies pasted. The toolkit's own
   entities that the design dropped are ``NOBODY`` whatever the watch policy says, so a moved,
   shrunk or emptied plot, or a replaced row, leaves nothing behind; with no ``area`` the scope
-  reaches them wherever they stand. ``ApplyReport.own`` is the record after the paste, for the
-  caller to save.
+  reaches them wherever they stand. A carrier the record shows under another net that holds
+  what its new net doesn't carry (``renet`` with ``WRONG_ITEM``: the old net's items on a belt,
+  its fluid in a pipe) is ordered out before the paste, and the paste lays a fresh ghost on it:
+  robots take the old one up with what it holds and build the new one (``relaid``; the game
+  keeps both, checked on a laptop test server, 2.0.77). ``ApplyReport.own`` is the record after
+  the paste, for the caller to save.
 - ``lab``: the chunks under the area (and no others) are generated and charted first (a new
   surface has none), each drill row's designed resource is seeded under it (lab ground has no
   ore; ``seed=False`` when the surface has a real terrain, whose ore is already there), a
@@ -73,6 +77,7 @@ class ApplyReport:
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
+    relaid: list = field(default_factory=list)   # carriers laid fresh under another net
     own: dict | None = None            # the record of what the applies pasted, after this one
     chunks: int = 0
     seeded: int = 0
@@ -94,6 +99,10 @@ class ApplyReport:
             out.append(f"  play: {self.decon} NOBODY entities ordered for deconstruction"
                        + (f" ({self.dropped} of them the toolkit's own, dropped from the design)"
                           if self.dropped else "") + "; robots build the ghosts")
+        if self.relaid:
+            items = sorted({i for v in self.relaid for i in v.wrong_items})
+            out.append(f"  {len(self.relaid)} carriers laid under another net held "
+                       f"{', '.join(items)}: ordered up, and the paste lays them fresh")
         if self.placed_alone:
             out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts")
         if self.misplaced:
@@ -188,8 +197,12 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         standing = [ownmod.at(v.name, v.x, v.y) for v in before.verdicts
                     if v.verdict == "NOBODY" and v.action == "own"]
         rep.dropped = len(standing)
-        if nobody:
-            rep.decon = int(r.lua(link.lua_decon_list(s.name, force, nobody)).strip() or 0)
+        rep.decon = _decon(r, s.name, force, nobody)
+        # ordered out before the paste, so the paste lays a fresh one on each (a paste over the
+        # same entity not ordered out places nothing, and the old items stay)
+        rep.relaid = [v for v in before.verdicts if v.renet and v.wrong_items
+                      and v.verdict in ("OK", "DRIFT")]
+        _decon(r, s.name, force, [(v.name, v.x, v.y) for v in rep.relaid])
         rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
     if not rows:
         rep.notes.append("nothing designed in this scope")
@@ -242,9 +255,23 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     return rep
 
 
+#: entities per decon order (one RCON command each; pastes go in 3000-character chunks)
+DECON_BATCH = 60
+
+
+def _decon(r, surface, force, things):
+    """Order ``things`` [(name, x, y)] out in batches; -> how many the game took."""
+    n = 0
+    for i in range(0, len(things), DECON_BATCH):
+        n += _int(r.lua(link.lua_decon_list(surface, force, things[i:i + DECON_BATCH])))
+    return n
+
+
 def rip_points(rep):
-    """The positions of what the next apply takes up, from a diff (a ``sense.SenseReport``)."""
-    return [(v.x, v.y) for v in rep.verdicts if v.verdict.split()[0] in RIP_VERDICTS]
+    """The positions of what the next apply takes up, from a diff (a ``sense.SenseReport``):
+    NOBODY and WRONG, and the carriers it lays fresh under another net (1.2)."""
+    return [(v.x, v.y) for v in rep.verdicts if v.verdict.split()[0] in RIP_VERDICTS
+            or (v.renet and v.wrong_items)]
 
 
 def rip_load(r, surface, force, points, batch=80):

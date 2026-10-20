@@ -129,9 +129,11 @@ def snapshot_of(live):
         rows = []
         for t in live["things"]:
             row = {"n": t["name"], "t": t["type"], "x": t["x"], "y": t["y"], "d": t["direction"],
-                   "g": t["ghost"], "force": t["force"]}
+                   "g": t["ghost"], "dc": t["decon"], "force": t["force"]}
             if t.get("last_user"):
                 row["lu"] = t["last_user"]
+            if t.get("items"):
+                row["it"] = dict(t["items"])
             xs, ys = [p[0] for p in t["tiles"]], [p[1] for p in t["tiles"]]
             row["box"] = [min(xs) + 0.1, min(ys) + 0.1, max(xs) + 0.9, max(ys) + 0.9]
             rows.append(row)
@@ -187,6 +189,81 @@ class ApplyTest(unittest.TestCase):
         lua = link.lua_decon_list("nauvis", "player", [("assembling-machine-1", 25.5, 3.5)])
         self.assertIn("ghost_name = t[1]", lua)
         self.assertIn("type = 'entity-ghost'", lua)
+
+
+class RelayTest(unittest.TestCase):
+    """1.2, the 0534 run: a row whose inputs changed got belts on the same tiles, and the old
+    net's items stayed on them (pipes and steel on a circuit belt; transport belts on a cable
+    belt). A carrier pasted under another net that holds what its new net doesn't carry is
+    ordered up before the paste, and the paste lays a fresh ghost on it."""
+
+    def setUp(self):
+        self.s = surface()
+        old = own.Row("nauvis:mini/~iron/b2", "transport-belt", 14.5, 0.5, 4, "mini/copper")
+        self.rec = record_of(self.s)
+        self.rec[own.at("transport-belt", 14.5, 0.5)] = old
+        self.live = copy.deepcopy(live_as_designed(self.s))
+        belt = next(t for t in self.live["things"] if (t["x"], t["y"]) == (14.5, 0.5))
+        belt["items"] = {"copper-plate": 5}
+
+    def test_the_diff_says_a_carrier_was_laid_under_another_net(self):
+        rep = sense.sense(self.s, self.live, CAT, AREA, WATCH, net_items=NETS, own=self.rec)
+        v, = [v for v in rep.verdicts if v.wrong_items]
+        self.assertEqual((v.verdict, v.renet, v.wrong_items), ("OK", "mini/copper",
+                                                               ["copper-plate"]))
+        self.assertIn("WRONG_ITEM copper-plate (laid under net mini/copper before: the next apply "
+                      "takes it up and lays it fresh)", str(v))
+        same = record_of(self.s)                                      # pasted under mini/iron
+        rep = sense.sense(self.s, self.live, CAT, AREA, WATCH, net_items=NETS, own=same)
+        self.assertEqual([v.renet for v in rep.verdicts if v.wrong_items], [None])
+
+    def test_the_apply_orders_it_up_before_the_paste(self):
+        r = FakeRcon()
+        order = []
+        with mock.patch.object(link, "snapshot", snapshot_of(self.live)), \
+                mock.patch.object(link, "paste", lambda *a, **k: order.append("paste") or "0"):
+            real = r.lua
+            r.lua = lambda body: (order.append("decon") if "order_deconstruction" in body
+                                  else None) or real(body)
+            rep = applymod.apply(r, self.s, CAT, None, mode="play", policy=WATCH,
+                                 net_items=NETS, own=self.rec)
+        self.assertEqual(r.ordered, [("transport-belt", 14.5, 0.5)])
+        self.assertEqual(order, ["decon", "paste"])
+        self.assertEqual(len(rep.relaid), 1)
+        self.assertIn("1 carriers laid under another net held copper-plate: ordered up, and the "
+                      "paste lays them fresh", "\n".join(rep.lines()))
+        self.assertEqual(rep.own[own.at("transport-belt", 14.5, 0.5)].net, "mini/iron")
+        self.assertEqual(applymod.rip_points(sense.sense(
+            self.s, self.live, CAT, AREA, WATCH, net_items=NETS, own=self.rec)), [(14.5, 0.5)])
+
+    def test_without_stale_items_nothing_is_taken_up(self):
+        belt = next(t for t in self.live["things"] if (t["x"], t["y"]) == (14.5, 0.5))
+        belt["items"] = {"iron-plate": 5}                       # what its new net carries
+        r = FakeRcon()
+        with mock.patch.object(link, "snapshot", snapshot_of(self.live)), \
+                mock.patch.object(link, "paste", lambda *a, **k: "0"):
+            rep = applymod.apply(r, self.s, CAT, None, mode="play", policy=WATCH,
+                                 net_items=NETS, own=self.rec)
+        self.assertEqual((r.ordered, rep.relaid), ([], []))
+
+    def test_the_fresh_ghost_on_the_old_belt_is_the_design(self):
+        # after the apply: the old belt ordered out, the paste's ghost on it
+        live = copy.deepcopy(self.live)
+        belt = next(t for t in live["things"] if (t["x"], t["y"]) == (14.5, 0.5))
+        belt["decon"] = True
+        live["things"].append(dict(belt, ghost=True, decon=False, items={}))
+        after = own.update(self.rec, self.s, CAT)
+        rep = sense.sense(self.s, live, CAT, AREA, WATCH, net_items=NETS, own=after)
+        at = {(v.verdict, v.key) for v in rep.verdicts if (v.x, v.y) == (14.5, 0.5)}
+        self.assertEqual(at, {("GHOST", "nauvis:mini/~iron/b2"),
+                              ("NOBODY", "nauvis:mini/~iron/b2")})
+        old = next(v for v in rep.verdicts if v.verdict == "NOBODY")
+        self.assertEqual(old.detail, "the toolkit's own, ordered out: robots take it up")
+
+    def test_the_snapshot_reads_the_fluid_in_a_pipe(self):
+        lua = link.lua_snapshot("nauvis", (0, 0, 4, 4))
+        self.assertIn("t == 'pipe' or t == 'pipe-to-ground' or t == 'pump'", lua)
+        self.assertIn("e.fluidbox[i]", lua)
 
 
 class FlowSeedTest(unittest.TestCase):

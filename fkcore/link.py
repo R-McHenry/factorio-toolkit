@@ -6,7 +6,8 @@ The Lua sent here only reads, or builds through a blueprint paste, or (lab only)
 save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
 
 - ``snapshot(surface, area)``: every entity in the area as v4's capture rows (n, t, x, y, d, g,
-  dc, force, hp, st, rc, it, ug, u, box) plus ``lu``, its last_user; not the ground (resources:
+  dc, force, hp, st, rc, it, ug, u, box) plus ``lu``, its last_user (``it``: what a belt or chest
+  holds, and the fluid in a pipe or pump, 1.2); not the ground (resources:
   the terrain read has those), characters, corpses, items on the ground or effects, which no
   design owns and the diff never judges. The rows go through
   ``helpers.write_file`` into script-output and are read back from disk, so a big area never
@@ -197,6 +198,14 @@ for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, type = {_SKIP}
       for _, c in pairs(inv.get_contents()) do it[c.name] = (it[c.name] or 0) + c.count end
       if next(it) then row.it = it end
     end
+  end
+  if not g and (t == 'pipe' or t == 'pipe-to-ground' or t == 'pump') then
+    local it = {{}}
+    for i = 1, #e.fluidbox do
+      local f = e.fluidbox[i]
+      if f then it[f.name] = (it[f.name] or 0) + f.amount end
+    end
+    if next(it) then row.it = it end
   end
   out[#out + 1] = row
 end

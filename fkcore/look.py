@@ -73,9 +73,15 @@ class Look:
                f"{p['plots']}, sanctioned {p['sanctioned']})"]
         out += self.rep.lines()
         stale = sum(1 for v in self.rep.verdicts if v.wrong_items)
-        if stale:
-            out.append(f"{stale} belts here carry items their net doesn't (WRONG_ITEM): fk fresh {a} "
-                       "takes them up, and the next fk build lays them fresh")
+        relay = sum(1 for v in self.rep.verdicts if v.wrong_items and v.renet)
+        if stale > relay:
+            out.append(f"{stale - relay} belts or pipes here carry items their net doesn't "
+                       f"(WRONG_ITEM): fk fresh {a} takes them up, and the next fk build lays "
+                       "them fresh")
+        if relay:
+            out.append(f"{relay} belts or pipes here hold what the net they were laid under before "
+                       "carried (WRONG_ITEM): the next fk build takes them up and lays them fresh "
+                       "by itself")
         out += side_by_side(self.design, self.live, self.area)[0]
         if p["notify"] == "all":
             out.append(f"notify all: pushed {len(self.pushed)} line(s) to game chat and "

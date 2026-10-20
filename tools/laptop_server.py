@@ -14,6 +14,10 @@ script-output for snapshots.
 
 Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py chat      the scenario loads, and a chat line reaches storage.fk_chat
+    python tools/laptop_server.py own       1.2 through fkcore.apply in play mode: the toolkit's own
+                                            dropped rows go (a built assembler, an unbuilt ghost), and a
+                                            belt laid under another net with the old net's plates is
+                                            ordered out with a fresh ghost on it
 """
 from __future__ import annotations
 
@@ -133,6 +137,55 @@ def check_chat():
     return 0 if ok else 1
 
 
+def check_own():
+    """The mini factory (tests/test_fkp.py) pasted on the lab surface under play rules and built
+    (revived: test setup), then a chest left as a ghost; then a design that drops the assembler
+    m1 and the chest and lays the iron belt row under net cable while belt b2 holds iron plates."""
+    from fkcore import apply as applymod, compose, fkp
+    from fkcore.catalog import Catalog
+    from tests.test_fkp import MINI
+    cat, s, f = Catalog.load(), "lab", "lab"
+    watch = {"plots": "keep", "sanctioned": "mark 2h", "notify": "off"}
+
+    def composed(text):
+        return compose.compose(fkp.loads("fkp 1 surface lab\nplot mini at 10,0 rot 0 size 7x7\n"),
+                               {"mini": fkp.loads(text)}, cat)
+
+    def at(r, x, y):
+        return r.lua(f"local o = {{}} for _, e in pairs(game.get_surface('{s}').find_entities_filtered"
+                     f"{{position = {{{x}, {y}}}, radius = 0.3}}) do o[#o + 1] = (e.type == "
+                     "'entity-ghost' and ('ghost:' .. e.ghost_name) or e.name) .. "
+                     "(e.to_be_deconstructed() and '(decon)' or '') end "
+                     "rcon.print(table.concat(o, ' '))").strip()
+
+    v2 = (MINI.replace("e gears/m1 assembling-machine-1 4.5,3.5 recipe=iron-gear-wheel\n", "")
+          .replace("~iron/", "~cable/").replace("net=iron", "net=cable"))
+    nets1 = {"mini/iron": ["iron-plate"], "mini/gear": ["iron-gear-wheel"]}
+    nets2 = {"mini/cable": ["copper-cable"], "mini/gear": ["iron-gear-wheel"]}
+    with LaptopServer("own", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area(s, f, (-32, -32, 64, 64)))
+            rep = applymod.apply(r, composed(MINI), cat, mode="play", force=f, policy=watch,
+                                 net_items=nets1)
+            r.lua(link.lua_revive(s, (0, -10, 40, 20)))
+            rep = applymod.apply(r, composed(MINI + "e extra/c0 wooden-chest 16.5,5.5\n"), cat,
+                                 mode="play", force=f, policy=watch, net_items=nets1, own=rep.own)
+            ghost = at(r, 26.5, 5.5)
+            r.lua(f"local b = game.get_surface('{s}').find_entity('transport-belt', {{14.5, 0.5}}) "
+                  "b.get_transport_line(1).insert_at_back({name = 'iron-plate', count = 1}) "
+                  "rcon.print('ok')")
+            rep = applymod.apply(r, composed(v2), cat, mode="play", force=f, policy=watch,
+                                 net_items=nets2, own=rep.own)
+            got = {"chest before": ghost, "m1": at(r, 14.5, 3.5), "chest": at(r, 26.5, 5.5),
+                   "b2": at(r, 14.5, 0.5)}
+    print("\n".join(rep.lines()))
+    want = {"chest before": "ghost:wooden-chest", "m1": "assembling-machine-1(decon)",
+            "chest": "", "b2": "ghost:transport-belt transport-belt(decon)"}
+    for k, v in want.items():
+        print(f"{k:<13} {got[k] or '(nothing)':<45} {'OK' if got[k] == v else 'NOT ' + repr(v)}")
+    return 0 if got == want and rep.dropped == 2 and len(rep.relaid) == 1 else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
-    raise SystemExit({"chat": check_chat}[what]())
+    raise SystemExit({"chat": check_chat, "own": check_own}[what]())

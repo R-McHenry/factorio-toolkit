@@ -12,8 +12,11 @@ Every layout entity in the area gets one verdict, matched to the world by positi
 - ``WRONG``: another entity stands on its tiles;
 - ``MISSING``: nothing there (never built, or destroyed: the next apply restores it).
 
-A carrier that holds an item its net doesn't expect is also ``WRONG_ITEM``. Every world entity in
-the area that no layout entity explains is one of:
+A carrier that holds an item (or a fluid) its net doesn't expect is also ``WRONG_ITEM``; when the
+toolkit's record (``own``) shows it was pasted under another net, the verdict says so
+(``renet``): the next apply takes it up and lays it fresh (1.2). Where a ghost stands on an
+entity ordered for deconstruction, the ghost is the design's (the entity is being replaced).
+Every world entity in the area that no layout entity explains is one of:
 
 - ``CLAIMED``: inside a claim;
 - ``MARKED``: under a mark;
@@ -61,8 +64,9 @@ class Verdict:
     key: str | None = None            # the layout key, or the claim/mark that explains it
     detail: str = ""
     actor: str | None = None
-    action: str | None = None         # mark | keep | revert | strict, for a foreign change
+    action: str | None = None         # mark | keep | revert | strict | own, for a foreign change
     wrong_items: list = field(default_factory=list)
+    renet: str | None = None          # the net the toolkit pasted this carrier under, if another
 
     def __str__(self):
         where = f"{_fmt(self.x)},{_fmt(self.y)}"
@@ -72,6 +76,9 @@ class Verdict:
             text += f": {self.detail}"
         if self.wrong_items:
             text += f"; WRONG_ITEM {', '.join(self.wrong_items)}"
+            if self.renet:
+                text += (f" (laid under net {self.renet} before: the next apply takes it up and "
+                         "lays it fresh)")
         return text + (who if self.verdict in ("MARKED", "NOBODY") and self.actor else "")
 
 
@@ -180,7 +187,9 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
         cands = [i for i in at_pos.get((e.name, round(float(e.x), 3), round(float(e.y), 3)), ())
                  if i not in used]
         if cands:
-            i = next((c for c in cands if not things[c]["ghost"]), cands[0])
+            # an entity first, then a ghost; one ordered for deconstruction last: a ghost on it
+            # is its replacement (a carrier laid fresh under another net, 1.2)
+            i = min(cands, key=lambda c: (bool(things[c]["decon"]), bool(things[c]["ghost"])))
             used.add(i)
             t = things[i]
             owners[i] = e.key.rsplit("/", 1)[0]
@@ -193,6 +202,9 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             if net and net_items and net in net_items and cat.kind(e.name) in _CARRIERS:
                 wrong = sorted(set(t["items"]) - set(net_items[net]))
                 v.wrong_items = wrong
+                row = own.get((e.name, round(float(e.x), 3), round(float(e.y), 3))) if own else None
+                if row is not None and row.net and row.net != net:
+                    v.renet = row.net
             verdicts.append(v)
             continue
         others = sorted({i for tile in e.tiles for i in at_tile.get(tuple(tile), ()) if i not in used})
@@ -234,11 +246,12 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
         mine = own.get((t["name"], round(t["x"], 3), round(t["y"], 3))) if own else None
         if mine is not None and not t.get("last_user"):
             owners[i] = "NOBODY"
+            why = ("ordered out: robots take it up" if t.get("decon") else
+                   "dropped from the design: the next apply removes it")
             verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], mine.key,
-                                    "the toolkit's own, dropped from the design: the next apply "
-                                    "removes it", None, "own"))
-            changes.append(f"{what}: the toolkit's own ({mine.key}), dropped from the design "
-                           f"({region}); the next apply removes it")
+                                    f"the toolkit's own, {why}", None, "own"))
+            changes.append(f"{what}: the toolkit's own ({mine.key}), {why.split(':')[0]} "
+                           f"({region}); {why.split(': ')[1]}")
             continue
         if action in ("mark", "keep"):
             p = pending.setdefault((actor, action), {
