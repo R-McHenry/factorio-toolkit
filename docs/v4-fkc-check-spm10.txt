@@ -1,0 +1,131 @@
+check spm10.fk: 93 instances, 88 nets
+  warn  RECIPE_LOCKED [mall-full.fk:70]: mall.requester wants recipe requester-chest, which has enabled=false in the catalog; it cannot be set in game
+rates (steady state, before layout):
+  main.gears                  21%  iron-gear-wheel 0.64  limited by out
+  main.cable                  18%  copper-cable 1.46  limited by out
+  main.circ                   19%  electronic-circuit 0.39  limited by out
+  main.belts                  12%  transport-belt 0.23  limited by out
+  main.ins                    23%  inserter 0.23  limited by in2
+  main.red                    51%  automation-science-pack 0.25  limited by in2
+  main.green                  46%  logistic-science-pack 0.23  limited by in1
+  main.steel_row              28%  steel-plate 0.14  limited by ore
+  main.labs                  100%  -
+  main.pipes                   8%  pipe 0.08  limited by out
+  main.engines                19%  engine-unit 0.04  limited by in1
+  main.adv                    31%  advanced-circuit 0.08  limited by out
+  main.blue                   23%  chemical-science-pack 0.04  limited by in1
+  main.si1                   100%  -
+  main.si2                   100%  -
+  main.si3                   100%  -
+  main.si4                   100%  -
+  main.si5                   100%  -
+  main.sc1                   100%  -
+  main.scb                   100%  -
+  main.scc                   100%  -
+  main.madv                  100%  -
+  main.sg1                   100%  -
+  main.sg2                   100%  -
+  main.sg3                   100%  -
+  main.mg                    100%  -
+  main.sst                   100%  -
+  main.meng                  100%  -
+  main.mblue                 100%  -
+  main.sadv                  100%  -
+  main.ml                    100%  -
+  oil.wells                  100%  crude-oil 30.00
+  oil.wells2                 100%  crude-oil 30.00
+  oil.refine                 100%  petroleum-gas 9.00
+  oil.water                  100%  water 1200.00
+  oil.plast                    8%  plastic-bar 0.15  limited by out
+  oil.sulf                     1%  sulfur 0.02  limited by out
+  oil.sulfx                    1%  sulfur 0.02  limited by out
+  oil.expl                     8%  explosives 0.04  limited by out
+  oil.mine                    19%  land-mine 0.08  limited by in
+  oil.scoal                  100%  -
+  oil.mexpl                  100%  -
+  oil.mmine                  100%  -
+  iron.mine                  100%  iron-ore 5.00
+  iron.smelt                 100%  iron-plate 5.00
+  copper.mine                 50%  copper-ore 0.99  limited by out
+  copper.smelt                53%  copper-plate 0.99  limited by out
+  coal.for_iron              100%  coal 1.00
+  coal.for_copper            100%  coal 0.50
+  coal.for_steel             100%  coal 0.50
+  coal.for_oil                19%  coal 0.10  limited by out
+  stone.mine                 100%  stone 2.00
+  stone.drop                 100%  -
+  stone.sst                  100%  -
+  iron_split                 100%  -
+  bots_split                 100%  -
+  bots_iron                  100%  -
+  mags                        13%  firearm-magazine 0.20  limited by out
+  mall_isplit                100%  -
+  mags_chest                 100%  -
+  mall_csplit                100%  -
+  mall_ssplit                100%  -
+  mine_chest                 100%  -
+  mall.furnaces                2%  stone-furnace 0.02
+  mall.turrets                 1%  gun-turret 0.00  limited by in
+  mall.cable_i                 0%  copper-cable 0.01  limited by out
+  mall.mpoles                  0%  medium-electric-pole 0.00  limited by in
+  mall.stick_i                 1%  iron-stick 0.01  limited by out
+  mall.schests                 0%  steel-chest 0.00  limited by in
+  mall.roboports               0%  roboport 0.00  limited by in
+  mall.storage                 0%  storage-chest 0.00  limited by in
+  mall.schest_i                0%  steel-chest 0.00  limited by in
+  mall.requester               0%  requester-chest 0.00  limited by in
+  mall.repair                  2%  repair-pack 0.02
+  mall.asm1                    1%  assembling-machine-1 0.01  limited by in
+  mall.drills                  1%  electric-mining-drill 0.00  limited by in
+  mall.ins                     1%  inserter 0.01  limited by in
+  mall.fast                    0%  fast-inserter 0.00  limited by in
+  mall.ins_i                   1%  inserter 0.01  limited by in
+  mall.long                    0%  long-handed-inserter 0.00  limited by in
+  mall.splitters               0%  splitter 0.00  limited by in
+  mall.belts_i                 1%  transport-belt 0.01  limited by in
+  mall.ugs                     0%  underground-belt 0.00  limited by in
+  mall.belts                   1%  transport-belt 0.01  limited by in
+  mall.gearp                   2%  iron-gear-wheel 0.02  limited by in
+  mall.pipes_i                 1%  pipe 0.01  limited by in
+  mall.ptg                     0%  pipe-to-ground 0.00  limited by in
+  mall.pipes                   2%  pipe 0.02  limited by in
+  mall.ichests                 2%  iron-chest 0.02  limited by in
+  circ_tap                   100%  -
+  mall_chest                 100%  -
+  mall_isplit2               100%  -
+  mall_gears                  13%  iron-gear-wheel 0.13  limited by out
+  net bots_split.a                 iron-plate               supply 5.00 demand 4.21 delivered 5.00 limited by supply
+  net circ_tap.out                 electronic-circuit       supply inf demand 0.10 delivered 0.10 limited by demand  (extern rate unknown)
+  net coal.for_copper.out          coal                     supply 0.50 demand 0.00 delivered 0.50 limited by supply
+  net coal.for_iron.out            coal                     supply 1.00 demand 0.00 delivered 1.00 limited by supply
+  net coal.for_oil.out             coal|sulfur              supply 0.11 demand 0.11 delivered 0.11 limited by supply
+  net coal.for_steel.out           coal                     supply 0.50 demand 0.00 delivered 0.50 limited by supply
+  net copper.mine.out              copper-ore               supply 0.99 demand 0.99 delivered 0.99 limited by demand
+  net copper.smelt.out             copper-plate             supply 0.99 demand 0.99 delivered 0.99 limited by supply
+  net iron.mine.out                iron-ore                 supply 5.00 demand 5.00 delivered 5.00 limited by supply
+  net mags.out                     firearm-magazine         supply 0.20 demand 0.20 delivered 0.20 limited by supply
+  net main.adv.out                 advanced-circuit|engine-unit supply 0.11 demand 0.11 delivered 0.11 limited by supply
+  net main.belts.out               transport-belt           supply 0.23 demand 0.23 delivered 0.23 limited by supply
+  net main.blue.out                chemical-science-pack    supply 0.04 demand 0.00 delivered 0.04 limited by supply
+  net main.cable.out               copper-cable|electronic-circuit|iron-gear-wheel|pipe supply 2.56 demand 2.56 delivered 2.56 limited by supply
+  net main.green.out               logistic-science-pack|automation-science-pack supply 0.48 demand 0.00 delivered 0.48 limited by supply
+  net main.ins.out                 inserter                 supply 0.23 demand 0.23 delivered 0.23 limited by supply
+  net main.sst.a                   steel-plate|explosives   supply 0.18 demand 0.18 delivered 0.18 limited by supply
+  net mall.belts_i.out             transport-belt           supply 0.01 demand 0.01 delivered 0.01 limited by supply
+  net mall.cable_i.out             copper-cable             supply 0.01 demand 0.01 delivered 0.01 limited by supply
+  net mall.out                     assembling-machine-1|transport-belt|electric-mining-drill|fast-inserter|stone-furnace|iron-gear-wheel|iron-chest|inserter|long-handed-inserter|medium-electric-pole|pipe|pipe-to-ground|repair-pack|requester-chest|roboport|steel-chest|splitter|storage-chest|gun-turret|underground-belt supply 0.15 demand 0.00 delivered 0.15 limited by supply  (extern rate unknown)
+  net mall.ins_i.out               inserter                 supply 0.01 demand 0.01 delivered 0.01 limited by supply  (extern rate unknown)
+  net mall.pipes_i.out             pipe                     supply 0.01 demand 0.01 delivered 0.01 limited by supply
+  net mall.schest_i.out            steel-chest              supply 0.00 demand 0.00 delivered 0.00 limited by supply
+  net mall.stick_i.out             iron-stick               supply 0.01 demand 0.01 delivered 0.01 limited by supply
+  net mall_gears.out               iron-gear-wheel          supply 0.13 demand 0.13 delivered 0.13 limited by supply
+  net oil.mine.out                 land-mine                supply 0.08 demand 0.00 delivered 0.08 limited by supply
+  net oil.plast.out                plastic-bar              supply 0.15 demand 0.15 delivered 0.15 limited by supply
+  net oil.refine.out               petroleum-gas            supply 9.00 demand 2.10 delivered 2.10 limited by demand
+  net oil.sulf.out                 sulfur                   supply 0.02 demand 0.02 delivered 0.02 limited by supply
+  net oil.water.out                water                    supply 15.00 demand 0.75 delivered 0.75 limited by demand
+  net oil.wells.out                crude-oil                supply 15.00 demand 20.00 delivered 15.00 limited by belt  SHORT
+  net stone.mine.out               stone                    supply 2.00 demand 0.10 delivered 2.00 limited by supply
+  assert ok   [spm10.fk:134] main.red.out.rate 0.25 >= 0.166667
+  assert ok   [spm10.fk:135] main.green.out.rate 0.23 >= 0.166667
+  assert FAIL [spm10.fk:137] main.blue.out.rate 0.04 >= 0.1

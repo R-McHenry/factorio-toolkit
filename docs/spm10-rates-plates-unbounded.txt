@@ -1,0 +1,136 @@
+rates main (unbounded: iron_plate, copper_plate) (nominal V1 model: logical nets, no capacity)
+  solved in 85 passes, last change 8.4e-13
+
+  instance           kind           n   util  makes /min                             binding
+  iron/mine          MinerRow      10  1.000  iron-ore 300.00                        full speed
+  iron/smelt         SmelterRow    16  1.000  iron-plate 300.00                      full speed
+  copper/mine        MinerRow       4  0.938  copper-ore 112.50                      copper-ore not taken on copper/ore
+  copper/smelt       SmelterRow     6  1.000  copper-plate 112.50                    full speed
+  coal/for_iron      MinerRow       2  0.360  coal 21.60                             coal not taken on iron_fuel
+  coal/for_copper    MinerRow       1  0.270  coal 8.10                              coal not taken on copper_fuel
+  coal/for_steel     MinerRow       1  0.360  coal 10.80                             coal not taken on steel_fuel
+  coal/for_oil       MinerRow       1  0.644  coal 19.32                             coal not taken on oil_coal
+  stone/mine         MinerRow       4  1.000  stone 120.00                           full speed
+  stone/drop         Chest          1  1.000                                         sink
+  oil/wells          Pumpjack       2  0.257  crude-oil 926.04                       crude-oil not taken on oil/crude
+  oil/refine         Refinery       1  0.772  petroleum-gas 416.72                   petroleum-gas not taken on oil/petro
+  oil/water          OffshorePump   1  0.002  water 159.88                           water not taken on oil/water_
+  oil/plast          ChemPlant      1  0.250  plastic-bar 30.00                      plastic-bar not taken on plastic
+  oil/sulf           ChemPlant      1  0.029  sulfur 3.46                            sulfur not taken on sulfur
+  oil/sulfx          ChemPlant      1  0.036  sulfur 4.32                            sulfur not taken on oil/sulf_x
+  oil/expl           ChemPlant      1  0.288  explosives 8.63                        explosives not taken on oil/boom
+  oil/mine           Assembler      1  0.719  land-mine 17.26                        steel-plate short on steel_plate
+  gears              AsmRow         3  0.455  iron-gear-wheel 81.93                  iron-gear-wheel not taken on gear
+  cable              AsmRow         4  0.500  copper-cable 240.00                    copper-cable not taken on cable_
+  circ               AsmRow         2  0.500  electronic-circuit 60.00               electronic-circuit not taken on circuit
+  belts              AsmRow         1  0.250  transport-belt 30.00                   transport-belt not taken on belt
+  ins                AsmRow         1  0.500  inserter 30.00                         inserter not taken on inserter_
+  red                AsmRow         5  1.000  automation-science-pack 30.00          full speed
+  green              AsmRow         6  1.000  logistic-science-pack 30.00            full speed
+  labs               LabRow        10  1.000                                         sink
+  steel              SmelterRow     8  1.000  steel-plate 30.00                      full speed
+  pipes              AsmRow         1  0.231  pipe 13.86                             pipe not taken on pipe
+  engines            AsmRow         4  0.577  engine-unit 6.93                       engine-unit not taken on engine
+  adv                AsmRow         3  1.000  advanced-circuit 15.00                 full speed
+  blue               AsmRow         4  0.693  chemical-science-pack 6.93             advanced-circuit short on advc
+  mags               AsmRow         3  0.133  firearm-magazine 12.00                 firearm-magazine not taken on magazines
+  mags_chest         Chest          1  1.000                                         sink
+  mine_chest         Chest          1  1.000                                         sink
+  bots_iron          Chest          1  1.000                                         sink
+  mall/furnaces      Assembler      1  0.020  stone-furnace 1.20                     duty 0.02
+  mall/turrets       Assembler      1  0.020  gun-turret 0.07                        duty 0.02
+  mall/cable_i       Assembler      1  0.010  copper-cable 1.20                      copper-cable not taken on mall/m_cable
+  mall/mpoles        Assembler      1  0.010  medium-electric-pole 0.60              iron-stick short on mall/m_stick
+  mall/stick_i       Assembler      1  0.020  iron-stick 2.40                        duty 0.02
+  mall/schests       Assembler      1  0.014  steel-chest 0.86                       steel-plate short on steel_plate
+  mall/roboports     Assembler      1  0.014  roboport 0.08                          advanced-circuit short on advc
+  mall/storage       Assembler      1  0.007  storage-chest 0.43                     steel-chest short on mall/m_chest
+  mall/schest_i      Assembler      1  0.014  steel-chest 0.86                       steel-plate short on steel_plate
+  mall/requester     Assembler      1  0.007  requester-chest 0.43                   steel-chest short on mall/m_chest
+  mall/repair        Assembler      1  0.020  repair-pack 1.20                       duty 0.02
+  mall/asm1          Assembler      1  0.020  assembling-machine-1 1.20              duty 0.02
+  mall/drills        Assembler      1  0.020  electric-mining-drill 0.30             duty 0.02
+  mall/ins           Assembler      1  0.020  inserter 1.20                          duty 0.02
+  mall/fast          Assembler      1  0.010  fast-inserter 0.60                     inserter short on mall/m_ins
+  mall/ins_i         Assembler      1  0.020  inserter 1.20                          duty 0.02
+  mall/long          Assembler      1  0.010  long-handed-inserter 0.60              inserter short on mall/m_ins
+  mall/splitters     Assembler      1  0.009  splitter 0.27                          transport-belt short on mall/m_belt
+  mall/belts_i       Assembler      1  0.020  transport-belt 2.40                    duty 0.02
+  mall/ugs           Assembler      1  0.009  underground-belt 0.53                  transport-belt short on mall/m_belt
+  mall/belts         Assembler      1  0.020  transport-belt 2.40                    duty 0.02
+  mall/gearp         Assembler      1  0.020  iron-gear-wheel 1.20                   duty 0.02
+  mall/pipes_i       Assembler      1  0.020  pipe 1.20                              duty 0.02
+  mall/ptg           Assembler      1  0.002  pipe-to-ground 0.24                    pipe short on mall/m_pipe
+  mall/pipes         Assembler      1  0.020  pipe 1.20                              duty 0.02
+  mall/ichests       Assembler      1  0.020  iron-chest 1.20                        duty 0.02
+  mall_gears         AsmRow         1  0.330  iron-gear-wheel 19.79                  iron-gear-wheel not taken on mall_gear
+  circ_tap           Chest          1  1.000  electronic-circuit unbounded           source
+  mall_chest         Chest          1  1.000                                         sink
+
+  net              item                        supply/s would take  taken/s  sinks/s surplus/s
+  iron/ore         iron-ore                       5.000      5.000    5.000    0.000     0.000
+  copper/ore       copper-ore                     1.875      1.875    1.875    0.000     0.000
+  oil/crude        crude-oil                     15.434     15.434   15.434    0.000     0.000
+  oil/petro        petroleum-gas                  6.945      6.945    6.945    0.000     0.000
+  oil/water_       water                          2.665      2.665    2.665    0.000     0.000
+  oil/sulf_x       sulfur                         0.072      0.072    0.072    0.000     0.000
+  oil/boom         explosives                     0.144      0.144    0.144    0.000     0.000
+  mall/m_cable     copper-cable                   0.020      0.020    0.020    0.000     0.000
+  mall/m_stick     iron-stick                     0.040      0.058    0.040    0.000     0.000
+  mall/m_belt      transport-belt                 0.040      0.090    0.040    0.000     0.000
+  mall/m_ins       inserter                       0.020      0.040    0.020    0.000     0.000
+  mall/m_pipe      pipe                           0.020      0.200    0.020    0.000     0.000
+  mall/m_chest     steel-chest                    0.014      0.028    0.014    0.000     0.000
+  iron_fuel        coal                           0.360      0.360    0.360    0.000     0.000
+  copper_fuel      coal                           0.135      0.135    0.135    0.000     0.000
+  steel_fuel       coal                           0.180      0.180    0.180    0.000     0.000
+  oil_coal         coal                           0.322      0.322    0.322    0.000     0.000
+  iron_plate       iron-plate                 unbounded      9.373    9.373 unbounded unbounded
+  copper_plate     copper-plate               unbounded      2.522    2.523    0.000 unbounded
+  steel_plate      steel-plate                    0.500      0.618    0.500    0.000     0.000
+  stone_           stone                          2.000      0.100    0.100    1.900     0.000
+  gear             iron-gear-wheel                1.365      1.365    1.365    0.000     0.000
+  cable_           copper-cable                   4.000      4.000    4.000    0.000     0.000
+  circuit          electronic-circuit             1.000      1.000    1.000    0.000     0.000
+  belt             transport-belt                 0.500      0.500    0.500    0.000     0.000
+  inserter_        inserter                       0.500      0.500    0.500    0.000     0.000
+  pipe             pipe                           0.231      0.231    0.231    0.000     0.000
+  engine           engine-unit                    0.115      0.115    0.115    0.000     0.000
+  advc             advanced-circuit               0.250      0.329    0.250    0.000     0.000
+  plastic          plastic-bar                    0.500      0.500    0.500    0.000     0.000
+  sulfur           sulfur                         0.058      0.058    0.058    0.000     0.000
+  packs            automation-science-pack        0.500      0.000    0.000    0.500     0.000
+  packs            logistic-science-pack          0.500      0.000    0.000    0.500     0.000
+  blue_packs       chemical-science-pack          0.115      0.000    0.000    0.115     0.000
+  magazines        firearm-magazine               0.200      0.000    0.000    0.200     0.000
+  mines            land-mine                      0.288      0.000    0.000    0.288     0.000
+  mall_gear        iron-gear-wheel                0.330      0.330    0.330    0.000     0.000
+  mall_circ        electronic-circuit         unbounded      0.240    0.240    0.000 unbounded
+  mall_out         stone-furnace                  0.020      0.000    0.000    0.020     0.000
+  mall_out         gun-turret                     0.001      0.000    0.000    0.001     0.000
+  mall_out         medium-electric-pole           0.010      0.000    0.000    0.010     0.000
+  mall_out         steel-chest                    0.014      0.000    0.000    0.014     0.000
+  mall_out         roboport                       0.001      0.000    0.000    0.001     0.000
+  mall_out         storage-chest                  0.007      0.000    0.000    0.007     0.000
+  mall_out         requester-chest                0.007      0.000    0.000    0.007     0.000
+  mall_out         repair-pack                    0.020      0.000    0.000    0.020     0.000
+  mall_out         assembling-machine-1           0.020      0.000    0.000    0.020     0.000
+  mall_out         electric-mining-drill          0.005      0.000    0.000    0.005     0.000
+  mall_out         inserter                       0.020      0.000    0.000    0.020     0.000
+  mall_out         fast-inserter                  0.010      0.000    0.000    0.010     0.000
+  mall_out         long-handed-inserter           0.010      0.000    0.000    0.010     0.000
+  mall_out         splitter                       0.004      0.000    0.000    0.004     0.000
+  mall_out         underground-belt               0.009      0.000    0.000    0.009     0.000
+  mall_out         transport-belt                 0.040      0.000    0.000    0.040     0.000
+  mall_out         iron-gear-wheel                0.020      0.000    0.000    0.020     0.000
+  mall_out         pipe-to-ground                 0.004      0.000    0.000    0.004     0.000
+  mall_out         pipe                           0.020      0.000    0.000    0.020     0.000
+  mall_out         iron-chest                     0.020      0.000    0.000    0.020     0.000
+
+  asserts
+  PASS red.rate >= 10/min: 30.000/min
+  PASS green.rate >= 10/min: 30.000/min
+  PASS blue.rate >= 6/min: 6.930/min
+
+  checks
+  UNBOUNDED   circ_tap: electronic-circuit from the logistic network has no rate; everything downstream of it is unbounded
