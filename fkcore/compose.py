@@ -14,6 +14,7 @@ plot, plus each factory's own) rather than raising: the caller decides; a writer
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
@@ -48,8 +49,9 @@ class Surface:
     problems: list = field(default_factory=list)
 
     def whose(self, x, y):
-        """(verdict, detail) for tile (x, y): entity, claim, mark, plot or sanctioned."""
-        t = (int(x), int(y))
+        """(verdict, detail) for tile (x, y) (a position works too: it is floored): entity, claim,
+        mark, plot or sanctioned."""
+        t = (math.floor(x), math.floor(y))
         key = self.tiles.get(t)
         if key is not None:
             e = self.entities[key]
@@ -58,7 +60,7 @@ class Surface:
             if c.x0 <= t[0] < c.x1 and c.y0 <= t[1] < c.y1:
                 return "claim", {"key": f"{self.name}:claim/{c.name}", "reason": c.reason}
         for m in self.marks.values():
-            if t in {(int(a), int(b)) for a, b in m.tiles}:
+            if t in {(math.floor(a), math.floor(b)) for a, b in m.tiles}:
                 return "mark", {"key": f"{self.name}:mark/{m.name}"}
         for p in self.plots.values():
             x0, y0, x1, y1 = p.box()
@@ -158,7 +160,7 @@ _ARROW = {0: "^", 4: ">", 8: "v", 12: "<"}
 _GLYPH = {"assembling-machine": "A", "furnace": "F", "mining-drill": "D", "lab": "L",
           "container": "C", "logistic-container": "C", "electric-pole": "+", "roboport": "R",
           "ammo-turret": "T", "splitter": "S", "pipe": "=", "pipe-to-ground": "%", "boiler": "B",
-          "generator": "E", "offshore-pump": "W", "inserter": "i"}
+          "generator": "E", "offshore-pump": "W", "inserter": "i", "reactor": "N"}
 
 
 def _glyph(cat, name, d, attrs):

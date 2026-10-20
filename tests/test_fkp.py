@@ -199,6 +199,9 @@ class ComposeTest(unittest.TestCase):
                                                     "reason": "explosives trial"}))
         self.assertEqual(s.whose(3, 5), ("mark", {"key": "nauvis:mark/Rory_618@4512000"}))
         self.assertEqual(s.whose(50, 50), ("sanctioned", {}))
+        # a position is floored, so -0.5 is tile -1 (int() would have made it tile 0)
+        self.assertEqual(s.whose(-9.5, 0.5)[0], "claim")
+        self.assertEqual(s.whose(-0.5, 0.5), ("sanctioned", {}))
 
     def test_render(self):
         s = surface_with()
