@@ -12,7 +12,7 @@ e cu/outb1 transport-belt 4.5,13.5 E net=mix
 e fe/m0 electric-mining-drill 3.5,3.5 S resource=iron-ore
 e fe/outb0 transport-belt 3.5,5.5 E net=mix
 e fe/outb1 transport-belt 4.5,5.5 E net=mix
-e gear/c0 requester-chest 3.5,18.5 item=iron-gear-wheel role=requester
+e gear/c0 requester-chest 3.5,18.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":100,"index":1,"name":"iron-gear-wheel","quality":"normal"}],"index":1}]}}' item=iron-gear-wheel role=requester
 e power/p0 medium-electric-pole 6.5,1.5
 e power/p1 medium-electric-pole 14.5,5.5
 e power/p2 medium-electric-pole 0.5,7.5
