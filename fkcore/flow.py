@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from dataclasses import dataclass, field
 
@@ -217,12 +218,43 @@ def _classify(new, prev):
     return out
 
 
+_OWN_POLE = re.compile(r"p\d+")
+
+
+def _pinned_covers(new, prev, cat):
+    """Carry over a cover's pinned entities (a merged factory's poles, hand-placed ones: every
+    entity under a cover that is not the cover's own ``p<k>``) from the committed .fkp."""
+    if prev is None:
+        return 0
+    taken = set()
+    for e in new.entities.values():
+        taken |= fkp.tiles_of(cat, e)
+    kept = 0
+    for name, c in prev.covers.items():
+        new.covers.setdefault(name, fkp.Cover(c.name, c.kind, dict(c.params)))
+        for e in prev.entities.values():
+            local = e.key[len(name) + 1:]
+            if e.owner != name or _OWN_POLE.fullmatch(local):
+                continue
+            tiles = fkp.tiles_of(cat, e)
+            if tiles & taken or e.key in new.entities:
+                continue
+            taken |= tiles
+            new.add(fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
+            kept += 1
+    return kept
+
+
 def s_place(ctx, args):
     lines, checks = [], []
     for p in _factories(ctx):
         flat = ctx.flats[p.factory]
         lay, notes = expand.expand_factory(flat, ctx.cat, ctx.previous.get(p.factory))
         lay.name = p.factory
+        pinned = _pinned_covers(lay, ctx.previous.get(p.factory), ctx.cat)
+        if pinned:
+            notes = list(notes)
+            lines.append(f"{p.factory}: {pinned} pinned cover entities kept from the committed .fkp")
         ctx.layouts[p.factory] = lay
         cls = _classify(lay, ctx.previous.get(p.factory))
         count = {}

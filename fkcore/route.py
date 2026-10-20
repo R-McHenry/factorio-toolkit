@@ -14,8 +14,10 @@ splitting where it branches. A net with one consumer and several drivers grows f
 to the drivers and is laid reversed, so the splitters become merges (``Tree.entities(reverse)``).
 A consumer that is a single machine (a chest, an assembler cell: its role has no attach tile) is
 reached by direct insertion: a fast (or long-handed) inserter beside the belt picks into it
-(``steiner.TapSink``), keyed ``~<net>/i<k>``. Several drivers AND several consumers, and a single
-machine as a driver, are not routed yet (reported).
+(``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver (a requester chest
+feeding a row) works the same way on a reversed tree, so its inserter turns round to pick from
+the machine; that needs exactly one consumer. Several drivers AND several consumers are not
+routed yet (reported).
 
 Per net the ground is: every entity tile, every placed instance's whole frame (the empty tiles
 inside a row are kept for poles), every other net's start and end tiles, every tile another
@@ -47,6 +49,7 @@ class NetJob:
     starts: list = field(default_factory=list)     # [(tile, heading)] the tile a driver belt feeds
     goals: list = field(default_factory=list)      # [(tile, heading)] the tile behind a consumer
     taps: list = field(default_factory=list)       # [(machine key, tile rect)] direct insertion
+    sources: list = field(default_factory=list)    # [(machine key, tile rect)] a machine driver
     owners: list = field(default_factory=list)     # "<inst>.<role>" per start/goal, for the report
     skip: str | None = None
 
@@ -90,14 +93,11 @@ def jobs(flat, lay, cat) -> dict:
                 continue
             job = out.setdefault(net, NetJob(net))
             if d is None:
-                if side == "out":
-                    job.skip = f"{path}.{role}: a single machine as a driver is not routed yet"
-                    continue
                 for key in flat.insts[path].machines:
                     ts = fkpmod.tiles_of(cat, lay.entities[key])
                     rect = (min(t[0] for t in ts), min(t[1] for t in ts),
                             max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
-                    job.taps.append((key, rect))
+                    (job.sources if side == "out" else job.taps).append((key, rect))
                 job.owners.append(f"{path}.{role}")
                 continue
             h = _H[int(d)]
@@ -108,15 +108,18 @@ def jobs(flat, lay, cat) -> dict:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
             job.owners.append(f"{path}.{role}")
     for net, job in out.items():
-        if job.skip is None and not job.starts:
+        drivers = len(job.starts) + len(job.sources)
+        if job.skip is not None:
+            continue
+        if not drivers:
             job.skip = "no driver role is placed"
-        elif job.skip is None and not job.consumers():
+        elif not job.consumers():
             job.skip = "no consumer role is placed"
-        elif job.skip is None and len(job.starts) > 1 and job.consumers() > 1:
-            job.skip = (f"{len(job.starts)} drivers and {job.consumers()} consumers: "
+        elif drivers > 1 and job.consumers() > 1:
+            job.skip = (f"{drivers} drivers and {job.consumers()} consumers: "
                         "merge-then-split trees are not routed yet")
-        elif job.skip is None and len(job.starts) > 1 and job.taps:
-            job.skip = "several drivers into a single machine are not routed yet"
+        elif (drivers > 1 or job.sources) and job.taps:
+            job.skip = "a machine driver or several drivers into a single machine: not routed yet"
     return out
 
 
@@ -189,22 +192,25 @@ def _route_one(cat, job, ents, frames, js, box, limit):
     net = job.net
     blocked = _ground(cat, ents, frames, js, net)
     grid = _Bounded(blocked, box, _ug_spans(cat, ents))
-    reverse = len(job.starts) > 1
+    # several drivers, or a machine driver: grow from the one consumer, lay it reversed
+    reverse = len(job.starts) + len(job.sources) > 1 or bool(job.sources)
     if reverse:
         (gtile, gh), = job.goals
         root = (gtile[0], gtile[1], (gh + 2) % 4, 0)
         sinks = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
+        machines = job.sources
     else:
         (stile, sh), = job.starts
         root = (stile[0], stile[1], sh, 0)
         sinks = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
+        machines = job.taps
     if grid.blocked((root[0], root[1])):
         return None, f"its {'end' if reverse else 'start'} tile {root[0]},{root[1]} is taken"
     # direct insertion: fast inserters (Rory's rule) unless only a long-handed one can reach
     for hands in (("fast-inserter",), ("fast-inserter", "long-handed-inserter")):
-        taps = [TapSink(key, rect, 1, hands) for key, rect in job.taps]
+        taps = [TapSink(key, rect, 1, hands) for key, rect in machines]
         res = grow(grid, root, sinks + taps, limit=limit)
-        if not res["problems"] or not job.taps:
+        if not res["problems"] or not machines:
             break
     sinks = sinks + taps
     if res["problems"]:
