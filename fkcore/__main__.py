@@ -14,6 +14,9 @@
                                           the composed surface of a game codebase, as designed
     sense GAME_DIR CAPTURE.json --area X0,Y0,X1,Y1 [--write-marks]
                                           the layout vs a captured scene inside the area only
+    split-to-chest GAME_DIR FACTORY NET NAME --at X,Y [--requester --item I [--rate R]]
+                                          a chest joins NET as one more endpoint; only NET
+                                          is re-routed by the next build
 """
 from __future__ import annotations
 
@@ -141,6 +144,15 @@ def main(argv=None):
     se.add_argument("capture")
     se.add_argument("--area", required=True)
     se.add_argument("--write-marks", action="store_true")
+    sp = sub.add_parser("split-to-chest")
+    sp.add_argument("game")
+    sp.add_argument("factory")
+    sp.add_argument("net")
+    sp.add_argument("name")
+    sp.add_argument("--at", required=True)
+    sp.add_argument("--requester", action="store_true")
+    sp.add_argument("--item")
+    sp.add_argument("--rate")
     a = ap.parse_args(argv)
     cat = Catalog.load()
 
@@ -158,6 +170,17 @@ def main(argv=None):
         return _look(a, cat)
     if a.cmd == "sense":
         return _sense(a, cat)
+    if a.cmd == "split-to-chest":
+        from . import merge
+        at = tuple(int(v) for v in a.at.split(","))
+        try:
+            ch = merge.split_to_chest(a.game, a.factory, a.net, a.name, at,
+                                      "requester" if a.requester else "provider", a.item, a.rate)
+        except merge.MergeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(ch)
+        return 0
     flat = _flat(a.file)
     if a.cmd in ("layout", "explain", "unfold"):
         previous = fkp.load(_fkp_path(a.file)) if os.path.exists(_fkp_path(a.file)) else None

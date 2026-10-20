@@ -279,7 +279,8 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
         elif job.skip:
             lines.append(f"skipped   {net}: {job.skip}")
         elif net in added:
-            lines.append(f"routed    {net}: {len(job.starts)} -> {job.consumers()}, {how[net]}")
+            lines.append(f"routed    {net}: {len(job.starts) + len(job.sources)} -> "
+                         f"{job.consumers()}, {how[net]}")
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
     return Routed(new, lines, sorted(added), failed, kept, passes)

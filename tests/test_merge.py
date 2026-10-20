@@ -130,6 +130,31 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(status["pipes/p_out"], "connected")
         self.assertEqual(leaks, [])
 
+    def test_split_to_chest_keeps_the_belt_and_adds_a_branch(self):
+        before = self.build()
+        gears_lay = before.layouts["gears"]
+        merge.split_to_chest(self.dir, "gears", "gear", "spare", (12, 12))     # a provider
+        after = self.build()
+        route_txt = self.report("route.txt")
+        self.assertIn("routed    gear: 1 -> 2", route_txt)         # the box and the spare chest
+        self.assertIn("kept      plates_in", route_txt)            # the other net stays pinned
+        status, leaks = self.connected(after, "gears")
+        self.assertEqual(status, {"gear": "connected", "plates_in": "connected"})
+        self.assertEqual(leaks, [])
+        keep = {k for k in gears_lay.entities if not k.startswith("~gear/")}
+        self.assertTrue(keep <= set(after.layouts["gears"].entities))   # nothing else moved
+        self.assertIn("spare/c0", after.layouts["gears"].entities)
+        rates = self.report("report_rates.txt")
+        self.assertRegex(rates, r"gear\s+iron-gear-wheel")
+        # a requester as one more driver: two machines feed the gear row's plates
+        merge.split_to_chest(self.dir, "gears", "plates_in", "extra", (2, 6), role="requester",
+                             item="iron-plate", rate="0.5/s")
+        more = self.build()
+        self.assertIn("routed    plates_in: 2 -> 1", self.report("route.txt"))
+        status, leaks = self.connected(more, "gears")
+        self.assertEqual(set(status.values()), {"connected"})
+        self.assertEqual(leaks, [])
+
     def test_refusals(self):
         self.build()
         with self.assertRaises(merge.MergeError):

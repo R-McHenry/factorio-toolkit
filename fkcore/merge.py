@@ -16,9 +16,14 @@ leave the build to the flow. Nothing in the world moves.
   provider chest, the requester chest and the nets that only joined them to their machines are
   removed; one new net joins the provider net's drivers to the requester net's consumers. Only
   that net is unrouted afterwards.
-- ``net_to_chests(game, factory, net, provider=..., requester=...)``: the opposite. A provider
-  chest goes in at the drivers, a requester chest at the consumers, each with its own net, and
-  the net's route is dropped.
+- ``net_to_chests(game, factory, net, provider=..., requester=...)``: the opposite, a full
+  decouple. A provider chest goes in at the drivers, a requester chest at the consumers, each with
+  its own net, and the net's route is dropped.
+- ``split_to_chest(game, factory, net, name, at, role=...)``: a belt split to a chest (Rory,
+  2026-10-20), first class. The net keeps its belt and every endpoint; a chest joins it as one
+  more endpoint: a provider as a consumer (it takes what the other consumers leave, in the rate
+  model), a requester as a driver (it feeds the line). Only that net's route is dropped, so the
+  next build lays the branch (a splitter, or an inserter off the passing belt) and pins the rest.
 
 The .fk edits work on whole statement lines (V1 source is one statement per line). Pure apart
 from reading and writing the game codebase's files.
@@ -33,7 +38,8 @@ from . import fkp as fkpmod
 from . import lang
 from . import surface as surfacemod
 
-__all__ = ["MergeError", "Change", "merge", "insert", "chests_to_net", "net_to_chests"]
+__all__ = ["MergeError", "Change", "merge", "insert", "chests_to_net", "net_to_chests",
+           "split_to_chest"]
 
 
 class MergeError(ValueError):
@@ -393,6 +399,61 @@ def net_to_chests(game, factory, net, provider, requester) -> Change:
         _write(lay_path, fkpmod.dumps(lay))
         change.add(f"{factory}.fkp: removed {len(gone)} carriers of {net}; {moved} row carriers "
                    "back on the chests' nets; both chest nets are unrouted until the next build")
+    return change
+
+
+def split_to_chest(game, factory, net, name, at, role="provider", item=None, rate=None) -> Change:
+    """Add chest ``name`` at ``at`` (in the net's own scope) as one more endpoint of ``net``.
+
+    ``net`` is the netlist's name: ``gear`` for a top-level net, ``iron/plates`` for a net inside
+    sub-module instance ``iron``. A requester needs ``item`` (and takes an optional ``rate``,
+    e.g. "0.5/s")."""
+    if role not in ("provider", "requester"):
+        raise MergeError("role is provider (one more consumer) or requester (one more driver)")
+    path, text, f = _parse(game, factory)
+    holder, _sep, short = net.rpartition("/")
+    if holder:
+        inst = next((i for i in f.body.insts if i.name == holder and i.kind in f.modules), None)
+        if inst is None:
+            raise MergeError(f"{holder} is not a sub-module instance of {factory}")
+        scope, mod = f.modules[inst.kind], inst.kind
+    else:
+        scope, mod = f.body, None
+    target = next((n for n in scope.nets if n.name == short), None)
+    if target is None:
+        raise MergeError(f"no net {net} in {factory}.fk")
+    if any(i.name == name for i in scope.insts):
+        raise MergeError(f"{name} is already an instance there")
+    if role == "requester" and not item:
+        raise MergeError("a requester chest needs the item it asks the network for")
+    lines = text.split("\n")
+    code, hash_, comment = lines[target.line - 1].partition("#")
+    if "->" not in code:
+        raise MergeError(f"line {target.line} is not a one-line net")
+    if role == "provider":
+        code = code.rstrip() + f", {name}"
+    else:
+        left, right = code.split("->", 1)
+        code = left.rstrip() + f", {name} ->" + right.rstrip()
+    lines[target.line - 1] = code + ("    " + hash_ + comment if hash_ else "")
+    params = "provider" if role == "provider" else (
+        f"requester, item={item}" + (f", rate={rate}" if rate else ""))
+    chest = f"{name} = Chest<{params}> @({at[0]}, {at[1]})    # split-to-chest on {short}"
+    lines = _append_module(lines, mod, chest) if mod else _append_top(lines, chest)
+    _write(path, "\n".join(lines))
+    change = Change()
+    change.add(f"{factory}.fk: + {chest.split('#')[0].strip()}")
+    change.add(f"{factory}.fk line {target.line}: {name} is now a "
+               f"{'consumer' if role == 'provider' else 'driver'} of {net}")
+    lay_path = os.path.join(game, f"{factory}.fkp")
+    if os.path.exists(lay_path):
+        lay = fkpmod.load(lay_path)
+        gone = [k for k, e in lay.entities.items() if e.owner == f"~{net}"]
+        for k in gone:
+            del lay.entities[k]
+        _write(lay_path, fkpmod.dumps(lay))
+        change.add(f"{factory}.fkp: {len(gone)} route carriers of {net} dropped; the next build "
+                   "lays the net with its branch to the chest, every other net pinned")
     return change
 
 
