@@ -14,108 +14,71 @@ A fresh map with a working start:
   undergrounds, splitters, inserters, pipes, plates, ore, coal and stone
 - electronics and steam power already researched
 
-Everything after that, you make: you design a factory, robots build it from what the logistic
-network holds, and it feeds itself. Robots place only what the network has, and the kit is small,
-so most of what you build, your own factories make first.
-
-Most recipes start locked, and nothing researches by itself: research needs labs, science packs
-delivered into them, and `fk research TECH` to start it. Every command ends with the research
-line; `RESEARCH: NONE` means the tech tree is standing still. `fk tech ITEM` says which technology
-opens an item, what it costs, and what has to be researched first.
+Everything after that, you make: robots build what you plan, and the factory you design feeds itself.
+On a fresh map the early tier is small, and most recipes open through research: labs, science packs
+and `fk research`. `fk research` shows what can be researched now, and `fk tech ITEM` what opens an
+item.
 
 ## How building works here
 
-You build like an engineer. A factory is a short source file, `game\NAME.fk`, that says **what**:
-rows of machines (`gears = AsmRow<n=3, recipe=iron-gear-wheel> @(16, 22)`) and **nets**, which say
-which machines feed which (`net gear: gears -> red, belts`). You don't draw belts: `fk build` lays
-the whole factory out on its plot, routes a belt for every net, adds the power poles, checks it,
-and pastes it into the game in one go. The robots build it from the network's stock. Then
-`fk look` shows you what is there.
+The fk toolkit lets you build like an engineer rather than tile by tile. A factory is a short file,
+`game\NAME.fk`: rows of machines and the nets that say which machines feed which. `fk build` lays it
+out, routes the belts, adds the poles, pastes it in one go, and the robots build it from the network's
+stock. Then `fk look` shows you how it turned out. Growing the base is adding the next piece and
+repeating.
 
-- `docs\TOOLKIT.md`: the commands, and what their reports mean. Read it once.
-- `docs\LANGUAGE.md`: the `.fk` language and the templates (the rows you build from).
-- `docs\EXAMPLES.md`: small factories that build cleanly; a good place to start.
-- `game\nauvis.surface`: where each factory's plot is on the map. `game\nauvis.build.fkb`: the
-  steps of `fk build`. `game\map.terrain.json`: the bare ground (ore, water, cliffs).
+- `docs\TOOLKIT.md` has the commands — read the "When you need something" list once, it is the map of
+  the whole toolkit
+- `docs\EXAMPLES.md` has three small factories that build cleanly: a good place to start
+- `docs\LANGUAGE.md` describes the factory language
+- `game\nauvis.surface` says where each factory goes on the map
 
-The nuclear plant is already a factory in the surface file (`plant`), and the starter kit is a
-claim (`kit`): leave both where they are and build around them.
+The nuclear plant is already in your surface file (`plant`) and the starter kit is a claim: build
+around them.
 
-## The loop
+## You're free to just build
 
-Design first, then build. Pick a target ("red science at 10/min"), write the factory, check its
-numbers with `fk rates`, `fk build` it, `fk look` at it. Then add the next piece and repeat. When
-something is off, fix the source and build again: the source owns every tile, and a build puts the
-world back to what the source says. Small factories that work beat a big plan.
+You don't need permission and you don't need a finished plan. Something running beats something
+planned: build a small piece, look at it, fix or grow it. If you notice you've spent a while reading
+or planning and nothing new is running in the game, stop and build the simplest useful thing you can.
+Mistakes are cheap here: a build replaces whatever was in the way.
 
-- Give each factory its own plot (`place` in the surface file) on bare ground, on or next to
-  the ore it needs (`map.terrain.json`, or `@patch(iron-ore)` on a miner row).
-- Robots build and serve chests only inside the robot network: the kit's roboport reaches 55
-  tiles each way for building and 25 for chests. A factory with chests gets its own roboport
-  (`cover robots`), so grow outward from spawn; `NO_ROBOTS` says when a factory is out of reach.
-- A build replaces whatever stands in the way of the design. That's intended: the design wins.
-- One net per belt. A net may carry several items (a sushi net), but only into machines that
-  take them all.
-- Don't place things by hand. If you must (a quick fix), `fk adopt` brings it into the source
-  afterwards, so the next build keeps it.
+You can also write your own code and scripts, and read the game directly with Lua (`fk lua`), to
+find out what's going on. Use whatever helps.
 
-## When a build doesn't finish
+## Ways to get unstuck
 
-A ghost that stays is a blocked build, not a slow one. `fk look` says why:
+The toolkit can answer most of the questions you will hit. Reach for a command before you reason it
+out by hand:
 
-- `GHOST SHORT`: the network holds none (or too few) of that item. Make it (an assembler row
-  whose product goes into a provider chest), or bring it; then the robots build the ghost.
-- `GHOST LOCKED`: the item's recipe isn't researched. `fk tech ITEM` names the technology and
-  its cost; research it first.
+- the design says one thing and the world another → `fk look X0,Y0,X1,Y1`: look small and often
+- a ghost that stays → `fk look` says `GHOST SHORT` (the network has none of that item: make it) or
+  `GHOST LOCKED` (its recipe needs research: `fk tech ITEM` says which)
+- can you afford the next piece → `fk build` says it before it pastes (`out\report_bom.txt`)
+- what to research → `fk research`, then `fk research TECH`
+- a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
+- what is the factory really making → `fk stats`
+- anything else → `fk lua` reads the game for you
 
-`fk build` says the same before it pastes (the `STOCK:` line and LOW_STOCK / LOCKED in
-`out\report_bom.txt`), and the game's `no_material_for_construction` alerts come grouped, with
-what the network holds of each item. Build in the order the tech tree and the stock allow:
-what you can make now, then what that unlocks.
+`docs\TOOLKIT.md` lists every command and its options; every command takes `--help`.
 
-## Your own tools
+## Keep the base tidy as you grow
 
-Investigate, and build what you need. You may write code, run your own scripts, and read the
-game with Lua over RCON to find out what is going on: `fk lua "rcon.print(game.tick)"` runs a
-chunk in the game, `fk lua --file probe.lua` a file of yours, and anything it `rcon.print`s comes
-back. Read whatever helps you understand a problem, then fix the cause.
+- One product per belt (a mixed belt only into a chest or labs).
+- Keep chests inside the robots' reach: a factory with chests gets its own roboport, so grow outward
+  from spawn.
+- Make the next thing you need, not a pile of something. Enough beats too much.
+- Wait only when you really must — usually the next useful step is somewhere else. If you do wait, say
+  what for and how long, and do something useful in the meantime.
 
-Two rules stay:
+Rory's chat messages show up at the end of any `fk` command; answer with `fk say "text"`.
 
-- **The game rule** (gameplay, not a tooling limit): you change the world only by building with
-  ghosts and robots (`fk build`). Nothing created by script: no entities, no items, no scripted
-  refills; recurring automation only through in-game machinery.
-- **Save safety:** never register an event handler, a command or an interface through RCON
-  (`script.on_event`, `commands.add_command`, `remote.add_interface`). That made every save
-  unjoinable once, so the link refuses such Lua.
+If something in the tools seems broken, just say so in `FRICTION.md`: that's useful to know.
 
-## What you can see
-
-You see what you look at, like a player in front of the screen:
-
-- `fk look X0,Y0,X1,Y1` shows that area and compares it with your design. Look small and often.
-- The game's alerts come to you on their own (a machine destroyed, no materials for a ghost, a
-  programmable speaker you set up): they appear at the end of whatever command you run, with a
-  reminder while one is still open.
-- `fk stats` (production statistics), `fk chart` (the explored map), `fk research` (what can be
-  researched now), `fk tech` and `fk recipes` are free to read any time.
-
-Nothing else is watched for you. If you want to know how a far-away part is doing, look at it, or
-build the in-game way (circuits and a speaker alert).
-
-## Talking to Rory
-
-Rory's chat messages show up at the end of any `fk` command. Answer with `fk say "text"`.
-
-## When something seems broken
-
-If a command or a report doesn't make sense, write it in `FRICTION.md`: the command, what you
-expected, what happened. That's useful to know, and then carry on with something else.
+Have fun!
 
 ## Your goal file
 
 `GOAL.md` in this folder is yours. Whenever you finish a turn, its text comes back to you as the next
 message, so you can keep going without waiting for anyone. Rewrite it whenever your aim changes:
 what's next, what's blocking, what to check first. Empty it only if you truly want to stop playing.
-
-Have fun!

@@ -1,5 +1,7 @@
-"""The agent kit's texts: what a run tells its player (Rory, 2026-10-20: the rules against code and
-Lua kept the player from investigating; they are gone, the game rule and the save-safety rule stay)."""
+"""The agent kit's texts: what a run tells its player (Rory, 2026-10-20). The brief is v4's
+(C:\\fk-player\\prompts\\core.md: simple and encouraging) with only the V1 facts swapped in; the
+rules against code and Lua are gone; the game rule is one plain sentence; save safety is the
+link's to enforce, not the brief's."""
 import contextlib
 import io
 import os
@@ -19,26 +21,27 @@ def read(*parts):
         return fh.read()
 
 
+BRIEF = read("agent", "prompts", "core-v1.md")
 DROPPED = ("don't read files outside it", "no scripts of your own", "no ssh, no RCON",
-           "does not mean something needs debugging", "recipe_not_researched")
+           "needs debugging", "recipe_not_researched", "Two rules stay")
 
 
 class AgentKitTest(unittest.TestCase):
     def test_no_rule_against_code_or_lua(self):
-        texts = {"CLAUDE.md": new_run.CLAUDE, "first message": new_run.LAUNCH["first"],
-                 "brief": read("agent", "prompts", "core-v1.md"),
-                 "TOOLKIT": read("agent", "docs", "TOOLKIT.md")}
-        for name, text in texts.items():
+        for name, text in {"CLAUDE.md": new_run.CLAUDE, "first message": new_run.LAUNCH["first"],
+                           "brief": BRIEF}.items():
             for phrase in DROPPED:
                 self.assertNotIn(phrase, text, f"{name}: {phrase!r}")
 
-    def test_the_rules_that_stay(self):
-        for name, text in (("CLAUDE.md", new_run.CLAUDE), ("brief", read("agent", "prompts",
-                                                                          "core-v1.md"))):
-            self.assertIn("fk lua", text, name)
-            self.assertIn("ghosts and robots", text, name)            # the game rule
-            self.assertIn("script.on_event", text, name)              # save safety
-        self.assertIn("find out why", new_run.LAUNCH["first"])
+    def test_the_brief_is_v4s_in_tone(self):
+        for line in ("You're free to just build", "Something running beats something",
+                     "Mistakes are cheap here", "Ways to get unstuck", "Have fun",
+                     "Your goal file"):
+            self.assertIn(line, BRIEF)
+        self.assertIn("robots build what you plan", BRIEF)           # the game, said plainly
+        self.assertIn("fk lua", BRIEF)
+        self.assertLess(len(new_run.CLAUDE.splitlines()), 8)          # a pointer, not a rulebook
+        self.assertIn("AGENTS.md", new_run.CLAUDE)
 
     def test_lua_refuses_registering_and_needs_the_link(self):
         with self.assertRaises(link.LinkError):
