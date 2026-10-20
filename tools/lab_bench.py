@@ -193,7 +193,7 @@ def _free_next_to_route(s, box):
 
 
 def step_watch(r, cat, a, lay, main, s, nets, box, area):
-    outside = (box[0] - 3, box[1] + 3)
+    outside = (box[0] - 1, box[1] + 3)          # inside the looked-at area, outside the plot
     fix_tile, fix_net = _free_next_to_route(s, box)
     r.lua(f"""
 local s = game.get_surface('lab')
