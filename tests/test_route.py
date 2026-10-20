@@ -1,12 +1,17 @@
 import os
+import shutil
+import tempfile
 import unittest
+from unittest import mock
 
-from fkcore import connect, expand, fkp, lang, route
+from fkcore import connect, expand, fkp, flow, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate, elaborate_file
 
 CAT = Catalog.load()
 REDGREEN = os.path.join(os.path.dirname(__file__), "..", "games", "redgreen", "main.fk")
+SPM10 = os.path.join(os.path.dirname(__file__), "..", "games", "spm10", "main.fk")
+LAB_KXM = os.path.join(os.path.dirname(__file__), "..", "games", "lab-kxm")
 
 BASE = """
 ore   = MinerRow<n=2, resource=iron-ore>  @(14, 0, rot 2)
@@ -42,6 +47,21 @@ def judged(flat, r):
     return {n: x.status for n, x in rep.nets.items()}, rep
 
 
+def connected(test, flat, r):
+    """Every net routed and connected, no LEAK, no check line at all, a well-formed layout."""
+    test.assertEqual(r.failed, {}, r.lines)
+    test.assertEqual(fkp.invariants(r.layout, CAT, nets=flat.nets), [])
+    status, rep = judged(flat, r)
+    test.assertEqual(set(status.values()), {"connected"}, rep.lines())
+    test.assertEqual(rep.leaks, [])
+    test.assertEqual(rep.checks, [])
+    return rep
+
+
+def carriers(r, net):
+    return [e for k, e in sorted(r.layout.entities.items()) if k.startswith(f"~{net}/")]
+
+
 class SmallTest(unittest.TestCase):
     def test_paths(self):
         flat, lay = build(BASE + "net plate: smelt -> pipes\n")
@@ -70,15 +90,19 @@ class SmallTest(unittest.TestCase):
         self.assertEqual(set(status.values()), {"connected"}, rep.lines())
         self.assertEqual(rep.leaks, [])
 
-    def test_several_drivers_and_consumers_are_reported_not_routed(self):
+    def test_several_drivers_and_consumers_merge_then_split(self):
+        # was "reported, not routed": now every driver merges into one trunk, which splits to
+        # every consumer (a hub)
         flat, lay = build(TWO_SMELTERS + """
             sticks = AsmRow<n=1, recipe=iron-stick> @(16, 24)
             net plate: smelt, smelt2 -> pipes, sticks
         """)
         r = route.route_layout(flat, lay, CAT)
         line = next(l for l in r.lines if " plate:" in l)
-        self.assertTrue(line.startswith("skipped"), line)
-        self.assertIn("2 drivers and 2 consumers", line)
+        self.assertTrue(line.startswith("routed    plate: 2 -> 2,"), line)
+        self.assertIn("1 merges, 1 splitters", line)
+        rep = connected(self, flat, r)
+        self.assertEqual((rep.nets["plate"].pairs, rep.nets["plate"].reached), (8, 8))
 
     def test_an_unreachable_net_fails_with_a_reason(self):
         flat, lay = build(BASE + "net plate: smelt -> pipes\n")
@@ -135,6 +159,170 @@ class SmallTest(unittest.TestCase):
         a = route.route_layout(flat, lay, CAT)
         b = route.route_layout(flat, lay, CAT)
         self.assertEqual(fkp.dumps(a.layout), fkp.dumps(b.layout))
+
+
+class SeveralDriversTest(unittest.TestCase):
+    """k -> m nets (CORE: a route joins every driver to every consumer): merge, then split."""
+
+    def test_three_drivers_two_consumers(self):
+        flat, lay = build("""
+            ore    = MinerRow<n=2, resource=iron-ore>   @(14, 0, rot 2)
+            coal   = MinerRow<n=1, resource=coal>       @(24, 0, rot 2)
+            smelt  = SmelterRow<n=2, recipe=iron-plate> @(6, 12)
+            smelt2 = SmelterRow<n=2, recipe=iron-plate> @(16, 12)
+            smelt3 = SmelterRow<n=2, recipe=iron-plate> @(26, 12)
+            pipes  = AsmRow<n=1, recipe=pipe>           @(6, 24)
+            sticks = AsmRow<n=1, recipe=iron-stick>     @(16, 24)
+            net ore_:  ore -> smelt, smelt2, smelt3
+            net fuel:  coal -> smelt, smelt2, smelt3
+            net plate: smelt, smelt2, smelt3 -> pipes, sticks
+        """)
+        r = route.route_layout(flat, lay, CAT)
+        line = next(l for l in r.lines if " plate:" in l)
+        self.assertTrue(line.startswith("routed    plate: 3 -> 2,"), line)
+        self.assertIn("2 merges, 1 splitters", line)
+        rep = connected(self, flat, r)
+        self.assertEqual((rep.nets["plate"].pairs, rep.nets["plate"].reached), (12, 12))
+        self.assertEqual(sum(e.name == "splitter" for e in carriers(r, "plate")), 3)
+
+    def test_a_sushi_output_into_one_chest(self):
+        # the mall's shape (CORE-V1 §11, mall.* -> mall_chest): every product into one chest
+        flat, lay = build("""
+            gears = Assembler<recipe=iron-gear-wheel> @(2, 2)
+            pipes = Assembler<recipe=pipe>            @(10, 2)
+            stick = Assembler<recipe=iron-stick>      @(18, 2)
+            box   = Chest<provider>                   @(10, 14)
+            net out: gears, pipes, stick -> box
+        """)
+        self.assertEqual(flat.nets["out"].items, ["iron-gear-wheel", "pipe", "iron-stick"])
+        r = route.route_layout(flat, lay, CAT)
+        line = next(l for l in r.lines if " out:" in l)
+        self.assertTrue(line.startswith("routed    out: 3 -> 1,"), line)
+        rep = connected(self, flat, r)
+        self.assertEqual(rep.nets["out"].reached, 3)
+        # one inserter per machine; fast ones (Rory's rule)
+        hands = [e.name for e in carriers(r, "out") if CAT.kind(e.name) == "inserter"]
+        self.assertEqual(hands, ["fast-inserter"] * 4)
+
+    def test_machine_drivers(self):
+        # a requester chest into two rows was a crash (one machine driver, several consumers);
+        # chest -> chest went unrouted; chest -> assembler beside it is one inserter
+        two_rows = build("""
+            inbox = Chest<requester, item=iron-plate>   @(2, 8)
+            gears = AsmRow<n=1, recipe=iron-gear-wheel> @(8, 2)
+            pipes = AsmRow<n=1, recipe=pipe>            @(8, 12)
+            net plates: inbox -> gears, pipes
+        """)
+        chest = build("""
+            inbox = Chest<requester, item=iron-plate> @(2, 2)
+            box   = Chest<provider>                   @(12, 9)
+            net p: inbox -> box
+        """)
+        direct = build("""
+            inbox = Chest<requester, item=iron-plate> @(2, 2)
+            gear  = Assembler<recipe=iron-gear-wheel> @(4, 1)
+            net plates: inbox -> gear
+        """)
+        for flat, lay in (two_rows, chest, direct):
+            connected(self, flat, route.route_layout(flat, lay, CAT))
+        r = route.route_layout(*direct, CAT)
+        self.assertEqual([(e.name, e.x, e.y, e.dir) for e in carriers(r, "plates")],
+                         [("fast-inserter", 3.5, 2.5, 12)])       # picks from the chest, west
+        self.assertIn("1 inserter (direct insertion)", r.lines[0])
+
+    def test_two_sushi_chests_into_two_chests(self):
+        # the lab game's shape (games/lab-kxm): each consumer must get every driver's item
+        flat, lay = build("""
+            a = Chest<requester, item=iron-plate>   @(2, 2)
+            b = Chest<requester, item=copper-plate> @(2, 10)
+            x = Chest<provider> @(16, 3)
+            y = Chest<provider> @(16, 11)
+            net mix: a, b -> x, y
+        """)
+        rep = connected(self, flat, route.route_layout(flat, lay, CAT))
+        self.assertEqual((rep.nets["mix"].pairs, rep.nets["mix"].reached), (4, 4))
+
+    def test_deterministic(self):
+        text = TWO_SMELTERS + """
+            sticks = AsmRow<n=1, recipe=iron-stick> @(16, 24)
+            net plate: smelt, smelt2 -> pipes, sticks
+        """
+        a = route.route_layout(*build(text), CAT)
+        b = route.route_layout(*build(text), CAT)
+        self.assertEqual(fkp.dumps(a.layout), fkp.dumps(b.layout))
+
+
+class Spm10Test(unittest.TestCase):
+    """games/spm10/main.fk has no placement: the instances on its iron net and the mall's sushi
+    output are shelf-packed here (hints set on the netlist), then the router lays every net it
+    can reach and connect judges the two."""
+
+    @classmethod
+    def setUpClass(cls):
+        flat = elaborate_file(SPM10, CAT)
+        mine = set()
+        for net in ("iron_plate", "mall_out"):
+            n = flat.nets[net]
+            mine |= {flat.machines[k].inst for k, _i in n.drivers + n.consumers}
+        for path, inst in flat.insts.items():
+            inst.hints["at"] = (0, 0, 0)
+        sizes = {p: expand.fragment_of(flat, p, CAT)[0].size for p in sorted(mine)}
+        x, y, row = 5, 5, 0
+        for p in sorted(mine, key=lambda p: (sizes[p][0] <= 3, p)):    # rows first, then cells
+            w, h = sizes[p]
+            if x + w + 5 > 140:
+                x, y, row = 5, y + row + 5, 0
+            flat.insts[p].hints["at"] = (x, y, 0)
+            x, row = x + w + (5 if w > 3 else 3), max(row, h)
+        for path, inst in flat.insts.items():
+            if path not in mine and inst.module is None:
+                del inst.hints["at"]
+        lay, _notes = expand.expand_factory(flat, CAT)
+        cls.flat = flat
+        cls.r = route.route_layout(flat, lay, CAT)
+        cls.rep = connect.connect(cls.r.layout, CAT, connect.endpoints(flat))
+
+    def test_the_iron_net_and_the_mall_output_connect(self):
+        lines = {l.split(":")[0].split()[-1]: l for l in self.r.lines}
+        self.assertTrue(lines["iron_plate"].startswith("routed    iron_plate: 1 -> 26,"),
+                        lines["iron_plate"])
+        self.assertTrue(lines["mall_out"].startswith("routed    mall_out: 20 -> 1,"),
+                        lines["mall_out"])
+        iron, out = self.rep.nets["iron_plate"], self.rep.nets["mall_out"]
+        self.assertEqual((iron.status, iron.reached, iron.pairs), ("connected", 608, 608))
+        self.assertEqual((out.status, out.reached, out.pairs), ("connected", 20, 20))
+        self.assertEqual(self.rep.leaks, [])
+        self.assertEqual(fkp.invariants(self.r.layout, CAT, nets=self.flat.nets), [])
+        # every net the router laid connects its placed ends; the open ones lack unplaced ends
+        for name in self.r.routed:
+            net = self.rep.nets[name]
+            self.assertTrue(net.connected or net.missing or any(
+                d not in self.r.layout.entities or c not in self.r.layout.entities
+                for d, c in net.unreached), (name, net.unreached[:3]))
+
+
+class LabKxmTest(unittest.TestCase):
+    """games/lab-kxm, the k -> m game applied on the lab surface: its flow on paper (no game link)
+    writes the committed layout, and the one sushi net connects every driver to every chest."""
+
+    def test_the_flow_on_paper(self):
+        with tempfile.TemporaryDirectory(prefix="fkkxm-") as d:
+            for name in ("kxm.fk", "lab.surface", "lab.build.fkb"):
+                shutil.copy(os.path.join(LAB_KXM, name), d)
+            with mock.patch.dict(os.environ, {"FK_LINK": "off"}):
+                code, ctx = flow.run(os.path.join(d, "lab.build.fkb"), cat=CAT,
+                                     echo=lambda _l: None)
+            self.assertEqual(code, 0, ctx.log)
+            for name in ("kxm.fkp", "lab.fkp"):
+                with open(os.path.join(d, name), encoding="utf-8") as a, \
+                        open(os.path.join(LAB_KXM, name), encoding="utf-8") as b:
+                    self.assertEqual(a.read(), b.read(), name)
+        rep = connect.connect(ctx.layouts["kxm"], CAT, connect.endpoints(ctx.flats["kxm"]))
+        mix = rep.nets["mix"]
+        self.assertEqual((mix.status, mix.reached, mix.pairs), ("connected", 6, 6))
+        self.assertEqual(rep.leaks, [])
+        self.assertEqual(sorted(ctx.flats["kxm"].nets["mix"].items),
+                         ["copper-ore", "iron-gear-wheel", "iron-ore"])
 
 
 class RedgreenTest(unittest.TestCase):

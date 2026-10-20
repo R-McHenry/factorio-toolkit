@@ -1,8 +1,20 @@
 """fkcore.steiner: one belt net as a TREE over mixed steps.
 
-Copied verbatim (code unchanged) from C:\\fk-lead\\repo\\fkc\\steiner.py (repo d6018d3; the
-file last changed at 144e783). fkcore.route wraps it: it builds the Grid per net from a layout
-and turns trees into keyed .fkp carriers. The original docstring follows.
+Copied from C:\\fk-lead\\repo\\fkc\\steiner.py (repo d6018d3; the file last changed at 144e783).
+fkcore.route wraps it: it builds the Grid per net from a layout and turns trees into keyed .fkp
+carriers. Changes since the copy:
+
+- A split is cut only where its feed runs straight into it, the root included. The copy let the
+  root turn into its first belt and still split there, but ``split_tiles`` lays a splitter by its
+  feed's own heading: the splitter landed beside the turn, fed from its side (no edge, the net cut).
+- For a tree laid reversed (a collector), set on its Grid by route.py: ``Grid.keep_clear``, tiles a
+  split may not leave its spare output on (reversed, every splitter is a merge facing back, whose
+  second output points at the tile beside the split's feed; a foreign belt there would take half
+  the merged items, a LEAK); ``Grid.drop_taps``: a tap's inserter drops onto its belt, and an
+  underground exit takes no drop (fkcore.connect, v4 B-120), so a tapped belt never starts a
+  tunnel (which, reversed, is an exit).
+
+The original docstring follows.
 
 
 ``fk.route`` finds ONE belt path between two ports; a net with one source and several consumers is
@@ -68,6 +80,8 @@ class Grid:
         self.occ = set(blocked)
         self.fronts = set(fronts)
         self.spans = spans or {0: set(), 1: set()}
+        self.keep_clear = set()      # no split's spare (reversed) output may point at these
+        self.drop_taps = False       # laid reversed: taps drop onto their belt
 
     def blocked(self, t):
         return t in self.occ or t in self.fronts
@@ -149,8 +163,12 @@ class TapSink:
     def pick(self, path, tree):
         """Taps off the last tiles of ``path`` (one per belt tile, newest first), up to k."""
         on = {(s[0], s[1]) for s in path}
+        tunnels = {path[i] for i in range(len(path) - 1) if path[i + 1][3]} \
+            if tree.grid.drop_taps else ()
         got = []
         for s in reversed(path[-6:]):
+            if s in tunnels:
+                continue     # reversed this is an underground exit, which takes no drop
             used = {g[0] for g in got}
             for q, name, direction in self.taps_at((s[0], s[1]), lambda q: tree.free(q) and q not in on
                                                    and q not in used):
@@ -454,11 +472,14 @@ def _starts(tree):
         cm = tree.succ.get(c)
         if c[3] or cm is None or cm[0] != "step" or cm[1][2] != d or c in tree.sink_at:
             continue
-        if s[2] != d and s != tree.root:
+        if s[2] != d:
             continue  # s turns into c: c is a curve, a splitter needs a straight feed
         for side in (1, 3):
             n, m = Tree.split_tiles(s, side)
             o2 = (m[0] + DX[d], m[1] + DY[d], d, 0)
+            sh = (d + side) % 4
+            if (s[0] + DX[sh], s[1] + DY[sh]) in tree.grid.keep_clear:
+                continue     # laid reversed, this merge's spare output would feed what is there
             if tree.free(m) and tree.free((o2[0], o2[1])):
                 out.append((o2, k["split"] - k["belt"], ("split", s, side, c)))
     return out
@@ -476,6 +497,12 @@ def _astar(tree, starts, sinks, targets, limit=60000):
 
     def hh(x, y):
         return min(sinks[i].h(x, y) for i in targets)
+
+    tapped = set()           # laid reversed, a tapped belt takes a drop: it starts no tunnel
+    if grid.drop_taps:
+        for q, name, direction, _s in tree.taps:
+            r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
+            tapped.add((q[0] + DX[g0] * r, q[1] + DY[g0] * r))
 
     heap, g, parent, how_of = [], {}, {}, {}
     for st, g0, how in starts:
@@ -519,7 +546,7 @@ def _astar(tree, starts, sinks, targets, limit=60000):
             step = k["belt"] + (k["turn"] if nd != d else 0.0)
             if not blocked((nx, ny)):
                 _push(heap, g, parent, (nx, ny, nd, 0), st, gs + step, hh)
-            if ex or nd != d:
+            if ex or nd != d or (x, y) in tapped:
                 continue
             seen_block = False
             for j in jumps:
