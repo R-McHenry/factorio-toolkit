@@ -1,0 +1,41 @@
+fkp 1 factory gears
+size 12x13
+inst box Chest provider=true at 2,12 rot 0 sig c724e6c441
+inst gears AsmRow n=2 recipe=iron-gear-wheel at 6,2 rot 0 sig 9bdeea0726
+inst inbox Chest item=iron-plate rate=1.25 requester=true at 2,2 rot 0 sig 61565a40ca
+cover power power pole=medium-electric-pole
+cover robots robots roboport=roboport
+e box/c0 passive-provider-chest 2.5,12.5 role=provider
+e gears/f0 fast-inserter 6.5,3.5 N net=plates_in
+e gears/f1 fast-inserter 9.5,3.5 N net=plates_in
+e gears/in1b0 transport-belt 6.5,2.5 E net=plates_in
+e gears/in1b1 transport-belt 7.5,2.5 E net=plates_in
+e gears/in1b2 transport-belt 8.5,2.5 E net=plates_in
+e gears/in1b3 transport-belt 9.5,2.5 E net=plates_in
+e gears/in1b4 transport-belt 10.5,2.5 E net=plates_in
+e gears/in1b5 transport-belt 11.5,2.5 S net=plates_in
+e gears/m0 assembling-machine-1 7.5,5.5 recipe=iron-gear-wheel
+e gears/m1 assembling-machine-1 10.5,5.5 recipe=iron-gear-wheel
+e gears/o0 fast-inserter 7.5,7.5 N net=gear
+e gears/o1 fast-inserter 10.5,7.5 N net=gear
+e gears/outb0 transport-belt 6.5,8.5 W net=gear
+e gears/outb1 transport-belt 7.5,8.5 W net=gear
+e gears/outb2 transport-belt 8.5,8.5 W net=gear
+e gears/outb3 transport-belt 9.5,8.5 W net=gear
+e gears/outb4 transport-belt 10.5,8.5 W net=gear
+e gears/outb5 transport-belt 11.5,8.5 W net=gear
+e inbox/c0 requester-chest 2.5,2.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":75,"index":1,"name":"iron-plate","quality":"normal"}],"index":1}]}}' item=iron-plate rate=1.25 role=requester
+e power/p0 medium-electric-pole 6.5,1.5
+e power/p1 medium-electric-pole 8.5,7.5
+e power/p2 medium-electric-pole 0.5,8.5
+e robots/r0 roboport 2,6
+e ~gear/b0 transport-belt 5.5,8.5 W net=gear
+e ~gear/b1 transport-belt 4.5,8.5 W net=gear
+e ~gear/b2 transport-belt 3.5,8.5 W net=gear
+e ~gear/b3 transport-belt 2.5,8.5 S net=gear
+e ~gear/b4 transport-belt 2.5,9.5 S net=gear
+e ~gear/b5 transport-belt 2.5,10.5 S net=gear
+e ~gear/i0 fast-inserter 2.5,11.5 N net=gear
+e ~plates_in/b0 transport-belt 5.5,2.5 E net=plates_in
+e ~plates_in/b1 transport-belt 4.5,2.5 E net=plates_in
+e ~plates_in/i0 fast-inserter 3.5,2.5 W net=plates_in

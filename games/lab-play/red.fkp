@@ -1,0 +1,101 @@
+fkp 1 factory red
+size 17x28
+inst copper Chest item=copper-plate rate=1 requester=true at 2,12 rot 0 sig 61565a40ca
+inst gears AsmRow n=1 recipe=iron-gear-wheel at 8,2 rot 0 sig a0ada23e2d
+inst iron Chest item=iron-plate rate=1 requester=true at 2,2 rot 0 sig 61565a40ca
+inst labs LabRow n=3 at 8,23 rot 0 sig be6148efe9
+inst red AsmRow n=3 recipe=automation-science-pack at 8,12 rot 0 sig 6b5b66ad3c
+cover power power pole=medium-electric-pole
+cover robots robots roboport=roboport
+e copper/c0 requester-chest 2.5,12.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":60,"index":1,"name":"copper-plate","quality":"normal"}],"index":1}]}}' item=copper-plate rate=1 role=requester
+e gears/f0 fast-inserter 8.5,3.5 N net=plates
+e gears/in1b0 transport-belt 8.5,2.5 E net=plates
+e gears/in1b1 transport-belt 9.5,2.5 E net=plates
+e gears/in1b2 transport-belt 10.5,2.5 S net=plates
+e gears/m0 assembling-machine-1 9.5,5.5 recipe=iron-gear-wheel
+e gears/o0 fast-inserter 9.5,7.5 N net=gear
+e gears/outb0 transport-belt 8.5,8.5 W net=gear
+e gears/outb1 transport-belt 9.5,8.5 W net=gear
+e gears/outb2 transport-belt 10.5,8.5 W net=gear
+e iron/c0 requester-chest 2.5,2.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":60,"index":1,"name":"iron-plate","quality":"normal"}],"index":1}]}}' item=iron-plate rate=1 role=requester
+e labs/f0 fast-inserter 8.5,24.5 N net=packs
+e labs/f1 fast-inserter 11.5,24.5 N net=packs
+e labs/f2 fast-inserter 14.5,24.5 N net=packs
+e labs/in1b0 transport-belt 8.5,23.5 E net=packs
+e labs/in1b1 transport-belt 9.5,23.5 E net=packs
+e labs/in1b2 transport-belt 10.5,23.5 E net=packs
+e labs/in1b3 transport-belt 11.5,23.5 E net=packs
+e labs/in1b4 transport-belt 12.5,23.5 E net=packs
+e labs/in1b5 transport-belt 13.5,23.5 E net=packs
+e labs/in1b6 transport-belt 14.5,23.5 E net=packs
+e labs/in1b7 transport-belt 15.5,23.5 E net=packs
+e labs/in1b8 transport-belt 16.5,23.5 E net=packs
+e labs/m0 lab 9.5,26.5
+e labs/m1 lab 12.5,26.5
+e labs/m2 lab 15.5,26.5
+e power/p0 medium-electric-pole 6.5,4.5
+e power/p1 medium-electric-pole 13.5,5.5
+e power/p2 medium-electric-pole 13.5,14.5
+e power/p3 medium-electric-pole 6.5,15.5
+e power/p4 medium-electric-pole 13.5,18.5
+e power/p5 medium-electric-pole 11.5,22.5
+e red/f0 fast-inserter 8.5,14.5 N net=copp
+e red/f1 fast-inserter 11.5,14.5 N net=copp
+e red/f2 fast-inserter 14.5,14.5 N net=copp
+e red/in1b0 transport-belt 8.5,13.5 E net=copp
+e red/in1b1 transport-belt 9.5,13.5 E net=copp
+e red/in1b2 transport-belt 10.5,13.5 E net=copp
+e red/in1b3 transport-belt 11.5,13.5 E net=copp
+e red/in1b4 transport-belt 12.5,13.5 E net=copp
+e red/in1b5 transport-belt 13.5,13.5 E net=copp
+e red/in1b6 transport-belt 14.5,13.5 E net=copp
+e red/in1b7 transport-belt 15.5,13.5 E net=copp
+e red/in1b8 transport-belt 16.5,13.5 S net=copp
+e red/in2b0 transport-belt 8.5,12.5 E net=gear
+e red/in2b1 transport-belt 9.5,12.5 E net=gear
+e red/in2b2 transport-belt 10.5,12.5 E net=gear
+e red/in2b3 transport-belt 11.5,12.5 E net=gear
+e red/in2b4 transport-belt 12.5,12.5 E net=gear
+e red/in2b5 transport-belt 13.5,12.5 E net=gear
+e red/in2b6 transport-belt 14.5,12.5 E net=gear
+e red/in2b7 transport-belt 15.5,12.5 E net=gear
+e red/l0 long-handed-inserter 9.5,14.5 N net=gear
+e red/l1 long-handed-inserter 12.5,14.5 N net=gear
+e red/l2 long-handed-inserter 15.5,14.5 N net=gear
+e red/m0 assembling-machine-1 9.5,16.5 recipe=automation-science-pack
+e red/m1 assembling-machine-1 12.5,16.5 recipe=automation-science-pack
+e red/m2 assembling-machine-1 15.5,16.5 recipe=automation-science-pack
+e red/o0 fast-inserter 9.5,18.5 N net=packs
+e red/o1 fast-inserter 12.5,18.5 N net=packs
+e red/o2 fast-inserter 15.5,18.5 N net=packs
+e red/outb0 transport-belt 8.5,19.5 W net=packs
+e red/outb1 transport-belt 9.5,19.5 W net=packs
+e red/outb2 transport-belt 10.5,19.5 W net=packs
+e red/outb3 transport-belt 11.5,19.5 W net=packs
+e red/outb4 transport-belt 12.5,19.5 W net=packs
+e red/outb5 transport-belt 13.5,19.5 W net=packs
+e red/outb6 transport-belt 14.5,19.5 W net=packs
+e red/outb7 transport-belt 15.5,19.5 W net=packs
+e red/outb8 transport-belt 16.5,19.5 W net=packs
+e robots/r0 roboport 2,7
+e ~copp/b0 transport-belt 7.5,13.5 E net=copp
+e ~copp/b1 transport-belt 6.5,13.5 E net=copp
+e ~copp/b2 transport-belt 5.5,13.5 E net=copp
+e ~copp/b3 transport-belt 4.5,13.5 E net=copp
+e ~copp/b4 transport-belt 4.5,12.5 S net=copp
+e ~copp/i0 fast-inserter 3.5,12.5 W net=copp
+e ~gear/b0 transport-belt 7.5,8.5 S net=gear
+e ~gear/b1 transport-belt 7.5,9.5 S net=gear
+e ~gear/b2 transport-belt 7.5,10.5 S net=gear
+e ~gear/b3 transport-belt 7.5,11.5 S net=gear
+e ~gear/b4 transport-belt 7.5,12.5 E net=gear
+e ~packs/b0 transport-belt 7.5,19.5 S net=packs
+e ~packs/b1 transport-belt 7.5,20.5 S net=packs
+e ~packs/b2 transport-belt 7.5,21.5 S net=packs
+e ~packs/b3 transport-belt 7.5,22.5 S net=packs
+e ~packs/b4 transport-belt 7.5,23.5 E net=packs
+e ~plates/b0 transport-belt 7.5,2.5 E net=plates
+e ~plates/b1 transport-belt 6.5,2.5 E net=plates
+e ~plates/b2 transport-belt 5.5,2.5 E net=plates
+e ~plates/b3 transport-belt 4.5,2.5 E net=plates
+e ~plates/i0 fast-inserter 3.5,2.5 W net=plates

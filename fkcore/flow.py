@@ -555,7 +555,8 @@ def s_apply(ctx, args):
         return [f"apply: skipped, no game link ({ctx.link_error})"], []
     from . import apply as applymod
     area, keys = _scope(ctx, o)
-    rep = applymod.apply(r, ctx.composed, ctx.cat, area, mode=ctx.surface.mode, policy=ctx.surface,
+    rep = applymod.apply(r, ctx.composed, ctx.cat, area, mode=ctx.surface.mode,
+                         force=getattr(ctx.surface, "force", None), policy=ctx.surface,
                          keys=keys, net_items=_net_items(ctx),
                          label=f"fk build {os.path.basename(ctx.script)}")
     checks = []

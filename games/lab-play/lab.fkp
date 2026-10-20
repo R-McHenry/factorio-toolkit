@@ -1,0 +1,15 @@
+fkp 1 surface lab
+cover bridge power pole=medium-electric-pole
+cover kit robots
+cover kitpower power
+plot gears at 200,600 rot 0 size 16x16 module=gears
+plot red at 222,590 rot 0 size 30x30 module=red
+claim kit box 213,648 219,652 "the lab kit's chests (tools/lab_kit.py)"
+e bridge/p0 medium-electric-pole 228.5,633.5
+e bridge/p1 medium-electric-pole 224.5,625.5
+e bridge/p2 medium-electric-pole 220.5,617.5
+e bridge/p3 medium-electric-pole 216.5,609.5
+e bridge/p4 medium-electric-pole 229.5,620.5
+e kit/r0 roboport 225,640
+e kitpower/e0 electric-energy-interface 230,640
+e kitpower/p0 medium-electric-pole 228.5,642.5

@@ -2,6 +2,7 @@
 
     surface  <name>
     mode     play | lab
+    force    <name>                           # whose the paste is (default: player in play, lab in lab)
     terrain  <name> | none                    # the bare world the layout is made against
     catalog  <name>
     place <factory> = <module> plot <x>,<y> <W>x<H> [rot <r>] [patch <resource>[#<n>]]
@@ -61,6 +62,7 @@ class SurfaceFile:
     claims: dict = field(default_factory=dict)        # name -> fkp.Claim
     watch: dict = field(default_factory=lambda: {"plots": "keep", "sanctioned": "mark"})
     notify: str | None = None
+    force: str | None = None                          # the paste's force; None = by mode
     targets: dict = field(default_factory=dict)       # item -> items/s
 
     @property
@@ -98,7 +100,7 @@ def loads(text, path="<surface>") -> SurfaceFile:
         t = shlex.split(line)
         head = t[0]
         try:
-            if head in ("surface", "mode", "terrain", "catalog", "notify") and len(t) == 2:
+            if head in ("surface", "mode", "terrain", "catalog", "notify", "force") and len(t) == 2:
                 if head == "mode" and t[1] not in ("play", "lab"):
                     raise SurfaceError(f"{where}: mode is play or lab")
                 if head == "notify" and t[1] not in ("nearby", "all", "off"):

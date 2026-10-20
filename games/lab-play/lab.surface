@@ -1,0 +1,19 @@
+# lab.surface: play rules on the lab surface, to watch robots build (Rory, 2026-10-20: "I like to
+# see stuff happening"). The kit is built first, directly (lab rules, tools/lab_kit.py): a roboport
+# with robots, two storage chests with the materials, an energy interface for power. Then fk build
+# pastes the factories as ghosts and the lab force's robots build them, as in a play run.
+# The lab surface is 2048x2048 (x and y from -1024 to 1023).
+surface  lab
+mode     play
+force    lab
+terrain  none
+catalog  base
+
+place gears = gears plot 200,600 16x16
+place red   = red   plot 222,590 30x30
+
+claim kit box 213,648 219,652 "the lab kit's chests (tools/lab_kit.py)"
+
+watch plots:      keep
+watch sanctioned: mark 2h
+notify            all
