@@ -70,13 +70,10 @@ def verdicts(text):
     return m.group(1) if m else text.strip().splitlines()[0] if text.strip() else ""
 
 
-def judge():
-    """The world against the design: the build script's own diff step, on the game side (until
-    the live ``fk look`` lands, this is how the agent asks)."""
-    code, text, s = fk("build", "--from", "diff", "--to", "diff")
-    with open(os.path.join(RUN, "game", "out", "diff.txt"), encoding="utf-8") as fh:
-        diff = fh.read()
-    return code, text, diff
+def judge(area):
+    """The world against the design, as the agent asks: the live look of an area."""
+    code, text, s = fk("look", ",".join(str(v) for v in area))
+    return code, text, text
 
 
 def main(argv):
@@ -93,6 +90,9 @@ def main(argv):
                  speed=got["rules"]["speed_bonus"], cargo=got["rules"]["cargo_bonus"])
             cfg = new_run.make(RUN, local=env)
             note("run", toolkit=cfg["toolkit_sha"], folder=RUN)
+            code, text, s = fk("read-terrain", "--surface", "nauvis", "--area=-128,-128,128,128")
+            REPORT["terrain_text"] = text
+            note("terrain", exit=code, lines=[l for l in text.splitlines() if l.startswith(("terrain", "  "))][:6])
 
             code, text, s = fk("build")
             REPORT["build1_text"] = text
@@ -101,9 +101,9 @@ def main(argv):
             plant = (-36, -41, 8, 10)
             left, waited = wait_built(r, plant)
             note("robots plant", ghosts_left=left, waited_s=waited)
-            code, text, diff = judge()
+            code, text, diff = judge(plant)
             REPORT["diff1_text"] = diff
-            note("diff plant", exit=code, verdicts=verdicts(diff))
+            note("look plant", exit=code, verdicts=verdicts(diff))
             def power():
                 return r.lua("local s = game.surfaces.nauvis local n = {} for _, p in pairs(s.find_entities_filtered{"
                              "type = 'electric-pole'}) do if p.electric_network_id then n[p.electric_network_id] = true end end "
@@ -144,10 +144,10 @@ def main(argv):
                         "out[#out + 1] = (f.value and f.value.name or '?') .. ':' .. (f.min or 0) end end "
                         "rcon.print(table.concat(out, ',') .. ' network=' .. tostring(c.logistic_network ~= nil))").strip()
             note("requester", request=req)
-            code, text, diff = judge()
+            code, text, diff = judge(gears_area)
             REPORT["diff2_text"] = diff
             REPORT["footer2_text"] = text
-            note("diff gears", exit=code, verdicts=verdicts(diff),
+            note("look gears", exit=code, verdicts=verdicts(diff),
                  chat_in_footer="hello from Rory" in text)
             def made():
                 return int(r.lua("local st = game.forces.player.get_item_production_statistics('nauvis') "
