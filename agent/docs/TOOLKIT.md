@@ -16,6 +16,12 @@ fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 ```
 
+One thing `fk rates` gets wrong: it shares a short net in proportion to what each machine wants,
+but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
+one side of a splitter) takes its fill, and the ones further on get what is left, or nothing. So a
+net that is short on paper starves its far machines rather than slowing them all a little: give it
+more supply than demand.
+
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step. Each
 step writes its report to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
