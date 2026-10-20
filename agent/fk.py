@@ -42,7 +42,9 @@ LOCAL = {"rates", "check", "explain", "unfold", "render", "layout", "split-to-ch
          "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "alerts", "stats", "chart", "read-terrain", "measure", "adopt",
-        "sense", "research", "tech", "recipes", "lua"}
+        "sense", "research", "tech", "recipes", "lua", "fresh"}
+#: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
+AREA_FIRST = ("fresh", "measure")
 #: files only the host writes: pulled, never pushed
 HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/alerts.json", "out/inbox.txt")
 #: the build steps that read or write the game
@@ -201,6 +203,8 @@ def main(argv):
         i = rest.index("--file")
         with open(rest[i + 1], encoding="utf-8") as fh:
             rest = rest[:i] + [fh.read()] + rest[i + 2:]
+    if cmd in AREA_FIRST:
+        rest = _area(rest)
     if cmd in HOST:
         push(cfg)
         code = remote(cfg, [cmd] + ([] if cmd == "say" else ["."]) + rest,

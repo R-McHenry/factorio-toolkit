@@ -44,6 +44,8 @@ use the game link, and only with FK_LINK=on)
   with the game link (FK_LINK=on, on the game host):
     measure GAME_DIR --area X0,Y0,X1,Y1 [--seconds 30]
                                           what the machines there make, against the model
+    fresh GAME_DIR --area X0,Y0,X1,Y1     belts there that carry items their net doesn't are
+                                          taken up by robots; the next build lays them fresh
     adopt GAME_DIR X,Y[;X,Y...] --into FACTORY/NET
                                           carriers placed by hand become part of a net's route
     chat GAME_DIR [--all]                 the chat lines since the last read (--all: the journal)
@@ -459,6 +461,9 @@ def main(argv=None):
     lk.add_argument("--notify", choices=("nearby", "all", "off"))
     lk.add_argument("--watch", help="strict | keep | revert | mark DUR, or plots=A,sanctioned=B")
     lk.add_argument("--write-marks", action="store_true")
+    fr = sub.add_parser("fresh")
+    fr.add_argument("game")
+    fr.add_argument("--area", required=True)
     al = sub.add_parser("alerts")
     al.add_argument("game")
     al.add_argument("--force")
@@ -571,6 +576,9 @@ def main(argv=None):
         return _look(a, cat)
     if a.cmd == "alerts":
         return _alerts(a, cat)
+    if a.cmd == "fresh":
+        from . import fresh
+        return _world(a, cat, "fresh", lambda r: fresh.run(r, a.game, cat, _area(a.area)))
     if a.cmd in ("stats", "chart"):
         return _free_read(a, cat)
     if a.cmd == "sense":

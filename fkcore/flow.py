@@ -365,7 +365,7 @@ def _frame_blocked(ctx, factory, size):
 
 
 def s_route(ctx, args):
-    o = _opts(args, only="all", effort="normal")
+    o = _opts(args, only="all", effort="normal", hand="fast-inserter")
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
@@ -374,7 +374,8 @@ def s_route(ctx, args):
         if o["only"] == "stale":
             lay, pinned = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
         blocked = _frame_blocked(ctx, factory, lay.size)
-        r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked)
+        r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
+                               hand=o["hand"])
         ctx.layouts[factory] = r.layout
         lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept "
                      f"({len(pinned)} pinned from the committed .fkp), {len(r.failed)} failed, "

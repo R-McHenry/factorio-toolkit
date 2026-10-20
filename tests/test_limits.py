@@ -1,19 +1,26 @@
-"""1.1, limited production (Rory, 2026-10-20).
+"""1.1 (Rory, 2026-10-20): limited production, rips, stale belts, and the 0534 player's patches.
 
 A chest's ``limit=`` is its inventory bar in the paste. CLOG, UNLIMITED and SHARED_SINK say where
-production is not limited; the rip estimate says what a build takes up and how long the robots
-need for it. The 0534 run met all of it: a copper chest first on red science's belt, 4800 plates
-in the network, a 1500-plate chest that held 29 robots for minutes, a 1300-entity hand merge.
+production is not limited, and only there: a mixed belt that requester chests feed, or a mixed
+chest with a limit, is fine (the 0534 player's one-off crafters were). The rip estimate says what a
+build takes up and how long the robots need; ``fk fresh`` takes up belts with stale items. The
+player's own patches (``inserter=``, ``item="a,b"``, a third lab belt, plain direct insertion) are
+features now.
 """
 import base64
 import json
+import os
+import sys
 import unittest
 import zlib
 
-from fkcore import apply, codec, expand, lang
+from fkcore import apply, codec, expand, fresh, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import ADVICE, elaborate
 from fkcore.sense import Verdict
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "kickoff"))
+import upgrade_run  # noqa: E402
 
 CAT = Catalog.load()
 
@@ -35,9 +42,13 @@ def advice(src):
     return sorted((c.code, c.where) for c in flat_of(src).checks if c.code in ADVICE)
 
 
-def entities(src):
+def layout(src):
     lay, _notes = expand.expand_factory(flat_of(src), CAT)
-    text = codec.fkp_to_blueprint(lay, CAT)
+    return lay
+
+
+def entities(src):
+    text = codec.fkp_to_blueprint(layout(src), CAT)
     bp = json.loads(zlib.decompress(base64.b64decode(text[1:])))
     return {e["tags"]["src"]: e for e in bp["blueprint"]["entities"]}
 
@@ -58,11 +69,20 @@ class ChestLimitTest(unittest.TestCase):
         with self.assertRaises(Exception):
             flat_of(BASE.format(inbox="", box=", limit=0"))
 
+    def test_a_requester_asks_for_several_items(self):
+        src = BASE.format(inbox="", box=", limit=4").replace(
+            "item=iron-plate,", 'item="iron-plate,copper-plate",')
+        (section,) = entities(src)["inbox/c0"]["request_filters"]["sections"]
+        self.assertEqual([(f["index"], f["name"]) for f in section["filters"]],
+                         [(1, "iron-plate"), (2, "copper-plate")])
+
 
 class LimitedProductionChecksTest(unittest.TestCase):
-    def test_an_unlimited_chest(self):
+    def test_unlimited_chests_are_one_line(self):
         self.assertEqual(advice(BASE.format(inbox="", box="")), [("UNLIMITED", "box")])
         self.assertEqual(advice(BASE.format(inbox="", box=", limit=4")), [])
+        two = BASE.format(inbox="", box="") + "more = Chest<provider> @(12, 12)\nnet m: gears -> more\n"
+        self.assertIn(("UNLIMITED", "box, more"), advice(two))
 
     def test_a_chest_on_a_net_with_machines(self):
         src = BASE.format(inbox="", box=", limit=4").replace(
@@ -72,22 +92,64 @@ class LimitedProductionChecksTest(unittest.TestCase):
         limited = src.replace("spare = Chest<provider>", "spare = Chest<provider, limit=1>")
         self.assertEqual(advice(limited), [])
 
-    def test_a_sushi_net_clogs(self):
-        src = BASE.format(inbox="", box=", limit=4") + (
-            "cu  = Chest<requester, item=copper-plate, rate=1/s> @(12, 2)\n"
-            "mix = Chest<provider, limit=4>                       @(12, 12)\n"
-            "net both: inbox, cu -> mix\n")
-        self.assertIn(("CLOG", "net both"), advice(src))
+    def test_a_mixed_belt_that_machines_feed_can_clog(self):
+        src = BASE.format(inbox="", box=", limit=4").replace(
+            "net plates_in: inbox -> gears", "pipes = AsmRow<n=1, recipe=pipe> @(6, 20)\n"
+                                             "net plates_in: inbox -> gears, pipes").replace(
+            "net gear:      gears -> box", "net out: gears, pipes -> box")
+        self.assertEqual(advice(src), [("CLOG", "net out")])
 
-    def test_two_nets_into_one_chest_clog(self):
-        src = BASE.format(inbox="", box=", limit=4") + (
-            "cu  = Chest<requester, item=copper-plate, rate=1/s> @(12, 2)\n"
-            "net copper: cu -> box\n")
-        self.assertEqual(advice(src), [("CLOG", "box")])
+    def test_a_mixed_belt_a_requester_feeds_is_limited(self):
+        src = ('kit = Chest<requester, item="iron-plate,copper-plate", rate=1/s> @(2, 2)\n'
+               "mix = Chest<provider, limit=4>                                    @(2, 12)\n"
+               "net both: kit -> mix\n")
+        self.assertEqual(advice(src), [])
+
+    def test_two_nets_into_one_unlimited_chest_clog(self):
+        cu = ("cu  = Chest<requester, item=copper-plate, rate=1/s> @(12, 2)\n"
+              "net copper: cu -> box\n")
+        self.assertEqual(advice(BASE.format(inbox="", box="") + cu), [("CLOG", "box")])
+        self.assertEqual(advice(BASE.format(inbox="", box=", limit=4") + cu), [])
 
 
-def v(verdict, name, x=0.5, y=0.5):
-    return Verdict(verdict, name, x, y)
+class PlayerPatchesTest(unittest.TestCase):
+    def test_inserter_on_a_row(self):
+        src = BASE.format(inbox="", box=", limit=4").replace(
+            "AsmRow<n=2, recipe=iron-gear-wheel>", "AsmRow<n=2, recipe=iron-gear-wheel, inserter=inserter>")
+        names = {e.name for k, e in layout(src).entities.items() if k.startswith("gears/")}
+        self.assertIn("inserter", names)
+        self.assertNotIn("fast-inserter", names)
+
+    def test_a_third_lab_belt(self):
+        src = ("r = Chest<requester, item=automation-science-pack, rate=0.1/s> @(2, 2)\n"
+               "g = Chest<requester, item=logistic-science-pack, rate=0.1/s>   @(2, 12)\n"
+               "b = Chest<requester, item=chemical-science-pack, rate=0.1/s>   @(2, 22)\n"
+               "labs = LabRow<n=2>                                            @(8, 2)\n"
+               "net red: r -> labs\nnet green: g -> labs\nnet blue: b -> labs\n")
+        names = [e.name for k, e in layout(src).entities.items() if k.startswith("labs/t")]
+        self.assertEqual(names, ["long-handed-inserter"] * 2)
+
+    def test_direct_insertion_by_another_hand(self):
+        flat = flat_of("inbox = Chest<requester, item=iron-plate> @(2, 2)\n"
+                       "gear  = Assembler<recipe=iron-gear-wheel> @(4, 1)\n"
+                       "net plates: inbox -> gear\n")
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT, hand="inserter")
+        self.assertEqual([e.name for k, e in r.layout.entities.items() if k.startswith("~plates/")],
+                         ["inserter"])
+        self.assertEqual(route._HANDS[0], ("fast-inserter",))      # the default is back after it
+        with self.assertRaises(ValueError):
+            route.route_layout(flat, lay, CAT, hand="long-handed-inserter")
+
+    def test_the_upgrade_keeps_plain_hands(self):
+        script = "place           --keep pinned\nroute           --only stale --effort normal\n"
+        self.assertIn("route           --only stale --effort normal --hand inserter\n",
+                      upgrade_run._hand(script))
+        self.assertIsNone(upgrade_run._hand(script.replace("normal", "normal --hand inserter")))
+
+
+def v(verdict, name, x=0.5, y=0.5, wrong=()):
+    return Verdict(verdict, name, x, y, wrong_items=list(wrong))
 
 
 class Diff:
@@ -127,6 +189,35 @@ class RipEstimateTest(unittest.TestCase):
         _line, warn = apply.rip_report({"n": 40, "items": 0, "robots": 50, "dist": 100,
                                         "speed": 4.86, "cargo": 2}, apply.moved(rep))
         self.assertIn("fk merge A,B --into C", warn)
+
+
+class FakeLink:
+    def __init__(self):
+        self.sent = []
+
+    def lua(self, text):
+        self.sent.append(text)
+        return "2"
+
+
+class FreshTest(unittest.TestCase):
+    def test_stale_belts_are_ordered_up_and_nothing_else(self):
+        class Look:
+            rep = Diff([v("OK", "transport-belt", 1.5, 1.5, ["pipe"]),
+                        v("OK", "transport-belt", 2.5, 1.5),
+                        v("OK", "underground-belt", 3.5, 1.5, ["steel-plate", "pipe"])])
+        r, saved = FakeLink(), fresh.look.run
+        fresh.look.run = lambda *a, **k: Look
+        game = os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game")
+        try:
+            lines = fresh.run(r, game, CAT, (0, 0, 10, 10))
+        finally:
+            fresh.look.run = saved
+        self.assertEqual(len(r.sent), 1)
+        self.assertIn('transport-belt\\", 1.5, 1.5]', r.sent[0])     # JSON inside a Lua string
+        self.assertIn('underground-belt\\", 3.5, 1.5]', r.sent[0])
+        self.assertNotIn("2.5", r.sent[0])
+        self.assertIn("2 of 2 belts with stale items (pipe, steel-plate) ordered up", lines[0])
 
 
 if __name__ == "__main__":

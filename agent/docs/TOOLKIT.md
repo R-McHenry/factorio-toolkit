@@ -48,7 +48,8 @@ Every designed entity in the area gets a verdict:
 - `MISSING`: nothing there (destroyed, or never built; the next build restores it)
 - `WRONG`: something else stands on its tiles
 - `DRIFT`: there but turned, or with another recipe
-- `WRONG_ITEM`: a belt carries an item its net doesn't
+- `WRONG_ITEM`: a belt carries an item its net doesn't (old items from a rebuild): `fk fresh
+  X0,Y0,X1,Y1` takes those belts up, and the next build lays them fresh
 
 Anything in the area that the design doesn't explain is:
 
@@ -65,17 +66,18 @@ fixing in the source.
 - `UNFED` / `UNCONSUMED`: a machine's input has no net feeding it / its output goes nowhere
 - `TYPE`: a net names a machine that has no endpoint for the net's items
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
-- `CLOG`: a sushi net, or a chest fed two or more items: whichever comes faster than it is used
-  fills the belt or the chest, and the others stop behind it. Make each item no faster than it is
-  used, or give each its own net and chest
-- `UNLIMITED`: a provider or storage chest without `limit=`: everything that reaches it goes into
-  the network, without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops
-  when it is full
+- `CLOG`: a mixed belt that machines feed, or an unlimited chest fed two or more items by
+  separate nets: an item that comes faster than it is used can fill it and stop the others.
+  Mixed belts and chests are fine where nothing comes faster than it is used (a one-off crafter
+  on a requester chest is)
+- `UNLIMITED`: provider or storage chests without `limit=`: what reaches them goes into the
+  network without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops when it
+  is full
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
 - `RIP`: the build takes up a lot, and the robots need minutes for it (the structures, the items
-  in them, and how long, are in `out\diff.txt`). Stop what feeds it first and let it run a few
-  minutes to empty its belts and chests, then build. When the same things come back elsewhere, a
+  in them, and how long: `out\diff.txt`). It goes faster if you stop what feeds it first and let
+  it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a
   factory moved: `fk merge` joins factories where they stand
 - `DOUBLE`: one machine input or output on two nets
 - `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper
@@ -100,6 +102,8 @@ fixing in the source.
 ```
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
+fk fresh X0,Y0,X1,Y1             belts there with old items on them are taken up; the next build
+                                 lays them fresh
 fk merge . A,B --into C          two factories become one, both kept where they stand
 fk chests-to-net . C PROV REQ    a robot link (provider chest to requester chest) becomes a belt
 fk net-to-chests . C NET --provider P --requester R
@@ -145,9 +149,11 @@ game host and read there. For a script of your own, the game host is `computah-c
 (`ssh computah-ct`); `run.json` names the toolkit there (`host_toolkit`: `fkcore.link.Rcon` is
 the RCON client) and your game codebase there (`host_game`).
 
-Use it to look and to understand; build only through `fk build` (ghosts and robots: nothing
-created or refilled by script). The link refuses Lua that registers an event handler, a command
-or an interface: that made every save unjoinable once.
+Use it to look and to understand. Changes go through the game: `fk build` (ghosts and robots),
+and a script of yours can fix things the same way, by taking up the belts that carry stale items
+so the next build lays them again (`fk fresh` does just that). Nothing is created, refilled or
+moved by script. The link refuses Lua that registers an event handler, a command or an
+interface: that made every save unjoinable once.
 
 ## The surface file
 
@@ -170,4 +176,5 @@ Plots never overlap. A factory can be moved by changing its plot alone.
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design, or add
 `stop_on UNFED` before a big paste so a check stops the build. `fk build --from route --to
-report_checks` runs part of it.
+report_checks` runs part of it. `route --hand inserter` links machines with plain inserters
+instead of fast ones (rows take `inserter=inserter` for the same).

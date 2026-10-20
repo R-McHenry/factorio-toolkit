@@ -94,7 +94,8 @@ class SenseReport:
         c = self.counts()
         head = (f"sense {_area_text(self.area)} tick {self.tick}: "
                 + (", ".join(f"{k} {c[k]}" for k in sorted(c)) or "nothing here"))
-        out = [head] + [f"  {v}" for v in self.verdicts if v.verdict != "OK"]
+        # a carrier with stale items is listed too, so a look says where they are (1.1)
+        out = [head] + [f"  {v}" for v in self.verdicts if v.verdict != "OK" or v.wrong_items]
         if self.changes:
             out += ["changes here:"] + [f"  {l}" for l in self.changes]
         if self.marks:

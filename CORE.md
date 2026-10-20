@@ -97,12 +97,18 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; [built: cover robots]
   `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
   1.1 [built] limited production (Rory, 2026-10-20: in the game a sink takes what reaches it first,
-  never a proportional share): `CLOG` (a sushi net, or a chest fed two or more items by any nets:
-  the item that piles up stops the others; only limited production keeps it running), `UNLIMITED`
-  (a provider or storage chest without `limit=`, the chest's bar in the paste), `SHARED_SINK` (such
-  a chest on a net with machines); and the diff's `RIP` (what the next apply takes up: structures,
-  the items in them and the robot minutes, with the drain-first hint, and the moved-factory hint
-  pointing to `fk merge` when the same names come back as new ghosts).
+  never a proportional share). The lines say what can happen, never how to build: mixed belts and
+  chests are fine where production is limited. `CLOG` (a sushi net that machines drive, or an
+  unlimited chest fed two or more items by separate nets; a net only requester chests drive is
+  limited), `UNLIMITED` (provider or storage chests without `limit=`, the chest's bar in the paste;
+  one line per factory), `SHARED_SINK` (such a chest on a net with machines); and the diff's `RIP`
+  (what the next apply takes up: structures, the items in them and the robot minutes, with the
+  drain-first trick, and the moved-factory hint pointing to `fk merge` when the same names come
+  back as new ghosts). `fk fresh AREA` takes up the belts with `WRONG_ITEM` (stale items from a
+  rebuild) so the next build lays them fresh: the scripted fix that goes through the game, and a
+  look now lists where they are. The 0534 player's own patches are features: `inserter=` on rows,
+  `item="a,b"` on a requester, a third lab belt, and `route --hand inserter`. See
+  docs/RELEASE-1.1.md.
 
 ## Rate model (nominal, V1) [built]
 

@@ -12,6 +12,10 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
 - `game\\nauvis.build.fkb`, if it still runs `report_bom --stock none` before the diff: that line
   moved after the diff as `report_bom --stock live` (the template's order), the old script kept
   beside it as `nauvis.build.fkb.before-<sha>`. The player's factories and surface are untouched.
+- 1.1: a run whose own toolkit copy routed direct insertion with plain inserters (the 0534
+  player's patch of route.py) keeps that: its build script's `route` line gets `--hand inserter`.
+  The player's other patches (inserter=, item="a,b", a third lab belt) are 1.1 features. A Claude
+  player's goal loop and hook (claude_loop.py, claude_hook.py) come into `.toolkit` too.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -57,6 +61,26 @@ def _script(text):
     return "".join(lines)
 
 
+def _hand(text):
+    """The build script with ``--hand inserter`` on its route line (None: nothing to change)."""
+    lines = text.splitlines(True)
+    for i, l in enumerate(lines):
+        if l.startswith("route") and "--hand" not in l:
+            body, sep, note = l.partition("#")
+            lines[i] = f"{body.rstrip()} --hand inserter" + (f"   {sep}{note}" if sep else "\n")
+            return "".join(lines)
+    return None
+
+
+def _plain_hands(run):
+    """Did the run's own toolkit copy route direct insertion with plain inserters?"""
+    path = os.path.join(run, ".toolkit", "fkcore", "route.py")
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as fh:
+        return '_HANDS = (("inserter",)' in fh.read()
+
+
 def upgrade(run, sha, dry=False):
     cfg_path = os.path.join(run, "run.json")
     with open(cfg_path, encoding="utf-8") as fh:
@@ -66,20 +90,27 @@ def upgrade(run, sha, dry=False):
     old = cfg.get("toolkit_sha", "unknown")
     plan = [f"run {run}: toolkit {old} -> {sha}"]
     script = os.path.join(run, "game", "nauvis.build.fkb")
-    new_script = None
+    new_script, hand = None, False
     if os.path.exists(script):
         with open(script, encoding="utf-8") as fh:
-            new_script = _script(fh.read())
+            text = fh.read()
+        new_script = _script(text)
+        if _plain_hands(run):
+            hand = _hand(new_script or text)
+            new_script = hand or new_script
     plan += [f"  replace {p} (old kept in .upgrade-{old}/)" for p in REPLACED
              if os.path.exists(os.path.join(run, p)) or p in (".toolkit", "bin", "docs")]
     if new_script:
-        plan.append("  game/nauvis.build.fkb: report_bom --stock live after the diff (old kept "
-                    f"as nauvis.build.fkb.before-{sha})")
+        plan.append("  game/nauvis.build.fkb: " + ("route --hand inserter (its own route.py "
+                    "used plain inserters)" if hand else "report_bom --stock live after the diff")
+                    + f" (old kept as nauvis.build.fkb.before-{sha})")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:
         return plan
     src = os.path.join(run, f".kit-{sha}")
-    _archive(sha, src, ("agent", "fkcore"))
+    claude = cfg.get("player") == "claude"
+    _archive(sha, src, ("agent", "fkcore")
+             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py") if claude else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
     for p in REPLACED:
@@ -89,6 +120,9 @@ def upgrade(run, sha, dry=False):
     agent = os.path.join(src, "agent")
     os.makedirs(os.path.join(run, ".toolkit"))
     shutil.copytree(os.path.join(src, "fkcore"), os.path.join(run, ".toolkit", "fkcore"))
+    if claude:
+        for name in ("claude_loop.py", "claude_hook.py"):
+            shutil.copy(os.path.join(src, "kickoff", name), os.path.join(run, ".toolkit", name))
     os.makedirs(os.path.join(run, "bin"))
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
     shutil.copy(os.path.join(agent, "bin", "fk.cmd"), os.path.join(run, "bin", "fk.cmd"))
@@ -115,12 +149,13 @@ def upgrade(run, sha, dry=False):
     return plan
 
 
-TELL = """Tell the player (its next message):
-  The toolkit was upgraded between your turns. Re-read AGENTS.md ("When a build doesn't finish") and
-  docs\\TOOLKIT.md. New: a look marks GHOST SHORT (the network holds none of the item) and GHOST
-  LOCKED (its recipe is not researched); fk build's out\\report_bom.txt has a STOCK line with
-  LOW_STOCK and LOCKED; alerts come grouped with what the network holds; every command ends with
-  the research line; and fk research [TECH], fk tech NAME, fk recipes [NAME] are new."""
+TELL = """Tell the player (its next message; a Claude player's INBOX.md):
+  Toolkit 1.1 is in. Your own patches are part of it now: inserter= on rows, item="a,b" on a
+  requester, a third lab belt, and route --hand inserter in your build script (fast inserters are
+  researched now; drop it if you like). New: Chest<..., limit=N>, which stops what feeds a full
+  chest; fk fresh X0,Y0,X1,Y1, which takes up belts with old items on them so the next build lays
+  them fresh (use it in place of moving items by script); fk build says how long a big rip takes
+  (RIP); and fk merge, chests-to-net and net-to-chests are in docs\\TOOLKIT.md."""
 
 
 def main(argv=None):

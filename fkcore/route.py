@@ -84,9 +84,11 @@ _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)
 _DY = (-1, 0, 1, 0)
 _BELT_KINDS = frozenset({"transport-belt", "underground-belt", "splitter"})
-#: direct insertion: fast inserters (Rory's rule) unless only a long-handed one can reach
+#: direct insertion: fast inserters (Rory's rule) unless only a long-handed one can reach; the
+#: route step's ``--hand`` picks another short hand (1.1, from the 0534 player's own patch: plain
+#: inserters while fast ones were short and locked)
 _HANDS = (("fast-inserter",), ("fast-inserter", "long-handed-inserter"))
-_REACH = {"fast-inserter": 1, "long-handed-inserter": 2}
+_REACH = {"fast-inserter": 1, "inserter": 1, "burner-inserter": 1, "long-handed-inserter": 2}
 _HUBS = 8          # hub candidates tried at most
 _HUB_WINS = 3      # stop after this many hubs that route
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
@@ -630,7 +632,24 @@ def _judge(flat, lay, cat, mine, js):
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                 blocked=()) -> Routed:
+                 blocked=(), hand=None) -> Routed:
+    """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
+    fast one; long-handed ones still go where only they reach."""
+    global _HANDS
+    if not hand or hand == "fast-inserter":
+        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked)
+    if _REACH.get(hand) != 1:
+        raise ValueError(f"hand is a short inserter (inserter, fast-inserter, burner-inserter), "
+                         f"got {hand!r}")
+    saved, _HANDS = _HANDS, ((hand,), (hand, "long-handed-inserter"))
+    try:
+        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked)
+    finally:
+        _HANDS = saved
+
+
+def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
+                  blocked=()) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``

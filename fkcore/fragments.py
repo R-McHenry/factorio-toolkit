@@ -179,20 +179,31 @@ def miner_row(n, resource, outputs, drill="electric-mining-drill"):
 
 
 def lab_row(n, inputs):
-    inputs = _inputs(inputs, "LabRow")
-    ents = _belt("in1b", "in1", 0, 0, 3 * n)
+    """Labs west to east. in1 north (inserters), in2 south. A third belt (1.1, from the 0534
+    player's own patch) runs north of in1: long-handed inserters reach over in1 to it, and
+    everything else shifts down one."""
+    inputs = _inputs(inputs, "LabRow", most=3)
+    three = len(inputs) == 3
+    d = 1 if three else 0
+    ents = _belt("in1b", "in1", 0, d, 3 * n)
+    if three:
+        ents += _belt("in3b", "in3", 0, 0, 3 * n)
     machines = []
     for k in range(n):
-        ents.append(FEnt(f"m{k}", "lab", 3 * k + 1.5, 3.5, None))
-        ents.append(FEnt(f"f{k}", _INSERTER, 3 * k + 0.5, 1.5, N, "in1"))
+        ents.append(FEnt(f"m{k}", "lab", 3 * k + 1.5, 3.5 + d, None))
+        ents.append(FEnt(f"f{k}", _INSERTER, 3 * k + 0.5, 1.5 + d, N, "in1"))
+        if three:
+            ents.append(FEnt(f"t{k}", _LONG, 3 * k + 1.5, 1.5 + d, N, "in3"))
         machines.append(f"m{k}")
-    roles = {"in1": Role("in1", "in", inputs[0], machines, [(0.5, 0.5, E)])}
-    h = 5
-    if len(inputs) == 2:
-        ents += _belt("in2b", "in2", 0, 6, 3 * n)
-        ents += [FEnt(f"g{k}", _INSERTER, 3 * k + 0.5, 5.5, S, "in2") for k in range(n)]
-        roles["in2"] = Role("in2", "in", inputs[1], machines, [(0.5, 6.5, E)])
-        h = 7
+    roles = {"in1": Role("in1", "in", inputs[0], machines, [(0.5, 0.5 + d, E)])}
+    if three:
+        roles["in3"] = Role("in3", "in", inputs[2], machines, [(0.5, 0.5, E)])
+    h = 5 + d
+    if len(inputs) >= 2:
+        ents += _belt("in2b", "in2", 0, 6 + d, 3 * n)
+        ents += [FEnt(f"g{k}", _INSERTER, 3 * k + 0.5, 5.5 + d, S, "in2") for k in range(n)]
+        roles["in2"] = Role("in2", "in", inputs[1], machines, [(0.5, 6.5 + d, E)])
+        h = 7 + d
     return ents, roles, (3 * n, h)
 
 
@@ -215,4 +226,11 @@ def fragment(kind, params, inputs, outputs) -> Fragment:
     except KeyError:
         raise FragmentError(f"{kind} has no fragment geometry yet") from None
     ents, roles, size = fn(params, [list(b) for b in inputs], [list(b) for b in outputs])
+    # the common ``inserter=`` parameter (templates.COMMON_PARAMS): the row's inserters, in place
+    # of the fast ones (1.1, from the 0534 player's own patch: the start has 48 plain inserters,
+    # 20 fast ones and the fast recipe locked)
+    if params.get("inserter"):
+        for e in ents:
+            if e.name == _INSERTER:
+                e.name = str(params["inserter"])
     return _finish(Fragment(kind, dict(params), ents, roles, size))

@@ -128,7 +128,7 @@ def _machine_attrs(m):
     if m.extra.get("role") in _REQUESTS and m.makes:
         item = next(iter(m.makes))
         attrs["item"] = item
-        fields.update(_request_fields(item, m.extra.get("request"), m.makes[item]))
+        fields.update(_request_fields(list(m.makes), m.extra.get("request"), m.makes[item]))
     if m.extra.get("limit") is not None:
         fields["bar"] = int(m.extra["limit"])    # the chest's inventory bar: its usable slots
     if fields:
@@ -142,16 +142,19 @@ _REQUESTS = ("requester", "buffer")
 
 
 def _request_fields(item, request, rate):
-    """The game's ``request_filters`` for one item. The count is ``request=`` if given, else a
-    minute of the chest's ``rate`` (at least 10), else 100."""
+    """The game's ``request_filters`` for one item, or a list of them (``item="a,b"``): each at
+    the same count, ``request=`` if given, else a minute of the chest's ``rate`` (at least 10),
+    else 100."""
     if request is not None:
         count = int(request)
     elif rate is not None and not math.isinf(rate):
         count = max(10, math.ceil(rate * 60))
     else:
         count = 100
+    items = item if isinstance(item, list) else [item]
     return {"request_filters": {"sections": [{"index": 1, "filters": [
-        {"index": 1, "name": item, "quality": "normal", "comparator": "=", "count": count}]}]}}
+        {"index": k + 1, "name": it, "quality": "normal", "comparator": "=", "count": count}
+        for k, it in enumerate(items)]}]}}
 
 
 def _request_config(item, request, rate):

@@ -71,6 +71,10 @@ class Look:
                f"{self.ok}/{self.designed} designed entities (notify {p['notify']}; watch plots "
                f"{p['plots']}, sanctioned {p['sanctioned']})"]
         out += self.rep.lines()
+        stale = sum(1 for v in self.rep.verdicts if v.wrong_items)
+        if stale:
+            out.append(f"{stale} belts here carry items their net doesn't (WRONG_ITEM): fk fresh {a} "
+                       "takes them up, and the next fk build lays them fresh")
         out += side_by_side(self.design, self.live, self.area)[0]
         if p["notify"] == "all":
             out.append(f"notify all: pushed {len(self.pushed)} line(s) to game chat and "

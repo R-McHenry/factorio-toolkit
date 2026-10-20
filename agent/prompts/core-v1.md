@@ -57,6 +57,8 @@ out by hand:
 - can you afford the next piece → `fk build` says it before it pastes (`out\report_bom.txt`)
 - what to research → `fk research`, then `fk research TECH`
 - a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
+- old items left on a rebuilt belt jam it → `fk fresh X0,Y0,X1,Y1` takes those belts up, and the
+  next `fk build` lays them fresh
 - what is the factory really making → `fk stats`
 - anything else → `fk lua` reads the game for you
 
@@ -64,16 +66,13 @@ out by hand:
 
 ## Keep the base tidy as you grow
 
-- One product per belt, and one per chest: a mixed belt or chest jams as soon as one of its items
-  piles up.
 - Keep chests inside the robots' reach: a factory with chests gets its own roboport, so grow outward
   from spawn.
-- Make the next thing you need, not a pile of something. Enough beats too much: give chests a
-  `limit=`, and a full chest stops what feeds it, so the network holds what you need rather than
-  thousands of plates.
-- Taking a big factory down keeps the robots busy for a while. Stop what feeds it first and let it
-  run a few minutes to empty, then build; `fk build` says how long a big one takes. To join two
-  factories, `fk merge` keeps both where they stand.
+- Make the next thing you need, not a pile of something. Enough beats too much, and a chest's
+  `limit=` helps: a full chest stops what feeds it.
+- A trick for big rebuilds: stop what feeds a factory and let it run a few minutes to empty before
+  you take it down, and it comes down much faster. `fk merge` joins two factories without moving
+  either.
 - Wait only when you really must — usually the next useful step is somewhere else. If you do wait, say
   what for and how long, and do something useful in the meantime.
 

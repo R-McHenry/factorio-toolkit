@@ -30,10 +30,10 @@ The templates:
 | `MinerRow<n, resource>` | n electric drills facing a belt between them; 3 tiles per pair, 7 tall | the ore leaves at the row's head |
 | `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in | 2 in, 1 out |
 | `AsmRow<n, recipe>` | n assemblers, 3 tiles each, 7 to 9 tall | up to 3 in (the third under the product belt, by long-handed inserters), 1 out |
-| `LabRow<n>` | n labs, 3 tiles each | 1 or 2 science belts in |
+| `LabRow<n>` | n labs, 3 tiles each | 1 to 3 science belts in (the third by long-handed inserters) |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
-| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops | |
+| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"` | |
 | `OffshorePump`, `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines | pipes |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one) | |
 
@@ -41,7 +41,8 @@ Rows are **counterflow**: every belt of a row attaches at its head, the west end
 a few free tiles at a row's head and between rows: the router lays the belts there. `fk explain
 FILE INST` shows any row as its exact entities, with its size and where its belts attach.
 
-`duty=0.5` on any instance caps it (a row that runs only part of the time).
+`duty=0.5` on any instance caps it (a row that runs only part of the time). `inserter=inserter`
+on a row puts plain inserters in place of the fast ones.
 
 ## Nets
 
@@ -51,9 +52,9 @@ the consumers take them.
 - A ref names an instance (`gears`): only the endpoints of the net's items count, so
   `net iron: smelt -> gears, circ` takes the plates of `smelt`.
 - `net NAME items a, b: ...` declares the items; otherwise they are what the drivers make.
-- Two or more items on one net is a **sushi** net. It runs only while each item comes no faster
-  than it is used: the first one that piles up fills the belt and stops the others (`CLOG`). Into a
-  machine it must also take every item (else `SUSHI_SINK`).
+- Two or more items on one net is a **sushi** net. It runs while each item comes no faster than
+  it is used; one that piles up fills the belt and stops the others (`CLOG` says where that can
+  happen). Into a machine it must take every item (else `SUSHI_SINK`).
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the

@@ -259,6 +259,8 @@ def chest(params, cat):
     sink for whatever reaches it, up to ``rate``. requester: the logistic network feeding a net with
     ``item``, at ``rate`` or unbounded (an UNBOUNDED check line); ``request`` is how many the
     chest asks the robots to keep in it (default: a minute of ``rate``, at least 10; else 100).
+    ``item="a,b"`` (1.1, from the 0534 player's own patch): a requester asks for several items,
+    each at ``rate``, and feeds them all onto its net (a one-off crafter's single chest).
     ``limit`` (1.1): the chest's slots, its inventory bar in the game. A limited chest stops taking
     when full, so what feeds it stops too: limited production (no UNLIMITED or SHARED_SINK line).
     """
@@ -271,14 +273,16 @@ def chest(params, cat):
     rate = _rate(params, "rate")
     limit = _int(params, "limit") if params.get("limit") is not None else None
     if role == "requester":
-        item = _word(params, "item")
+        items = [i.strip() for i in str(params.get("item", "")).split(",") if i.strip()]
+        if not items:
+            items = [_word(params, "item")]
         extra = {"role": role}
         if limit is not None:
             extra["limit"] = limit
         if params.get("request") is not None:
             extra["request"] = int(float(params["request"]))
-        return [MSpec("c0", proto, None, {}, {item: INF if rate is None else rate}, frozenset(),
-                      source=rate is None, extra=extra)]
+        return [MSpec("c0", proto, None, {}, {it: INF if rate is None else rate for it in items},
+                      frozenset(), source=rate is None, extra=extra)]
     takes = None if "item" not in params else frozenset([_word(params, "item")])
     extra = {"role": role}
     if limit is not None:
