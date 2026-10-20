@@ -64,8 +64,9 @@ class MergeTest(unittest.TestCase):
         self.assertLessEqual(len(joins), 3)
         self.assertIn("0 routed, 5 kept (5 pinned from the committed .fkp)", self.report("route.txt"))
         self.assertIn("7 unchanged", self.report("place.txt"))           # 4 iron rows, 3 gears
-        # their 8 poles and 2 roboports (one per old factory, for its chests), kept as they were
-        self.assertIn("10 pinned cover entities kept", self.report("place.txt"))
+        # their 8 poles, 2 roboports (one per old factory, for its chests) and the storage chest
+        # beside each roboport (1.2), kept as they were
+        self.assertIn("12 pinned cover entities kept", self.report("place.txt"))
 
         # 2. chests-to-net: the robot link becomes a net; only it is routed
         ch = merge.chests_to_net(self.dir, "works", "iron.out", "gears.inbox", "link")

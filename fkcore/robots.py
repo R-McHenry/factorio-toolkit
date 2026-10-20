@@ -9,9 +9,15 @@ roboport's square and got nothing.
 roboport's logistic square (``logistic_radius`` each way from its centre, catalog), a greedy set
 cover over free 4x4 spots of the factory frame: the spot covering the most uncovered chests, ties
 to the spot nearest the chests' centre, then north, then west. Roboports already in the layout
-that are not the owner's own ``r<k>`` count as coverage and stay. A factory without logistic chests
-gets none (building it is the network's job). Run it before ``cover power``, so the poles power the
-roboports too. :func:`apply_robots` returns the layout with them and ``cover robots robots``.
+that are not the owner's own ``r<k>`` count as coverage and stay, and so do ``served`` squares:
+the surface's main network in the factory's frame (:func:`served`, 1.2: the 0534 run's ``boot``
+stood inside the kit roboport's square and got a roboport of its own anyway, from a stock of 4).
+A factory without logistic chests gets none (building it is the network's job). With ``storage``
+(the flow's default, ``storage-chest``) each roboport it places gets a storage chest beside it,
+``<owner>/s<k>``, so what robots take up nearby is stored nearby (1.2: the run's rebuilds far
+from spawn sent every taken-up item 110 tiles to the kit's chests). Run it before ``cover
+power``, so the poles power the roboports too. :func:`apply_robots` returns the layout with them
+and ``cover robots robots``.
 
 :func:`check_surface` judges a composed surface: roboports join one logistic network when their
 logistic squares meet (centres at most twice the radius apart on both axes); the **main** network
@@ -23,29 +29,41 @@ from __future__ import annotations
 
 import copy
 import re
+from collections import namedtuple
 
 from . import fkp
+from .compose import turn
 from .cover import _Ground
 from .elaborate import Check
 from .fkp import Entity, natural_key
 
 __all__ = ["LOGISTIC_CHESTS", "RobotReport", "cover_robots", "apply_robots", "networks",
-           "check_surface"]
+           "served", "check_surface"]
 
 LOGISTIC_CHESTS = frozenset({"requester-chest", "passive-provider-chest", "active-provider-chest",
                              "storage-chest", "buffer-chest"})
-_OWN = re.compile(r"r\d+")
+_OWN = re.compile(r"[rs]\d+")          # the cover's own: roboports r<k>, their storage chests s<k>
+_Port = namedtuple("_Port", "key name x y plot")
 
 
 class RobotReport:
-    def __init__(self, owner, roboports, chests, covered, uncovered):
+    def __init__(self, owner, roboports, chests, covered, uncovered, served=0, storage=(),
+                 no_room=0):
         self.owner, self.roboports, self.chests, self.covered, self.uncovered = (
             owner, roboports, chests, covered, uncovered)
+        self.served, self.storage, self.no_room = served, list(storage), no_room
         self.checks = [Check("NO_ROBOTS", key, why) for key, why in uncovered]
 
     def summary(self):
-        return (f"cover {self.owner} robots: {len(self.roboports)} roboports; {self.covered}/"
-                f"{self.chests} logistic chests inside a logistic area")
+        text = f"cover {self.owner} robots: {len(self.roboports)} roboports"
+        if self.storage or self.no_room:
+            text += f", {len(self.storage)} storage chests beside them"
+            if self.no_room:
+                text += f" ({self.no_room} with no free tile beside it)"
+        text += f"; {self.covered}/{self.chests} logistic chests inside a logistic area"
+        if self.served:
+            text += f" ({self.served} of them in the surface network's)"
+        return text
 
 
 def _radius(cat, name, field):
@@ -61,12 +79,17 @@ def _is_own(e, owner):
     return e.owner == owner and _OWN.fullmatch(e.key[len(owner) + 1:]) is not None
 
 
-def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport"):
-    """-> (new roboport Entities keyed ``<owner>/r<k>``, RobotReport)."""
+def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", served=(),
+                 storage=None):
+    """-> (new Entities: roboports keyed ``<owner>/r<k>`` and, with ``storage`` (a chest
+    prototype), a storage chest beside each keyed ``<owner>/s<k>``; RobotReport). ``served``:
+    [(x, y, radius)] logistic squares of the surface's network in this factory's frame."""
     r = _radius(cat, roboport, "logistic_radius")
     ents = sorted(lay.entities.values(), key=lambda e: natural_key(e.key))
-    chests = [e for e in ents if e.name in LOGISTIC_CHESTS]
+    chests = [e for e in ents if e.name in LOGISTIC_CHESTS and not _is_own(e, owner)]
     existing = [e for e in ents if cat.kind(e.name) == "roboport" and not _is_own(e, owner)]
+    outside = [c for c in chests
+               if any(_inside(float(c.x), float(c.y), sx, sy, sr) for sx, sy, sr in served)]
     taken = {}
     for e in ents:
         if _is_own(e, owner):
@@ -75,8 +98,8 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport"):
             taken[t] = e.key
     w, h = cat.size(roboport)
     ground = _Ground(taken, set(map(tuple, keep_out)), lay.size, (w, h))
-    left = [c for c in chests
-            if not any(_inside(float(c.x), float(c.y), float(p.x), float(p.y), r) for p in existing)]
+    left = [c for c in chests if c not in outside
+            and not any(_inside(float(c.x), float(c.y), float(p.x), float(p.y), r) for p in existing)]
     placed = []
     if left:
         cx = sum(float(c.x) for c in left) / len(left)
@@ -103,24 +126,63 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport"):
         spot = best[1]
         ground.place(spot)
         px, py = ground.centre(spot)
-        placed.append((px, py))
+        placed.append((spot, px, py))
         left = [c for c in left if not _inside(float(c.x), float(c.y), px, py, r)]
-    placed.sort(key=lambda p: (p[1], p[0]))
+    placed.sort(key=lambda p: (p[2], p[1]))
     news = [Entity(f"{owner}/r{k}", roboport, _clean(x), _clean(y), None, {})
-            for k, (x, y) in enumerate(placed)]
+            for k, (_spot, x, y) in enumerate(placed)]
+    chests_out, no_room = [], 0
+    if storage:
+        avoid = _hands_and_fronts(cat, ents)
+        for k, (spot, _x, _y) in enumerate(placed):
+            tile = _beside(ground, spot, avoid)
+            if tile is None:
+                no_room += 1
+                continue
+            ground.placed.add(tile)
+            chests_out.append(Entity(f"{owner}/s{k}", storage, tile[0] + 0.5, tile[1] + 0.5,
+                                     None, {}))
     uncovered = [(c.key, "no free 4x4 spot inside the factory's frame reaches it") for c in left]
     rep = RobotReport(owner, [e.key for e in news], len(chests), len(chests) - len(left),
-                      uncovered)
-    return news, rep
+                      uncovered, served=len(outside), storage=[e.key for e in chests_out],
+                      no_room=no_room)
+    return news + chests_out, rep
+
+
+def _hands_and_fronts(cat, ents):
+    """Tiles a chest beside a roboport keeps off: where an inserter picks or drops, where a drill
+    drops, where a belt points (``fkcore.route``'s ground rules)."""
+    from . import route
+    return set(route._hand_tiles(cat, ents)) | set(route._belt_fronts(cat, ents))
+
+
+def _beside(ground, spot, avoid):
+    """The first free tile around a roboport's footprint (north row west to east, then the east,
+    south and west sides), inside the frame, on no entity, keep-out or placed tile; else None."""
+    i, j, w, h = spot[0], spot[1], ground.pw, ground.ph
+    ring = ([(x, j - 1) for x in range(i - 1, i + w + 1)]
+            + [(i + w, y) for y in range(j, j + h)]
+            + [(x, j + h) for x in range(i + w, i - 2, -1)]
+            + [(i - 1, y) for y in range(j + h - 1, j - 1, -1)])
+    size = ground.size
+    for t in ring:
+        if size is not None and not (0 <= t[0] < size[0] and 0 <= t[1] < size[1]):
+            continue
+        if t in ground.taken or t in ground.keep_out or t in ground.placed or t in avoid:
+            continue
+        return t
+    return None
 
 
 def _clean(v):
     return int(v) if float(v).is_integer() else v
 
 
-def apply_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport"):
-    """A new Layout: ``lay`` without ``owner``'s previous roboports, with the new ones."""
-    news, rep = cover_robots(lay, cat, owner, keep_out, roboport)
+def apply_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", served=(),
+                 storage=None):
+    """A new Layout: ``lay`` without ``owner``'s previous roboports and storage chests, with the
+    new ones."""
+    news, rep = cover_robots(lay, cat, owner, keep_out, roboport, served, storage)
     out = copy.deepcopy(lay)
     out.entities = {k: e for k, e in out.entities.items() if not _is_own(e, owner)}
     if news or owner in out.covers:
@@ -131,6 +193,39 @@ def apply_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport"):
     for e in news:
         out.add(e)
     return out, rep
+
+
+def served(places, infra, layouts, factory, cat):
+    """[(x, y, logistic radius)] in ``factory``'s frame: the roboports of the surface's main
+    network (the one holding a roboport outside every plot, as :func:`check_surface` judges it)
+    that stand outside ``factory`` and whose logistic square reaches its frame. ``places``:
+    {factory: surface.Place}; ``infra``: the surface .fkp's own entities; ``layouts``: {factory:
+    Layout} as laid out so far."""
+    ports = [_Port(e.key, e.name, float(e.x), float(e.y), None) for e in infra
+             if cat.has_entity(e.name) and cat.kind(e.name) == "roboport"]
+    for name, lay in sorted(layouts.items()):
+        p = places.get(name)
+        if p is None or not lay.size:
+            continue
+        for e in lay.entities.values():
+            if cat.has_entity(e.name) and cat.kind(e.name) == "roboport":
+                x, y, _d = turn(float(e.x), float(e.y), None, p.rot, lay.size)
+                ports.append(_Port(f"{name}/{e.key}", e.name, x + p.x, y + p.y, name))
+    main = next((n for n in networks(ports, cat) if any(q.plot is None for q in n)), None)
+    me, lay = places.get(factory), layouts.get(factory)
+    if main is None or me is None or lay is None or not lay.size:
+        return []
+    w, h = lay.size
+    turned = (h, w) if me.rot % 2 else (w, h)
+    out = []
+    for q in main:
+        if q.plot == factory:
+            continue
+        fx, fy, _d = turn(q.x - me.x, q.y - me.y, None, (4 - me.rot) % 4, turned)
+        r = _radius(cat, q.name, "logistic_radius")
+        if fx + r >= 0 and fx - r <= w and fy + r >= 0 and fy - r <= h:
+            out.append((fx, fy, r))
+    return out
 
 
 def networks(ents, cat):

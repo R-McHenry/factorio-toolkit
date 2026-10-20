@@ -1,7 +1,11 @@
 """fkcore.robots: roboports over a factory's logistic chests, and the surface's NO_ROBOTS check."""
+import os
+import shutil
+import tempfile
 import unittest
 
-from fkcore import compose, expand, fkp, lang, robots
+from fkcore import compose, expand, fkp, flow, lang, robots
+from fkcore import surface as surfacemod
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -59,6 +63,83 @@ class RobotsTest(unittest.TestCase):
         lines, checks = robots.check_surface(surface(lay, (14, -14), kit=False), CAT)
         self.assertEqual(checks, [])
         self.assertIn("nothing to judge against", lines[0])
+
+
+KIT = [fkp.Entity("kit/r0", "roboport", 8, 8)]
+
+
+def places(at, rot=0, size=(14, 14)):
+    return {"gears": surfacemod.Place("gears", "gears", at[0], at[1], size[0], size[1], rot)}
+
+
+class SurfaceNetworkTest(unittest.TestCase):
+    """1.2 (the 0534 run): cover robots counts the surface's network, as NO_ROBOTS does. A factory
+    whose chests the kit roboport already reaches got a roboport of its own (the stock held 4),
+    so the player turned cover robots off."""
+
+    def test_the_kit_network_serves_a_factory_in_its_square(self):
+        lay = gears_layout()
+        near = robots.served(places((14, -14)), KIT, {"gears": lay}, "gears", CAT)
+        self.assertEqual(near, [(-6.0, 22.0, 25.0)])         # the kit's centre, in gears' frame
+        out, rep = robots.apply_robots(lay, CAT, served=near, storage="storage-chest")
+        self.assertEqual([e for e in out.entities.values() if e.owner == "robots"], [])
+        self.assertEqual((rep.chests, rep.covered, rep.served), (2, 2, 2))
+        self.assertIn("0 roboports; 2/2 logistic chests inside a logistic area (2 of them in "
+                      "the surface network's)", rep.summary())
+
+    def test_out_of_reach_a_roboport_and_a_storage_chest_beside_it(self):
+        lay = gears_layout()
+        near = robots.served(places((200, -14)), KIT, {"gears": lay}, "gears", CAT)
+        self.assertEqual(near, [])
+        out, rep = robots.apply_robots(lay, CAT, served=near, storage="storage-chest")
+        port, = [e for e in out.entities.values() if e.name == "roboport"]
+        chest, = [e for e in out.entities.values() if e.key == "robots/s0"]
+        self.assertEqual(chest.name, "storage-chest")
+        ring = {(x, y) for x in range(int(port.x) - 3, int(port.x) + 3)
+                for y in range(int(port.y) - 3, int(port.y) + 3)} - fkp.tiles_of(CAT, port)
+        self.assertIn((int(chest.x), int(chest.y)), ring)       # beside the roboport
+        self.assertEqual(fkp.invariants(out, CAT), [])
+        self.assertIn("1 roboports, 1 storage chests beside them", rep.summary())
+        again, rep2 = robots.apply_robots(out, CAT, served=near, storage="storage-chest")
+        self.assertEqual(fkp.dumps(again), fkp.dumps(out))      # a rerun replaces its own
+        self.assertEqual(rep2.chests, 2)                         # its own chest is not a chest to serve
+
+    def test_a_turned_plot_gets_the_square_in_its_own_frame(self):
+        lay = gears_layout()
+        for rot in range(4):
+            (fx, fy, _r), = robots.served(places((14, -14), rot), KIT, {"gears": lay}, "gears",
+                                          CAT)
+            x, y, _d = compose.turn(fx, fy, None, rot, lay.size)
+            self.assertEqual((x + 14, y - 14), (8, 8), rot)
+
+    def test_the_flow_counts_the_kit_roboport_of_the_surface_fkp(self):
+        d = tempfile.mkdtemp(prefix="fkrobots-")
+        self.addCleanup(shutil.rmtree, d, True)
+        files = {"gears.fk": GEARS,
+                 "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+                                   "place gears = gears plot 14,-14 20x16\n",
+                 "nauvis.fkp": "fkp 1 surface nauvis\ncover kit robots\ne kit/r0 roboport 8,8\n",
+                 "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
+                                     "place\nroute\ncover robots\nfloorplan\nreport_checks\n"}
+        for name, text in files.items():
+            with open(os.path.join(d, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        script = os.path.join(d, "nauvis.build.fkb")
+
+        def cover_txt():
+            code, ctx = flow.run(script, cat=CAT, echo=lambda _l: None)
+            self.assertEqual(code, 0, ctx.log)
+            with open(os.path.join(d, "out", "cover_robots.txt"), encoding="utf-8") as fh:
+                return fh.read(), ctx
+
+        text, ctx = cover_txt()
+        self.assertIn("0 roboports; 2/2 logistic chests inside a logistic area (2 of them in "
+                      "the surface network's)", text)
+        self.assertFalse([c for _s, c in ctx.checks if c.code == "NO_ROBOTS"])
+        with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(files["nauvis.surface"].replace("14,-14", "200,-14"))
+        text, ctx = cover_txt()
+        self.assertIn("1 roboports, 1 storage chests beside them", text)
 
 
 if __name__ == "__main__":

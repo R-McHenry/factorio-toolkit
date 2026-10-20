@@ -268,7 +268,7 @@ def _classify(new, prev):
     return out
 
 
-_OWN_POLE = re.compile(r"[pr]\d+")          # a cover's own: poles p<k>, roboports r<k>
+_OWN_POLE = re.compile(r"[prs]\d+")   # a cover's own: poles p<k>, roboports r<k>, storage s<k>
 
 
 def _pinned_covers(new, prev, cat):
@@ -421,16 +421,37 @@ def s_cover_power(ctx, args):
     return lines, checks
 
 
+def _infra(ctx):
+    """The surface .fkp's own entities (shared infrastructure: the kit's roboport, the bridge),
+    as last written; [] before the first floorplan."""
+    path = os.path.join(ctx.root, f"{ctx.surface.name}.fkp") if ctx.surface is not None else None
+    if path is None or not os.path.exists(path):
+        return []
+    return list(fkp.load(path).entities.values())
+
+
 def s_cover_robots(ctx, args):
     """Roboports so every logistic chest of a factory is in a logistic area (``fkcore.robots``);
-    before ``cover power`` in the script, so the poles power them."""
+    before ``cover power`` in the script, so the poles power them. A chest the surface's network
+    already reaches (the kit's roboport and every roboport joined to it) needs none (1.2), and
+    each roboport placed gets a storage chest beside it (``--storage none``: no chest)."""
     from . import robots
-    o = _opts(args, roboport="roboport")
+    o = _opts(args, roboport="roboport", storage="storage-chest")
     if ctx.surface is not None and ctx.surface.mode == "lab":
         return ["cover robots: lab mode revives the ghosts, no robots build here; nothing placed"], []
+    storage = None if o["storage"] in ("none", "off") else \
+        ("storage-chest" if o["storage"] is True else o["storage"])
+    if storage and not ctx.cat.has_entity(storage):
+        return [f"cover robots: no {storage} in the catalog; nothing placed"], [
+            Check("NO_ROBOTS", "cover robots", f"--storage {storage}: not an entity")]
+    infra = _infra(ctx)
+    places = ctx.surface.places if ctx.surface is not None else {}
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
-        new, rep = robots.apply_robots(lay, ctx.cat, roboport=o["roboport"])
+        near = robots.served(places, infra, ctx.layouts, factory, ctx.cat)
+        keep_out = _frame_blocked(ctx, factory, lay.size)        # no roboport or chest on water
+        new, rep = robots.apply_robots(lay, ctx.cat, keep_out=keep_out, roboport=o["roboport"],
+                                       served=near, storage=storage)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
