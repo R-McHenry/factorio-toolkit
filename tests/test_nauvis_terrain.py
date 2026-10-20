@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from fkcore import connect, fkp, flow, terrain
 from fkcore.catalog import Catalog
@@ -12,6 +13,8 @@ from fkcore.elaborate import elaborate_file
 CAT = Catalog.load()
 GAME = os.path.join(os.path.dirname(__file__), "..", "games", "nauvis-terrain")
 SOURCES = ("nauvis.surface", "nauvis.build.fkb", "iron.fk", "gears.fk", "map.terrain.json")
+LAB = os.path.join(os.path.dirname(__file__), "..", "games", "lab-terrain")
+LAB_SOURCES = ("lab.surface", "lab.build.fkb", "iron.fk", "gears.fk", "lab.terrain.json")
 
 
 class NauvisTerrainTest(unittest.TestCase):
@@ -75,6 +78,32 @@ class NauvisTerrainTest(unittest.TestCase):
         self.assertEqual([u for _x, u in ugs], ["in", "out"])
         self.assertLess(ugs[0][0], 181)                      # the wall is x 181..182
         self.assertGreater(ugs[1][0], 183)
+
+
+class LabTerrainTest(unittest.TestCase):
+    """games/lab-terrain: the same factories on the terrain transplanted to the lab and read
+    back from it (2026-10-20); on paper here (the link is off), so diff and apply skip."""
+
+    def test_the_same_factories_give_the_same_layouts(self):
+        folder = tempfile.mkdtemp(prefix="fklabterrain-")
+        try:
+            for name in LAB_SOURCES:
+                shutil.copy(os.path.join(LAB, name), folder)
+            with mock.patch.dict(os.environ, {"FK_LINK": "off"}):
+                code, ctx = flow.run(os.path.join(folder, "lab.build.fkb"), cat=CAT,
+                                     echo=lambda _l: None)
+            self.assertEqual(code, 0, ctx.log)
+            self.assertEqual(sorted(c.code for _s, c in ctx.checks), ["NO_POWER", "NO_POWER"])
+            for factory in ("iron", "gears"):
+                with open(os.path.join(folder, f"{factory}.fkp"), encoding="utf-8") as fh:
+                    lab = fh.read()
+                with open(os.path.join(GAME, f"{factory}.fkp"), encoding="utf-8") as fh:
+                    self.assertEqual(lab, fh.read(), factory)
+            t = ctx.ground
+            self.assertEqual((len(t.water), len(t.cliffs), len(t.resources["iron-ore"])),
+                             (644, 6, 329))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 if __name__ == "__main__":

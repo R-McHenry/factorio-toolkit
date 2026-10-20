@@ -1,0 +1,54 @@
+fkp 1 factory gears
+size 41x28
+inst box Chest provider=true at 40,26 rot 0 sig c724e6c441
+inst gears AsmRow n=1 recipe=iron-gear-wheel at 30,20 rot 0 sig a0ada23e2d
+inst inbox Chest item=iron-plate rate=0.5 requester=true at 10,24 rot 0 sig 61565a40ca
+cover power power pole=medium-electric-pole
+e box/c0 passive-provider-chest 40.5,26.5 role=provider
+e gears/f0 fast-inserter 30.5,21.5 N net=plates_in
+e gears/in1b0 transport-belt 30.5,20.5 E net=plates_in
+e gears/in1b1 transport-belt 31.5,20.5 E net=plates_in
+e gears/in1b2 transport-belt 32.5,20.5 S net=plates_in
+e gears/m0 assembling-machine-1 31.5,23.5 recipe=iron-gear-wheel
+e gears/o0 fast-inserter 31.5,25.5 N net=gear
+e gears/outb0 transport-belt 30.5,26.5 W net=gear
+e gears/outb1 transport-belt 31.5,26.5 W net=gear
+e gears/outb2 transport-belt 32.5,26.5 W net=gear
+e inbox/c0 requester-chest 10.5,24.5 rate=0.5 role=requester
+e power/p0 medium-electric-pole 14.5,15.5
+e power/p1 medium-electric-pole 23.5,15.5
+e power/p2 medium-electric-pole 7.5,20.5
+e power/p3 medium-electric-pole 28.5,22.5
+e power/p4 medium-electric-pole 36.5,23.5
+e ~gear/b0 transport-belt 29.5,26.5 S net=gear
+e ~gear/b1 transport-belt 29.5,27.5 E net=gear
+e ~gear/b2 transport-belt 30.5,27.5 E net=gear
+e ~gear/b3 transport-belt 31.5,27.5 E net=gear
+e ~gear/b4 transport-belt 32.5,27.5 E net=gear
+e ~gear/b5 transport-belt 33.5,27.5 E net=gear
+e ~gear/b6 transport-belt 34.5,27.5 E net=gear
+e ~gear/b7 transport-belt 35.5,27.5 E net=gear
+e ~gear/b8 transport-belt 36.5,27.5 E net=gear
+e ~gear/b9 transport-belt 37.5,27.5 E net=gear
+e ~gear/b10 transport-belt 38.5,27.5 N net=gear
+e ~gear/b11 transport-belt 38.5,26.5 N net=gear
+e ~gear/i0 fast-inserter 39.5,26.5 W net=gear
+e ~plates_in/b0 transport-belt 29.5,20.5 E net=plates_in
+e ~plates_in/b1 transport-belt 28.5,20.5 E net=plates_in
+e ~plates_in/b2 transport-belt 27.5,20.5 E net=plates_in
+e ~plates_in/b3 transport-belt 26.5,20.5 E net=plates_in
+e ~plates_in/b4 transport-belt 25.5,20.5 E net=plates_in
+e ~plates_in/b5 transport-belt 24.5,20.5 E net=plates_in
+e ~plates_in/b6 transport-belt 17.5,20.5 E net=plates_in
+e ~plates_in/b7 transport-belt 16.5,20.5 E net=plates_in
+e ~plates_in/b8 transport-belt 15.5,20.5 E net=plates_in
+e ~plates_in/b9 transport-belt 14.5,20.5 E net=plates_in
+e ~plates_in/b10 transport-belt 13.5,20.5 E net=plates_in
+e ~plates_in/b11 transport-belt 12.5,20.5 E net=plates_in
+e ~plates_in/b12 transport-belt 11.5,20.5 E net=plates_in
+e ~plates_in/b13 transport-belt 10.5,20.5 E net=plates_in
+e ~plates_in/b14 transport-belt 10.5,21.5 N net=plates_in
+e ~plates_in/b15 transport-belt 10.5,22.5 N net=plates_in
+e ~plates_in/i0 fast-inserter 10.5,23.5 S net=plates_in
+e ~plates_in/u0 underground-belt 23.5,20.5 E net=plates_in ug=out
+e ~plates_in/u1 underground-belt 18.5,20.5 E net=plates_in ug=in

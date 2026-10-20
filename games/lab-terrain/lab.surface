@@ -1,0 +1,12 @@
+# lab.surface: the two nauvis-terrain factories on the lab surface, on the real terrain
+# transplanted there (tools/transplant.py): nauvis -168,64..-24,204 (iron-ore#2 and the pond)
+# moved by 648,352 and nauvis 160,256..208,288 (the cliff wall) moved by 320,320. Each plot is
+# its nauvis plot moved by the same offset; the .fk files are the same. lab.terrain.json is a
+# read-terrain of the lab region 460,400..700,640 after the transplant (its iron patch is #1).
+surface  lab
+mode     lab
+terrain  lab
+catalog  base
+
+place iron  = iron  plot 480,416 144x140 patch iron-ore#1
+place gears = gears plot 480,576 48x32

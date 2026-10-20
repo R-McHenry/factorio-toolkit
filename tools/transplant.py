@@ -6,6 +6,8 @@ Run on the game host from a deployed v5 dir:
         --region RX0,RY0,RX1,RY1 [--say "what it is"]
     python3 tools/transplant.py --clear X0,Y0,X1,Y1 --region RX0,RY0,RX1,RY1
 
+(A negative first corner needs the = form: --area=-168,64,-24,204.)
+
 The source area of a terrain file (``fkcore.terrain``: a ``read-terrain`` of nauvis) lands at
 ``area + offset`` on the ``lab`` surface: its resources with their amounts (``create_entity``), its
 water (``set_tiles``, as ``water``) and its cliffs with their orientation. Trees and rocks are not
