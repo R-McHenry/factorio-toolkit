@@ -96,6 +96,13 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
   [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; [built: cover robots]
   `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
+  1.1 [built] limited production (Rory, 2026-10-20: in the game a sink takes what reaches it first,
+  never a proportional share): `CLOG` (a sushi net, or a chest fed two or more items by any nets:
+  the item that piles up stops the others; only limited production keeps it running), `UNLIMITED`
+  (a provider or storage chest without `limit=`, the chest's bar in the paste), `SHARED_SINK` (such
+  a chest on a net with machines); and the diff's `RIP` (what the next apply takes up: structures,
+  the items in them and the robot minutes, with the drain-first hint, and the moved-factory hint
+  pointing to `fk merge` when the same names come back as new ghosts).
 
 ## Rate model (nominal, V1) [built]
 

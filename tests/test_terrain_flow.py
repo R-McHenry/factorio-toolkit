@@ -7,7 +7,7 @@ import unittest
 
 from fkcore import connect, cover, fkp, flow, route, terrain
 from fkcore.catalog import Catalog
-from fkcore.elaborate import elaborate_file
+from fkcore.elaborate import ADVICE, elaborate_file
 from tests.test_nauvis import CHAIN, GAME as NAUVIS, SOURCES as NAUVIS_SOURCES
 
 CAT = Catalog.load()
@@ -83,8 +83,8 @@ class TerrainFlowTest(unittest.TestCase):
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
         # the one check line: a paper factory has no generator (as in the redgreen flow test)
-        self.assertEqual([(s, c.code) for s, c in ctx.checks], [("floorplan", "NO_POWER")],
-                         [str(c) for _s, c in ctx.checks])
+        self.assertEqual([(s, c.code) for s, c in ctx.checks if c.code not in ADVICE],
+                         [("floorplan", "NO_POWER")], [str(c) for _s, c in ctx.checks])
         lay = ctx.layouts["iron"]
         blocked = self.t.blocked
         on = {k for k, e in lay.entities.items() if fkp.tiles_of(CAT, e) & blocked}

@@ -9,7 +9,7 @@ import zlib
 
 from fkcore import codec, compose, connect, cover, fkp, flow
 from fkcore.catalog import Catalog
-from fkcore.elaborate import elaborate_file
+from fkcore.elaborate import ADVICE, elaborate_file
 
 CAT = Catalog.load()
 GAME = os.path.join(os.path.dirname(__file__), "..", "games", "nauvis")
@@ -45,7 +45,7 @@ class NauvisTest(unittest.TestCase):
 
     def test_the_surface_composes_with_no_check_line(self):
         self.assertEqual(self.code, 0, self.ctx.log)
-        self.assertEqual(self.ctx.checks, [])
+        self.assertEqual([(s, c) for s, c in self.ctx.checks if c.code not in ADVICE], [])
         s = self.ctx.composed
         self.assertEqual(sorted(s.plots), ["boot", "main", "plant"])
         self.assertEqual(s.problems, [])

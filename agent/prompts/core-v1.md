@@ -64,10 +64,16 @@ out by hand:
 
 ## Keep the base tidy as you grow
 
-- One product per belt (a mixed belt only into a chest or labs).
+- One product per belt, and one per chest: a mixed belt or chest jams as soon as one of its items
+  piles up.
 - Keep chests inside the robots' reach: a factory with chests gets its own roboport, so grow outward
   from spawn.
-- Make the next thing you need, not a pile of something. Enough beats too much.
+- Make the next thing you need, not a pile of something. Enough beats too much: give chests a
+  `limit=`, and a full chest stops what feeds it, so the network holds what you need rather than
+  thousands of plates.
+- Taking a big factory down keeps the robots busy for a while. Stop what feeds it first and let it
+  run a few minutes to empty, then build; `fk build` says how long a big one takes. To join two
+  factories, `fk merge` keeps both where they stand.
 - Wait only when you really must — usually the next useful step is somewhere else. If you do wait, say
   what for and how long, and do something useful in the meantime.
 

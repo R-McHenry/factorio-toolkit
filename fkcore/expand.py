@@ -124,10 +124,15 @@ def _machine_attrs(m):
         attrs["item"] = next(iter(m.makes))
     if m.takes is not None and m.sink and len(m.takes) == 1:
         attrs["item"] = next(iter(m.takes))
+    fields = {}
     if m.extra.get("role") in _REQUESTS and m.makes:
         item = next(iter(m.makes))
         attrs["item"] = item
-        attrs["config"] = _request_config(item, m.extra.get("request"), m.makes[item])
+        fields.update(_request_fields(item, m.extra.get("request"), m.makes[item]))
+    if m.extra.get("limit") is not None:
+        fields["bar"] = int(m.extra["limit"])    # the chest's inventory bar: its usable slots
+    if fields:
+        attrs["config"] = config_text(fields)
     return attrs
 
 
@@ -136,17 +141,22 @@ def _machine_attrs(m):
 _REQUESTS = ("requester", "buffer")
 
 
-def _request_config(item, request, rate):
-    """The game's ``request_filters`` for one item, as the ``config`` attr the codec writes. The
-    count is ``request=`` if given, else a minute of the chest's ``rate`` (at least 10), else 100."""
+def _request_fields(item, request, rate):
+    """The game's ``request_filters`` for one item. The count is ``request=`` if given, else a
+    minute of the chest's ``rate`` (at least 10), else 100."""
     if request is not None:
         count = int(request)
     elif rate is not None and not math.isinf(rate):
         count = max(10, math.ceil(rate * 60))
     else:
         count = 100
-    return config_text({"request_filters": {"sections": [{"index": 1, "filters": [
-        {"index": 1, "name": item, "quality": "normal", "comparator": "=", "count": count}]}]}})
+    return {"request_filters": {"sections": [{"index": 1, "filters": [
+        {"index": 1, "name": item, "quality": "normal", "comparator": "=", "count": count}]}]}}
+
+
+def _request_config(item, request, rate):
+    """``_request_fields`` as the ``config`` attr the codec writes."""
+    return config_text(_request_fields(item, request, rate))
 
 
 def _param_text(v):

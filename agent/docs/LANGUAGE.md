@@ -33,7 +33,7 @@ The templates:
 | `LabRow<n>` | n labs, 3 tiles each | 1 or 2 science belts in |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
-| `Chest<provider>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net | |
+| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops | |
 | `OffshorePump`, `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines | pipes |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one) | |
 
@@ -51,8 +51,9 @@ the consumers take them.
 - A ref names an instance (`gears`): only the endpoints of the net's items count, so
   `net iron: smelt -> gears, circ` takes the plates of `smelt`.
 - `net NAME items a, b: ...` declares the items; otherwise they are what the drivers make.
-- Two or more items on one net is a **sushi** net: fine into a lab or a chest, which take
-  everything; into a machine it must take every item (else `SUSHI_SINK`).
+- Two or more items on one net is a **sushi** net. It runs only while each item comes no faster
+  than it is used: the first one that piles up fills the belt and stops the others (`CLOG`). Into a
+  machine it must also take every item (else `SUSHI_SINK`).
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the

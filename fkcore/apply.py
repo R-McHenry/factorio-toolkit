@@ -22,16 +22,34 @@ still built by robots (``placed_alone``).
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
 (or a lab revive) it is all ``OK``, which is 1:1. Nothing here registers anything; every game
 call is one RCON command with the link's 5 s timeout.
+
+The rip estimate (1.1, Rory 2026-10-20): what the next apply takes up (``rip_points`` of a diff:
+NOBODY is ordered out, WRONG is pasted over), read with ``link.lua_rip_load``, and
+``rip_report``: how many structures, the items they hold, and about how long the network's
+construction robots need to carry it all to storage. A big one is a ``RIP`` check, with the way to
+make it faster (stop the input and let the factory drain first) and, when the taken-up things come
+back as new ghosts of the same names, the hint that a factory moved (``fk merge`` joins
+factories where they stand).
 """
 from __future__ import annotations
 
+import json
+import math
 import time
 from dataclasses import dataclass, field
 
 from . import codec, link, scene, sense
 from .fkp import natural_key
 
-__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "force_for"]
+__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "force_for", "rip_points",
+           "rip_load", "rip_minutes", "moved", "rip_report"]
+
+#: a rip worth a RIP check: this many minutes of robot time, or this many structures
+RIP_WARN_MIN, RIP_WARN_N = 3.0, 100
+#: what the next apply takes up: NOBODY is ordered for deconstruction, WRONG is pasted over
+RIP_VERDICTS = ("NOBODY", "WRONG")
+#: taken-up structures coming back as new ghosts of the same names: a factory moved
+MOVED_N = 30
 
 
 @dataclass
@@ -190,6 +208,73 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.revive_failed = int(got[1]) if len(got) > 1 else 0
     rep.seconds = time.time() - t0
     return rep
+
+
+def rip_points(rep):
+    """The positions of what the next apply takes up, from a diff (a ``sense.SenseReport``)."""
+    return [(v.x, v.y) for v in rep.verdicts if v.verdict.split()[0] in RIP_VERDICTS]
+
+
+def rip_load(r, surface, force, points, batch=80):
+    """``link.lua_rip_load`` over ``points`` in batches that fit one RCON command (pastes go in
+    3000-character chunks for the same reason): the counts summed, the network's numbers from
+    the first batch that has them."""
+    total = {"n": 0, "items": 0}
+    for i in range(0, len(points), batch):
+        got = json.loads(r.lua(link.lua_rip_load(surface, force, points[i:i + batch])).strip()
+                         or "{}")
+        total["n"] += int(got.get("n") or 0)
+        total["items"] += int(got.get("items") or 0)
+        for k in ("robots", "idle", "dist", "speed", "cargo"):
+            if got.get(k) is not None and k not in total:
+                total[k] = got[k]
+    return total
+
+
+def rip_minutes(load):
+    """Robot time to take up a load read by ``link.lua_rip_load``: each structure, and each cargo
+    of the items it holds, is a trip to the nearest storage and back, shared by the network's
+    construction robots. An estimate: robots also build, charge and queue."""
+    n, items = int(load.get("n") or 0), int(load.get("items") or 0)
+    if not n:
+        return 0.0
+    trips = n + math.ceil(items / max(1, int(load.get("cargo") or 1)))
+    trip = 2 * max(5.0, float(load.get("dist") or 50.0)) / max(0.5, float(load.get("speed") or 3.6))
+    return trips * (trip + 2) / max(1, int(load.get("robots") or 1)) / 60
+
+
+def moved(rep):
+    """How many taken-up structures come back as new ones of the same name (MISSING or GHOST)
+    in the same diff: the sign of a factory that moved."""
+    gone, new = {}, {}
+    for v in rep.verdicts:
+        head = v.verdict.split()[0]
+        if head in RIP_VERDICTS:
+            gone[v.name] = gone.get(v.name, 0) + 1
+        elif head in ("MISSING", "GHOST"):
+            new[v.name] = new.get(v.name, 0) + 1
+    return sum(min(c, new.get(name, 0)) for name, c in gone.items())
+
+
+def rip_report(load, moved_n=0):
+    """-> (the report line, the RIP check text or None) for a load from ``link.lua_rip_load``."""
+    n, items = int(load.get("n") or 0), int(load.get("items") or 0)
+    minutes = rip_minutes(load)
+    dist = load.get("dist")
+    where = f"storage {dist:.0f} tiles away" if dist is not None else "no storage chest in reach"
+    line = (f"rip: the apply takes up {n} structures holding {items} items: about {minutes:.0f} "
+            f"min for {int(load.get('robots') or 0)} construction robots ({where}, "
+            f"{int(load.get('cargo') or 1)} items a trip)")
+    if minutes < RIP_WARN_MIN and n < RIP_WARN_N and moved_n < MOVED_N:
+        return line, None
+    text = (f"{n} structures holding {items} items come down: about {minutes:.0f} min of robot "
+            "time, and builds wait for robots meanwhile. To make it faster, stop what feeds it "
+            "first and let it run a few minutes to drain its belts and chests, then build")
+    if moved_n >= MOVED_N:
+        text += (f". {moved_n} of them come back as new ones of the same name: it looks like a "
+                 "factory moved. To join factories, fk merge A,B --into C keeps both where they "
+                 "stand")
+    return line, text
 
 
 def _int(text):

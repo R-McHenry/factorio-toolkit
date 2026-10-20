@@ -6,7 +6,7 @@ import unittest
 
 from fkcore import compose, connect, fkp, flow
 from fkcore.catalog import Catalog
-from fkcore.elaborate import elaborate_file
+from fkcore.elaborate import ADVICE, elaborate_file
 
 CAT = Catalog.load()
 GAME = os.path.join(os.path.dirname(__file__), "..", "games", "redgreen")
@@ -37,7 +37,7 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(code, 0, ctx.log)
         self.assertEqual(len(ctx.log), 16)
         # the one check line of the run: this surface has no power plant (games/nauvis has one)
-        self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks],
+        self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks if c.code not in ADVICE],
                          [("floorplan", "NO_POWER", "nauvis main")])
         lay = fkp.load(os.path.join(self.dir, "main.fkp"))
         flat = elaborate_file(os.path.join(self.dir, "main.fk"), CAT)

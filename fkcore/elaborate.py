@@ -367,6 +367,67 @@ def _group(rows):
     return [(inst, item, n) for (inst, item), n in out.items()]
 
 
+#: chests that put what reaches them into the logistic network
+_STORES = ("provider", "storage")
+#: the 1.1 check lines about limited production (tests of other things leave them out)
+ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK")
+
+
+def _unlimited(m):
+    return m.sink and m.extra.get("role") in _STORES and m.extra.get("limit") is None
+
+
+def _clog_checks(flat, in_hold, fed):
+    """1.1 (Rory, 2026-10-20): in the game, production is never shared out in proportion.
+
+    - ``CLOG``: a sushi net (two or more items on one belt), or a chest fed two or more items by
+      any nets: whatever comes faster than it is used fills the belt or the chest, and the other
+      items stop behind it. Only limited production keeps it running (each item no faster than it
+      is used), or one net and one chest per item.
+    - ``UNLIMITED``: a provider or storage chest without ``limit=``: everything that reaches it goes
+      into the logistic network, without end (the 0534 run's network held 4800 iron and 5300
+      copper plates).
+    - ``SHARED_SINK``: such a chest on a net with machines: whichever stands first on the belt gets
+      its fill, and an unlimited chest takes all it is given, so the machines after it can starve
+      (the 0534 run's red science stood at 0% behind a copper chest).
+    """
+    for name, net in flat.nets.items():
+        if net.sushi:
+            flat.checks.append(Check(
+                "CLOG", f"net {name}",
+                f"{', '.join(net.items)} share one belt: an item that comes faster than it is used "
+                "fills the belt and stops the others. Make each no faster than it is used, or give "
+                "each its own net", net.line))
+    items = {}
+    for (key, item), nets in in_hold.items():
+        items.setdefault(key, {})[item] = nets
+    for key, got in items.items():
+        m = flat.machines[key]
+        nets = sorted({n for ns in got.values() for n in ns})
+        if m.sink and m.takes is None and len(got) > 1 and len(nets) > 1:
+            flat.checks.append(Check(
+                "CLOG", m.inst,
+                f"takes {', '.join(sorted(got))} from nets {', '.join(nets)}: whichever comes faster "
+                "fills it and the others stop. Give each item a chest of its own with limit="))
+    for key, m in flat.machines.items():
+        if _unlimited(m) and key in fed:
+            flat.checks.append(Check(
+                "UNLIMITED", m.inst,
+                "everything that reaches it goes into the logistic network, without end: limit=N "
+                "(slots) stops what feeds it once it holds that much"))
+    for name, net in flat.nets.items():
+        chests = sorted({flat.machines[k].inst for k, _i in net.consumers
+                         if _unlimited(flat.machines[k])})
+        machines = sorted({flat.machines[k].inst for k, _i in net.consumers
+                           if not flat.machines[k].sink})
+        if chests and machines:
+            flat.checks.append(Check(
+                "SHARED_SINK", f"net {name}",
+                f"{', '.join(chests)} takes without limit from the net {', '.join(machines)} also "
+                "takes from: whoever stands first on the belt gets its fill, so the machines can "
+                "starve. Give the chest limit=, or a net of its own", net.line))
+
+
 def _endpoint_checks(flat):
     out_hold, in_hold = flat._out_hold, flat._in_hold
     for side, hold in (("out", out_hold), ("in", in_hold)):
@@ -406,6 +467,7 @@ def _endpoint_checks(flat):
             flat.checks.append(Check("SUSHI_SINK", f"net {name}",
                                      f"{inst} does not take {missing}"
                                      + (f" ({n} machines)" if n > 1 else ""), net.line))
+    _clog_checks(flat, in_hold, fed)
     seen = set()
     driving = {key for key, _item in out_hold}
     for key, m in flat.machines.items():

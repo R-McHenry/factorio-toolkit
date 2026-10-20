@@ -685,7 +685,21 @@ def s_diff(ctx, args):
     ctx.last_diff = rep
     checks = [Check("DIFF", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
               if k != "OK"]
-    return rep.lines(), checks
+    lines = rep.lines()
+    pts = applymod.rip_points(rep)
+    if pts and ctx.surface.mode != "lab":
+        # 1.1: what the apply will take up, and how long the robots need for it (before it starts)
+        from . import link
+        try:
+            load = applymod.rip_load(r, ctx.surface.name, _force(ctx), pts)
+        except (ValueError, OSError, link.LinkError) as exc:
+            lines.append(f"rip: not estimated ({type(exc).__name__}: {exc})")
+        else:
+            line, warn = applymod.rip_report(load, applymod.moved(rep))
+            lines.append(line)
+            if warn:
+                checks.append(Check("RIP", ctx.surface.name, warn))
+    return lines, checks
 
 
 def _force(ctx):

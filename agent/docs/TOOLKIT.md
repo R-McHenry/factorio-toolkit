@@ -20,7 +20,7 @@ One thing `fk rates` gets wrong: it shares a short net in proportion to what eac
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
 one side of a splitter) takes its fill, and the ones further on get what is left, or nothing. So a
 net that is short on paper starves its far machines rather than slowing them all a little: give it
-more supply than demand.
+more supply than demand, and give a chest on it a `limit=` (`SHARED_SINK` says where).
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step. Each
 step writes its report to `game\out\<step>.txt`: read the one that matters
@@ -65,6 +65,18 @@ fixing in the source.
 - `UNFED` / `UNCONSUMED`: a machine's input has no net feeding it / its output goes nowhere
 - `TYPE`: a net names a machine that has no endpoint for the net's items
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
+- `CLOG`: a sushi net, or a chest fed two or more items: whichever comes faster than it is used
+  fills the belt or the chest, and the others stop behind it. Make each item no faster than it is
+  used, or give each its own net and chest
+- `UNLIMITED`: a provider or storage chest without `limit=`: everything that reaches it goes into
+  the network, without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops
+  when it is full
+- `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
+  fill, so the machines can starve
+- `RIP`: the build takes up a lot, and the robots need minutes for it (the structures, the items
+  in them, and how long, are in `out\diff.txt`). Stop what feeds it first and let it run a few
+  minutes to empty its belts and chests, then build. When the same things come back elsewhere, a
+  factory moved: `fk merge` joins factories where they stand
 - `DOUBLE`: one machine input or output on two nets
 - `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper
 - `UNROUTED`: no belt route was found for a net (the reason follows: often a row is boxed in;
@@ -87,6 +99,11 @@ fixing in the source.
 
 ```
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
+fk build --to diff               what the next build would take up, and how long the robots need
+fk merge . A,B --into C          two factories become one, both kept where they stand
+fk chests-to-net . C PROV REQ    a robot link (provider chest to requester chest) becomes a belt
+fk net-to-chests . C NET --provider P --requester R
+                                 a belt becomes a robot link
 fk unfold main.fk gears          turn a row into a Literal (its entities pinned as they are)
 fk split-to-chest . main NET box --at X,Y [--requester --item I]
                                  a chest joins a net as one more endpoint (a buffer, a tap)

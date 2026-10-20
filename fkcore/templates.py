@@ -252,29 +252,38 @@ _CHEST = {"provider": "passive-provider-chest", "storage": "storage-chest",
 
 
 def chest(params, cat):
-    """``Chest<provider | storage | requester | buffer, item=, rate=, request=, chest=>``: a boundary.
+    """``Chest<provider | storage | requester | buffer, item=, rate=, request=, limit=, chest=>``:
+    a boundary.
 
     provider / storage (the default is provider): the end of a net into the logistic network, a
     sink for whatever reaches it, up to ``rate``. requester: the logistic network feeding a net with
     ``item``, at ``rate`` or unbounded (an UNBOUNDED check line); ``request`` is how many the
     chest asks the robots to keep in it (default: a minute of ``rate``, at least 10; else 100).
+    ``limit`` (1.1): the chest's slots, its inventory bar in the game. A limited chest stops taking
+    when full, so what feeds it stops too: limited production (no UNLIMITED or SHARED_SINK line).
     """
     roles = [r for r in _CHEST if params.get(r) is True]
     if len(roles) > 1:
         raise TemplateError("one role only: " + ", ".join(roles))
     role = roles[0] if roles else "provider"
-    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request"))
+    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "limit"))
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
+    limit = _int(params, "limit") if params.get("limit") is not None else None
     if role == "requester":
         item = _word(params, "item")
         extra = {"role": role}
+        if limit is not None:
+            extra["limit"] = limit
         if params.get("request") is not None:
             extra["request"] = int(float(params["request"]))
         return [MSpec("c0", proto, None, {}, {item: INF if rate is None else rate}, frozenset(),
                       source=rate is None, extra=extra)]
     takes = None if "item" not in params else frozenset([_word(params, "item")])
-    return [MSpec("c0", proto, None, {}, {}, takes, sink=True, drain=rate, extra={"role": role})]
+    extra = {"role": role}
+    if limit is not None:
+        extra["limit"] = limit
+    return [MSpec("c0", proto, None, {}, {}, takes, sink=True, drain=rate, extra=extra)]
 
 
 def turret_row(params, cat):

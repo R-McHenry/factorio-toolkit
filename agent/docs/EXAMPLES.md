@@ -21,7 +21,7 @@ Their power joins the plant's grid (`floorplan --bridge-power`).
 ore   = MinerRow<n=4, resource=iron-ore>   @(10, 2, rot 2)
 coal  = MinerRow<n=2, resource=coal>       @(18, 2, rot 2)
 smelt = SmelterRow<n=8, recipe=iron-plate> @(10, 12)
-box   = Chest<provider>                    @(4, 22)
+box   = Chest<provider, limit=4>           @(4, 22)
 
 net ore_:   ore -> smelt
 net fuel:   coal -> smelt
@@ -38,7 +38,7 @@ patches.
 ```
 inbox = Chest<requester, item=iron-plate, rate=1.25/s> @(2, 2)
 gears = AsmRow<n=2, recipe=iron-gear-wheel>           @(6, 2)
-box   = Chest<provider>                               @(2, 12)
+box   = Chest<provider, limit=4>                      @(2, 12)
 
 net plates_in: inbox -> gears
 net gear:      gears -> box

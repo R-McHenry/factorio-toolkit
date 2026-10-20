@@ -5,7 +5,7 @@ from fractions import Fraction as F
 
 from fkcore import rates
 from fkcore.catalog import Catalog
-from fkcore.elaborate import elaborate_file
+from fkcore.elaborate import ADVICE, elaborate_file
 
 CAT = Catalog.load()
 HERE = os.path.dirname(__file__)
@@ -27,7 +27,8 @@ class Spm10Test(unittest.TestCase):
         self.assertEqual(len(flat.nets), 38)
         kinds = {i.kind for i in flat.insts.values()}
         self.assertFalse(kinds & {"BeltSplit", "LaneMerge", "ChestTap", "ChestEnd"})
-        self.assertEqual([c.code for c in flat.checks], ["UNBOUNDED"])  # the packed circuit chest
+        self.assertEqual([c.code for c in flat.checks if c.code not in ADVICE],
+                         ["UNBOUNDED"])  # the packed circuit chest
 
     def test_nets_never_merge(self):
         # v4's model joined the cable, circuit, gear and pipe nets through the spine adapters into

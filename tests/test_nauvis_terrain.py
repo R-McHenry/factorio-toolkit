@@ -8,7 +8,7 @@ from unittest import mock
 
 from fkcore import connect, fkp, flow, terrain
 from fkcore.catalog import Catalog
-from fkcore.elaborate import elaborate_file
+from fkcore.elaborate import ADVICE, elaborate_file
 
 CAT = Catalog.load()
 GAME = os.path.join(os.path.dirname(__file__), "..", "games", "nauvis-terrain")
@@ -44,7 +44,8 @@ class NauvisTerrainTest(unittest.TestCase):
 
     def test_builds_with_only_the_no_power_lines(self):
         self.assertEqual(self.code, 0, self.ctx.log)
-        self.assertEqual(sorted((s, c.code, c.where) for s, c in self.ctx.checks),
+        self.assertEqual(sorted((s, c.code, c.where) for s, c in self.ctx.checks
+                                if c.code not in ADVICE),
                          [("floorplan", "NO_POWER", "nauvis gears"),
                           ("floorplan", "NO_POWER", "nauvis iron")])
 
@@ -124,7 +125,8 @@ class LabTerrainTest(unittest.TestCase):
                 code, ctx = flow.run(os.path.join(folder, "lab.build.fkb"), cat=CAT,
                                      echo=lambda _l: None)
             self.assertEqual(code, 0, ctx.log)
-            self.assertEqual(sorted(c.code for _s, c in ctx.checks), ["NO_POWER", "NO_POWER"])
+            self.assertEqual(sorted(c.code for _s, c in ctx.checks if c.code not in ADVICE),
+                             ["NO_POWER", "NO_POWER"])
             for factory in ("iron", "gears"):
                 with open(os.path.join(folder, f"{factory}.fkp"), encoding="utf-8") as fh:
                     lab = _no_robots(fh.read())

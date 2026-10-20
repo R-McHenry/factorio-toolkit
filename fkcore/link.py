@@ -42,7 +42,7 @@ import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_decon_list", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
+           "lua_decon_list", "lua_rip_load", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
            "lua_seed", "lua_ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
            "open_from_env", "OUT_DIR", "WINDOWS"]
@@ -255,6 +255,61 @@ for _, t in pairs(helpers.json_to_table({_q(data)})) do
   if e and e.order_deconstruction({_q(force)}) then n = n + 1 end
 end
 rcon.print(n)
+"""
+
+
+def lua_rip_load(surface, force, points):
+    """What taking up the entities at ``points`` [(x, y)] costs the robots (1.1, a free read): how
+    many there are and the items they hold (inventories, belt lines, inserter hands), the
+    construction robots of the network there, how far its nearest storage is, and a robot's speed
+    (tiles/s) and cargo. JSON."""
+    data = json.dumps([[float(x), float(y)] for x, y in points])
+    return f"""
+local s, f = game.get_surface({_q(surface)}), game.forces[{_q(force)}]
+local skip = {{["entity-ghost"] = true, ["tile-ghost"] = true, resource = true, character = true,
+  ["construction-robot"] = true, ["logistic-robot"] = true, fish = true, corpse = true}}
+local belts = {{["transport-belt"] = true, ["underground-belt"] = true, splitter = true,
+  loader = true, ["loader-1x1"] = true}}
+local seen, n, items, sx, sy = {{}}, 0, 0, 0, 0
+for _, t in pairs(helpers.json_to_table({_q(data)})) do
+  for _, e in pairs(s.find_entities_filtered{{position = {{t[1], t[2]}}, radius = 0.5}}) do
+    local id = e.name .. "@" .. e.position.x .. "," .. e.position.y
+    if not skip[e.type] and not seen[id] then
+      seen[id] = true
+      n, sx, sy = n + 1, sx + e.position.x, sy + e.position.y
+      for i = 1, e.get_max_inventory_index() do
+        local inv = e.get_inventory(i)
+        if inv then items = items + inv.get_item_count() end
+      end
+      if belts[e.type] then
+        for i = 1, e.get_max_transport_line_index() do
+          items = items + e.get_transport_line(i).get_item_count()
+        end
+      end
+      if e.type == "inserter" and e.held_stack.valid_for_read then
+        items = items + e.held_stack.count
+      end
+    end
+  end
+end
+local out = {{n = n, items = items}}
+if n > 0 then
+  local c = {{sx / n, sy / n}}
+  local net = s.find_logistic_network_by_position(c, f)
+  if net then
+    out.robots, out.idle = net.all_construction_robots, net.available_construction_robots
+    local best
+    for _, st in pairs(net.storages) do
+      local d = math.sqrt((st.position.x - c[1]) ^ 2 + (st.position.y - c[2]) ^ 2)
+      if not best or d < best then best = d end
+    end
+    out.dist = best
+  end
+  local p = prototypes.entity["construction-robot"]
+  out.speed = p.speed * 60 * (1 + f.worker_robots_speed_modifier)
+  out.cargo = (p.max_payload_size or 1) + f.worker_robots_storage_bonus
+end
+rcon.print(helpers.table_to_json(out))
 """
 
 
