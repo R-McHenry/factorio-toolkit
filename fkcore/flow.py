@@ -496,8 +496,8 @@ def _on_terrain(t, s, cat):
                             f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)} stands on {what} "
                             f"tile{'s' if sum(n for n, _k in parts) != 1 else ''} (first "
                             f"{first[0]},{first[1]})"))
-    drills = sorted((e for e in s.entities.values()
-                     if e.attrs.get("resource") and cat.kind(e.name) == "mining-drill"),
+    drills = sorted((e for e in s.entities.values() if e.attrs.get("resource")
+                     and cat.has_entity(e.name) and cat.kind(e.name) == "mining-drill"),
                     key=lambda e: fkp.natural_key(e.key))
     full = under = amount = 0
     for e in drills:
