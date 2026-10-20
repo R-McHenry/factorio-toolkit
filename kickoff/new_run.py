@@ -14,11 +14,15 @@ RUN_DIR gets:
                        the plant
   run.json             where the game is: host, host_game, host_toolkit, the toolkit's sha, the
                        brief and its md5, the start time
+  launch.json          for C:\\fk-player\\launch.ps1: the preflight command (one that reaches
+                       the game) with the text its output must hold, and the first message
 
-The toolkit is pinned per run, on both sides, so files a running session uses never change under
-it. On the host the run needs the toolkit at SHA in /home/computah/factorio/fk-v5-<sha> (deploy it
-with `git archive`) and the game codebase in host_game; fk's first command pulls, and the push
-after it sends game/ there. Stdlib only.
+Everything comes from the toolkit at SHA (git archive: the brief, the docs, bin, the template and
+fkcore), so a run is what that commit says, whatever the working tree holds. The toolkit is
+pinned per run, on both sides, so files a running session uses never change under it. On the
+host the run needs the toolkit at SHA in /home/computah/factorio/fk-v5-<sha> (deploy it with
+`git archive`) and the game codebase in host_game (kickoff-v1.sh makes it); fk's first command
+pulls it. Stdlib only.
 """
 from __future__ import annotations
 
@@ -44,28 +48,46 @@ def _archive(sha, dest, paths=("fkcore",)):
         t.extractall(dest, filter="data")
 
 
+#: what launch.ps1 sends: a preflight that reaches the game (stats: a free read) and the first turn
+LAUNCH = {
+    "preflight": "fk stats",
+    "expect": "stats nauvis",
+    "first": ("Play Factorio as your AGENTS.md describes.\n\n"
+              "The start works: the nuclear plant runs and the kit's robots are ready. A machine that "
+              "is not running yet does not mean something needs debugging.\n\n"
+              "You're free to act: no permission needed and no finished plan needed. Get something "
+              "small running early (docs\\EXAMPLES.md has three factories that build cleanly), then "
+              "grow it."),
+}
+
+
 def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
          host_root="/home/computah/factorio/v1-runs", local=None):
     if os.path.exists(run) and os.listdir(run):
         raise SystemExit(f"new_run: {run} exists and is not empty")
     sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", sha], stdout=subprocess.PIPE,
                          check=True, text=True).stdout.strip()
-    agent = os.path.join(ROOT, "agent")
+    src = os.path.join(run, ".kit")
+    _archive(sha, src, ("agent", "kickoff/template"))
+    agent = os.path.join(src, "agent")
     brief = os.path.join(agent, "prompts", f"{prompt}.md")
-    os.makedirs(run, exist_ok=True)
+    if not os.path.exists(brief):
+        raise SystemExit(f"new_run: no brief agent/prompts/{prompt}.md at {sha}")
     shutil.copy(brief, os.path.join(run, "AGENTS.md"))
     for name in ("GOAL.md", "FRICTION.md"):
         shutil.copy(os.path.join(agent, "run", name), os.path.join(run, name))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))
     os.makedirs(os.path.join(run, "bin"))
-    for name in ("fk.py", "fk.cmd"):
-        shutil.copy(os.path.join(agent, name if name == "fk.py" else os.path.join("bin", name)),
-                    os.path.join(run, "bin", name))
+    shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
+    shutil.copy(os.path.join(agent, "bin", "fk.cmd"), os.path.join(run, "bin", "fk.cmd"))
     _archive(sha, os.path.join(run, ".toolkit"))
-    shutil.copytree(os.path.join(HERE, "template", "game"), os.path.join(run, "game"),
+    shutil.copytree(os.path.join(src, "kickoff", "template", "game"), os.path.join(run, "game"),
                     ignore=shutil.ignore_patterns("out"))
+    shutil.rmtree(src)
+    with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(LAUNCH, fh, indent=1)
     name = os.path.basename(os.path.abspath(run))
-    with open(brief, "rb") as fh:
+    with open(os.path.join(run, "AGENTS.md"), "rb") as fh:
         md5 = hashlib.md5(fh.read()).hexdigest()
     cfg = {"prompt": prompt, "prompt_md5": md5, "toolkit_sha": sha,
            "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
