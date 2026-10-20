@@ -114,8 +114,9 @@ class SupplyTest(unittest.TestCase):
                                                                            0, [], {"type": "craft-item",
                                                                                    "item": "lab"})],
                                      "research": RAW["research"]})
-        self.assertTrue(av[0].startswith("RESEARCH: NONE"))
-        self.assertIn("automation-science-pack", av[2])     # a trigger first: nothing to wait for
+        self.assertTrue(av[0].startswith("research available now: 2"))   # the footer has the state
+        self.assertIn("automation-science-pack", av[1])     # a trigger first: nothing to wait for
+        self.assertIn("craft lab x1", av[1])
 
     def test_the_lua_is_safe(self):
         for lua in (supply.lua_read("player", "nauvis", ["transport-belt"], ["lab"], "t"),

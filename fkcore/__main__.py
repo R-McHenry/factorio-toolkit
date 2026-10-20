@@ -254,7 +254,8 @@ def _research(a):
                 failed = list(got["failed"].values())
             lines = [f"research: queued {', '.join(added) or 'nothing'}"]
             lines += [f"  not queued: {f}" for f in failed]
-            lines.append(supply.research_line(got.get("research")))
+            if added:
+                lines.append(supply.research_line(got.get("research")))
         elif a.cmd == "research":
             lines = supply.available_lines(supply.available(r, force, surface))
         elif a.cmd == "tech":

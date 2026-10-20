@@ -209,11 +209,14 @@ def _held(sup, target, n, typ):
     """' (the network holds 0)', ' (LOCKED: ...)' for a target the supply read covers."""
     if sup is None or target not in getattr(sup, "entities", {}):
         return ""
-    from .supply import ghost_state
-    state, why = ghost_state(sup, target, n)
+    from .supply import ghost_state, tech_brief
+    state, _why = ghost_state(sup, target, n)
+    row = sup.entities[target]
+    stock = int(row.get("stock") or 0)
     if state == "LOCKED":
-        return f" (LOCKED: {why})"
-    stock = int(sup.entities[target].get("stock") or 0)
+        t = row.get("tech")
+        return f" (LOCKED: research {tech_brief(t)}; the network holds {stock})" if t else \
+            f" (LOCKED, nothing unlocks it; the network holds {stock})"
     return f" (the network holds {stock})"
 
 

@@ -241,8 +241,13 @@ for _, n in pairs(helpers.json_to_table({_J(_J(list(names)))})) do
   if not t then failed[#failed + 1] = n .. ' (no such technology)'
   elseif t.researched then failed[#failed + 1] = n .. ' (already researched)'
   else
-    local ok, res = pcall(function() return f.add_research(n) end)
-    if ok and res then added[#added + 1] = n else failed[#failed + 1] = n .. ' (the game refused it: a prerequisite not done, or the queue is full)' end
+    local first = {{}}
+    for _, p in pairs(t.prerequisites or {{}}) do if not p.researched then first[#first + 1] = p.name end end
+    if #first > 0 then failed[#failed + 1] = n .. ' (research first: ' .. table.concat(first, ', ') .. ')'
+    else
+      local ok, res = pcall(function() return f.add_research(n) end)
+      if ok and res then added[#added + 1] = n else failed[#failed + 1] = n .. ' (the game refused it: the queue is full, or it is a trigger technology: craft or build what it names)' end
+    end
   end
 end
 {_STATE_LUA}
@@ -333,6 +338,11 @@ def cost_text(t):
 
 def _missing_prereqs(t):
     return [p["name"] for p in _list(t.get("prerequisites")) if not p.get("researched")]
+
+
+def tech_brief(t):
+    """'electric-mining-drill (25 automation-science-pack; first: automation-science-pack)'."""
+    return _tech_brief(t)
 
 
 def _tech_brief(t):
@@ -465,8 +475,8 @@ def available_lines(data):
     techs = sorted(_list((data or {}).get("techs")),
                    key=lambda t: (0 if t.get("trigger") else 1, float(t.get("count") or 0),
                                   t.get("name") or ""))
-    out = [research_line((data or {}).get("research")),
-           f"research available now: {len(techs)} (prerequisites done; cheapest first)"]
+    out = [f"research available now: {len(techs)} (prerequisites done; a trigger first, then the "
+           "cheapest; a trigger technology completes when you craft or build what it names)"]
     for t in techs[:40]:
         out.append(f"  {t.get('name'):<36} {cost_text(t)}")
     if len(techs) > 40:
@@ -482,9 +492,17 @@ def recipe_lines(data, enabled=False):
     out = [f"recipes: {len(rows)} read, {len(on)} enabled, {len(off)} locked"]
     if missing:
         out.append(f"  no such recipe: {', '.join(sorted(missing))}")
-    for r in sorted(on if enabled else off, key=lambda r: r["name"]):
+    shown = sorted(on if enabled else off, key=lambda r: r["name"])
+    for r in shown[:RECIPES_SHOWN]:
         by = r.get("by")
         how = (f"by {by} ({'researched' if r.get('by_researched') else 'not researched'})" if by
                else "no technology")
         out.append(f"  {r['name']:<36} {'enabled' if r.get('enabled') else 'LOCKED':<8} {how}")
+    if len(shown) > RECIPES_SHOWN:
+        out.append(f"  ... {len(shown) - RECIPES_SHOWN} more: name the recipes you need "
+                   "(fk recipes NAME...), or ask fk tech ITEM")
     return out
+
+
+#: at most this many recipe rows in one report (a world has hundreds of locked recipes)
+RECIPES_SHOWN = 40
