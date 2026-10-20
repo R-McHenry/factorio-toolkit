@@ -14,9 +14,12 @@ the last layout step before ``frm``.
 
 Steps: read_surface, read_terrain, run_models, elaborate, report_rates, place, route,
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
-stop_on. ``diff`` and ``apply`` need the game link, which this offline toolkit does not have
-(nothing here touches the game), so they report that they were skipped. Pure apart from reading
-the game codebase and writing ``out/`` and, in write_layout, the ``.fkp`` files.
+stop_on. ``diff`` and ``apply`` use the game link (``fkcore.link``: RCON, 5 s per call; the
+surface file's name is the game surface, its mode picks the force and the rules, see
+``fkcore.apply``). The link is used only when ``FK_LINK=on`` is set (so a paper game run on the
+game host never pastes by accident); without it, or with no RCON password file or nothing
+listening, they report that they were skipped. Apart from those two steps it is pure: it reads
+the game codebase and writes ``out/`` and, in write_layout, the ``.fkp`` files.
 """
 from __future__ import annotations
 
@@ -63,6 +66,8 @@ class Ctx:
     stop_on: set = field(default_factory=lambda: {"INVARIANT"})
     log: list = field(default_factory=list)          # one summary line per step run
     checks: list = field(default_factory=list)       # [(step, Check)] of every step run so far
+    link: object = None                              # the game link (fkcore.link.Rcon), on use
+    link_error: str | None = None
 
 
 def parse(text, path="<fkb>") -> list:
@@ -471,13 +476,83 @@ def s_write_layout(ctx, args):
     return lines, checks
 
 
+def _link(ctx):
+    """The game link, opened on first use; None (``ctx.link_error`` says why) without one."""
+    if ctx.link is None and ctx.link_error is None:
+        if os.environ.get("FK_LINK", "off").lower() != "on":
+            ctx.link_error = "FK_LINK is not on (FK_LINK=on uses the game link)"
+        else:
+            from . import link
+            try:
+                ctx.link = link.Rcon()
+            except (OSError, link.LinkError) as exc:
+                ctx.link_error = f"{type(exc).__name__}: {exc}"
+    return ctx.link
+
+
+def _scope(ctx, o):
+    """(area, key prefixes) from --area X0,Y0,X1,Y1 and --plot NAME[,NAME]; None, None = all."""
+    area = tuple(int(v) for v in o["area"].split(",")) if isinstance(o.get("area"), str) else None
+    keys = None
+    if isinstance(o.get("plot"), str):
+        keys = [f"{ctx.surface.name}:{p}/" for p in o["plot"].split(",")]
+        if area is None:
+            boxes = [ctx.composed.plots[p].box() for p in o["plot"].split(",")
+                     if p in ctx.composed.plots]
+            if boxes:
+                area = (min(b[0] for b in boxes) - 2, min(b[1] for b in boxes) - 2,
+                        max(b[2] for b in boxes) + 2, max(b[3] for b in boxes) + 2)
+    return area, keys
+
+
+def _net_items(ctx):
+    return {f"{factory}/{n}": list(net.items) for factory, flat in ctx.flats.items()
+            for n, net in flat.nets.items()}
+
+
 def s_diff(ctx, args):
-    return ["diff: skipped, it reads the game (snapshot of the scope) and this build is offline"], []
+    o = _opts(args, scope="all")
+    if ctx.composed is None:
+        return ["diff: no composed surface yet (floorplan first)"], []
+    r = _link(ctx)
+    if r is None:
+        return [f"diff: skipped, no game link ({ctx.link_error})"], []
+    from . import apply as applymod
+    area, keys = _scope(ctx, o)
+    if area is None:
+        area = applymod.scope_area(applymod.scope_rows(ctx.composed, None, keys), ctx.cat)
+    if area is None:
+        return ["diff: nothing is designed on this surface"], []
+    rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx))
+    checks = [Check("DIFF", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
+              if k != "OK"]
+    return rep.lines(), checks
 
 
 def s_apply(ctx, args):
-    return ["apply: skipped, it is the only world write and this build is offline (Rory's go "
-            "comes first)"], []
+    o = _opts(args, scope="all")
+    if ctx.composed is None:
+        return ["apply: no composed surface yet (floorplan first)"], []
+    if ctx.composed.problems:
+        return [f"apply: refused, the composed surface has {len(ctx.composed.problems)} invariant "
+                "problems"], _invariant_checks(ctx.surface.name, ctx.composed.problems)
+    r = _link(ctx)
+    if r is None:
+        return [f"apply: skipped, no game link ({ctx.link_error})"], []
+    from . import apply as applymod
+    area, keys = _scope(ctx, o)
+    rep = applymod.apply(r, ctx.composed, ctx.cat, area, mode=ctx.surface.mode, policy=ctx.surface,
+                         keys=keys, net_items=_net_items(ctx),
+                         label=f"fk build {os.path.basename(ctx.script)}")
+    checks = []
+    if rep.misplaced:
+        checks.append(Check("MISPLACED", ctx.surface.name, f"{rep.misplaced} ghosts are not where "
+                                                           "the design says"))
+    if rep.present < rep.design:
+        checks.append(Check("UNPLACED", ctx.surface.name, f"{rep.design - rep.present} of "
+                                                          f"{rep.design} designed entities are not "
+                                                          "there as ghost or entity"))
+    return rep.lines(), checks
 
 
 def s_stop_on(ctx, args):
@@ -561,5 +636,13 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
         if stops:
             echo(f"stopped at line {ln.n} ({ln.cmd}): {len(stops)} {stops[0].code} "
                  f"line(s), first: {stops[0]}")
+            _close(ctx)
             return 1, ctx
+    _close(ctx)
     return 0, ctx
+
+
+def _close(ctx):
+    if ctx.link is not None:
+        ctx.link.close()
+        ctx.link = None

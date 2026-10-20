@@ -12,7 +12,8 @@ save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
 - ``paste(surface, force, bp, at)``: a superforced ``build_blueprint`` of a blueprint string from a
   script inventory (the only world write). ``revive(surface, area)``: lab only, builds the area's
   ghosts at once (lab rules: free materials).
-- ``decon(surface, force, area)``: marks the area for deconstruction; ``destroy`` (lab only) removes.
+- ``decon(surface, force, area)``: marks the area for deconstruction; ``decon_list`` marks given
+  entities (name + position); ``destroy`` (lab only) removes.
 - ``produced(force, surface, items)``: the force's production counts (two samples are a measure).
 - ``say(text)``: a line in game chat.
 
@@ -28,8 +29,8 @@ import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_destroy", "lua_produced", "lua_generate", "lua_seed", "assert_safe", "snapshot",
-           "paste", "OUT_DIR"]
+           "lua_decon_list", "lua_destroy", "lua_produced", "lua_generate", "lua_seed",
+           "lua_say", "assert_safe", "snapshot", "paste", "OUT_DIR"]
 
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
@@ -204,6 +205,24 @@ rcon.print(n)
 """
 
 
+def lua_decon_list(surface, force, things):
+    """Order deconstruction of the given entities [(name, x, y)] (found by name and position)."""
+    data = json.dumps([[n, float(x), float(y)] for n, x, y in things])
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for _, t in pairs(helpers.json_to_table({_q(data)})) do
+  local e = s.find_entity(t[1], {{t[2], t[3]}})
+  if e and e.order_deconstruction({_q(force)}) then n = n + 1 end
+end
+rcon.print(n)
+"""
+
+
+def lua_say(text):
+    return f"game.print({_q(text)}) rcon.print('ok')"
+
+
 def lua_destroy(surface, area, names=None):
     filt = f", name = {{{', '.join(_q(n) for n in names)}}}" if names else ""
     return f"""
@@ -298,7 +317,9 @@ def paste(rcon, surface, force, bp, at, chunk=CHUNK):
 
 
 def snapshot(rcon, surface, area, tag="snap"):
-    """Capture ``area``; -> the capture dict (read back from script-output)."""
+    """Capture ``area``; -> the capture dict (read back from script-output). The file name
+    carries the process id, so several tools can snapshot at once."""
+    tag = f"{tag}-{os.getpid()}"
     n = rcon.lua(lua_snapshot(surface, area, tag))
     path = os.path.join(OUT_DIR, "fk5", f"{tag}.json")
     if not n.strip().isdigit():
