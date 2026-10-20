@@ -1,0 +1,11 @@
+# lab.surface: the merge game (iron + gears) on the lab surface of the test map, so fk build's
+# diff and apply can be watched live (/lab). The lab rules: free materials, direct building.
+surface  lab
+mode     lab
+terrain  none
+catalog  base
+
+place iron  = iron  plot 1000,200 20x24
+place gears = gears plot 1022,200 16x16
+
+robots works: cover iron, gears

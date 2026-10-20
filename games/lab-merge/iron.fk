@@ -1,0 +1,9 @@
+# iron.fk: ore and coal into four furnaces; the plates into a provider chest (the robot link).
+ore   = MinerRow<n=2, resource=iron-ore>   @(8, 2, rot 2)
+coal  = MinerRow<n=1, resource=coal>       @(14, 2, rot 2)
+smelt = SmelterRow<n=4, recipe=iron-plate> @(8, 11)
+out   = Chest<provider>                    @(2, 20)
+
+net ore_:   ore -> smelt
+net fuel:   coal -> smelt
+net plates: smelt -> out
