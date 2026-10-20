@@ -19,6 +19,8 @@ RUN_DIR gets:
   CLAUDE.md            with --player claude: the rules for a Claude Code session playing in this
                        folder (it reads CLAUDE.md, not AGENTS.md; Rory, 2026-10-20: an Opus agent
                        plays directly, no DeepSeek)
+  play.cmd             with --player claude: starts the goal loop (.toolkit/claude_loop.py, from
+                       SHA) for this folder; kickoff-v1.ps1 opens it
 
 Everything comes from the toolkit at SHA (git archive: the brief, the docs, bin, the template and
 fkcore), so a run is what that commit says, whatever the working tree holds. The toolkit is
@@ -62,6 +64,16 @@ LAUNCH = {
 }
 
 
+#: a Claude Code player's goal loop, in its own window
+PLAY = """@echo off
+title Factorio player (Claude) - {name}
+python "{loop}" "{run}"
+echo.
+echo The player loop has stopped (play.log says why).
+pause
+"""
+
+
 #: a Claude Code player's own file: it reads CLAUDE.md in its folder
 CLAUDE = """# Your Factorio run
 
@@ -79,7 +91,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", sha], stdout=subprocess.PIPE,
                          check=True, text=True).stdout.strip()
     src = os.path.join(run, ".kit")
-    _archive(sha, src, ("agent", "kickoff/template"))
+    _archive(sha, src, ("agent", "kickoff/template")
+             + (("kickoff/claude_loop.py",) if player == "claude" else ()))
     agent = os.path.join(src, "agent")
     brief = os.path.join(agent, "prompts", f"{prompt}.md")
     if not os.path.exists(brief):
@@ -94,6 +107,12 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     _archive(sha, os.path.join(run, ".toolkit"))
     shutil.copytree(os.path.join(src, "kickoff", "template", "game"), os.path.join(run, "game"),
                     ignore=shutil.ignore_patterns("out"))
+    if player == "claude":
+        loop = os.path.join(run, ".toolkit", "claude_loop.py")
+        shutil.copy(os.path.join(src, "kickoff", "claude_loop.py"), loop)
+        with open(os.path.join(run, "play.cmd"), "w", encoding="ascii", newline="\r\n") as fh:
+            fh.write(PLAY.format(name=os.path.basename(os.path.abspath(run)), loop=os.path.abspath(loop),
+                                 run=os.path.abspath(run)))
     shutil.rmtree(src)
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump(LAUNCH, fh, indent=1)

@@ -5,8 +5,8 @@ kickoff-v1: a V1 player run, the laptop side (the V1 successor of v4-hand\kickof
   kickoff-v1.cmd -Prompt NAME          ... on agent\prompts\NAME.md
   kickoff-v1.cmd -NoReset              no new map (the run folder and DeepSeek only)
   kickoff-v1.cmd -NoLaunch             no DeepSeek (the map and the run folder only)
-  kickoff-v1.cmd -Player claude        the run folder for a Claude Code player (its CLAUDE.md);
-                                       no DeepSeek: the Claude session is started in the folder
+  kickoff-v1.cmd -Player claude        a Claude Code player: its CLAUDE.md, and its goal loop
+                                       (claude_loop.py) in a window of its own (the run's play.cmd)
 
 Steps: stop earlier runs (as computah); deploy the toolkit at the commit (HEAD) to the host as
 its own dir fk-v5-<sha>, never over another; the host side, run from that dir:
@@ -18,7 +18,6 @@ come from the run's launch.json; then the feed window.
 #>
 param([string]$Prompt = "core-v1", [switch]$NoReset, [switch]$NoLaunch, [string]$Sha = "HEAD",
       [ValidateSet("deepseek", "claude")][string]$Player = "deepseek")
-if ($Player -eq "claude") { $NoLaunch = $true }
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $v5 = Split-Path -Parent $here
@@ -35,6 +34,8 @@ $run = Join-Path $P "runs\$name"
 # one run at a time: an earlier session would share the world with this one
 runas /savecred /user:computah "powershell -NoProfile -ExecutionPolicy Bypass -File $P\stop.ps1"
 Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "feed\.(py|js)" } |
+    ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
+Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "python.exe" -and $_.CommandLine -match "claude_loop\.py" } |
     ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
 
 # the toolkit on the host, pinned for the run (cmd pipes the tar's bytes; PowerShell would not)
@@ -57,6 +58,12 @@ icacls $run /grant "computah:(OI)(CI)F" /T /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "could not give computah the run folder $run" }
 Write-Host "workspace: $run"
 if ($NoLaunch) { exit 0 }
+if ($Player -eq "claude") {
+    # explorer opens it: the window lives outside this shell, in the user's own environment
+    explorer.exe (Join-Path $run "play.cmd")
+    Write-Host "Claude is playing: the window 'Factorio player (Claude)', $run\play.log"
+    exit 0
+}
 
 runas /savecred /user:computah "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File $P\launch.ps1 -Run $run"
 $pre = Join-Path $run "preflight.txt"
