@@ -6,13 +6,16 @@ carriers, roles, attach points) is added per template in ``fkcore.fragments``; t
 here (``m0``, ``m1``...) are the keys the fragment uses for the same machines.
 
 Endpoints come from the recipe (ingredients in, products out), plus the fuel of a burner machine,
-the resource of a drill and every science pack for a lab. Pure, stdlib only.
+the resource of a drill and every science pack for a lab. The steam chain has its own kinds: a
+``Boiler`` (water and fuel in, steam out) and a ``SteamEngine`` (steam in; electricity is not an
+item, so it makes nothing the netlist carries). ``InfinityPipe`` is a lab-only fluid source (the
+lab's free materials; no recipe makes one). Pure, stdlib only.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .catalog import FUEL_USE_W, FUEL_VALUE_J, MINING_TIME
+from .catalog import FUEL_USE_W, FUEL_VALUE_J, MINING_TIME, STEAM_PER_S
 
 __all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "machines", "science_packs",
            "literal_machines"]
@@ -200,6 +203,42 @@ def chem_plant(params, cat):
     return [_crafter(cat, f"m{k}", "chemical-plant", recipe) for k in range(_int(params, "n", 1))]
 
 
+def boiler(params, cat):
+    """``Boiler<fuel=coal, machine=boiler>``: water and fuel in, steam out (60/s each)."""
+    _only(params, ("fuel", "machine"))
+    machine = _word(params, "machine", "boiler")
+    if cat.has_entity(machine) and cat.kind(machine) != "boiler":
+        raise TemplateError(f"{machine} is not a boiler")
+    fuel = _word(params, "fuel", "coal")
+    rate = STEAM_PER_S["boiler"]
+    needs = {"water": rate, fuel: _fuel_rate("boiler", fuel)}
+    return [MSpec("m0", machine, None, needs, {"steam": rate}, frozenset(needs),
+                  extra={"fuel": fuel})]
+
+
+def steam_engine(params, cat):
+    """``SteamEngine<machine=steam-engine>``: steam in at full power (30/s, 900 kW)."""
+    _only(params, ("machine",))
+    machine = _word(params, "machine", "steam-engine")
+    if cat.has_entity(machine) and cat.kind(machine) != "generator":
+        raise TemplateError(f"{machine} is not a generator")
+    # role=engine on its .fkp line tells a netlist engine from an imported plant's turbine
+    return [MSpec("m0", machine, None, {"steam": STEAM_PER_S["steam-engine"]}, {},
+                  frozenset({"steam"}), extra={"role": "engine"})]
+
+
+def infinity_pipe(params, cat):
+    """``InfinityPipe<fluid, rate=>``: a lab-only source of ``fluid`` (the lab's free materials).
+    Without a rate it is unbounded (an UNBOUNDED check line)."""
+    _only(params, ("fluid", "rate"))
+    fluid = _word(params, "fluid")
+    if not cat.is_fluid(fluid):
+        raise TemplateError(f"{fluid} is not a fluid")
+    rate = _rate(params, "rate")
+    return [MSpec("m0", "infinity-pipe", None, {}, {fluid: INF if rate is None else rate},
+                  frozenset(), source=rate is None, extra={"fluid": fluid})]
+
+
 def lab_row(params, cat):
     """``LabRow<n>``: n labs; each takes every science pack that reaches it (a sink)."""
     _only(params, ("n",))
@@ -252,6 +291,9 @@ TEMPLATES = {
     "OffshorePump": offshore_pump,
     "Refinery": refinery,
     "ChemPlant": chem_plant,
+    "Boiler": boiler,
+    "SteamEngine": steam_engine,
+    "InfinityPipe": infinity_pipe,
     "LabRow": lab_row,
     "Chest": chest,
     "TurretRow": turret_row,
@@ -284,6 +326,20 @@ def literal_machines(entities, cat):
         elif kind == "offshore-pump" and rate is not None:
             # without a rate it feeds a power plant (an imported Literal), not the netlist
             out.append(MSpec(local, e.name, None, {}, {"water": rate}, frozenset()))
+        elif kind == "boiler" and "fuel" in a:
+            # the same rule: a boiler without fuel= is part of an imported plant
+            spec = boiler({"fuel": a["fuel"], "machine": e.name}, cat)[0]
+            spec.local = local
+            out.append(spec)
+        elif kind == "generator" and a.get("role") == "engine":
+            spec = steam_engine({"machine": e.name}, cat)[0]
+            spec.local = local
+            out.append(spec)
+        elif kind == "infinity-pipe" and "fluid" in a:
+            spec = infinity_pipe({"fluid": a["fluid"], **({"rate": rate} if rate is not None
+                                                         else {})}, cat)[0]
+            spec.local = local
+            out.append(spec)
         elif kind == "lab":
             out.append(MSpec(local, e.name, None, {}, {}, science_packs(cat), sink=True))
         elif kind in ("container", "logistic-container") and "role" in a:

@@ -25,7 +25,9 @@ from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
            "frame_of"]
 
-_SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump")
+_SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump",
+           "Boiler", "SteamEngine", "InfinityPipe")
+_NO_DIRECTION = ("infinity-pipe",)          # fluid prototypes the game never turns
 
 
 def belts(flat, key, side):
@@ -80,7 +82,7 @@ def _single(flat, keys, cat, ins, outs):
     w, h = cat.size(m.prototype)
     local = keys[0].rsplit("/", 1)[1]
     attrs = _machine_attrs(m)
-    ents = [FEnt(local, m.prototype, w / 2, h / 2, None, None, attrs)]
+    ents = [FEnt(local, m.prototype, w / 2, h / 2, _facing(m, cat), None, attrs)]
     roles = {}
     for i, (_net, items) in enumerate(ins):
         roles[f"in{i + 1}"] = Role(f"in{i + 1}", "in", items, [local], [(w / 2, h / 2, None)])
@@ -90,11 +92,20 @@ def _single(flat, keys, cat, ins, outs):
     return _finish(Fragment(flat.insts[keys[0].rsplit("/", 1)[0]].kind, {}, ents, roles, (w, h)))
 
 
+def _facing(m, cat):
+    """N for a machine on a fluid net (its pipe connections turn with it, so ``rot`` in the hint
+    turns it); None, as before, for every other single machine."""
+    fluid = any(cat.is_fluid(i) for i in list(m.needs) + list(m.makes))
+    if fluid and cat.has_fluid_boxes(m.prototype) and m.prototype not in _NO_DIRECTION:
+        return 0
+    return None
+
+
 def _machine_attrs(m):
     attrs = {}
     if m.recipe:
         attrs["recipe"] = m.recipe
-    for k in ("resource", "role"):
+    for k in ("resource", "role", "fuel", "fluid"):
         if k in m.extra:
             attrs[k] = m.extra[k]
     if m.drain is not None:
