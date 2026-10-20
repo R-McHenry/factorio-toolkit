@@ -25,6 +25,10 @@ the area that no layout entity explains is one of:
   suffix, ``<actor>@<tick>.2``. ``revert`` leaves it ``NOBODY`` for the next apply to
   steamroll, and ``strict`` leaves it ``NOBODY``, loud.
 
+The toolkit's own entities (``own``, the record of what the applies pasted, ``fkcore.own``) are
+no foreign change: one the design has dropped is ``NOBODY`` (the next apply removes it) whatever
+the policy says, unless a claim or a mark covers it or a player touched it (a ``last_user``).
+
 Enemies and nature (neutral force) are separate and never judged. Each foreign change gets a
 "changes here" line with who, what and a hint: built by a player; an unkeyed ghost; a carrier next
 to net N, which looks like a fix to it (offer ``adopt``). Expired marks are listed for clearing.
@@ -143,10 +147,11 @@ def _policy(text):
     return (parts[0] if parts else "strict"), (parts[1] if len(parts) > 1 else None)
 
 
-def sense(surface, live, cat, area, policy, tick=None, net_items=None) -> SenseReport:
+def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None) -> SenseReport:
     """``policy``: a ``surface.SurfaceFile`` (its watch and notify settings) or a dict
     {"plots": "keep", "sanctioned": "mark 2h", "notify": "nearby"}. ``net_items``: {net: items}
-    for WRONG_ITEM, with surface net names (``<factory>/<net>``)."""
+    for WRONG_ITEM, with surface net names (``<factory>/<net>``). ``own``: the toolkit's own
+    entities ({``own.at``: ``own.Row``}, ``fkcore.own.load``), or None."""
     if hasattr(policy, "watch"):
         watch, notify = dict(policy.watch), policy.notify_mode
     else:
@@ -226,6 +231,15 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None) -> SenseR
         actor = t.get("last_user") or "unknown"
         hint = _hint(t, cat, carrier_tiles)
         what = f"{'a ghost of ' if t['ghost'] else ''}{t['name']} at {_fmt(t['x'])},{_fmt(t['y'])}"
+        mine = own.get((t["name"], round(t["x"], 3), round(t["y"], 3))) if own else None
+        if mine is not None and not t.get("last_user"):
+            owners[i] = "NOBODY"
+            verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], mine.key,
+                                    "the toolkit's own, dropped from the design: the next apply "
+                                    "removes it", None, "own"))
+            changes.append(f"{what}: the toolkit's own ({mine.key}), dropped from the design "
+                           f"({region}); the next apply removes it")
+            continue
         if action in ("mark", "keep"):
             p = pending.setdefault((actor, action), {
                 "mark": fkpmod.Mark(None, [], None if action == "keep" else

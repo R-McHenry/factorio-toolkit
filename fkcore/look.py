@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 from . import compose, fkp, link, scene, sense
 from . import notify as notifymod
+from . import own as ownmod
 from . import surface as surfacemod
 
 __all__ = ["LookError", "Look", "composed", "net_items", "policy", "default_area", "report",
@@ -152,10 +153,11 @@ def default_area(s, cat):
     return scope_area(s.rows(), cat)
 
 
-def report(s, live, cat, area, pol, net_items=None) -> Look:
-    """The look at ``area`` of the composed ``s`` against the ``live`` scene. Pure."""
+def report(s, live, cat, area, pol, net_items=None, own=None) -> Look:
+    """The look at ``area`` of the composed ``s`` against the ``live`` scene. Pure. ``own``: the
+    toolkit's own entities (``fkcore.own``): those the design dropped read NOBODY."""
     area = tuple(int(v) for v in area)
-    rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items)
+    rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items, own=own)
     design = compose.render_scene(scene.design_scene(s, cat, list(area)), cat, area)
     return Look(s.name, area, dict(pol), rep, design, compose.render_scene(live, cat, area))
 
@@ -197,7 +199,7 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
     items, notes = net_items(game, sf, cat)
     pol = policy(sf, notify, watch)
     live = scene.from_capture(link.snapshot(r, sf.name, area, tag, keep=False))
-    lk = report(s, live, cat, area, pol, items)
+    lk = report(s, live, cat, area, pol, items, ownmod.load(game, sf.name))
     ghosts = sorted({v.name for v in lk.rep.verdicts if v.verdict == "GHOST"})
     if ghosts:
         # a ghost that stays is a blocked build: say why (SHORT: the network holds none of the

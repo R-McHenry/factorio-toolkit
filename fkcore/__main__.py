@@ -187,12 +187,12 @@ def _composed(game, cat):
 
 def _sense(a, cat):
     import json
-    from . import scene, sense
+    from . import own, scene, sense
     sf, surface_lay, lay_path, s = _composed(a.game, cat)
     with open(a.capture, encoding="utf-8") as fh:
         live = scene.from_capture(json.load(fh))
     area = [int(v) for v in a.area.split(",")]
-    rep = sense.sense(s, live, cat, area, sf)
+    rep = sense.sense(s, live, cat, area, sf, own=own.load(a.game, sf.name))
     print("\n".join(rep.lines()))
     if a.write_marks and rep.marks:
         for m in rep.marks:

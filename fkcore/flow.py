@@ -41,6 +41,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from . import compose, connect, expand, fkp, placer, rates, route
+from . import own as ownmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
 from .catalog import Catalog
@@ -677,6 +678,13 @@ def s_report_bom(ctx, args):
 
 def s_write_layout(ctx, args):
     lines, checks = [], []
+    if ctx.surface is not None and ownmod.load(ctx.root, ctx.surface.name) is None:
+        # 1.2: the toolkit's own entities start as the .fkp files last written (what was built
+        # from them), before this step writes the new ones; each play apply keeps it after that
+        record = ownmod.seed(ctx.root, ctx.surface.name, ctx.cat)
+        ownmod.save(ctx.root, ctx.surface.name, record)
+        lines.append(f"own: {len(record)} entities of the last written .fkp files are the "
+                     f"toolkit's own (out/own/{ctx.surface.name}.json)")
     for p in _factories(ctx):
         lay = ctx.layouts.get(p.factory)
         if lay is None:
@@ -734,11 +742,12 @@ def s_diff(ctx, args):
         return [f"diff: skipped, no game link ({ctx.link_error})"], []
     from . import apply as applymod
     area, keys = _scope(ctx, o)
+    own = ownmod.load(ctx.root, ctx.surface.name)
     if area is None:
-        area = applymod.scope_area(applymod.scope_rows(ctx.composed, None, keys), ctx.cat)
+        area = applymod.default_area(ctx.composed, ctx.cat, keys, own)
     if area is None:
         return ["diff: nothing is designed on this surface"], []
-    rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx))
+    rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx), own=own)
     ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "GHOST"})
     if ghosts:
         from . import supply
@@ -784,7 +793,9 @@ def s_apply(ctx, args):
                          force=getattr(ctx.surface, "force", None), policy=ctx.surface,
                          keys=keys, net_items=_net_items(ctx),
                          label=f"fk build {os.path.basename(ctx.script)}",
-                         seed=ctx.ground is None)
+                         seed=ctx.ground is None, own=ownmod.load(ctx.root, ctx.surface.name))
+    if rep.own is not None:
+        ownmod.save(ctx.root, ctx.surface.name, rep.own)
     checks = []
     if rep.misplaced:
         checks.append(Check("MISPLACED", ctx.surface.name, f"{rep.misplaced} ghosts are not where "

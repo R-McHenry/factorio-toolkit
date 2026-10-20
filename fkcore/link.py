@@ -245,13 +245,22 @@ rcon.print(n)
 
 
 def lua_decon_list(surface, force, things):
-    """Order deconstruction of the given entities [(name, x, y)] (found by name and position)."""
+    """Order deconstruction of the given entities [(name, x, y)] (found by name and position).
+    With no entity of that name there, a ghost of it at that position is ordered out instead:
+    the game removes a ghost ordered for deconstruction at once (checked on a laptop test server,
+    Factorio 2.0.77, 2026-10-20). A diff names a ghost by the entity it stands for, so before 1.2
+    an emptied factory's ghosts were never found and stayed."""
     data = json.dumps([[n, float(x), float(y)] for n, x, y in things])
     return f"""
 local s = game.get_surface({_q(surface)})
 local n = 0
 for _, t in pairs(helpers.json_to_table({_q(data)})) do
   local e = s.find_entity(t[1], {{t[2], t[3]}})
+  if not e then
+    for _, g in pairs(s.find_entities_filtered{{type = 'entity-ghost', ghost_name = t[1], position = {{t[2], t[3]}}, radius = 0.5}}) do
+      if g.position.x == t[2] and g.position.y == t[3] then e = g break end
+    end
+  end
   if e and e.order_deconstruction({_q(force)}) then n = n + 1 end
 end
 rcon.print(n)

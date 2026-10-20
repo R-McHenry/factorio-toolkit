@@ -6,9 +6,15 @@ it goes through ``link.paste`` (superforced: ghosts go over what stands in the w
 marks that for deconstruction). Then, by mode:
 
 - ``play``: ghosts only; robots build them. A world entity in the area that the design does not
-  explain and the watch policy leaves to the apply (``NOBODY``) is ordered for deconstruction;
-  ``MARKED`` and ``CLAIMED`` ones stay. The paste must land where designed: a shifted paste is
-  reported (``MISPLACED``), never cleaned up.
+  explain and the watch policy leaves to the apply (``NOBODY``) is ordered for deconstruction, an
+  unbuilt ghost too (the game removes a ghost ordered out at once); ``MARKED`` and ``CLAIMED``
+  ones stay. The paste must land where designed: a shifted paste is reported (``MISPLACED``),
+  never cleaned up.
+- ``own`` (1.2, ``fkcore.own``): the record of what the applies pasted. The toolkit's own
+  entities that the design dropped are ``NOBODY`` whatever the watch policy says, so a moved,
+  shrunk or emptied plot, or a replaced row, leaves nothing behind; with no ``area`` the scope
+  reaches them wherever they stand. ``ApplyReport.own`` is the record after the paste, for the
+  caller to save.
 - ``lab``: the chunks under the area (and no others) are generated and charted first (a new
   surface has none), each drill row's designed resource is seeded under it (lab ground has no
   ore; ``seed=False`` when the surface has a real terrain, whose ore is already there), a
@@ -39,10 +45,11 @@ import time
 from dataclasses import dataclass, field
 
 from . import codec, link, scene, sense
+from . import own as ownmod
 from .fkp import natural_key
 
-__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "force_for", "rip_points",
-           "rip_load", "rip_minutes", "moved", "rip_report"]
+__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
+           "force_for", "rip_points", "rip_load", "rip_minutes", "moved", "rip_report"]
 
 #: a rip worth a RIP check: this many minutes of robot time, or this many structures
 RIP_WARN_MIN, RIP_WARN_N = 3.0, 100
@@ -65,6 +72,8 @@ class ApplyReport:
     misplaced: int = 0                 # ghosts that are not where the design says (play)
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
+    dropped: int = 0                   # of them, the toolkit's own that the design dropped
+    own: dict | None = None            # the record of what the applies pasted, after this one
     chunks: int = 0
     seeded: int = 0
     revived: int = 0
@@ -82,8 +91,9 @@ class ApplyReport:
                        f"{self.revived} revived, {self.revive_failed} not revivable"
                        + (f", paste corrected by {self.corrected}" if self.corrected else ""))
         else:
-            out.append(f"  play: {self.decon} NOBODY entities ordered for deconstruction; robots "
-                       "build the ghosts")
+            out.append(f"  play: {self.decon} NOBODY entities ordered for deconstruction"
+                       + (f" ({self.dropped} of them the toolkit's own, dropped from the design)"
+                          if self.dropped else "") + "; robots build the ghosts")
         if self.placed_alone:
             out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts")
         if self.misplaced:
@@ -114,6 +124,17 @@ def _touches(tiles, area):
     return any(area[0] <= t[0] < area[2] and area[1] <= t[1] < area[3] for t in tiles)
 
 
+def default_area(s, cat, keys=None, own=None):
+    """An apply's area when none is given: the design in scope plus the toolkit's own entities
+    it dropped (``own``), wherever they stand (a moved plot's old ground). None: nothing."""
+    rows = scope_rows(s, None, keys)
+    for row in ownmod.dropped(own, s):
+        if ownmod.in_scope(row, cat, None, keys):
+            rows.append({"src": row.key, "name": row.name, "x": row.x, "y": row.y,
+                         "direction": row.dir, "attrs": {}})
+    return scope_area(rows, cat)
+
+
 def scope_area(rows, cat, margin=2):
     """The bounding box of ``rows``' tiles, plus ``margin``."""
     xs, ys = [], []
@@ -140,23 +161,39 @@ def _things(cap):
     return want
 
 
-def diff(r, s, cat, area, policy, net_items=None, tag="diff"):
+def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None):
     """Snapshot ``area`` and judge it against the design: a ``sense.SenseReport``."""
     live = scene.from_capture(link.snapshot(r, s.name, area, tag))
-    return sense.sense(s, live, cat, list(area), policy, net_items=net_items)
+    return sense.sense(s, live, cat, list(area), policy, net_items=net_items, own=own)
 
 
 def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None, keys=None,
-          net_items=None, tag="apply", seed=True) -> ApplyReport:
-    """Paste the design inside ``area`` (default: all of ``s``) as one named blueprint."""
+          net_items=None, tag="apply", seed=True, own=None) -> ApplyReport:
+    """Paste the design inside ``area`` (default: all of ``s``, and the toolkit's own entities it
+    dropped) as one named blueprint. ``own``: the record of what the applies pasted."""
     t0 = time.time()
+    given = area
     rows = scope_rows(s, area, keys)
     if area is None:
-        area = scope_area(rows, cat) or (0, 0, 0, 0)
+        area = default_area(s, cat, keys, own)
     force = force or force_for(mode)
-    rep = ApplyReport(s.name, force, mode, tuple(area), design=len(rows))
+    rep = ApplyReport(s.name, force, mode, tuple(area or (0, 0, 0, 0)), design=len(rows))
+    if area is None:
+        rep.notes.append("nothing designed in this scope")
+        return rep
+    standing = []
+    if mode != "lab" and policy is not None:
+        before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own)
+        nobody = [(v.name, v.x, v.y) for v in before.verdicts if v.verdict == "NOBODY"]
+        standing = [ownmod.at(v.name, v.x, v.y) for v in before.verdicts
+                    if v.verdict == "NOBODY" and v.action == "own"]
+        rep.dropped = len(standing)
+        if nobody:
+            rep.decon = int(r.lua(link.lua_decon_list(s.name, force, nobody)).strip() or 0)
+        rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
     if not rows:
         rep.notes.append("nothing designed in this scope")
+        rep.seconds = time.time() - t0
         return rep
     if mode == "lab":
         rep.chunks = int(r.lua(link.lua_generate_area(s.name, force, area)).strip() or 0)
@@ -169,11 +206,6 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             rep.seeded = int(r.lua(link.lua_seed(s.name, ore)).strip() or 0)
         elif ore:
             rep.notes.append("no ore seeded: the drills stand on the terrain's ore")
-    elif policy is not None:
-        before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before")
-        nobody = [(v.name, v.x, v.y) for v in before.verdicts if v.verdict == "NOBODY"]
-        if nobody:
-            rep.decon = int(r.lua(link.lua_decon_list(s.name, force, nobody)).strip() or 0)
     desc = f"fk apply {s.name} area {','.join(str(int(v)) for v in area)} ({len(rows)} entities)"
     bp = codec.blueprint(rows, description=desc, label=label or f"apply {s.name}",
                          wires=codec.pole_wires(rows, cat))
