@@ -39,7 +39,10 @@ reversed tree, so its inserter turns round to pick from the machine.
 A **fluid net** (every item a fluid) is not a belt job: it goes to the fluid plug-in,
 ``fkcore.fluid_route.route(flat, lay, cat, nets, blocked, box, limit) -> (added, how, failed)``
 (``{net: [Entity]}``, ``{net: report text}``, ``{net: reason}``), called after the belt nets
-with the belts already laid. Without the plug-in a fluid net is reported, not routed.
+with the belts already laid. Its job carries the plug-in's ``reserved`` tiles (its machines'
+connection tiles, an offshore pump's water), which are among its ends, so no belt takes them, and
+the plug-in's ``why_not`` as its skip reason. Without the plug-in a fluid net is reported, not
+routed.
 
 Per net the ground is: every entity tile, every placed instance's whole frame (the empty tiles
 inside a row are kept for poles), every other net's start and end tiles, every tile another
@@ -99,9 +102,10 @@ class NetJob:
     owners: list = field(default_factory=list)     # "<inst>.<role>" per start/goal, for the report
     skip: str | None = None
     fluid: bool = False                            # a fluid net: the fluid plug-in routes it
+    reserved: list = field(default_factory=list)   # tiles a fluid net's connections need
 
     def ends(self):
-        return [t for t, _h in self.starts] + [t for t, _h in self.goals]
+        return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
 
     def drivers(self):
         return len(self.starts) + len(self.sources)
@@ -164,9 +168,14 @@ def jobs(flat, lay, cat) -> dict:
     """{net: NetJob} from every placed instance's attach points (a fluid net: flagged only)."""
     out = {}
     fluids = fluid_nets(flat, cat)
+    plugin = _fluid_plugin() if fluids else None
     for name in sorted(fluids):
-        out[name] = NetJob(name, fluid=True,
-                           skip="a fluid net: pipes are routed by the fluid plug-in, not built yet")
+        if plugin is None:
+            out[name] = NetJob(name, fluid=True, skip="a fluid net: pipes are routed by the fluid "
+                                                       "plug-in, not built yet")
+        else:
+            out[name] = NetJob(name, fluid=True, skip=plugin.why_not(flat, lay, cat, name),
+                               reserved=plugin.reserved(flat, lay, cat, name))
     for path, rec in sorted(lay.insts.items()):
         if rec.kind == "Literal" or path not in flat.insts:
             continue
@@ -190,7 +199,7 @@ def jobs(flat, lay, cat) -> dict:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
             job.owners.append(f"{path}.{role}")
     for net, job in out.items():
-        if job.skip is not None:
+        if job.skip is not None or job.fluid:
             continue
         if not job.drivers():
             job.skip = "no driver role is placed"
@@ -631,7 +640,7 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     terrain = frozenset(tuple(t) for t in blocked)
     have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
     kept = sorted(n for n in js if n in have)
-    todo = [n for n in js if n not in have and js[n].skip is None]
+    todo = [n for n in js if n not in have and js[n].skip is None and not js[n].fluid]
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
     frames = set()
     for path, rec in lay.insts.items():
@@ -674,12 +683,11 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
                          terrain)
         if guard:
             failed[net] = f"{failed[net]}; {guard}"
-    fluid_todo = sorted(n for n in js if js[n].fluid and n not in have)
+    fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and js[n].skip is None)
     plugin = _fluid_plugin() if fluid_todo else None
     if plugin is not None:
         f_added, f_how, f_failed = plugin.route(flat, new, cat, fluid_todo, terrain, box, limit)
         for net in fluid_todo:
-            js[net].skip = None
             for e in f_added.get(net, ()):
                 new.add(e)
         added.update(f_added)

@@ -1,21 +1,33 @@
-"""Prototype facts, read from fkcore/data/catalog.json.
+"""Prototype facts, read from fkcore/data/catalog.json and fkcore/data/fluidboxes.json.
 
 Copied from C:\\fk-lead\\repo\\fk\\catalog.py (d6018d3) with its measured fixture fk/catalog-v5.json
 (Factorio 2.0 + Space Age prototypes). Added for V1: a default path, ``load()`` with no argument,
 ``kind`` (the entity type), ``recipe_rates`` (per-second ingredients and products, fluids included)
 and the few base-game facts the fixture does not carry (``FUEL_USE_W``, ``FUEL_VALUE_J``,
-``MINING_TIME``). Every other module takes a Catalog instance instead of opening the fixture itself.
-Pure, stdlib only.
+``MINING_TIME``, ``STEAM_PER_S``). Every other module takes a Catalog instance instead of opening
+the fixture itself.
+
+Fluid boxes (``fluidboxes.json``, read from the game over RCON, 2.0.77, see its ``source``):
+every fluid prototype's boxes and pipe connections per direction, and per crafting machine and
+recipe the boxes the recipe makes live. :meth:`Catalog.fluid_boxes_at` turns them into world
+tiles: for an entity at (x, y) facing ``direction`` with ``recipe``, each live box with its
+fluid (filter or recipe) and its connections (the tile inside the entity, the side it faces, the
+tile a pipe must stand on). An entity the measured fixture lacks (``infinity-pipe``) is added from
+that file. Pure, stdlib only.
 """
 from __future__ import annotations
 
 import json
 import math
 import os
+from collections import namedtuple
 
-__all__ = ["Catalog", "DEFAULT_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME"]
+__all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
+           "STEAM_PER_S", "FluidBox", "PipeConn"]
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
+#: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
+FLUID_PATH = os.path.join(os.path.dirname(DEFAULT_PATH), "fluidboxes.json")
 
 # Base-game facts the measured fixture does not record (Factorio 2.0 prototype values).
 #: Burner energy use in watts, for machines whose endpoints include a fuel input.
@@ -25,6 +37,23 @@ FUEL_USE_W = {"stone-furnace": 90e3, "steel-furnace": 90e3, "burner-mining-drill
 FUEL_VALUE_J = {"coal": 4e6, "wood": 2e6, "solid-fuel": 12e6, "rocket-fuel": 100e6}
 #: Mining time per resource (an electric drill at mining speed 0.5 makes 0.5/s of a time-1 ore).
 MINING_TIME = {"iron-ore": 1.0, "copper-ore": 1.0, "coal": 1.0, "stone": 1.0, "uranium-ore": 2.0}
+#: Steam per second: a boiler makes it from as much water (1.8 MW at 30 kJ a unit, 165 C), a steam
+#: engine uses it at full power (fluid_usage_per_tick 0.5, read from the game: 900 kW).
+STEAM_PER_S = {"boiler": 60.0, "steam-engine": 30.0}
+
+_STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
+
+#: One pipe connection of a placed entity, in world tiles: ``tile`` (inside the entity), ``dir``
+#: (the side it faces: 0 N, 4 E, 8 S, 12 W), ``target`` (the tile next to it on that side, where a
+#: connecting entity's own connection faces back; None for an underground one), ``flow`` (input,
+#: output, input-output), ``type`` (normal, underground), ``reach`` (an underground's max
+#: distance, end to end) and ``categories`` (they must share one to connect).
+PipeConn = namedtuple("PipeConn", "tile dir target flow type reach categories",
+                      defaults=(None, ("default",)))
+#: One live fluid box of a placed entity: ``box`` (1-based, the game's order), ``fluid`` (the
+#: filter or the recipe's fluid; None = whatever flows in), ``production`` (input, output,
+#: input-output, none) and ``conns`` (its PipeConns).
+FluidBox = namedtuple("FluidBox", "box fluid production conns")
 
 # Entity types that are powered by electricity. Inserters, mining drills and furnaces hold burner
 # and electric prototypes alike, so there the burners are named: every other inserter, drill
@@ -38,17 +67,29 @@ _BURNERS = frozenset({"burner-inserter", "burner-mining-drill", "stone-furnace",
 class Catalog:
     """Immutable view over the measured prototype catalog."""
 
-    def __init__(self, version, entities, recipes):
+    def __init__(self, version, entities, recipes, fluid=None):
         self.version = version
         self._entities = entities
         self._recipes = recipes
         self._fluids = None
+        self._fluid = fluid or {}
+        for name, row in (self._fluid.get("entities") or {}).items():
+            if name not in self._entities:      # a prototype the measured fixture lacks
+                w, h = row["size"]
+                self._entities[name] = {"name": name, "type": row["type"], "tile_width": w,
+                                        "tile_height": h,
+                                        "collision_box": row.get("collision_box")}
 
     # -- construction ---------------------------------------------------------------------
     @classmethod
     def load(cls, path=DEFAULT_PATH) -> "Catalog":
+        """The fixture at ``path``, with the fluid boxes beside it (``fluidboxes.json``) if any."""
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
+        fluid = os.path.join(os.path.dirname(os.path.abspath(path)), "fluidboxes.json")
+        if os.path.exists(fluid):
+            with open(fluid, encoding="utf-8") as fh:
+                data = dict(data, fluidboxes=json.load(fh))
         return cls.from_dict(data)
 
     @classmethod
@@ -59,7 +100,7 @@ class Catalog:
         recipes = {}
         for row in data.get("recipes", []):
             recipes[row["name"]] = row
-        return cls(data.get("version"), entities, recipes)
+        return cls(data.get("version"), entities, recipes, data.get("fluidboxes"))
 
     # -- prototypes -----------------------------------------------------------------------
     def entity(self, name) -> dict:
@@ -96,6 +137,107 @@ class Catalog:
     def kind(self, name) -> str:
         """The prototype's entity type (``transport-belt``, ``inserter``, ``assembling-machine``...)."""
         return self.entity(name).get("type", "")
+
+    # -- fluid boxes ----------------------------------------------------------------------
+    def has_fluid_boxes(self, name) -> bool:
+        """The prototype has fluid boxes (pipes, pumps, boilers, engines, chemical plants ...)."""
+        return bool(self.fluid_boxes(name))
+
+    def fluid_boxes(self, name) -> list:
+        """The prototype's fluid boxes as read from the game (``fluidboxes.json``), [] if none."""
+        row = (self._fluid.get("entities") or {}).get(name)
+        return list(row["boxes"]) if row else []
+
+    def fluid_boxes_at(self, name, x, y, direction=None, recipe=None) -> list:
+        """[FluidBox] of an entity of ``name`` centred at (x, y) facing ``direction`` (None = N)
+        with ``recipe``, in world tiles: the boxes the game makes live, in its order.
+
+        A crafting machine with a recipe the file measured takes that recipe's live boxes (one
+        fluid on a side with several boxes holds them all: one box, every connection). A recipe
+        it did not measure gets the same rule from the recipe itself (fluids in order, one per
+        box, an explicit ``fluidbox_index`` first). No recipe: every prototype box, except where
+        the boxes need a fluid recipe (assembling machines 2 and 3)."""
+        row = (self._fluid.get("entities") or {}).get(name)
+        if not row:
+            return []
+        d = int(direction or 0) % 16
+        k = d // 4 if d % 4 == 0 else 0
+        protos = {b["index"]: b for b in row["boxes"]}
+        live = self._recipe_boxes(name, row, recipe)
+        if live is None:
+            if row.get("boxes_need_fluid_recipe"):
+                return []
+            live = [(b.get("filter"), [[b["index"], j + 1] for j in range(len(b["connections"]))])
+                    for b in row["boxes"]]
+        out = []
+        for i, (fluid, members) in enumerate(live, 1):
+            conns, prods = [], set()
+            for bi, ci in members:
+                b = protos[bi]
+                prods.add(b["production"])
+                c = b["connections"][ci - 1]
+                ax, ay = c["at"][k]
+                tile = (math.floor(float(x) + ax), math.floor(float(y) + ay))
+                facing = (int(c["dir"]) + d) % 16 if d % 4 == 0 else int(c["dir"])
+                step = _STEP[facing]
+                target = None if c["type"] != "normal" else (tile[0] + step[0], tile[1] + step[1])
+                conns.append(PipeConn(tile, facing, target, c["flow"], c["type"],
+                                      c.get("max_distance"),
+                                      tuple(c.get("categories") or ("default",))))
+            prod = prods.pop() if len(prods) == 1 else "input-output"
+            out.append(FluidBox(i, fluid or protos[members[0][0]].get("filter"), prod,
+                                tuple(conns)))
+        return out
+
+    def water_tiles(self, name, x, y, direction=None) -> set:
+        """The tiles that must be water for an offshore pump at (x, y) facing ``direction`` (its
+        ``tile_buildability_rules``, read from the game); empty for anything else."""
+        row = (self._fluid.get("entities") or {}).get(name) or {}
+        if not row.get("water_area"):
+            return set()
+        x0, y0, x1, y1 = row["water_area"]
+        corners = [(x0, y0), (x1, y1)]
+        for _ in range((int(direction or 0) % 16) // 4):
+            corners = [(-cy, cx) for cx, cy in corners]          # a quarter turn clockwise
+        (ax, ay), (bx, by) = corners
+        lo_x, hi_x = sorted((ax, bx))
+        lo_y, hi_y = sorted((ay, by))
+        eps = 1e-6
+        return {(tx, ty)
+                for tx in range(math.floor(float(x) + lo_x + eps), math.ceil(float(x) + hi_x - eps))
+                for ty in range(math.floor(float(y) + lo_y + eps), math.ceil(float(y) + hi_y - eps))}
+
+    def _recipe_boxes(self, name, row, recipe):
+        """[(fluid, [[box, connection], ...])] a recipe makes live, or None (no recipe rule)."""
+        if not recipe:
+            return None
+        measured = ((self._fluid.get("recipes") or {}).get(name) or {}).get(recipe)
+        if measured is not None:
+            return [(b["fluid"], [list(m) for m in b["members"]]) for b in measured]
+        if row["type"] not in ("assembling-machine", "furnace") or not self.has_recipe(recipe):
+            return None
+        rec = self.recipe(recipe)
+        out = []
+        for side, rows in (("input", rec.get("ingredients") or ()), ("output", rec.get("products")
+                                                                      or ())):
+            fluids = [r for r in rows if r.get("type") == "fluid"]
+            boxes = [b for b in row["boxes"] if b["production"] == side]
+            if not fluids:
+                continue
+            if len(fluids) == 1 and not fluids[0].get("fluidbox_index"):
+                out.append((fluids[0]["name"], [[b["index"], j + 1] for b in boxes
+                                                 for j in range(len(b["connections"]))]))
+                continue
+            free = list(boxes)
+            for r in fluids:
+                at = r.get("fluidbox_index")
+                b = boxes[at - 1] if at and at <= len(boxes) else (free[0] if free else None)
+                if b is None:
+                    break
+                if b in free:
+                    free.remove(b)
+                out.append((r["name"], [[b["index"], j + 1] for j in range(len(b["connections"]))]))
+        return out
 
     def is_fluid(self, name) -> bool:
         """A fluid: a recipe names it with ``type: fluid``; water, steam and crude oil also come

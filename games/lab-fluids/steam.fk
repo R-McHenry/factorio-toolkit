@@ -1,0 +1,15 @@
+# steam.fk: water -> boilers -> steam engines, the V1 fluid nets (pipes and pipe-to-ground).
+# The pump faces west, so its water lies west of the frame (outside every route). Each pair of
+# engines is joined directly, end to end; the boilers stand apart, so the router lays the steam
+# from each boiler to its pair and joins the two halves, and lays the water to both boilers.
+# The boilers' coal has no net: in the lab it is put in by hand (UNFED says so).
+pump = OffshorePump<rate=1200/s>  @(0, 17, rot 3)
+b1   = Boiler<fuel=coal>          @(2, 13)
+b2   = Boiler<fuel=coal>          @(10, 13)
+e1   = SteamEngine                @(2, 0)
+e2   = SteamEngine                @(2, 5)
+e3   = SteamEngine                @(10, 0)
+e4   = SteamEngine                @(10, 5)
+
+net water: pump -> b1, b2
+net steam: b1, b2 -> e1, e2, e3, e4
