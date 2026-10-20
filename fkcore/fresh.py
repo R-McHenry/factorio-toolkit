@@ -1,16 +1,20 @@
-"""fkcore.fresh: belts that carry stale items are taken up, and the next build lays them fresh.
+"""fkcore.fresh: connectors that hold stale items are taken up, and the next build lays them fresh.
 
     python -m fkcore fresh GAME_DIR --area X0,Y0,X1,Y1        (with the game link)
 
 1.1 (Rory, 2026-10-20): a rebuilt factory can leave items its net doesn't carry on belts laid on
-the same tiles, and they jam the new machines. A scripted fix is fine when it goes through the
-game: it breaks the connectors with stale items and replaces them. ``run`` looks at the area as
-``fk look`` does and orders deconstruction of every carrier with a ``WRONG_ITEM`` (an item its net
-doesn't carry): robots carry the belt and what is on it to storage, nothing is moved or created by
-script, and the next ``fk build`` lays the belt again (it is ``MISSING`` by then). Belts are found
-by name and position, in batches that fit one RCON command.
+the same tiles, and a recipe switch can leave an item in an inserter's hand that its machine no
+longer takes; both jam the new machines. A scripted fix is fine when it goes through the game: it
+breaks the connectors with stale items and replaces them. ``run`` looks at the area as ``fk look``
+does and orders deconstruction of every carrier with a ``WRONG_ITEM`` (an item its net doesn't
+carry) and, 1.1.1, of every inserter holding an item the assembling machine it feeds doesn't use
+(``link.lua_stuck_hands``). Robots carry them and what they hold to storage, nothing is moved or
+created by script, and the next ``fk build`` lays them again (they are ``MISSING`` by then). They
+are found by name and position, in batches that fit one RCON command.
 """
 from __future__ import annotations
+
+import json
 
 from . import link, look
 from . import surface as surfacemod
@@ -18,31 +22,42 @@ from .apply import force_for
 
 __all__ = ["run"]
 
-#: belts per RCON command (pastes go in 3000-character chunks for the same reason)
+#: connectors per RCON command (pastes go in 3000-character chunks for the same reason)
 BATCH = 60
-#: belts listed in the report
+#: connectors listed in the report
 SHOWN = 40
 
 
+def _n(k, word):
+    return f"{k} {word}{'' if k == 1 else 's'}"
+
+
 def run(r, game, cat, area):
-    """Order the stale belts in ``area`` up; -> the report lines."""
+    """Order the stale belts and stuck inserters in ``area`` up; -> the report lines."""
     sf = surfacemod.load_game(game)
     force = getattr(sf, "force", None) or force_for(sf.mode)
     lk = look.run(r, game, cat, area=area, notify="off", tag="fresh")
     stale = [v for v in lk.rep.verdicts if v.wrong_items]
+    try:
+        hands = json.loads(r.lua(link.lua_stuck_hands(sf.name, area)).strip() or "[]")
+    except ValueError:
+        hands = []
+    hands = hands if isinstance(hands, list) else []
     a = ",".join(str(int(v)) for v in area)
-    if not stale:
-        return [f"fresh {sf.name} area {a}: no belt here carries an item its net doesn't"]
-    things = [(v.name, v.x, v.y) for v in stale]
+    if not stale and not hands:
+        return [f"fresh {sf.name} area {a}: no belt or inserter here holds an item it shouldn't"]
+    things = [(v.name, v.x, v.y) for v in stale] + [(h[0], h[1], h[2]) for h in hands]
     ordered = 0
     for i in range(0, len(things), BATCH):
         got = r.lua(link.lua_decon_list(sf.name, force, things[i:i + BATCH])).strip()
         ordered += int(got) if got.isdigit() else 0
-    items = sorted({i for v in stale for i in v.wrong_items})
-    out = [f"fresh {sf.name} area {a}: {ordered} of {len(stale)} belts with stale items "
-           f"({', '.join(items)}) ordered up. Robots carry them and what is on them to storage; "
-           "the next fk build lays them fresh"]
+    items = sorted({i for v in stale for i in v.wrong_items} | {h[3] for h in hands})
+    out = [f"fresh {sf.name} area {a}: {ordered} of {len(things)} ordered up "
+           f"({_n(len(stale), 'belt')}, {_n(len(hands), 'inserter')}; {', '.join(items)}). Robots "
+           "carry them and what they hold to storage; the next fk build lays them fresh"]
     out += [f"  {v}" for v in stale[:SHOWN]]
-    if len(stale) > SHOWN:
-        out.append(f"  ... and {len(stale) - SHOWN} more")
+    out += [f"  {h[0]} {h[1]},{h[2]} holds {h[3]}, which its machine doesn't use"
+            for h in hands[:SHOWN]]
+    if len(things) > len(stale[:SHOWN]) + len(hands[:SHOWN]):
+        out.append(f"  ... and {len(things) - len(stale[:SHOWN]) - len(hands[:SHOWN])} more")
     return out

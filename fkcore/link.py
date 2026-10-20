@@ -42,7 +42,7 @@ import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_decon_list", "lua_rip_load", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
+           "lua_decon_list", "lua_rip_load", "lua_stuck_hands", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
            "lua_seed", "lua_ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
            "open_from_env", "OUT_DIR", "WINDOWS"]
@@ -255,6 +255,30 @@ for _, t in pairs(helpers.json_to_table({_q(data)})) do
   if e and e.order_deconstruction({_q(force)}) then n = n + 1 end
 end
 rcon.print(n)
+"""
+
+
+def lua_stuck_hands(surface, area):
+    """The inserters in ``area`` that hold an item the assembling machine they feed doesn't use
+    (left in the hand by a recipe switch): [[name, x, y, item]] as JSON (1.1.1, a free read)."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local out = {{}}
+for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, type = "inserter"}}) do
+  local h = e.held_stack
+  local t = e.drop_target
+  if h and h.valid_for_read and t and t.valid and t.type == "assembling-machine" then
+    local r = t.get_recipe()
+    local used = false
+    if r then
+      for _, ing in pairs(r.ingredients) do
+        if ing.name == h.name then used = true break end
+      end
+    end
+    if not used then out[#out + 1] = {{e.name, e.position.x, e.position.y, h.name}} end
+  end
+end
+rcon.print(#out > 0 and helpers.table_to_json(out) or "[]")
 """
 
 

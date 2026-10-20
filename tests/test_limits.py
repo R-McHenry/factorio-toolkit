@@ -192,32 +192,46 @@ class RipEstimateTest(unittest.TestCase):
 
 
 class FakeLink:
-    def __init__(self):
-        self.sent = []
+    def __init__(self, hands="[]", ordered="2"):
+        self.sent, self.hands, self.ordered = [], hands, ordered
 
     def lua(self, text):
+        if "held_stack" in text:                    # the stuck-hands read
+            return self.hands
         self.sent.append(text)
-        return "2"
+        return self.ordered
 
 
 class FreshTest(unittest.TestCase):
-    def test_stale_belts_are_ordered_up_and_nothing_else(self):
+    def fresh(self, r):
         class Look:
             rep = Diff([v("OK", "transport-belt", 1.5, 1.5, ["pipe"]),
                         v("OK", "transport-belt", 2.5, 1.5),
                         v("OK", "underground-belt", 3.5, 1.5, ["steel-plate", "pipe"])])
-        r, saved = FakeLink(), fresh.look.run
+        saved = fresh.look.run
         fresh.look.run = lambda *a, **k: Look
         game = os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game")
         try:
-            lines = fresh.run(r, game, CAT, (0, 0, 10, 10))
+            return fresh.run(r, game, CAT, (0, 0, 10, 10))
         finally:
             fresh.look.run = saved
+
+    def test_stale_belts_are_ordered_up_and_nothing_else(self):
+        r = FakeLink()
+        lines = self.fresh(r)
         self.assertEqual(len(r.sent), 1)
         self.assertIn('transport-belt\\", 1.5, 1.5]', r.sent[0])     # JSON inside a Lua string
         self.assertIn('underground-belt\\", 3.5, 1.5]', r.sent[0])
         self.assertNotIn("2.5", r.sent[0])
-        self.assertIn("2 of 2 belts with stale items (pipe, steel-plate) ordered up", lines[0])
+        self.assertIn("2 of 2 ordered up (2 belts, 0 inserters; pipe, steel-plate)", lines[0])
+
+    def test_an_inserter_stuck_with_an_unused_item_goes_too(self):
+        r = FakeLink(hands='[["inserter", 5.5, 1.5, "iron-gear-wheel"]]', ordered="3")
+        lines = self.fresh(r)
+        self.assertIn('inserter\\", 5.5, 1.5]', r.sent[0])
+        self.assertIn("3 of 3 ordered up (2 belts, 1 inserter; iron-gear-wheel, pipe, steel-plate)",
+                      lines[0])
+        self.assertIn("inserter 5.5,1.5 holds iron-gear-wheel", "\n".join(lines))
 
 
 if __name__ == "__main__":
