@@ -18,7 +18,19 @@
                                           a chest joins NET as one more endpoint; only NET
                                           is re-routed by the next build
 
+    merge GAME_DIR A,B --into C           two factories become one (source, layout, plots)
+    insert GAME_DIR COMPONENT_DIR NAME --into C --at X,Y
+                                          a component copied into a factory
+    chests-to-net GAME_DIR FACTORY PROVIDER REQUESTER [--net link]
+                                          a robot link (two chests) becomes one net
+    net-to-chests GAME_DIR FACTORY NET --provider P --requester R
+                                          a net becomes a robot link (a full decouple)
+
   with the game link (FK_LINK=on, on the game host):
+    measure GAME_DIR --area X0,Y0,X1,Y1 [--seconds 30]
+                                          what the machines there make, against the model
+    adopt GAME_DIR X,Y[;X,Y...] --into FACTORY/NET
+                                          carriers placed by hand become part of a net's route
     chat GAME_DIR [--all]                 the chat lines since the last read (--all: the journal)
     say TEXT...                           one line in the game chat, as [agent]
     poll GAME_DIR                         what every agent command ends with: new chat lines, and
@@ -152,6 +164,95 @@ def _talk(a):
     return 0
 
 
+def _rewire(a):
+    from . import merge
+    try:
+        if a.cmd == "merge":
+            ch = merge.merge(a.game, a.names.split(","), a.into)
+        elif a.cmd == "insert":
+            ch = merge.insert(a.game, a.component_dir, a.name, a.into,
+                              tuple(int(v) for v in a.at.split(",")))
+        elif a.cmd == "chests-to-net":
+            ch = merge.chests_to_net(a.game, a.factory, a.provider, a.requester, a.net)
+        else:
+            ch = merge.net_to_chests(a.game, a.factory, a.net, a.provider, a.requester)
+    except merge.MergeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(ch)
+    return 0
+
+
+def _flats_and_models(game, sf, cat):
+    flats, models = {}, {}
+    for p in sf.places.values():
+        path = os.path.join(game, f"{p.module}.fk")
+        lay_path = os.path.join(game, f"{p.module}.fkp")
+        if not os.path.exists(path):
+            continue
+        flat = elaborate_file(path, cat, name=p.module,
+                              layout=fkp.load(lay_path) if os.path.exists(lay_path) else None)
+        flats[p.factory] = flat
+        models[p.factory] = rates.solve(flat)
+    return flats, models
+
+
+def _measure(a, cat):
+    from . import measure
+    r = _game_link()
+    if r is None:
+        return 2
+    sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
+    flats, models = _flats_and_models(a.game, sf, cat)
+    area = tuple(int(v) for v in a.area.split(","))
+    with r:
+        got = measure.measure(r, s, cat, area, flats, models, a.seconds)
+    print("\n".join(got.lines()))
+    return 0
+
+
+def _adopt(a, cat):
+    import math
+    from . import adopt, link, scene
+    factory, _, net = a.into.partition("/")
+    if not net:
+        print("error: --into FACTORY/NET", file=sys.stderr)
+        return 2
+    tiles = [tuple(int(float(v)) for v in t.split(",")) for t in a.tiles.replace(";", " ").split()]
+    sf, surface_lay, lay_path, s = _composed(a.game, cat)
+    place = next((p for p in sf.places.values() if p.factory == factory), None)
+    if place is None or factory not in surface_lay.plots:
+        print(f"error: no factory {factory} on {sf.name}", file=sys.stderr)
+        return 2
+    r = _game_link()
+    if r is None:
+        return 2
+    xs, ys = [t[0] for t in tiles], [t[1] for t in tiles]
+    with r:
+        live = scene.from_capture(link.snapshot(r, sf.name, (min(xs) - 1, min(ys) - 1,
+                                                            max(xs) + 2, max(ys) + 2), "adopt"))
+    things = [t for t in live["things"] if (math.floor(t["x"]), math.floor(t["y"])) in set(tiles)
+              and not t["ghost"]]
+    if len(things) != len(tiles):
+        print(f"error: found {len(things)} built entities on {len(tiles)} tiles", file=sys.stderr)
+        return 2
+    fpath = os.path.join(a.game, f"{place.module}.fkp")
+    lay = fkp.load(fpath)
+    try:
+        keys, covered = adopt.adopt(lay, surface_lay.plots[factory], things, net, cat,
+                                    surface_lay.marks)
+    except adopt.AdoptError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    fkp.save(lay, fpath, cat)
+    for name in covered:
+        surface_lay.marks.pop(name, None)
+    fkp.save(surface_lay, lay_path, cat)
+    print(f"adopted into {factory}/{net}: {', '.join(keys)}"
+          + (f"; marks cleared: {', '.join(covered)}" if covered else ""))
+    return 0
+
+
 def _render(lay, cat):
     w, h = lay.size
     surface = fkp.loads(f"fkp 1 surface view\nplot {lay.name} at 0,0 rot 0 size {w}x{h}\n")
@@ -200,6 +301,36 @@ def main(argv=None):
     sp.add_argument("--requester", action="store_true")
     sp.add_argument("--item")
     sp.add_argument("--rate")
+    mg = sub.add_parser("merge")
+    mg.add_argument("game")
+    mg.add_argument("names")
+    mg.add_argument("--into", required=True)
+    ins = sub.add_parser("insert")
+    ins.add_argument("game")
+    ins.add_argument("component_dir")
+    ins.add_argument("name")
+    ins.add_argument("--into", required=True)
+    ins.add_argument("--at", required=True)
+    c2n = sub.add_parser("chests-to-net")
+    c2n.add_argument("game")
+    c2n.add_argument("factory")
+    c2n.add_argument("provider")
+    c2n.add_argument("requester")
+    c2n.add_argument("--net", default="link")
+    n2c = sub.add_parser("net-to-chests")
+    n2c.add_argument("game")
+    n2c.add_argument("factory")
+    n2c.add_argument("net")
+    n2c.add_argument("--provider", required=True)
+    n2c.add_argument("--requester", required=True)
+    me = sub.add_parser("measure")
+    me.add_argument("game")
+    me.add_argument("--area", required=True)
+    me.add_argument("--seconds", type=float, default=30.0)
+    ad = sub.add_parser("adopt")
+    ad.add_argument("game")
+    ad.add_argument("tiles")
+    ad.add_argument("--into", required=True)
     ch = sub.add_parser("chat")
     ch.add_argument("game")
     ch.add_argument("--all", action="store_true")
@@ -211,6 +342,12 @@ def main(argv=None):
     if a.cmd in ("chat", "say", "poll"):
         return _talk(a)
     cat = Catalog.load()
+    if a.cmd in ("merge", "insert", "chests-to-net", "net-to-chests"):
+        return _rewire(a)
+    if a.cmd == "measure":
+        return _measure(a, cat)
+    if a.cmd == "adopt":
+        return _adopt(a, cat)
 
     if a.cmd == "render":
         print(_render(fkp.load(a.file), cat))
