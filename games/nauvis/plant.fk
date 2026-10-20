@@ -1,0 +1,5 @@
+# plant.fk: the kickoff's world-3 nuclear plant (Rory's, captured 2026-10-18) as a Literal of the
+# kickoff's own file, copied into this game codebase (v4-hand/kickoff/plant-w3.json). The box keeps
+# the plant block; the pole chain to the spawn grid in the same file is shared infrastructure,
+# nauvis.fkp's bridge. A standalone factory: its own generation and its own grid.
+reactor = Literal<file="plant-w3.json", box="-34,-39,-17,-23">

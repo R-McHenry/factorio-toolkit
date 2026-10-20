@@ -36,7 +36,9 @@ class FlowTest(unittest.TestCase):
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
         self.assertEqual(len(ctx.log), 16)
-        self.assertEqual(ctx.checks, [])                        # not one check line in the run
+        # the one check line of the run: this surface has no power plant (games/nauvis has one)
+        self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks],
+                         [("floorplan", "NO_POWER", "nauvis main")])
         lay = fkp.load(os.path.join(self.dir, "main.fkp"))
         flat = elaborate_file(os.path.join(self.dir, "main.fk"), CAT)
         self.assertEqual(fkp.invariants(lay, CAT, nets=flat.nets), [])

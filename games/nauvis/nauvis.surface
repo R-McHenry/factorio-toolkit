@@ -1,0 +1,16 @@
+# nauvis.surface: CORE-V1 step 6, on paper. A standalone plant, a temporary boot factory and the
+# red-green main, each on its own plot; the pole chain from the plant (nauvis.fkp's bridge) and the
+# poles floorplan adds to it are the only shared infrastructure.
+surface  nauvis
+mode     play
+terrain  none                                   # a paper surface: no ore, water or cliffs yet
+catalog  base
+
+place plant = plant plot -34,-39 17x16          # the kickoff's reactor plant (a Literal)
+place boot  = boot  plot -40,-10 20x26 temporary until main.running
+place main  = main  plot 8,12 70x56             # the red-green part of spm10's main
+
+watch plots:      keep
+watch sanctioned: mark 2h
+
+target automation-science-pack 10/min, logistic-science-pack 10/min

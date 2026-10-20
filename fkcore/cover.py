@@ -127,6 +127,26 @@ def _wired(a, b, reach=None):
     return dx * dx + dy * dy <= (limit + _EPS) ** 2
 
 
+def networks(ents, cat):
+    """The wire networks of an entity list (a layout's or a composed surface's entities):
+    ``[{"poles": [keys], "sources": [keys]}]``, a source being a grid source (generator, solar,
+    accumulator ...) inside some pole's supply area. Poles wire to every pole in reach, as the game
+    auto-wires them; wires are not recorded anywhere yet."""
+    ents = sorted(ents, key=lambda e: natural_key(e.key))
+    poles = [e for e in ents if cat.kind(e.name) == "electric-pole"]
+    nodes = [_Node(float(e.x), float(e.y), cat.pole_supply(e.name), cat.pole_reach(e.name), e.key)
+             for e in poles]
+    sources = [(e.key, _rect(fkp.tiles_of(cat, e))) for e in ents
+               if cat.kind(e.name) in GRID_SOURCE_TYPES]
+    out = []
+    for group in _groups(nodes):
+        found = sorted({k for k, rect in sources for i in group
+                        if _overlap(rect, nodes[i].x, nodes[i].y, nodes[i].supply)},
+                       key=natural_key)
+        out.append({"poles": [nodes[i].key for i in group], "sources": found})
+    return out
+
+
 def _groups(nodes):
     """Wire components as lists of node indices, each in index order, by smallest index (v4)."""
     parent = list(range(len(nodes)))
@@ -205,6 +225,57 @@ class _Ground:
 
 
 # -- bridging (v4 _search_links) ------------------------------------------------------------------
+def bridge(ents, cat, keep_out=(), pole="medium-electric-pole", owner="bridge"):
+    """Shared infrastructure (CORE-V1.md §6.2): new poles joining every wire network that reaches
+    no grid source to one that does, on free tiles outside ``keep_out`` (a surface passes every
+    plot's and claim's tiles: a bridge stands only in sanctioned space). -> (poles, lines).
+
+    The fewest-pole chain per network is :func:`_search_links` (v4's BFS); a network joined becomes
+    a source for the next. Keys continue ``<owner>/p<k>`` after the owner's existing poles."""
+    ents = sorted(ents, key=lambda e: natural_key(e.key))
+    nets = networks(ents, cat)
+    if not any(n["sources"] for n in nets):
+        return [], ["no wire network reaches a grid source: nothing to bridge to"]
+    by_key = {e.key: e for e in ents}
+    taken = {}
+    for e in ents:
+        for t in fkp.tiles_of(cat, e):
+            taken[t] = e.key
+    ground = _Ground(taken, set(keep_out), None, cat.size(pole))
+    supply, reach = cat.pole_supply(pole), cat.pole_reach(pole)
+
+    def nodes(keys):
+        return [_Node(float(by_key[k].x), float(by_key[k].y), cat.pole_supply(by_key[k].name),
+                      cat.pole_reach(by_key[k].name), k) for k in keys]
+
+    used = [int(m.group(1)) for k in by_key
+            if (m := re.fullmatch(rf".*\b{re.escape(owner)}/p(\d+)", k))]
+    k = max(used) + 1 if used else 0
+    sources = [n for net in nets if net["sources"] for n in nodes(net["poles"])]
+    poles, lines = [], []
+    for net in nets:
+        if net["sources"]:
+            continue
+        targets = nodes(net["poles"])
+        path = _search_links(ground, sources, targets, supply, reach)
+        where = f"the network of {net['poles'][0]} ({len(net['poles'])} poles)"
+        if path is None:
+            lines.append(f"cannot bridge {where}: no chain of free sanctioned tiles reaches it")
+            continue
+        for node in path:
+            ground.place(node.spot)
+            poles.append(fkp.Entity(f"{owner}/p{k}", pole, _clean(node.x), _clean(node.y)))
+            node.key = f"{owner}/p{k}"
+            k += 1
+        sources += path + targets
+        lines.append(f"bridged {where} with {len(path)} pole{'s' if len(path) != 1 else ''}")
+    return poles, lines
+
+
+def _clean(v):
+    return int(v) if float(v).is_integer() else v
+
+
 def _search_links(ground, sources, targets, supply, reach):
     """Fewest new spots joining some node of ``sources`` to some node of ``targets``.
 

@@ -1,0 +1,18 @@
+# the default flow (CORE-V1.md §7); keep it or tweak it. One contained tool per line; each reads
+# what the steps before it left and writes out/<step>.txt, and a layout step out/<step>/*.fkp.
+read_surface    nauvis                    # surface file: factories, plots, claims, mode, policy
+read_terrain    none                      # bare world: ore, water, cliffs (none on paper)
+run_models      --stale                   # model scripts: derive and pin parameters
+elaborate                                 # templates -> logical netlist + its checks
+report_rates                              # nominal rate model, asserts, surface targets
+place           --keep pinned             # fragments by their @(x, y) hints; Literals stay
+route           --only stale --effort normal
+cover power     --pole medium-electric-pole
+cover robots
+floorplan       --bridge-power            # plots + shared infra (a pole bridge), compose
+report_checks                             # invariants + warnings, connectivity of every net
+report_bom      --stock none
+write_layout                              # write the .fkp files (commit them)
+diff            --scope stale             # reads only the scope being built (needs the game)
+apply           --scope stale             # paste + decon; the only world write (needs the game)
+stop_on         invariant                 # the default: only malformed data stops the run

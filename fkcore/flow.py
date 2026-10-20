@@ -320,14 +320,54 @@ def s_floorplan(ctx, args):
                            entities=prev.entities)
     ctx.surface_lay = surfacemod.floorplan(sf, infra)
     ctx.composed = compose.compose(ctx.surface_lay, ctx.layouts, ctx.cat)
+    o = _opts(args)
+    lines, checks = [], []
+    if o.get("bridge_power"):
+        from . import cover
+        pole = o["bridge_power"] if isinstance(o["bridge_power"], str) else "medium-electric-pole"
+        s = ctx.composed
+        keep = set()
+        for p in s.plots.values():
+            keep |= {(x, y) for x in range(p.x, p.x + p.w) for y in range(p.y, p.y + p.h)}
+        for c in s.claims.values():
+            keep |= {(x, y) for x in range(c.x0, c.x1) for y in range(c.y0, c.y1)}
+        for m in s.marks.values():
+            keep |= {(int(x), int(y)) for x, y in m.tiles}
+        poles, blines = cover.bridge(list(s.entities.values()), ctx.cat, keep, pole)
+        if poles and "bridge" not in ctx.surface_lay.covers:
+            ctx.surface_lay.covers["bridge"] = fkp.Cover("bridge", "power", {"pole": pole})
+        for e in poles:
+            ctx.surface_lay.add(e)
+        lines += [f"bridge power: {l}" for l in blines] or ["bridge power: every network is "
+                                                             "already joined"]
+        ctx.composed = compose.compose(ctx.surface_lay, ctx.layouts, ctx.cat)
     s = ctx.composed
-    lines = [f"surface {sf.name}: {len(s.plots)} plots, {len(s.claims)} claims, "
-             f"{len(s.marks)} marks, {len(s.entities)} entities composed, {len(s.tiles)} tiles"]
+    lines.insert(0, f"surface {sf.name}: {len(s.plots)} plots, {len(s.claims)} claims, "
+                    f"{len(s.marks)} marks, {len(s.entities)} entities composed, {len(s.tiles)} tiles")
     for name, p in sorted(s.plots.items()):
         lay = ctx.layouts.get(name)
         size = f"{lay.size[0]}x{lay.size[1]}" if lay is not None and lay.size else "?"
         lines.append(f"  plot {name} at {p.x},{p.y} rot {p.rot} {p.w}x{p.h} (factory {size})")
-    return lines, _invariant_checks(sf.name, s.problems)
+    try:
+        from . import cover
+    except ImportError:
+        cover = None
+    if cover is not None:
+        nets = cover.networks(list(s.entities.values()), ctx.cat)
+        lines.append(f"power: {len(nets)} wire network{'s' if len(nets) != 1 else ''}, "
+                     f"{sum(1 for n in nets if n['sources'])} with generation")
+        for name in sorted(s.plots):
+            mine = {k for k in s.entities if k.startswith(f"{sf.name}:{name}/")
+                    and ctx.cat.kind(s.entities[k].name) == "electric-pole"}
+            powered = any(n["sources"] for n in nets if mine & set(n["poles"]))
+            lines.append(f"  {name}: {len(mine)} poles, "
+                         + ("on a grid with generation" if powered else "NOT on a grid with "
+                                                                         "generation"))
+            if mine and not powered:
+                checks.append(Check("NO_POWER", f"{sf.name} {name}",
+                                    "its grid reaches no generator (bridge it: floorplan "
+                                    "--bridge-power)"))
+    return lines, checks + _invariant_checks(sf.name, s.problems)
 
 
 def s_report_checks(ctx, args):
