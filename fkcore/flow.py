@@ -349,6 +349,8 @@ def s_cover_robots(ctx, args):
     before ``cover power`` in the script, so the poles power them."""
     from . import robots
     o = _opts(args, roboport="roboport")
+    if ctx.surface is not None and ctx.surface.mode == "lab":
+        return ["cover robots: lab mode revives the ghosts, no robots build here; nothing placed"], []
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         new, rep = robots.apply_robots(lay, ctx.cat, roboport=o["roboport"])

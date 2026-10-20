@@ -23,7 +23,7 @@ e gears/outb2 transport-belt 8.5,8.5 W net=gear
 e gears/outb3 transport-belt 9.5,8.5 W net=gear
 e gears/outb4 transport-belt 10.5,8.5 W net=gear
 e gears/outb5 transport-belt 11.5,8.5 W net=gear
-e inbox/c0 requester-chest 2.5,2.5 rate=1.25 role=requester
+e inbox/c0 requester-chest 2.5,2.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":75,"index":1,"name":"iron-plate","quality":"normal"}],"index":1}]}}' item=iron-plate rate=1.25 role=requester
 e power/p0 medium-electric-pole 6.5,1.5
 e power/p1 medium-electric-pole 8.5,7.5
 e power/p2 medium-electric-pole 0.5,8.5
