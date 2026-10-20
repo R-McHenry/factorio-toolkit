@@ -9,15 +9,32 @@ its first belt, pointing into it). Output: carriers keyed ``~<net>/b<k>`` (belts
 can't route is reported with the reason, never raised; nothing else is moved.
 
 The search is ``fkcore.steiner`` (v4's tree router, copied): one net is a tree of belt steps,
-underground jumps and splitters. A net with one driver grows forward from it to all consumers,
-splitting where it branches. A net with one consumer and several drivers grows from the consumer
-to the drivers and is laid reversed, so the splitters become merges (``Tree.entities(reverse)``).
+underground jumps and splitters. Every driver must reach every consumer (CORE: a route is any
+connected graph joining every driver to every consumer); a net is laid in one of three shapes:
+
+- **forward** (one driver belt): the tree grows from it to all consumers, splitting where it
+  branches.
+- **reverse** (one consumer belt): the tree grows from the consumer to all drivers and is laid
+  reversed, so the splitters become merges (``Tree.entities(reverse)``).
+- **hub** (everything else: several drivers and several consumers, a machine driver into a
+  machine, a machine driver into several consumers, several drivers into one machine): every
+  driver merges into one trunk, which then splits to every consumer. The trunk is a hub of two
+  tiles, H and F = H + f: a reversed tree from H to the drivers (laid as merges, H's belt pointing
+  into F) and a forward tree from F to the consumers, grown on the ground the first one left.
+  Merge-then-split is the shape that joins every driver to every consumer with the fewest
+  splitters: each driver joins once and each consumer leaves once (k - 1 merges, m - 1
+  splitters), where pairwise trees would need k * m paths and a crossbar of splitters; the trunk
+  carries everything, which V1 does not rate (throughput is V2). The hub is searched: free tiles
+  ranked by the belt distance (around obstacles, tunnels included) from every driver to H and
+  from F to every consumer, 3 tiles apart, tried in order; the cheapest pair of trees of the
+  first three that route wins. A hub within 2 tiles of an end, on a side with several ends,
+  ranks last: a tree whose first branch ends at once has no straight belt left to cut its next
+  splitter into. One machine driver into one machine: a single inserter, where one reaches.
+
 A consumer that is a single machine (a chest, an assembler cell: its role has no attach tile) is
 reached by direct insertion: a fast (or long-handed) inserter beside the belt picks into it
-(``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver (a requester chest
-feeding a row) works the same way on a reversed tree, so its inserter turns round to pick from
-the machine; that needs exactly one consumer. Several drivers AND several consumers are not
-routed yet (reported).
+(``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver works the same way on a
+reversed tree, so its inserter turns round to pick from the machine.
 
 A **fluid net** (every item a fluid) is not a belt job: it goes to the fluid plug-in,
 ``fkcore.fluid_route.route(flat, lay, cat, nets, blocked, box, limit) -> (added, how, failed)``
@@ -26,27 +43,50 @@ with the belts already laid. Without the plug-in a fluid net is reported, not ro
 
 Per net the ground is: every entity tile, every placed instance's whole frame (the empty tiles
 inside a row are kept for poles), every other net's start and end tiles, every tile another
-net's belt points into, ``blocked`` (terrain: water, cliffs) and everything outside ``bounds``.
+net's belt points into (any belt tier; an underground of unknown type counts as an exit), every
+tile another net's inserter picks from or drops onto and every tile a drill drops onto,
+``blocked`` (terrain: water, cliffs) and everything outside ``bounds``.
+
+**The underground guard.** The game pairs an underground entrance with the nearest end of the same
+name facing the same way within its reach (``fkcore.connect`` has the same rule). So no new
+tunnel may hide another same-axis underground end, and no new end may sit in another tunnel:
+``_ug_spans`` gives the search, per axis, every underground end of the layout (any tier; paired,
+alone, or of unknown type as a Literal imported from an entity list has them) and the hidden
+tiles of every tunnel, paired as the game pairs them; ``steiner`` refuses a jump whose span
+touches one, and its own tree's spans likewise. A net that only the guard stops is refused with
+the tiles it protects. Laid reversed, a merge splitter's spare output may not point at a belt
+(``Grid.keep_clear``) and a tapped belt never starts a tunnel (``Grid.drop_taps``: reversed it is
+an exit, which takes no drop); a tapped belt's last tile never points into another net's belt.
+
 Nets are routed one at a time, each seeing the ones before it; a net that fails moves to the
-front and the pass is retried, and the pass that routes the most nets is kept.
-``fkcore.connect`` is the judge: a routed layout is done when every net is connected with no
-LEAK. Pure, stdlib only, deterministic.
+front and the pass is retried, and the pass that routes the most nets is kept. ``fkcore.connect``
+is the judge: a routed layout is done when every net is connected with no LEAK. The router runs it
+on its own result: a net whose route leaks or does not connect is re-routed around the tiles at
+fault (twice at most), else refused with the judge's line. Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
+import heapq
 import math
 from dataclasses import dataclass, field
 
+from . import connect as connectmod
 from . import fkp as fkpmod
 from .expand import attach_points, frame_of
 from .steiner import FixedSink, Grid, TapSink, grow
 
-__all__ = ["NetJob", "Routed", "jobs", "route_layout"]
+__all__ = ["NetJob", "Routed", "jobs", "route_layout", "fluid_nets"]
 
 _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)
 _DY = (-1, 0, 1, 0)
-_BELTS = ("transport-belt", "underground-belt", "splitter")
+_BELT_KINDS = frozenset({"transport-belt", "underground-belt", "splitter"})
+#: direct insertion: fast inserters (Rory's rule) unless only a long-handed one can reach
+_HANDS = (("fast-inserter",), ("fast-inserter", "long-handed-inserter"))
+_REACH = {"fast-inserter": 1, "long-handed-inserter": 2}
+_HUBS = 8          # hub candidates tried at most
+_HUB_WINS = 3      # stop after this many hubs that route
+_REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
 
 
 @dataclass
@@ -63,8 +103,20 @@ class NetJob:
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals]
 
+    def drivers(self):
+        return len(self.starts) + len(self.sources)
+
     def consumers(self):
         return len(self.goals) + len(self.taps)
+
+    @property
+    def mode(self):
+        """forward (one driver belt) | reverse (one consumer belt) | hub (the rest)."""
+        if len(self.starts) == 1 and not self.sources:
+            return "forward"
+        if len(self.goals) == 1 and not self.taps:
+            return "reverse"
+        return "hub"
 
 
 @dataclass
@@ -78,11 +130,16 @@ class Routed:
 
 
 class _Bounded(Grid):
-    """A Grid that is also blocked outside a box, so no search wanders off the factory."""
+    """A Grid that is also blocked outside a box, so no search wanders off the factory.
+    ``belts`` (the tiles belts stand on) makes it the ground of a tree laid reversed: no merge's
+    spare output may point at one, and taps drop onto their belt."""
 
-    def __init__(self, blocked, box, spans=None):
+    def __init__(self, blocked, box, spans=None, belts=None):
         super().__init__(blocked, (), spans)
         self.box = box
+        if belts is not None:
+            self.keep_clear = set(belts)
+            self.drop_taps = True
 
     def blocked(self, t):
         x0, y0, x1, y1 = self.box
@@ -133,28 +190,33 @@ def jobs(flat, lay, cat) -> dict:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
             job.owners.append(f"{path}.{role}")
     for net, job in out.items():
-        drivers = len(job.starts) + len(job.sources)
         if job.skip is not None:
             continue
-        if not drivers:
+        if not job.drivers():
             job.skip = "no driver role is placed"
         elif not job.consumers():
             job.skip = "no consumer role is placed"
-        elif drivers > 1 and job.consumers() > 1:
-            job.skip = (f"{drivers} drivers and {job.consumers()} consumers: "
-                        "merge-then-split trees are not routed yet")
-        elif (drivers > 1 or job.sources) and job.taps:
-            job.skip = "a machine driver or several drivers into a single machine: not routed yet"
     return out
 
 
+# -- the ground -----------------------------------------------------------------------------------
+def _heading(e):
+    """N E S W = 0..3 of a directed entity (no direction counts as north, as in connect)."""
+    return _H.get(int(e.dir or 0) % 16)
+
+
+def _is_belt(cat, e):
+    return cat.has_entity(e.name) and cat.kind(e.name) in _BELT_KINDS
+
+
 def _belt_fronts(cat, ents):
-    """{tile: net} for every tile a belt, an underground exit or a splitter points into."""
+    """{tile: net} for every tile a belt, an underground exit or a splitter points into (any
+    tier; an underground of unknown type counts as an exit)."""
     out = {}
     for e in ents:
-        if e.name not in _BELTS or e.dir is None or e.attrs.get("ug") == "in":
+        if not _is_belt(cat, e) or e.attrs.get("ug") == "in":
             continue
-        h = _H.get(int(e.dir))
+        h = _heading(e)
         if h is None:
             continue
         for tx, ty in fkpmod.tiles_of(cat, e):
@@ -162,21 +224,60 @@ def _belt_fronts(cat, ents):
     return out
 
 
-def _ug_spans(cat, ents):
-    """Grid spans per axis of the undergrounds already laid (no same-axis tunnel may cross one)."""
-    spans = {0: set(), 1: set()}
-    ugs = [e for e in ents if e.name == "underground-belt" and e.dir is not None]
-    outs = {(math.floor(e.x), math.floor(e.y), _H[int(e.dir)]) for e in ugs
-            if e.attrs.get("ug") == "out"}
-    for e in ugs:
-        if e.attrs.get("ug") != "in":
+def _hand_tiles(cat, ents):
+    """{tile: net} for every tile an inserter picks from or drops onto, and every tile a drill
+    drops onto (net None): another net's belt there would be picked from or fed."""
+    out = {}
+    for e in ents:
+        if not cat.has_entity(e.name):
             continue
-        h = _H[int(e.dir)]
-        x, y = math.floor(e.x), math.floor(e.y)
-        for k in range(1, 12):
-            if (x + _DX[h] * k, y + _DY[h] * k, h) in outs:
+        kind = cat.kind(e.name)
+        if kind == "inserter":
+            h = _heading(e)
+            if h is None:
+                continue
+            r = connectmod.REACH.get(e.name, 1)
+            (tx, ty), = fkpmod.tiles_of(cat, e)
+            for s in (r, -r):
+                out.setdefault((tx + _DX[h] * s, ty + _DY[h] * s), e.net)
+        elif kind == "mining-drill" and e.name != "pumpjack" and _heading(e) is not None:
+            # the game's vector_to_place_result, as fkcore.connect has it
+            w, hh = cat.size(e.name)
+            vx, vy = (-0.5 if w % 2 == 0 else 0.0), -(hh / 2 + 0.3)
+            for _ in range(_heading(e)):
+                vx, vy = -vy, vx
+            out.setdefault((math.floor(float(e.x) + vx), math.floor(float(e.y) + vy)), None)
+    return out
+
+
+def _ug_spans(cat, ents):
+    """Per axis, the tiles no new same-axis tunnel may cover (the game would pair it wrong):
+    every underground end (any tier, paired or alone; ``ug`` known or not) and the hidden tiles of
+    every tunnel. A tunnel is paired as the game pairs it: an entrance looks ahead, up to its
+    tier's reach, for the first end of the same name facing the same way; an exit there makes the
+    tunnel. An end of unknown type counts as an entrance, and as an exit when one looks for it."""
+    spans = {0: set(), 1: set()}
+    ugs = {}
+    for e in ents:
+        if not cat.has_entity(e.name) or cat.kind(e.name) != "underground-belt":
+            continue
+        h = _heading(e)
+        if h is None:
+            continue
+        t = (math.floor(e.x), math.floor(e.y))
+        ugs[t] = (e, h)
+        spans[h % 2].add(t)
+    for (x, y), (e, h) in ugs.items():
+        if e.attrs.get("ug") == "out":
+            continue
+        reach = int(cat.entity(e.name).get("max_distance") or 5)
+        for k in range(1, reach + 1):
+            o = ugs.get((x + _DX[h] * k, y + _DY[h] * k))
+            if o is None or o[0].name != e.name or o[1] != h:
+                continue                                  # passed through
+            if o[0].attrs.get("ug") != "in":
                 spans[h % 2] |= {(x + _DX[h] * j, y + _DY[h] * j) for j in range(k + 1)}
-                break
+            break
     return spans
 
 
@@ -187,12 +288,25 @@ def _ground(cat, ents, frames, js, net, terrain=()):
     for tile, owner in _belt_fronts(cat, ents).items():
         if owner != net:
             blocked.add(tile)
+    for tile, owner in _hand_tiles(cat, ents).items():
+        if owner != net:
+            blocked.add(tile)
     for other, job in js.items():
         if other != net:
             blocked |= set(job.ends())
     return blocked - set(js[net].ends())
 
 
+def _belt_tiles(cat, ents):
+    """Every tile a belt, an underground or a splitter stands on (a merge must not feed one)."""
+    out = set()
+    for e in ents:
+        if _is_belt(cat, e):
+            out |= fkpmod.tiles_of(cat, e)
+    return out
+
+
+# -- trees ----------------------------------------------------------------------------------------
 def _carriers(job, tree_ents, net):
     """The tree's plan entities as keyed .fkp entities, in the tree's own order."""
     count = {"b": 0, "u": 0, "s": 0, "i": 0}
@@ -213,40 +327,297 @@ def _clean(v):
     return int(v) if float(v).is_integer() else v
 
 
-def _route_one(cat, job, ents, frames, js, box, limit, terrain=()):
-    net = job.net
-    blocked = _ground(cat, ents, frames, js, net, terrain)
-    grid = _Bounded(blocked, box, _ug_spans(cat, ents))
-    # several drivers, or a machine driver: grow from the one consumer, lay it reversed
-    reverse = len(job.starts) + len(job.sources) > 1 or bool(job.sources)
+def _grow(grid, root, fixed, machines, limit):
+    """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
+    inserters, or long-handed ones where only those reach. -> (result, sinks)."""
+    for hands in _HANDS:
+        sinks = fixed + [TapSink(key, rect, 1, hands) for key, rect in machines]
+        res = grow(grid, root, sinks, limit=limit)
+        if not res["problems"] or not machines:
+            break
+    return res, sinks
+
+
+def _tree_job(cat, job, blocked, spans, clear, box, limit):
+    """forward or reverse: one tree. -> (plan entities, report text) or (None, reason)."""
+    reverse = job.mode == "reverse"
+    grid = _Bounded(blocked, box, spans, clear if reverse else None)
     if reverse:
         (gtile, gh), = job.goals
         root = (gtile[0], gtile[1], (gh + 2) % 4, 0)
-        sinks = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
+        fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
         machines = job.sources
     else:
         (stile, sh), = job.starts
         root = (stile[0], stile[1], sh, 0)
-        sinks = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
+        fixed = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
         machines = job.taps
     if grid.blocked((root[0], root[1])):
         return None, f"its {'end' if reverse else 'start'} tile {root[0]},{root[1]} is taken"
-    # direct insertion: fast inserters (Rory's rule) unless only a long-handed one can reach
-    for hands in (("fast-inserter",), ("fast-inserter", "long-handed-inserter")):
-        taps = [TapSink(key, rect, 1, hands) for key, rect in machines]
-        res = grow(grid, root, sinks + taps, limit=limit)
-        if not res["problems"] or not machines:
-            break
-    sinks = sinks + taps
+    res, sinks = _grow(grid, root, fixed, machines, limit)
     if res["problems"]:
         return None, "; ".join(res["problems"][:3])
-    tree = res["tree"]
-    plan = tree.entities(sinks, net=net, reverse=reverse)
     c = res["counts"]
     how = (f"{c['belts']} belts, {c['undergrounds']} underground ends, {c['splitters']} "
            f"{'merges' if reverse else 'splitters'}" + (f", {c['taps']} inserters" if c["taps"]
                                                          else ""))
-    return _carriers(job, plan, net), how
+    return res["tree"].entities(sinks, net=job.net, reverse=reverse), how
+
+
+# -- the hub --------------------------------------------------------------------------------------
+def _walk(grid, seeds, reach=5):
+    """Belt distance over free ground from ``seeds``: a step to a free tile, or a tunnel under
+    whatever blocks it to the first free tile within ``reach`` (as the search may jump)."""
+    dist = {s: 0 for s in seeds}
+    todo = [(0, s) for s in sorted(dist)]
+    while todo:
+        d, t = heapq.heappop(todo)
+        if d > dist[t]:
+            continue
+        for h in range(4):
+            for j in range(1, reach + 1):
+                u = (t[0] + _DX[h] * j, t[1] + _DY[h] * j)
+                if not grid.blocked(u):
+                    if d + j < dist.get(u, d + j + 1):
+                        dist[u] = d + j
+                        heapq.heappush(todo, (d + j, u))
+                    break
+                if not grid.box[0] <= u[0] < grid.box[2] or not grid.box[1] <= u[1] < grid.box[3]:
+                    break
+    return dist
+
+
+def _beside(grid, rect):
+    """The free tiles beside a machine's rectangle (where its inserter could stand)."""
+    x0, y0, x1, y1 = rect
+    ring = [(x, y0 - 1) for x in range(x0, x1)] + [(x, y1) for x in range(x0, x1)] + \
+           [(x0 - 1, y) for y in range(y0, y1)] + [(x1, y) for y in range(y0, y1)]
+    return [t for t in ring if not grid.blocked(t)]
+
+
+def _hubs(grid, job, most=_HUBS):
+    """[(H, f)] hub candidates, best first: H and F = H + f free, reached from every end; ranked
+    by the summed walking distance from every driver to H and from F to every consumer; a hub
+    within 2 tiles of an end on a side with several ends ranks last; picked 3 tiles apart."""
+    ends = set(job.ends())
+    near_d = [[t] for t, _h in job.starts] + [_beside(grid, r) for _k, r in job.sources]
+    near_c = [[t] for t, _h in job.goals] + [_beside(grid, r) for _k, r in job.taps]
+    dd = [_walk(grid, s) for s in near_d]
+    dc = [_walk(grid, s) for s in near_c]
+    if not dd or not dc:
+        return []
+    common = set.intersection(*(set(d) for d in dd + dc)) - ends
+    rows = []
+    for t in common:
+        a = [d[t] for d in dd]
+        for f in range(4):
+            u = (t[0] + _DX[f], t[1] + _DY[f])
+            if u not in common:
+                continue
+            b = [d[u] for d in dc]
+            short = (len(a) > 1 and min(a) < 3) or (len(b) > 1 and min(b) < 3)
+            rows.append((short, sum(a) + sum(b), t[1], t[0], f))
+    rows.sort()
+    out = []
+    for _short, _score, y, x, f in rows:
+        if any(abs(x - o[0]) + abs(y - o[1]) < 3 for o, _f in out):
+            continue
+        out.append(((x, y), f))
+        if len(out) >= most:
+            break
+    return out
+
+
+def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f):
+    """The reversed tree from H to every driver, then the forward tree from F = H + f to every
+    consumer on what is left. -> (cost, plan, counts, counts) or a reason."""
+    net = job.net
+    fx, fy = hub[0] + _DX[f], hub[1] + _DY[f]
+    rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
+    fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
+    rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit)
+    if rres["problems"]:
+        return "drivers: " + "; ".join(rres["problems"][:2])
+    rtree = rres["tree"]
+    rplan = rtree.entities(rsinks, net=net, reverse=True)
+    laid = _carriers(job, rplan, net)
+    fb = set(blocked) | set(rtree.tiles())
+    for e in laid:
+        fb |= fkpmod.tiles_of(cat, e)
+    fb |= set(_belt_fronts(cat, laid)) - {(fx, fy)}
+    rs = rtree.spans()
+    fgrid = _Bounded(fb, box, {a: set(spans[a]) | rs[a] for a in (0, 1)})
+    fixed = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
+    fres, fsinks = _grow(fgrid, (fx, fy, f, 0), fixed, job.taps, limit)
+    if fres["problems"]:
+        return "consumers: " + "; ".join(fres["problems"][:2])
+    ftree = fres["tree"]
+    plan = rplan + ftree.entities(fsinks, net=net)
+    return rtree.cost() + ftree.cost(), plan, rres["counts"], fres["counts"]
+
+
+def _direct(cat, job, grid):
+    """One machine driver into one machine: a single inserter between them, if one fits."""
+    (_sk, src), = job.sources
+    (_tk, dst), = job.taps
+    for hands in _HANDS:
+        for name in hands:
+            r = _REACH[name]
+            for x in range(src[0], src[2]):
+                for y in range(src[1], src[3]):
+                    for g in range(4):           # the inserter faces its pickup side, g
+                        q = (x - _DX[g] * r, y - _DY[g] * r)
+                        drop = (q[0] - _DX[g] * r, q[1] - _DY[g] * r)
+                        if grid.blocked(q) or not (dst[0] <= drop[0] < dst[2]
+                                                   and dst[1] <= drop[1] < dst[3]):
+                            continue
+                        return [{"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5,
+                                 "direction": g * 4, "role": "ins"}]
+    return None
+
+
+def _hub_job(cat, job, blocked, spans, clear, box, limit):
+    """hub: merge every driver into a trunk, split it to every consumer. -> (plan, how)."""
+    grid = _Bounded(blocked, box, spans)
+    if len(job.sources) == 1 and len(job.taps) == 1 and not job.starts and not job.goals:
+        plan = _direct(cat, job, grid)
+        if plan:
+            return plan, "1 inserter (direct insertion)"
+    cands = _hubs(grid, job)
+    if not cands:
+        return None, "no free tile is reached from every driver and consumer (no hub)"
+    best, why, wins = None, None, 0
+    for hub, f in cands:
+        got = _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f)
+        if isinstance(got, str):
+            why = why or f"hub {hub[0]},{hub[1]}: {got}"
+            continue
+        if best is None or got[0] < best[0][0] - 1e-9:
+            best = (got, hub, f)
+        wins += 1
+        if wins >= _HUB_WINS:
+            break
+    if best is None:
+        return None, f"none of {len(cands)} hubs routes; first: {why}"
+    (_cost, plan, cr, cf), hub, f = best
+    taps = cr["taps"] + cf["taps"]
+    how = (f"{cr['belts'] + cf['belts']} belts, {cr['undergrounds'] + cf['undergrounds']} "
+           f"underground ends, {cr['splitters']} merges, {cf['splitters']} splitters"
+           + (f", {taps} inserters" if taps else "")
+           + f", hub {hub[0]},{hub[1]} {'NESW'[f]}")
+    return plan, how
+
+
+# -- one net --------------------------------------------------------------------------------------
+def _settle_leaves(cat, laid, ents):
+    """A tapped belt's last tile points on into whatever stands ahead: turn it (never back at its
+    feed) where that is another net's belt. -> the carriers, or None when no turn is clear."""
+    occ = {}
+    for e in ents:
+        if _is_belt(cat, e):
+            for t in fkpmod.tiles_of(cat, e):
+                occ[t] = e
+    mine = {}
+    for e in laid:
+        for t in fkpmod.tiles_of(cat, e):
+            mine[t] = e
+    out = []
+    for e in laid:
+        h = _heading(e)
+        if e.name != "transport-belt" or h is None:
+            out.append(e)
+            continue
+        (tx, ty), = fkpmod.tiles_of(cat, e)
+
+        def bad(d):
+            ahead = (tx + _DX[d], ty + _DY[d])
+            o = occ.get(ahead)
+            return o is not None and o.net != e.net
+
+        if not bad(h):
+            out.append(e)
+            continue
+        behind = (tx - _DX[h], ty - _DY[h])
+        turns = [d for d in ((h + 1) % 4, (h + 3) % 4) if not bad(d)
+                 and (tx + _DX[d], ty + _DY[d]) not in mine]
+        if behind not in mine or not turns:
+            return None
+        out.append(fkpmod.Entity(e.key, e.name, e.x, e.y, turns[0] * 4, dict(e.attrs)))
+    return out
+
+
+def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None):
+    net = job.net
+    blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
+    spans = _ug_spans(cat, ents) if spans is None else spans
+    clear = _belt_tiles(cat, ents)
+    if job.mode == "hub":
+        plan, how = _hub_job(cat, job, blocked, spans, clear, box, limit)
+    else:
+        plan, how = _tree_job(cat, job, blocked, spans, clear, box, limit)
+    if plan is None:
+        return None, how
+    laid = _settle_leaves(cat, _carriers(job, plan, net), ents)
+    if laid is None:
+        return None, "a tapped belt's last tile points into another net's belt"
+    return laid, how
+
+
+def _guarded(cat, job, ents, frames, js, box, limit, terrain):
+    """Why a net failed, when the underground guard is the cause: without it the search routes,
+    and its tunnels cover these tiles of other undergrounds on the same axis. None otherwise."""
+    got, _how = _route_one(cat, job, ents, frames, js, box, limit, terrain,
+                           spans={0: set(), 1: set()})
+    if got is None:
+        return None
+    mine, theirs = _ug_spans(cat, got), _ug_spans(cat, ents)
+    hit = sorted((mine[0] & theirs[0]) | (mine[1] & theirs[1]))
+    if not hit:
+        return None
+    return ("the only ways in tunnel past another underground on the same axis, which the game "
+            "would pair wrong: " + " ".join(f"{x},{y}" for x, y in hit[:4]))
+
+
+# -- the judge ------------------------------------------------------------------------------------
+def _judge(flat, lay, cat, mine, js):
+    """{net: (reason, tiles at fault)} for the nets in ``mine`` (routed this run, in routing
+    order) whose route leaks, or leaves a pair of its placed ends apart, by ``fkcore.connect``. A
+    LEAK between two routes is the later one's fault."""
+    rep = connectmod.connect(lay, cat, connectmod.endpoints(flat))
+    g = rep.graph
+    out = {}
+
+    def route_net(key):
+        n = g.nodes.get(key)
+        return n.net if n is not None and n.net in mine and key.startswith(f"~{n.net}/") else None
+
+    for lk in rep.leaks:
+        a, b = route_net(lk.src), route_net(lk.dst)
+        blame = b if b is not None and (a is None or mine.index(b) > mine.index(a)) else a
+        if blame is None:
+            continue
+        key = lk.dst if blame == b else lk.src
+        _reason, tiles = out.setdefault(blame, (f"its route would LEAK: {lk.text}", set()))
+        tiles |= set(g.nodes[key].tiles)
+    for name in mine:
+        r = rep.nets.get(name)
+        if r is None or name in out:
+            continue
+        placed = set()
+        for owner in js[name].owners:
+            placed |= set(flat.insts[owner.rsplit(".", 1)[0]].machines)
+        apart = [(d, c) for d, c in r.unreached if d in placed and c in placed]
+        alone = [k for k in r.unpaired if k.startswith(f"~{name}/")]
+        if not apart and not alone:
+            continue
+        reason = f"its route does not connect {len(apart)} driver->consumer pairs"
+        if alone:
+            reason += f"; the game pairs no exit with {', '.join(alone[:4])}"
+        tiles = set()
+        for key in alone:
+            tiles |= set(g.nodes[key].tiles)
+        out[name] = (reason, tiles)
+    return out
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
@@ -286,16 +657,23 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
             ents += got
         score = (len(added), -attempt)
         if best is None or score > best[0]:
-            best = (score, added, failed, how, attempt + 1)
+            best = (score, added, failed, how, attempt + 1, list(order))
         if not failed:
             break
         order = [n for n in order if n in failed] + [n for n in order if n not in failed]
-    _score, added, failed, how, passes = best
+    _score, added, failed, how, passes, order = best
+    added, failed, how = dict(added), dict(failed), dict(how)
     new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
                         dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
+    _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain)
+    for net in sorted(failed):
+        guard = _guarded(cat, js[net], list(new.entities.values()), frames, js, box, limit,
+                         terrain)
+        if guard:
+            failed[net] = f"{failed[net]}; {guard}"
     fluid_todo = sorted(n for n in js if js[n].fluid and n not in have)
     plugin = _fluid_plugin() if fluid_todo else None
     if plugin is not None:
@@ -320,8 +698,36 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
         elif net in added and job.fluid:
             lines.append(f"routed    {net}: {how[net]}")
         elif net in added:
-            lines.append(f"routed    {net}: {len(job.starts) + len(job.sources)} -> "
-                         f"{job.consumers()}, {how[net]}")
+            lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, {how[net]}")
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
     return Routed(new, lines, sorted(added), failed, kept, passes)
+
+
+def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain):
+    """Judge the belt routes laid this run; re-route a net that leaks or does not connect around
+    the tiles at fault, else refuse it (its carriers go, the judge's line is the reason)."""
+    avoid = {}
+    for round_ in range(_REPAIRS + 1):
+        mine = [n for n in order if n in added]
+        bad = _judge(flat, new, cat, mine, js)
+        if not bad:
+            return
+        for net in sorted(bad, key=order.index):
+            reason, tiles = bad[net]
+            for e in added.pop(net):
+                del new.entities[e.key]
+            how.pop(net, None)
+            if round_ == _REPAIRS or not tiles:
+                failed[net] = reason
+                continue
+            avoid.setdefault(net, set()).update(tiles)
+            got, why = _route_one(cat, js[net], list(new.entities.values()), frames, js, box,
+                                  limit, terrain, avoid[net])
+            if got is None:
+                failed[net] = f"{reason}; re-routed around it: {why}"
+                continue
+            added[net] = got
+            how[net] = why
+            for e in got:
+                new.add(e)
