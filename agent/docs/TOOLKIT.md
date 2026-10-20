@@ -22,14 +22,23 @@ step writes its report to `game\out\<step>.txt`: read the one that matters
 in the source: unchanged rows and routes stay where they are.
 
 After `fk build`, the ghosts are in the game and the robots build them from the network's stock.
-`fk look` says GHOST for what is still waiting. Look again a little later, not in a loop.
+Before the paste, `out\report_bom.txt` says what the network can't cover: its `STOCK:` line, and
+LOW_STOCK / LOCKED per item. A ghost that stays is a blocked build, not a slow one: `fk look`
+marks it GHOST SHORT or GHOST LOCKED (below), and waiting won't change that.
+
+Every command ends with the game's new alerts (grouped per kind), Rory's new chat lines and the
+research line (`RESEARCH: NONE` when nothing researches).
 
 ## What `fk look` says
 
 Every designed entity in the area gets a verdict:
 
 - `OK`: there, as designed
-- `GHOST`: its ghost is there, waiting for robots
+- `GHOST`: its ghost is there and the network holds the item: robots are on their way
+- `GHOST SHORT`: its ghost is there and the network holds none (or too few) of the item: robots
+  can't build it until you make the item (an assembler row into a provider chest) or bring it
+- `GHOST LOCKED`: its ghost is there and the item's recipe isn't researched: `fk tech ITEM` says
+  which technology opens it and what it costs
 - `MISSING`: nothing there (destroyed, or never built; the next build restores it)
 - `WRONG`: something else stands on its tiles
 - `DRIFT`: there but turned, or with another recipe
@@ -64,6 +73,9 @@ fixing in the source.
   tiles of another one on both axes. Grow outward: the next factory within reach of the last.
 - `ON_TERRAIN`: something designed stands on water or a cliff
 - `MISPLACED` / `UNPLACED`: the paste did not land where the design says
+- `LOW_STOCK`: the network holds fewer of an item than the build still needs
+- `LOCKED`: an item to build, or a machine's recipe, isn't researched (the technology and its
+  cost follow)
 
 ## When you need something
 
@@ -79,6 +91,11 @@ fk stats [--items iron-plate,copper-plate] [--window 10min]
                                  production statistics (free to read)
 fk chart                         how much of the map is explored (free to read)
 fk alerts                        the alert panel now (new alerts also come by themselves)
+fk research                      what can be researched now, cheapest first, and what is running
+fk research TECH [TECH...]       queue research (labs and science packs do the rest)
+fk tech NAME                     a technology, or what opens an item or recipe: cost (or what to
+                                 craft or build for it), what to research first
+fk recipes [NAME...] [--enabled] the locked recipes (or the enabled ones) and what opens each
 fk read-terrain --surface nauvis --area X0,Y0,X1,Y1
                                  read more bare ground into map.terrain.json
 fk chat                          Rory's messages since you last looked

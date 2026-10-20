@@ -16,7 +16,13 @@ prototype name), message and icon (custom alerts only), tick}; its identity (``k
 that but the tick, which the game moves while an entity stays under attack.
 
 ``track(state, read, tick, remind_ticks)`` is pure: a new alert is pushed once; one that persists
-gets a reminder every ``remind_ticks``; one that is gone is reported once as cleared. The cadence
+gets a reminder every ``remind_ticks``; one that is gone is reported once as cleared. The lines
+are **grouped per alert type**: the game raises one ``no_material_for_construction`` per waiting
+ghost, and the first V1 run (2026-10-20) got hundreds, each naming only ``entity-ghost``, so the
+player read them as "the queue". A ghost's alert now names the entity the ghost stands for, and a
+type with more than a few alerts is one line, its targets counted, each with what the network
+holds of it and whether its recipe is researched (``fkcore.supply``): "no_material_for_construction
+x220: 204 transport-belt (the network holds 0), 18 electric-mining-drill (LOCKED: research ...)". The cadence
 is the surface file's ``remind`` (default 10min, **a placeholder: the default is still open with
 Rory**). ``poll(r, game_dir)`` is what every agent command calls, as it reads the chat journal
 today: read the panel of the surface mode's force (lab -> ``lab``, play -> ``player``), track it
@@ -88,7 +94,7 @@ def normalise(raw) -> AlertRead:
         a = {"type": str(row.get("type")), "surface": str(row.get("surface") or ""),
              "x": _num(row.get("x")), "y": _num(row.get("y")), "target": row.get("target"),
              "message": _text(row.get("message")), "icon": row.get("icon"),
-             "tick": int(row.get("tick") or 0)}
+             "tick": int(row.get("tick") or 0), "ghost": bool(row.get("ghost"))}
         k = key(a)
         if k not in seen or a["tick"] < seen[k]["tick"]:
             seen[k] = a
@@ -107,7 +113,8 @@ def key(a):
 def describe(a):
     """'entity_under_attack: wooden-chest at lab 385.5,520.5', or for a speaker
     'custom "text" [item/iron-plate]: programmable-speaker at lab 390.5,520.5'."""
-    where = f"{a.get('target') or '?'} at {a['surface']} {_fmt(a.get('x'))},{_fmt(a.get('y'))}"
+    what = ("a ghost of " if a.get("ghost") else "") + (a.get("target") or "?")
+    where = f"{what} at {a['surface']} {_fmt(a.get('x'))},{_fmt(a.get('y'))}"
     if a["type"] != "custom":
         return f"{a['type']}: {where}"
     msg = f' "{a["message"]}"' if a.get("message") else ""
@@ -155,14 +162,59 @@ def age(ticks):
     return f"{h}h {m}min" if m else f"{h}h"
 
 
-def lines(new, reminders, cleared, tick):
-    """The push lines: ALERT once, REMINDER while it persists, CLEARED once."""
-    out = [f"ALERT {describe(e['alert'])} (raised at tick {e['alert']['tick']})" for e in new]
-    out += [f"REMINDER {describe(e['alert'])}: still there, first seen {age(tick - e['first'])} "
-            f"ago (tick {e['first']})" for e in reminders]
-    out += [f"CLEARED {describe(e['alert'])} (seen for {age(tick - e['first'])})"
-            for e in cleared]
+#: a type with more alerts than this in one push is one grouped line
+GROUP_AT = 3
+
+
+def lines(new, reminders, cleared, tick, sup=None):
+    """The push lines: ALERT once, REMINDER while it persists, CLEARED once; a type with more
+    than ``GROUP_AT`` alerts in one of them is one line (``sup``: a ``supply.Supply`` with the
+    targets' stock and recipes, for what the network holds)."""
+    out = []
+    out += _push("ALERT", new, tick, sup,
+                 lambda e: f"(raised at tick {e['alert']['tick']})")
+    out += _push("REMINDER", reminders, tick, sup,
+                 lambda e: f"still there, first seen {age(tick - e['first'])} ago (tick {e['first']})")
+    out += _push("CLEARED", cleared, tick, sup,
+                 lambda e: f"(seen for {age(tick - e['first'])})")
     return out
+
+
+def _push(word, entries, tick, sup, tail):
+    by_type = {}
+    for e in entries:
+        by_type.setdefault(e["alert"]["type"], []).append(e)
+    out = []
+    for typ in sorted(by_type):
+        es = by_type[typ]
+        if len(es) <= GROUP_AT:
+            for e in es:
+                sep = ": " if word == "REMINDER" else " "
+                out.append(f"{word} {describe(e['alert'])}{sep}{tail(e)}")
+            continue
+        counts = {}
+        for e in es:
+            t = e["alert"].get("target") or "?"
+            counts[t] = counts.get(t, 0) + 1
+        parts = [f"{n} {t}{_held(sup, t, n, typ)}" for t, n in
+                 sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+        first = min(e["first"] for e in es)
+        when = (f"; the oldest first seen {age(tick - first)} ago" if word == "REMINDER" else "")
+        more = f", ... {len(parts) - 10} more kinds" if len(parts) > 10 else ""
+        out.append(f"{word} {typ} x{len(es)}: {', '.join(parts[:10])}{more}{when}")
+    return out
+
+
+def _held(sup, target, n, typ):
+    """' (the network holds 0)', ' (LOCKED: ...)' for a target the supply read covers."""
+    if sup is None or target not in getattr(sup, "entities", {}):
+        return ""
+    from .supply import ghost_state
+    state, why = ghost_state(sup, target, n)
+    if state == "LOCKED":
+        return f" (LOCKED: {why})"
+    stock = int(sup.entities[target].get("stock") or 0)
+    return f" (the network holds {stock})"
 
 
 # -- the game ---------------------------------------------------------------------------------
@@ -245,7 +297,16 @@ def check(r, game_dir, force=None) -> Poll:
     new, reminders, cleared, st = track(states.get(force), rd, rd.tick, sf.remind_ticks)
     states[force] = st
     _save(path, states)
-    out = lines(new, reminders, cleared, rd.tick)
+    sup = None
+    wanted = sorted({e["alert"]["target"] for e in new + reminders
+                     if e["alert"].get("target") and e["alert"]["type"] in _SUPPLY_TYPES})
+    if wanted:
+        from . import supply
+        try:
+            sup = supply.read(r, force, sf.name, wanted)
+        except (OSError, link.LinkError):
+            sup = None
+    out = lines(new, reminders, cleared, rd.tick, sup)
     poll_ = Poll(sf.name, force, sf.remind, sf.notify_mode, rd, new, reminders, cleared, out)
     if out and sf.notify_mode == "all":
         try:
@@ -253,6 +314,11 @@ def check(r, game_dir, force=None) -> Poll:
         except (OSError, link.LinkError) as exc:
             poll_.notes.append(f"chat push failed ({type(exc).__name__}: {exc})")
     return poll_
+
+
+#: alert types whose targets are items robots need: the lines say what the network holds of them
+_SUPPLY_TYPES = frozenset({"no_material_for_construction", "not_enough_repair_packs",
+                           "no_storage", "not_enough_construction_robots"})
 
 
 def poll(r, game_dir, force=None):

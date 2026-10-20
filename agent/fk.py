@@ -42,7 +42,7 @@ LOCAL = {"rates", "check", "explain", "unfold", "render", "layout", "split-to-ch
          "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "alerts", "stats", "chart", "read-terrain", "measure", "adopt",
-        "sense"}
+        "sense", "research", "tech", "recipes"}
 #: files only the host writes: pulled, never pushed
 HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/alerts.json", "out/inbox.txt")
 #: the build steps that read or write the game

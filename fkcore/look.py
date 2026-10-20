@@ -57,8 +57,8 @@ class Look:
 
     @property
     def designed(self):
-        """Layout entities in the area (each has one layout verdict)."""
-        return sum(1 for v in self.rep.verdicts if v.verdict in _LAYOUT_VERDICTS)
+        """Layout entities in the area (each has one layout verdict; GHOST SHORT is a GHOST)."""
+        return sum(1 for v in self.rep.verdicts if v.verdict.split()[0] in _LAYOUT_VERDICTS)
 
     @property
     def ok(self):
@@ -194,6 +194,17 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
     pol = policy(sf, notify, watch)
     live = scene.from_capture(link.snapshot(r, sf.name, area, tag, keep=False))
     lk = report(s, live, cat, area, pol, items)
+    ghosts = sorted({v.name for v in lk.rep.verdicts if v.verdict == "GHOST"})
+    if ghosts:
+        # a ghost that stays is a blocked build: say why (SHORT: the network holds none of the
+        # item; LOCKED: its recipe is not researched), from the free supply read
+        from . import supply
+        from .apply import force_for
+        try:
+            sup = supply.read(r, getattr(sf, "force", None) or force_for(sf.mode), sf.name, ghosts)
+            supply.mark_ghosts(lk.rep.verdicts, sup)
+        except (OSError, link.LinkError) as exc:
+            lk.notes.append(f"ghosts not judged against the network ({type(exc).__name__}: {exc})")
     lk.notes += notes + [f"composed surface: {p}" for p in s.problems]
     if write_marks and lk.rep.marks:
         for m in lk.rep.marks:

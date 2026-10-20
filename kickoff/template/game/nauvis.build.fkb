@@ -11,8 +11,8 @@ cover robots                              # roboports over the logistic chests (
 cover power     --pole medium-electric-pole
 floorplan       --bridge-power            # plots + shared infra (a pole bridge), compose
 report_checks                             # invariants + warnings, connectivity of every net
-report_bom      --stock none
 write_layout                              # write the .fkp files (commit them)
 diff            --scope stale             # what stands there now, against the design (the game)
+report_bom      --stock live              # still to build vs the network's stock and research (LOW_STOCK, LOCKED)
 apply           --scope stale             # the paste: ghosts, robots build them (the game)
 stop_on         invariant                 # the default: only malformed data stops the run

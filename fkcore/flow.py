@@ -81,6 +81,7 @@ class Ctx:
     checks: list = field(default_factory=list)       # [(step, Check)] of every step run so far
     link: object = None                              # the game link (fkcore.link.Rcon), on use
     link_error: str | None = None
+    last_diff: object = None                         # the last diff's SenseReport this run
 
 
 def parse(text, path="<fkb>") -> list:
@@ -553,8 +554,42 @@ def s_report_checks(ctx, args):
     return lines, checks
 
 
+def _to_build(ctx):
+    """{entity: count} still to build: after a diff its MISSING, GHOST and WRONG entities, else
+    the whole composed design."""
+    need = {}
+    if ctx.last_diff is not None:
+        for v in ctx.last_diff.verdicts:
+            if v.verdict.split()[0] in ("MISSING", "GHOST", "WRONG"):
+                need[v.name] = need.get(v.name, 0) + 1
+        return need, "what the last diff found missing, ghosted or wrong"
+    for e in (ctx.composed.entities.values() if ctx.composed is not None else ()):
+        need[e.name] = need.get(e.name, 0) + 1
+    return need, "the whole design (no diff before this step)"
+
+
+def _bom_live(ctx):
+    """report_bom --stock live: what still has to be built against the network's stock, and every
+    item and machine recipe against what is researched (LOW_STOCK, LOCKED). The first V1 run
+    (2026-10-20) waited on 295 ghosts the network held nothing for."""
+    from . import supply
+    r = _link(ctx)
+    if r is None:
+        return [f"report_bom --stock live: skipped, no game link ({ctx.link_error})"], []
+    need, what = _to_build(ctx)
+    used = sorted({e.attrs["recipe"] for e in (ctx.composed.entities.values() if ctx.composed
+                                                else ()) if e.attrs.get("recipe")
+                   and ctx.cat.kind(e.name) == "assembling-machine"})
+    sup = supply.read(r, _force(ctx), ctx.surface.name, need, used)
+    lines, checks = supply.bom(need, sup, used)
+    return ([lines[0], f"  to build: {what}; {sum(need.values())} entities",
+             f"  {supply.research_line(sup.research)}"] + lines[1:]), checks
+
+
 def s_report_bom(ctx, args):
     o = _opts(args, stock="none")
+    if o["stock"] == "live":
+        return _bom_live(ctx)
     need = {}
     ents = (ctx.composed.entities.values() if ctx.composed is not None
             else [e for lay in ctx.layouts.values() for e in lay.entities.values()])
@@ -643,9 +678,19 @@ def s_diff(ctx, args):
     if area is None:
         return ["diff: nothing is designed on this surface"], []
     rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx))
+    ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "GHOST"})
+    if ghosts:
+        from . import supply
+        supply.mark_ghosts(rep.verdicts, supply.read(r, _force(ctx), ctx.surface.name, ghosts))
+    ctx.last_diff = rep
     checks = [Check("DIFF", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
               if k != "OK"]
     return rep.lines(), checks
+
+
+def _force(ctx):
+    from .apply import force_for
+    return getattr(ctx.surface, "force", None) or force_for(ctx.surface.mode)
 
 
 def s_apply(ctx, args):

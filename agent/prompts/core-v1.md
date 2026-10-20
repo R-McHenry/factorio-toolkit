@@ -14,8 +14,14 @@ A fresh map with a working start:
   undergrounds, splitters, inserters, pipes, plates, ore, coal and stone
 - electronics and steam power already researched
 
-Everything after that, you make: you design a factory, robots build it, and it feeds itself.
-Not every recipe is unlocked at the start; `recipe_not_researched` is the tech tree doing its job.
+Everything after that, you make: you design a factory, robots build it from what the logistic
+network holds, and it feeds itself. Robots place only what the network has, and the kit is small,
+so most of what you build, your own factories make first.
+
+Most recipes start locked, and nothing researches by itself: research needs labs, science packs
+delivered into them, and `fk research TECH` to start it. Every command ends with the research
+line; `RESEARCH: NONE` means the tech tree is standing still. `fk tech ITEM` says which technology
+opens an item, what it costs, and what has to be researched first.
 
 ## How building works here
 
@@ -53,6 +59,20 @@ world back to what the source says. Small factories that work beat a big plan.
 - Don't place things by hand. If you must (a quick fix), `fk adopt` brings it into the source
   afterwards, so the next build keeps it.
 
+## When a build doesn't finish
+
+A ghost that stays is a blocked build, not a slow one. `fk look` says why:
+
+- `GHOST SHORT`: the network holds none (or too few) of that item. Make it (an assembler row
+  whose product goes into a provider chest), or bring it; then the robots build the ghost.
+- `GHOST LOCKED`: the item's recipe isn't researched. `fk tech ITEM` names the technology and
+  its cost; research it first.
+
+`fk build` says the same before it pastes (the `STOCK:` line and LOW_STOCK / LOCKED in
+`out\report_bom.txt`), and the game's `no_material_for_construction` alerts come grouped, with
+what the network holds of each item. Build in the order the tech tree and the stock allow:
+what you can make now, then what that unlocks.
+
 ## What you can see
 
 You see what you look at, like a player in front of the screen:
@@ -61,7 +81,8 @@ You see what you look at, like a player in front of the screen:
 - The game's alerts come to you on their own (a machine destroyed, no materials for a ghost, a
   programmable speaker you set up): they appear at the end of whatever command you run, with a
   reminder while one is still open.
-- `fk stats` (production statistics) and `fk chart` (the explored map) are free to read any time.
+- `fk stats` (production statistics), `fk chart` (the explored map), `fk research` (what can be
+  researched now), `fk tech` and `fk recipes` are free to read any time.
 
 Nothing else is watched for you. If you want to know how a far-away part is doing, look at it, or
 build the in-game way (circuits and a speaker alert).

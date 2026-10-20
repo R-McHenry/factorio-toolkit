@@ -48,9 +48,16 @@ use the game link, and only with FK_LINK=on)
                                           carriers placed by hand become part of a net's route
     chat GAME_DIR [--all]                 the chat lines since the last read (--all: the journal)
     say TEXT...                           one line in the game chat, as [agent]
-    poll GAME_DIR                         what every agent command ends with: new chat lines, and
-                                          the game's new and still-open alerts once fkcore.alerts
-                                          is built
+    poll GAME_DIR                         what every agent command ends with: the game's alerts
+                                          (new, reminders, cleared; grouped), new chat lines and
+                                          the research state (loud when nothing researches)
+    research GAME_DIR [TECH...]           queue research; without a name, what can be researched
+                                          now and its cost (a free read)
+    tech GAME_DIR NAME...                 a technology, or what unlocks a recipe or item: cost or
+                                          trigger, prerequisites (a free read)
+    recipes GAME_DIR [NAME...] [--enabled]
+                                          the locked recipes (or the enabled ones) and what
+                                          unlocks each (a free read)
     read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map]
                                           a free read of the bare world (ore, water, cliffs;
                                           trees and rocks counted) into GAME_DIR/<name>.terrain.json
@@ -205,14 +212,56 @@ def _talk(a):
         else:
             lines = chat.new_lines(r, a.game)
         if a.cmd == "poll":
-            try:
-                from . import alerts
-            except ImportError:
-                alerts = None
-            if alerts is not None and hasattr(alerts, "poll"):
-                lines = alerts.poll(r, a.game) + lines
+            from . import alerts
+            lines = alerts.poll(r, a.game) + lines + [_research_footer(r, a.game)]
         print("\n".join(lines) if lines else ("chat: nothing new" if a.cmd == "chat" else ""),
               end="\n" if lines or a.cmd == "chat" else "")
+    return 0
+
+
+def _force_surface(game):
+    from .apply import force_for
+    sf = surfacemod.load_game(game)
+    return getattr(sf, "force", None) or force_for(sf.mode), sf.name
+
+
+def _research_footer(r, game):
+    """The research bar a player always sees (a free read): one line, loud when nothing moves."""
+    from . import supply
+    try:
+        force, surface = _force_surface(game)
+        return supply.research_line(supply.read(r, force, surface).research)
+    except Exception as exc:          # a footnote must never break the command that asked
+        return f"research: not read ({type(exc).__name__}: {exc})"
+
+
+def _research(a):
+    """research / tech / recipes: the research screen and the tech tree (v4's research, tech and
+    recipes, through fkcore.supply)."""
+    from . import supply
+    r = _game_link(a.cmd)
+    if r is None:
+        return 2
+    force, surface = _force_surface(a.game)
+    with r:
+        if a.cmd == "research" and a.techs:
+            got = supply.add_research(r, force, surface, a.techs)
+            added = list(got.get("added") or [])
+            failed = list(got.get("failed") or [])
+            if isinstance(got.get("added"), dict):
+                added = list(got["added"].values())
+            if isinstance(got.get("failed"), dict):
+                failed = list(got["failed"].values())
+            lines = [f"research: queued {', '.join(added) or 'nothing'}"]
+            lines += [f"  not queued: {f}" for f in failed]
+            lines.append(supply.research_line(got.get("research")))
+        elif a.cmd == "research":
+            lines = supply.available_lines(supply.available(r, force, surface))
+        elif a.cmd == "tech":
+            lines = supply.tech_lines(supply.tech(r, force, a.names))
+        else:
+            lines = supply.recipe_lines(supply.recipes(r, force, a.names), a.enabled)
+    print("\n".join(lines))
     return 0
 
 
@@ -444,6 +493,16 @@ def main(argv=None):
     sy.add_argument("text", nargs="+")
     po = sub.add_parser("poll")
     po.add_argument("game")
+    rs = sub.add_parser("research")
+    rs.add_argument("game")
+    rs.add_argument("techs", nargs="*")
+    th = sub.add_parser("tech")
+    th.add_argument("game")
+    th.add_argument("names", nargs="+")
+    rc = sub.add_parser("recipes")
+    rc.add_argument("game")
+    rc.add_argument("names", nargs="*")
+    rc.add_argument("--enabled", action="store_true")
     rt = sub.add_parser("read-terrain")
     rt.add_argument("game")
     rt.add_argument("--surface", required=True)
@@ -452,6 +511,8 @@ def main(argv=None):
     a = ap.parse_args(_glue(sys.argv[1:] if argv is None else list(argv)))
     if a.cmd in ("chat", "say", "poll"):
         return _talk(a)
+    if a.cmd in ("research", "tech", "recipes"):
+        return _research(a)
     if a.cmd == "read-terrain":
         return _read_terrain(a)
     cat = Catalog.load()

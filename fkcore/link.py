@@ -388,7 +388,9 @@ for _, p in pairs(f.players) do
         n = n + 1
         local row = {{type = names[t] or tostring(t), surface = surface and surface.name or tostring(si), tick = a.tick, player = p.name}}
         local target = a.target
-        if target and target.valid then row.target = target.name elseif a.prototype then row.target = a.prototype.name end
+        if target and target.valid then
+          if target.type == 'entity-ghost' then row.target = target.ghost_name row.ghost = true else row.target = target.name end
+        elseif a.prototype then row.target = a.prototype.name end
         local pos = a.position
         if not pos and target and target.valid then pos = target.position end
         if pos then row.x = pos.x row.y = pos.y end
