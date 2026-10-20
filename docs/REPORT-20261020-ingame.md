@@ -68,3 +68,13 @@ with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
 - Wires through robots rather than revive: the blueprint now carries them, so ghosts should be
   built wired; to be seen on the first robot-built apply.
 - The bench builds with revive (lab rules); a real apply goes through robots and stock.
+- **The plant Literal drops the plant's game settings** (found on paper, after the bench).
+  `plant-w3.json`'s blueprint carries:
+  - the requester chest's request (uranium-fuel-cell 20 to 50, trash unrequested);
+  - the fuel inserter's condition (signal-T < 550);
+  - the reactor's temperature read, and the red wire between the two.
+
+  `Literal<file>` imports the file's `entities` list, which has none of them. Applying the plant
+  as it is now would build a requester that asks for nothing, so the reactor never gets fuel.
+  The fix: keep those settings verbatim on the Literal's `.fkp` lines, and have the codec write
+  them back. This is needed before step 8 applies the plant.
