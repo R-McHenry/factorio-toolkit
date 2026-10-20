@@ -8,7 +8,7 @@ report_rates                              # nominal rate model, asserts, surface
 place           --keep pinned             # fragments by their @(x, y) hints; Literals stay
 route           --only stale --effort normal
 cover power     --pole medium-electric-pole
-cover robots
+# cover robots: not in lab mode (ghosts are revived; no robots build here)
 floorplan                                 # plots + shared infra, compose the surface
 report_checks                             # invariants + warnings, connectivity of every net
 report_bom      --stock none

@@ -6,7 +6,11 @@ mode     lab
 terrain  none
 catalog  base
 
-place iron  = iron  plot 200,400 20x24
+place iron  = iron  plot 200,400 19x24          # 19 wide: Rory's power at 219,408 stands beside it
 place gears = gears plot 222,400 16x16
 
 robots works: cover iron, gears
+
+# Rory powered both factories with the editor (2026-10-20): two energy interfaces, adopted as
+# this surface's infra (lab.fkp, cover rory): rory/e0 at 220,409 feeds the gears grid, rory/e1
+# at 198,417 the iron grid. They are design now, so a build keeps them.

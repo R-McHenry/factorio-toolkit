@@ -1,3 +1,6 @@
 fkp 1 surface lab
+cover rory power
 plot gears at 222,400 rot 0 size 16x16 module=gears
-plot iron at 200,400 rot 0 size 20x24 module=iron
+plot iron at 200,400 rot 0 size 19x24 module=iron
+e rory/e0 electric-energy-interface 220,409
+e rory/e1 electric-energy-interface 198,417

@@ -251,13 +251,17 @@ def lua_say(text):
     return f"game.print({_q(text)}) rcon.print('ok')"
 
 
-def lua_destroy(surface, area, names=None):
+def lua_destroy(surface, area, names=None, players=False):
+    """Lab only: remove the area's entities (never characters). What a player placed (it has a
+    ``last_user``: Rory's editor power on the lab, 2026-10-20) stays unless ``players``: a tool
+    clearing its own test area never takes a person's change with it."""
     filt = f", name = {{{', '.join(_q(n) for n in names)}}}" if names else ""
+    keep = "" if players else " and not e.last_user"
     return f"""
 local s = game.get_surface({_q(surface)})
 local n = 0
 for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}{filt}}}) do
-  if e.type ~= 'character' and e.destroy() then n = n + 1 end
+  if e.type ~= 'character'{keep} and e.destroy() then n = n + 1 end
 end
 rcon.print(n)
 """
