@@ -13,6 +13,10 @@ marks that for deconstruction). Then, by mode:
   row's designed resource is seeded under it (lab ground has no ore), a shifted paste is measured
   and pasted again, and the ghosts are revived at once (lab rules: free materials).
 
+What the paste refuses (the game won't place an offshore pump from a blueprint: the kickoff
+found it on 2026-10-18, the V1 rehearsal again) is placed as single ghosts, still keyed and
+still built by robots (``placed_alone``).
+
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
 (or a lab revive) it is all ``OK``, which is 1:1. Nothing here registers anything; every game
 call is one RCON command with the link's 5 s timeout.
@@ -40,6 +44,7 @@ class ApplyReport:
     present: int = 0                   # design entities now there, as ghost or built
     corrected: tuple | None = None     # the shift a lab paste was corrected by
     misplaced: int = 0                 # ghosts that are not where the design says (play)
+    placed_alone: int = 0              # refused by the paste, placed as single ghosts
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     chunks: int = 0
     seeded: int = 0
@@ -60,6 +65,8 @@ class ApplyReport:
         else:
             out.append(f"  play: {self.decon} NOBODY entities ordered for deconstruction; robots "
                        "build the ghosts")
+        if self.placed_alone:
+            out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts")
         if self.misplaced:
             out.append(f"  MISPLACED {self.misplaced} ghosts are not where the design says")
         out += [f"  {n}" for n in self.notes]
@@ -169,6 +176,13 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             stray = {k for k, gs in seen.items() if any(gs)} - want
     if mode != "lab":
         rep.misplaced = len(stray)
+    refused = [row for row in rows
+               if (row["name"], float(row["x"]), float(row["y"])) not in seen]
+    if refused and not rep.misplaced:
+        rep.placed_alone = _int(r.lua(link.lua_ghosts(s.name, force, refused)))
+        if rep.placed_alone:
+            seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
+            rep.present = len(want & set(seen))
     if mode == "lab":
         got = r.lua(link.lua_revive(s.name, area)).split()
         rep.revived = int(got[0]) if got else 0

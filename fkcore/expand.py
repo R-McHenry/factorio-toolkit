@@ -19,6 +19,7 @@ import math
 import re
 
 from . import fkp as fkpmod
+from .codec import config_text
 from .compose import turn
 from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
 
@@ -105,7 +106,29 @@ def _machine_attrs(m):
         attrs["item"] = next(iter(m.makes))
     if m.takes is not None and m.sink and len(m.takes) == 1:
         attrs["item"] = next(iter(m.takes))
+    if m.extra.get("role") in _REQUESTS and m.makes:
+        item = next(iter(m.makes))
+        attrs["item"] = item
+        attrs["config"] = _request_config(item, m.extra.get("request"), m.makes[item])
     return attrs
+
+
+#: logistic chests that ask the network for their item: the request has to be in the paste, or
+#: the chest asks for nothing (the V1 rehearsal's gear factory got no plates, 2026-10-20)
+_REQUESTS = ("requester", "buffer")
+
+
+def _request_config(item, request, rate):
+    """The game's ``request_filters`` for one item, as the ``config`` attr the codec writes. The
+    count is ``request=`` if given, else a minute of the chest's ``rate`` (at least 10), else 100."""
+    if request is not None:
+        count = int(request)
+    elif rate is not None and not math.isinf(rate):
+        count = max(10, math.ceil(rate * 60))
+    else:
+        count = 100
+    return config_text({"request_filters": {"sections": [{"index": 1, "filters": [
+        {"index": 1, "name": item, "quality": "normal", "comparator": "=", "count": count}]}]}})
 
 
 def _param_text(v):

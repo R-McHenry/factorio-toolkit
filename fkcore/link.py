@@ -32,7 +32,7 @@ import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_destroy", "lua_produced", "lua_generate", "lua_seed",
-           "lua_say", "assert_safe", "snapshot", "paste", "OUT_DIR"]
+           "lua_ghosts", "lua_say", "assert_safe", "snapshot", "paste", "OUT_DIR"]
 
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
@@ -127,6 +127,7 @@ def _area(area):
 #: entity types a snapshot leaves out: the ground, the player's body, and what is not built
 _SKIP = "{" + ", ".join(f"'{t}'" for t in (
     "resource", "fish", "character", "corpse", "character-corpse", "item-entity", "item-request-proxy",
+    "construction-robot", "logistic-robot", "combat-robot",
     "highlight-box", "speech-bubble", "explosion", "smoke-with-trigger", "particle-source",
     "projectile", "beam", "stream", "sticker", "fire", "deconstructible-tile-proxy",
     "tile-ghost")) + "}"
@@ -224,6 +225,23 @@ local n = 0
 for _, t in pairs(helpers.json_to_table({_q(data)})) do
   local e = s.find_entity(t[1], {{t[2], t[3]}})
   if e and e.order_deconstruction({_q(force)}) then n = n + 1 end
+end
+rcon.print(n)
+"""
+
+
+def lua_ghosts(surface, force, rows):
+    """One ghost per row, placed on its own: for what a blueprint paste refuses (an offshore
+    pump: the kickoff found it, 2026-10-18; v5 again, 2026-10-20). rows: codec rows."""
+    data = json.dumps([[r["name"], float(r["x"]), float(r["y"]), int(r.get("direction") or 0),
+                        r.get("src", "")] for r in rows])
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for _, t in pairs(helpers.json_to_table({_q(data)})) do
+  local g = s.create_entity{{name = 'entity-ghost', inner_name = t[1], position = {{t[2], t[3]}},
+    direction = t[4], force = {_q(force)}}}
+  if g then n = n + 1 if t[5] ~= '' then g.tags = {{src = t[5]}} end end
 end
 rcon.print(n)
 """

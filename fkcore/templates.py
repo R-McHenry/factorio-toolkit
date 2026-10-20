@@ -213,23 +213,27 @@ _CHEST = {"provider": "passive-provider-chest", "storage": "storage-chest",
 
 
 def chest(params, cat):
-    """``Chest<provider | storage | requester | buffer, item=, rate=, chest=>``: a boundary.
+    """``Chest<provider | storage | requester | buffer, item=, rate=, request=, chest=>``: a boundary.
 
     provider / storage (the default is provider): the end of a net into the logistic network, a
     sink for whatever reaches it, up to ``rate``. requester: the logistic network feeding a net with
-    ``item``, at ``rate`` or unbounded (an UNBOUNDED check line).
+    ``item``, at ``rate`` or unbounded (an UNBOUNDED check line); ``request`` is how many the
+    chest asks the robots to keep in it (default: a minute of ``rate``, at least 10; else 100).
     """
     roles = [r for r in _CHEST if params.get(r) is True]
     if len(roles) > 1:
         raise TemplateError("one role only: " + ", ".join(roles))
     role = roles[0] if roles else "provider"
-    _only(params, tuple(_CHEST) + ("item", "rate", "chest"))
+    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request"))
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
     if role == "requester":
         item = _word(params, "item")
+        extra = {"role": role}
+        if params.get("request") is not None:
+            extra["request"] = int(float(params["request"]))
         return [MSpec("c0", proto, None, {}, {item: INF if rate is None else rate}, frozenset(),
-                      source=rate is None, extra={"role": role})]
+                      source=rate is None, extra=extra)]
     takes = None if "item" not in params else frozenset([_word(params, "item")])
     return [MSpec("c0", proto, None, {}, {}, takes, sink=True, drain=rate, extra={"role": role})]
 
