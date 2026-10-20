@@ -124,7 +124,8 @@ def _surface(cat, a):
 def step_apply(r, cat, a, offset):
     lay, main, s, nets, box = _surface(cat, a)
     rows = s.rows()
-    bp = codec.blueprint(rows, label="apply main (redgreen) on lab")
+    bp = codec.blueprint(rows, label="apply main (redgreen) on lab",
+                         wires=codec.pole_wires(rows, cat))
     at = bbox_center(rows, cat)
     area = (box[0] - 2, box[1] - 2, box[2] + 2, box[3] + 2)
     t0 = time.time()
@@ -159,6 +160,9 @@ def step_apply(r, cat, a, offset):
     rep = sense.sense(s, live, cat, list(area), LAB_POLICY, net_items=nets)
     with open("/tmp/fk5-bench-apply.txt", "w") as fh:
         fh.write("\n".join(rep.lines()) + "\n")
+    grid = r.lua(link.lua_grid(SURF, area)).split()
+    out("apply", poles=grid[0], poles_wired=grid[1], electric_networks=grid[2],
+        wires_in_blueprint=len(codec.pole_wires(rows, cat)))
     out("apply", cleared=cleared, ore_tiles=seeded, design=len(rows), pasted=built.strip(),
         ghosts_where_designed=len(want & got),
         corrected=corrected, revived=revived[0] if revived else "?",

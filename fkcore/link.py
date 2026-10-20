@@ -247,6 +247,23 @@ rcon.print(n)
 """
 
 
+def lua_grid(surface, area):
+    """'<poles> <poles with a copper wire> <electric networks>' in the area."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local wired, nets, n = 0, {{}}, 0
+for _, p in pairs(s.find_entities_filtered{{area = {_area(area)}, type = 'electric-pole'}}) do
+  n = n + 1
+  local c = p.get_wire_connector(defines.wire_connector_id.pole_copper, false)
+  if c and c.connection_count > 0 then wired = wired + 1 end
+  if p.electric_network_id then nets[p.electric_network_id] = true end
+end
+local k = 0
+for _ in pairs(nets) do k = k + 1 end
+rcon.print(n .. ' ' .. wired .. ' ' .. k)
+"""
+
+
 def lua_produced(force, surface, items):
     names = ", ".join(_q(i) for i in items)
     return f"""

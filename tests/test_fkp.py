@@ -100,6 +100,18 @@ class BlueprintRoundTripTest(unittest.TestCase):
         self.assertEqual(ents["gears/m0"]["recipe"], "iron-gear-wheel")
         self.assertNotIn("direction", ents["power/p0"])
 
+    def test_pole_wires_are_derived_and_written(self):
+        import base64, json, zlib
+        rows = [{"src": f"power/p{k}", "name": "medium-electric-pole", "x": x, "y": 0.5,
+                 "direction": None, "attrs": {}} for k, x in enumerate((0.5, 8.5, 16.5, 40.5))]
+        self.assertEqual(codec.pole_wires(rows, CAT), [(0, 1), (1, 2)])   # 40.5 is out of reach
+        bp = codec.blueprint(rows, wires=codec.pole_wires(rows, CAT))
+        doc = json.loads(zlib.decompress(base64.b64decode(bp[1:])))["blueprint"]
+        self.assertEqual(doc["wires"], [[1, 5, 2, 5], [2, 5, 3, 5]])
+        # the wires are derived: a .fkp round trip through a wired blueprint is still identical
+        lay = fkp.loads(MINI)
+        self.assertEqual(fkp.dumps(codec.blueprint_to_fkp(codec.fkp_to_blueprint(lay, CAT))), MINI)
+
     def test_composed_rows_round_trip(self):
         s = surface_with()
         rows, _desc = codec.read_blueprint(codec.blueprint(s.rows()))

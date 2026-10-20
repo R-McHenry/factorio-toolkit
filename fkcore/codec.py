@@ -10,7 +10,12 @@ deterministic serialisation (sorted keys, compact separators, zlib level 9, base
 - the row's key rides in ``tags.src`` (as before), its net in ``tags.net``, and any attribute the
   game has no field for in ``tags.fkp``;
 - the layout's record lines (header, size, inst, cover, plot, claim, mark) ride in the blueprint
-  ``description``, so ``.fkp -> blueprint -> .fkp`` is byte-identical.
+  ``description``, so ``.fkp -> blueprint -> .fkp`` is byte-identical;
+- copper wires between poles are **derived**, not stored: ``pole_wires`` is a minimum spanning
+  tree over the poles within wire reach (at most 5 wires a pole), written as the blueprint's
+  ``wires`` (``[[a, 5, b, 5]]``, 5 = ``defines.wire_connector_id.pole_copper``). The first in-game
+  test (2026-10-20) showed a blueprint without wires builds every pole unwired: 40 poles, 40
+  electric networks. Reading a blueprint drops the wires again, so the round trip holds.
 
 Pure, stdlib only, deterministic.
 """
@@ -23,7 +28,12 @@ import zlib
 from . import fkp as fkpmod
 
 __all__ = ["CodecError", "BLUEPRINT_VERSION", "rows_of", "blueprint", "read_blueprint",
-           "fkp_to_blueprint", "blueprint_to_fkp"]
+           "fkp_to_blueprint", "blueprint_to_fkp", "pole_wires", "POLE_COPPER"]
+
+#: defines.wire_connector_id.pole_copper (read from the game, 2.0.77)
+POLE_COPPER = 5
+#: copper wires one pole takes
+MAX_POLE_WIRES = 5
 
 #: The Factorio blueprint version the harness emits (an opaque 2.0.77 format marker).
 BLUEPRINT_VERSION = 562949954076673
@@ -76,10 +86,48 @@ def _entity_json(row, number):
     return entity
 
 
-def blueprint(rows, description=None, label=None) -> str:
-    """Rows -> a blueprint string; ``entity_number`` follows row order. Deterministic."""
+def pole_wires(rows, cat):
+    """[(i, j)] row indices to wire: a minimum spanning forest over the electric poles, an edge
+    only within both poles' wire reach, at most MAX_POLE_WIRES per pole. Deterministic."""
+    poles = [i for i, r in enumerate(rows) if cat.has_entity(r["name"])
+             and cat.kind(r["name"]) == "electric-pole"]
+    edges = []
+    for a in range(len(poles)):
+        for b in range(a + 1, len(poles)):
+            i, j = poles[a], poles[b]
+            ri, rj = rows[i], rows[j]
+            d2 = (float(ri["x"]) - float(rj["x"])) ** 2 + (float(ri["y"]) - float(rj["y"])) ** 2
+            reach = min(cat.pole_reach(ri["name"]), cat.pole_reach(rj["name"]))
+            if d2 <= reach * reach + 1e-9:
+                edges.append((d2, i, j))
+    edges.sort()
+    parent = {i: i for i in poles}
+    degree = dict.fromkeys(poles, 0)
+
+    def find(k):
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+    out = []
+    for _d2, i, j in edges:
+        ri, rj = find(i), find(j)
+        if ri == rj or degree[i] >= MAX_POLE_WIRES or degree[j] >= MAX_POLE_WIRES:
+            continue
+        parent[max(ri, rj)] = min(ri, rj)
+        degree[i] += 1
+        degree[j] += 1
+        out.append((i, j))
+    return out
+
+
+def blueprint(rows, description=None, label=None, wires=None) -> str:
+    """Rows -> a blueprint string; ``entity_number`` follows row order. ``wires``: [(i, j)] row
+    indices of poles to join by copper wire (see :func:`pole_wires`). Deterministic."""
     entities = [_entity_json(row, i + 1) for i, row in enumerate(rows or [])]
     bp = {"item": "blueprint", "entities": entities, "version": BLUEPRINT_VERSION}
+    if wires:
+        bp["wires"] = [[i + 1, POLE_COPPER, j + 1, POLE_COPPER] for i, j in wires]
     if description:
         bp["description"] = description
     if label:
@@ -132,9 +180,11 @@ def _num(v):
     return int(v) if v == int(v) else v
 
 
-def fkp_to_blueprint(lay) -> str:
-    return blueprint(rows_of(lay), description="\n".join(fkpmod.record_lines(lay)),
-                     label=f"{lay.level} {lay.name}")
+def fkp_to_blueprint(lay, cat=None) -> str:
+    """With ``cat``, the poles are wired (derived wires; reading drops them again)."""
+    rows = rows_of(lay)
+    return blueprint(rows, description="\n".join(fkpmod.record_lines(lay)),
+                     label=f"{lay.level} {lay.name}", wires=pole_wires(rows, cat) if cat else None)
 
 
 def blueprint_to_fkp(s, path="<blueprint>"):
