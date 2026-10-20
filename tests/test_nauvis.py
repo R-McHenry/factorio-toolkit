@@ -103,5 +103,48 @@ class NauvisTest(unittest.TestCase):
             self.assertIn("bridge power: every network is already joined", fh.read())
 
 
+class BridgeUnderAPlotTest(unittest.TestCase):
+    """1.2 (the 0534 run): a new plot over the old pole bridge stopped the build with INVARIANT
+    shared infrastructure, and the bridge stayed. Now the plot takes the bridge's poles and
+    ``floorplan --bridge-power`` lays the bridge again around the plots."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="fkbridge-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        for name in SOURCES:
+            shutil.copy(os.path.join(GAME, name), self.dir)
+        with open(os.path.join(self.dir, "nauvis.fkp"), "w", newline="\n") as fh:
+            fh.write(CHAIN)
+        self.script = os.path.join(self.dir, "nauvis.build.fkb")
+
+    def test_a_plot_over_the_bridge_reroutes_it(self):
+        code, ctx = flow.run(self.script, cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0, ctx.log)
+        # an empty plot over bridge/p2 (-11.5,-11.5), the chain from the plant to the rest
+        with open(os.path.join(self.dir, "pad.fk"), "w", newline="\n") as fh:
+            fh.write("# an empty plot\n")
+        with open(os.path.join(self.dir, "nauvis.surface"), "a", newline="\n") as fh:
+            fh.write("place pad = pad plot -14,-14 6x6\n")
+        code, ctx = flow.run(self.script, cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0, ctx.log)
+        self.assertEqual([c for _s, c in ctx.checks if c.code == "INVARIANT"], [])
+        s = ctx.composed
+        self.assertEqual(s.problems, [])
+        self.assertNotIn("nauvis:bridge/p2", s.entities)
+        nets = cover.networks(list(s.entities.values()), CAT)
+        self.assertEqual(len(nets), 1)                     # one grid, the plant's generation on it
+        self.assertTrue(nets[0]["sources"])
+        for k, e in s.entities.items():
+            if k.startswith("nauvis:bridge/"):
+                self.assertEqual(s.whose(e.x, e.y)[1]["plot"], None, k)
+        with open(os.path.join(self.dir, "out", "floorplan.txt"), encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("bridge power: 1 of its poles stand in a plot now (bridge/p2): taken out, "
+                      "the bridge is laid again around the plots", text)
+        self.assertIn("bridge power: bridged the network of", text)
+        surface = fkp.load(os.path.join(self.dir, "nauvis.fkp"))
+        self.assertNotIn("bridge/p2", surface.entities)
+
+
 if __name__ == "__main__":
     unittest.main()

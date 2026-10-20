@@ -438,18 +438,47 @@ def s_cover_robots(ctx, args):
     return lines, checks
 
 
+_BRIDGE_POLE = re.compile(r"bridge/p\d+")      # the bridge's own poles (cover bridge power)
+
+
+def _bridge_in_plots(ents, sf, cat):
+    """The bridge's own poles that stand in a plot of the surface file: -> (the entities without
+    them, their keys). A plot laid over an old bridge takes its poles, and ``--bridge-power``
+    lays the bridge again around the plots (1.2: the 0534 run's new plot stopped the build with
+    INVARIANT shared infrastructure)."""
+    boxes = [(p.x, p.y, p.x + p.w, p.y + p.h) for p in sf.places.values()
+             if p.lifecycle != "retired"]
+    keep, gone = {}, []
+    for key, e in ents.items():
+        if _BRIDGE_POLE.fullmatch(key) and cat.has_entity(e.name) \
+                and cat.kind(e.name) == "electric-pole" \
+                and any(b[0] <= x < b[2] and b[1] <= y < b[3] for b in boxes
+                        for x, y in fkp.tiles_of(cat, e)):
+            gone.append(key)
+            continue
+        keep[key] = e
+    return keep, sorted(gone, key=fkp.natural_key)
+
+
 def s_floorplan(ctx, args):
     sf = ctx.surface
+    o = _opts(args)
     infra_path = os.path.join(ctx.root, f"{sf.name}.fkp")
     infra = None
+    lines, checks = [], []
     if os.path.exists(infra_path):
         prev = fkp.load(infra_path)
+        ents = prev.entities
+        if o.get("bridge_power"):
+            ents, gone = _bridge_in_plots(prev.entities, sf, ctx.cat)
+            if gone:
+                lines.append(f"bridge power: {len(gone)} of its poles stand in a plot now "
+                             f"({', '.join(gone)}): taken out, the bridge is laid again around "
+                             "the plots")
         infra = fkp.Layout("surface", sf.name, covers=prev.covers, marks=prev.marks,
-                           entities=prev.entities)
+                           entities=ents)
     ctx.surface_lay = surfacemod.floorplan(sf, infra)
     ctx.composed = compose.compose(ctx.surface_lay, ctx.layouts, ctx.cat)
-    o = _opts(args)
-    lines, checks = [], []
     if o.get("bridge_power"):
         from . import cover
         pole = o["bridge_power"] if isinstance(o["bridge_power"], str) else "medium-electric-pole"
