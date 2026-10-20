@@ -38,8 +38,14 @@ param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' 
   takes every mall product not used inside the mall.
 - Kinds: `MinerRow<n, resource>`, `SmelterRow<n, recipe, fuel>`, `AsmRow<n, recipe>`, `LabRow<n>`,
   `Assembler`, `Furnace`, `ChemPlant`, `Refinery<recipe>`, `Pumpjack<rate>`, `OffshorePump<rate>`,
-  `Chest<provider|storage|requester, item, rate>`, `Literal<file>` [spec], and modules. `duty=` caps
-  any instance (a mall runs only while the network restocks).
+  `Chest<provider|storage|requester, item, rate>`, `Literal` (its entities are pinned in the `.fkp`;
+  `Literal<file>` for a blueprint import is [spec]), and modules. `duty=` caps any instance (a
+  mall runs only while the network restocks).
+- **Templates expand visibly** [built: AsmRow, SmelterRow, MinerRow, LabRow, single machines]: an
+  instance's fragment (machines, the belts and inserters of each role, attach points) is written into
+  the `.fkp` under its keys, every carrier `net=` the net its role is bound to. Rows are counterflow
+  (all attach points at the head) and take one or two input belts in V1. `explain X` shows both
+  views; `unfold X` makes it a `Literal` and keeps every `.fkp` line.
 
 ## Keys
 
@@ -48,7 +54,7 @@ param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' 
 `nauvis:claim/boom-test`, `nauvis:mark/Rory_618@4512000`. The world matches the composed layout **by
 position + name**; no unit numbers, no per-run state.
 
-## `.fkp` v1, the layout record [built]
+## `.fkp` v1, the layout record [built: format, invariants, compose, tile index, blueprint codec]
 
 ```
 fkp 1 factory main                                           # factory frame; tiles 0..W, 0..H

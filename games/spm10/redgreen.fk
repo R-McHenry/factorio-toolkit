@@ -1,0 +1,35 @@
+# redgreen.fk: the red-green part of main.fk (spm10's counts), placed by hand with @(x, y) hints:
+# the top-left tile of each row's frame. Rows are counterflow: every belt end is at the row's west
+# head. The routes between rows are the router's job (next step); expanding this writes the rows'
+# own segments into redgreen.fkp.
+iron_mine    = MinerRow<n=10, resource=iron-ore>   @(0, 0)
+coal_iron    = MinerRow<n=2, resource=coal>        @(17, 0)
+copper_mine  = MinerRow<n=4, resource=copper-ore>  @(22, 0)
+coal_copper  = MinerRow<n=1, resource=coal>        @(30, 0, rot 1)
+iron_smelt   = SmelterRow<n=16, recipe=iron-plate>   @(0, 9)
+copper_smelt = SmelterRow<n=6, recipe=copper-plate>  @(34, 9)
+
+gears = AsmRow<n=3, recipe=iron-gear-wheel>          @(0, 18)
+cable = AsmRow<n=4, recipe=copper-cable>             @(11, 18)
+circ  = AsmRow<n=2, recipe=electronic-circuit>       @(25, 18)
+belts = AsmRow<n=1, recipe=transport-belt>           @(33, 18)
+ins   = AsmRow<n=1, recipe=inserter>                 @(38, 18)
+red   = AsmRow<n=5, recipe=automation-science-pack>  @(0, 28)
+green = AsmRow<n=6, recipe=logistic-science-pack>    @(17, 28)
+labs  = LabRow<n=10>                                 @(0, 38)
+
+net iron_ore:    iron_mine -> iron_smelt
+net copper_ore:  copper_mine -> copper_smelt
+net iron_fuel:   coal_iron -> iron_smelt
+net copper_fuel: coal_copper -> copper_smelt
+net iron:   iron_smelt -> gears, circ, belts, ins
+net copper: copper_smelt -> cable, red
+net gear:   gears -> red, belts, ins
+net cable:  cable -> circ
+net circ:   circ -> ins
+net belt:   belts -> green
+net ins_:   ins -> green
+net packs:  red, green -> labs
+
+assert red.rate >= 10/min
+assert green.rate >= 10/min

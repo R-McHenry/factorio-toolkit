@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 
 from . import lang
-from .templates import MSpec, TemplateError, machines as template_machines
+from .templates import MSpec, TemplateError, literal_machines, machines as template_machines
 
 __all__ = ["ElabError", "Machine", "FlatNet", "Check", "Flat", "load", "elaborate", "elaborate_file"]
 
@@ -131,9 +131,10 @@ def _imports(f, folder, modules, seen):
             modules[name] = g.modules[name]
 
 
-def elaborate_file(path, cat, name=None):
+def elaborate_file(path, cat, name=None, layout=None):
     f, modules = load(path)
-    return elaborate(f, modules, cat, name or os.path.splitext(os.path.basename(path))[0])
+    return elaborate(f, modules, cat, name or os.path.splitext(os.path.basename(path))[0],
+                     layout)
 
 
 # -- elaboration ----------------------------------------------------------------------------------
@@ -150,8 +151,10 @@ def _duty(params, path, line, src):
     return float(v)
 
 
-def elaborate(f, modules, cat, name="main") -> Flat:
+def elaborate(f, modules, cat, name="main", layout=None) -> Flat:
+    """``layout`` (the factory's .fkp) is needed only by Literal instances."""
     flat = Flat(name, f.path)
+    flat._layout = layout
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     _resolve_nets(flat)
     _endpoint_checks(flat)
@@ -181,7 +184,18 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
             try:
-                specs = template_machines(inst.kind, params, cat)
+                if inst.kind == "Literal":
+                    if params:
+                        raise TemplateError("a Literal takes only duty=; its entities are in "
+                                            "the .fkp")
+                    if flat._layout is None:
+                        raise TemplateError("a Literal needs the factory's .fkp")
+                    specs = literal_machines([e for e in flat._layout.entities.values()
+                                              if e.owner == path], cat)
+                    if not specs:
+                        raise TemplateError("the .fkp has no machine entities under it")
+                else:
+                    specs = template_machines(inst.kind, params, cat)
             except TemplateError as exc:
                 raise ElabError(src, inst.line, f"{path} = {inst.kind}: {exc}") from None
             keys = []

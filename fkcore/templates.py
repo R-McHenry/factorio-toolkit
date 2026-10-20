@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 
 from .catalog import FUEL_USE_W, FUEL_VALUE_J, MINING_TIME
 
-__all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "machines", "science_packs"]
+__all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "machines", "science_packs",
+           "literal_machines"]
 
 INF = float("inf")
 
@@ -255,6 +256,47 @@ TEMPLATES = {
     "Chest": chest,
     "TurretRow": turret_row,
 }
+
+
+def literal_machines(entities, cat):
+    """The machines of a ``Literal``: rebuilt from its pinned .fkp entities (CORE-V1.md §5).
+
+    A machine entity carries what it needs: ``recipe`` (and ``fuel``) for a crafter, ``resource``
+    for a drill, ``role``/``item``/``rate`` for a chest, ``rate`` for a pump. Carriers and poles
+    are not machines.
+    """
+    out = []
+    for e in entities:
+        local = e.key.rsplit("/", 1)[1]
+        kind = cat.kind(e.name)
+        a = e.attrs
+        rate = float(a["rate"]) if "rate" in a else None
+        if kind in ("assembling-machine", "furnace") and a.get("recipe"):
+            out.append(_crafter(cat, local, e.name, a["recipe"], a.get("fuel")))
+        elif e.name == "pumpjack":
+            out.append(MSpec(local, e.name, None, {}, {"crude-oil": rate or 30.0}, frozenset(),
+                             extra={"resource": "crude-oil"}))
+        elif kind == "mining-drill" and a.get("resource"):
+            spec = miner_row({"n": 1, "resource": a["resource"], "drill": e.name,
+                              **({"fuel": a["fuel"]} if "fuel" in a else {})}, cat)[0]
+            spec.local = local
+            out.append(spec)
+        elif kind == "offshore-pump":
+            out.append(MSpec(local, e.name, None, {}, {"water": rate or 1200.0}, frozenset()))
+        elif kind == "lab":
+            out.append(MSpec(local, e.name, None, {}, {}, science_packs(cat), sink=True))
+        elif kind in ("container", "logistic-container") and "role" in a:
+            params = {a["role"]: True, "chest": e.name}
+            for k in ("item", "rate"):
+                if k in a:
+                    params[k] = rate if k == "rate" else a[k]
+            spec = chest(params, cat)[0]
+            spec.local = local
+            out.append(spec)
+        elif kind == "ammo-turret":
+            out.append(MSpec(local, e.name, None, {}, {}, frozenset([a.get("ammo",
+                             "firearm-magazine")]), sink=True))
+    return out
 
 
 def machines(kind, params, cat):
