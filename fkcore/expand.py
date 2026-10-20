@@ -140,6 +140,20 @@ def expand_factory(flat, cat, previous=None):
     for path, inst in flat.insts.items():
         if inst.module is not None:
             continue
+        if inst.kind == "Literal" and inst.literal is not None:
+            # imported from a file: placed by its hint like any fragment, keys from the import
+            ents, size, _file_corner, sig = inst.literal
+            hint = _origin(flat, path) or (0, 0, 0)
+            x0, y0, rot = hint
+            params = {k: _param_text(v) for k, v in inst.params.items()}
+            lay.insts[path] = fkpmod.Inst(path, "Literal", params, x0, y0, rot, sig)
+            for e in ents:
+                x, y, d = turn(float(e.x), float(e.y), e.dir, rot, size)
+                placed = fkpmod.Entity(e.key, e.name, _clean(x + x0), _clean(y + y0), d,
+                                       dict(e.attrs))
+                lay.add(placed)
+                xmax, ymax = _grow(cat, placed, xmax, ymax)
+            continue
         if inst.kind == "Literal":
             if previous is None or path not in previous.insts:
                 notes.append(f"{path}: a Literal needs its entities from the previous .fkp")

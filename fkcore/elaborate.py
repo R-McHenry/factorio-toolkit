@@ -84,6 +84,7 @@ class Inst:
     module: str | None         # module name when this is a sub-module instance
     scope: dict | None         # name -> Inst for a sub-module instance
     line: int
+    literal: tuple | None = None   # Literal<file>: (entities, frame size, file origin, sig)
 
 
 @dataclass
@@ -183,17 +184,13 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                         flat.scopes[path], inst.line)
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
+            imported = None
             try:
                 if inst.kind == "Literal":
-                    if params:
-                        raise TemplateError("a Literal takes only duty=; its entities are in "
-                                            "the .fkp")
-                    if flat._layout is None:
-                        raise TemplateError("a Literal needs the factory's .fkp")
-                    specs = literal_machines([e for e in flat._layout.entities.values()
-                                              if e.owner == path], cat)
-                    if not specs:
-                        raise TemplateError("the .fkp has no machine entities under it")
+                    ents = _literal_entities(flat, path, params, cat, src)
+                    if isinstance(ents, tuple):
+                        imported, ents = ents, ents[0]
+                    specs = literal_machines(ents, cat)     # a power plant may have none
                 else:
                     specs = template_machines(inst.kind, params, cat)
             except TemplateError as exc:
@@ -203,7 +200,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                 m = _machine(spec, path, inst.kind, d)
                 flat.machines[m.key] = m
                 keys.append(m.key)
-            node = Inst(path, inst.kind, inst.params, inst.hints, keys, None, None, inst.line)
+            node = Inst(path, inst.kind, inst.params, inst.hints, keys, None, None, inst.line,
+                        imported)
         scope[inst.name] = node
         flat.insts[path] = node
     for net in mod.nets:
@@ -215,6 +213,27 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         flat.asserts.append((a, prefix))
     for c in mod.covers:
         flat.covers.append((c, prefix))
+
+
+def _literal_entities(flat, path, params, cat, src):
+    """A Literal's entities: imported from ``file=`` (-> the import tuple), else pinned in the .fkp."""
+    from . import literal
+    extra = sorted(set(params) - {"file", "box"})
+    if extra:
+        raise TemplateError(f"a Literal takes file=, box= and duty=, not {', '.join(extra)}")
+    if "file" in params:
+        try:
+            ents, size, origin = literal.import_entities(literal.resolve(src, params["file"]),
+                                                         path, cat, params.get("box"))
+        except (literal.LiteralError, OSError) as exc:
+            raise TemplateError(str(exc)) from None
+        return ents, size, origin, literal.signature(ents, size)
+    if flat._layout is None:
+        raise TemplateError("a Literal without file= needs the factory's .fkp")
+    ents = [e for e in flat._layout.entities.values() if e.owner == path]
+    if not ents:
+        raise TemplateError("the .fkp has no entities under it")
+    return ents
 
 
 def _machine(spec: MSpec, path, kind, duty):

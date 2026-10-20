@@ -273,7 +273,7 @@ def literal_machines(entities, cat):
         rate = float(a["rate"]) if "rate" in a else None
         if kind in ("assembling-machine", "furnace") and a.get("recipe"):
             out.append(_crafter(cat, local, e.name, a["recipe"], a.get("fuel")))
-        elif e.name == "pumpjack":
+        elif e.name == "pumpjack" and ("resource" in a or rate is not None):
             out.append(MSpec(local, e.name, None, {}, {"crude-oil": rate or 30.0}, frozenset(),
                              extra={"resource": "crude-oil"}))
         elif kind == "mining-drill" and a.get("resource"):
@@ -281,8 +281,9 @@ def literal_machines(entities, cat):
                               **({"fuel": a["fuel"]} if "fuel" in a else {})}, cat)[0]
             spec.local = local
             out.append(spec)
-        elif kind == "offshore-pump":
-            out.append(MSpec(local, e.name, None, {}, {"water": rate or 1200.0}, frozenset()))
+        elif kind == "offshore-pump" and rate is not None:
+            # without a rate it feeds a power plant (an imported Literal), not the netlist
+            out.append(MSpec(local, e.name, None, {}, {"water": rate}, frozenset()))
         elif kind == "lab":
             out.append(MSpec(local, e.name, None, {}, {}, science_packs(cat), sink=True))
         elif kind in ("container", "logistic-container") and "role" in a:
