@@ -12,7 +12,10 @@ The search is ``fkcore.steiner`` (v4's tree router, copied): one net is a tree o
 underground jumps and splitters. A net with one driver grows forward from it to all consumers,
 splitting where it branches. A net with one consumer and several drivers grows from the consumer
 to the drivers and is laid reversed, so the splitters become merges (``Tree.entities(reverse)``).
-Several drivers AND several consumers are not routed yet (reported).
+A consumer that is a single machine (a chest, an assembler cell: its role has no attach tile) is
+reached by direct insertion: a fast (or long-handed) inserter beside the belt picks into it
+(``steiner.TapSink``), keyed ``~<net>/i<k>``. Several drivers AND several consumers, and a single
+machine as a driver, are not routed yet (reported).
 
 Per net the ground is: every entity tile, every placed instance's whole frame (the empty tiles
 inside a row are kept for poles), every other net's start and end tiles, every tile another
@@ -28,7 +31,7 @@ from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
 from .expand import attach_points, frame_of
-from .steiner import FixedSink, Grid, grow
+from .steiner import FixedSink, Grid, TapSink, grow
 
 __all__ = ["NetJob", "Routed", "jobs", "route_layout"]
 
@@ -43,11 +46,15 @@ class NetJob:
     net: str
     starts: list = field(default_factory=list)     # [(tile, heading)] the tile a driver belt feeds
     goals: list = field(default_factory=list)      # [(tile, heading)] the tile behind a consumer
+    taps: list = field(default_factory=list)       # [(machine key, tile rect)] direct insertion
     owners: list = field(default_factory=list)     # "<inst>.<role>" per start/goal, for the report
     skip: str | None = None
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals]
+
+    def consumers(self):
+        return len(self.goals) + len(self.taps)
 
 
 @dataclass
@@ -83,7 +90,15 @@ def jobs(flat, lay, cat) -> dict:
                 continue
             job = out.setdefault(net, NetJob(net))
             if d is None:
-                job.skip = f"{path}.{role} is a direct-insertion endpoint (not routed yet)"
+                if side == "out":
+                    job.skip = f"{path}.{role}: a single machine as a driver is not routed yet"
+                    continue
+                for key in flat.insts[path].machines:
+                    ts = fkpmod.tiles_of(cat, lay.entities[key])
+                    rect = (min(t[0] for t in ts), min(t[1] for t in ts),
+                            max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
+                    job.taps.append((key, rect))
+                job.owners.append(f"{path}.{role}")
                 continue
             h = _H[int(d)]
             tile = (math.floor(x), math.floor(y))
@@ -95,11 +110,13 @@ def jobs(flat, lay, cat) -> dict:
     for net, job in out.items():
         if job.skip is None and not job.starts:
             job.skip = "no driver role is placed"
-        elif job.skip is None and not job.goals:
+        elif job.skip is None and not job.consumers():
             job.skip = "no consumer role is placed"
-        elif job.skip is None and len(job.starts) > 1 and len(job.goals) > 1:
-            job.skip = (f"{len(job.starts)} drivers and {len(job.goals)} consumers: merge-then-split "
-                        "trees are not routed yet")
+        elif job.skip is None and len(job.starts) > 1 and job.consumers() > 1:
+            job.skip = (f"{len(job.starts)} drivers and {job.consumers()} consumers: "
+                        "merge-then-split trees are not routed yet")
+        elif job.skip is None and len(job.starts) > 1 and job.taps:
+            job.skip = "several drivers into a single machine are not routed yet"
     return out
 
 
@@ -150,10 +167,10 @@ def _ground(cat, ents, frames, js, net):
 
 def _carriers(job, tree_ents, net):
     """The tree's plan entities as keyed .fkp entities, in the tree's own order."""
-    count = {"b": 0, "u": 0, "s": 0}
+    count = {"b": 0, "u": 0, "s": 0, "i": 0}
     out = []
     for p in tree_ents:
-        letter = {"transport-belt": "b", "underground-belt": "u", "splitter": "s"}[p["name"]]
+        letter = {"transport-belt": "b", "underground-belt": "u", "splitter": "s"}.get(p["name"], "i")
         key = f"~{net}/{letter}{count[letter]}"
         count[letter] += 1
         attrs = {"net": net}
@@ -183,14 +200,21 @@ def _route_one(cat, job, ents, frames, js, box, limit):
         sinks = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
     if grid.blocked((root[0], root[1])):
         return None, f"its {'end' if reverse else 'start'} tile {root[0]},{root[1]} is taken"
-    res = grow(grid, root, sinks, limit=limit)
+    # direct insertion: fast inserters (Rory's rule) unless only a long-handed one can reach
+    for hands in (("fast-inserter",), ("fast-inserter", "long-handed-inserter")):
+        taps = [TapSink(key, rect, 1, hands) for key, rect in job.taps]
+        res = grow(grid, root, sinks + taps, limit=limit)
+        if not res["problems"] or not job.taps:
+            break
+    sinks = sinks + taps
     if res["problems"]:
         return None, "; ".join(res["problems"][:3])
     tree = res["tree"]
     plan = tree.entities(sinks, net=net, reverse=reverse)
     c = res["counts"]
     how = (f"{c['belts']} belts, {c['undergrounds']} underground ends, {c['splitters']} "
-           f"{'merges' if reverse else 'splitters'}")
+           f"{'merges' if reverse else 'splitters'}" + (f", {c['taps']} inserters" if c["taps"]
+                                                         else ""))
     return _carriers(job, plan, net), how
 
 
@@ -249,7 +273,7 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
         elif job.skip:
             lines.append(f"skipped   {net}: {job.skip}")
         elif net in added:
-            lines.append(f"routed    {net}: {len(job.starts)} -> {len(job.goals)}, {how[net]}")
+            lines.append(f"routed    {net}: {len(job.starts)} -> {job.consumers()}, {how[net]}")
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
     return Routed(new, lines, sorted(added), failed, kept, passes)
