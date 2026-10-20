@@ -94,8 +94,8 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   that doesn't take every item on it), `DOUBLE` (an endpoint on two nets), `UNBOUNDED` (a source with
   no rate), `ASSERT` (a nominal rate assert failed); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
   `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
-  [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; later `NO_ROBOTS`,
-  `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
+  [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; [built: cover robots]
+  `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
 
 ## Rate model (nominal, V1) [built]
 
@@ -106,7 +106,7 @@ output. Damped fixed point; reports per machine utilization + the binding endpoi
 supply / demand / delivered, the binding chain, and every `assert`. No capacity in V1: routed
 throughput is V2.
 
-## Flow script `build.fkb` [built; `cover robots`, `run_models`, `diff`, `apply` report and skip]
+## Flow script `build.fkb` [built; `diff` and `apply` live with the game link (FK_LINK=on); `run_models` reports and skips]
 
 Straight-line, one contained tool per line, each reads the previous checkpoint and writes its own
 (`out/<step>/<factory>.fkp`) plus `out/<step>.txt`: `read_surface`, `read_terrain`, `run_models`,
@@ -116,13 +116,13 @@ merges, direct insertion], `cover power` [built] `|robots`, `floorplan` [built, 
 invariants only). `fk build <surface> [--from X --to Y]`; every line is also a command on its own.
 Merge, insert, chests-to-net and net-to-chests edit source and layout only [built, on paper].
 
-## Diff verdicts [built: `sense` on captured scenes; not wired to the game]
+## Diff verdicts [built: `sense`, live through the flow's `diff`, `look --source world` and `apply`]
 
 Per tile: `OK`, `GHOST`, `MISSING`, `WRONG` (another entity), `DRIFT` (direction, ug type, config),
 `CLAIMED`, `MARKED`, `NOBODY`. Per carrier: `WRONG_ITEM`. After robots finish, the diff inside the
 applied scope is empty: that is 1:1.
 
-## Watch, notify, fair play [built: `sense` policies and notify, offline; `lab` scenario written, not deployed; alert push spec]
+## Watch, notify, fair play [built: `sense` policies, notify nearby/all/off, the alert push with reminders, the free reads `stats` and `chart`; the `lab` scenario runs the test map, `/lab` used by Rory]
 
 - Foreign change, per region: `mark [expiry]` (sanctioned space), `keep` (plots), `revert`, `strict`.
 - Notify, per surface and actor: `nearby` (play default: only inside a look, sense or build), `all`
