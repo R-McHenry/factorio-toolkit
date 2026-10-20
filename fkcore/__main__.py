@@ -1,4 +1,5 @@
-"""python -m fkcore <command> ...  (each command is one contained tool; nothing touches the game)
+"""python -m fkcore <command> ...  (each command is one contained tool; only build's diff and apply
+and read-terrain use the game link, and only with FK_LINK=on)
 
     check FILE.fk                         netlist checks (report lines, never a gate)
     rates FILE.fk [--unbounded NET,...] [--share appetite|level] [--chain INST,...]
@@ -17,6 +18,9 @@
     split-to-chest GAME_DIR FACTORY NET NAME --at X,Y [--requester --item I [--rate R]]
                                           a chest joins NET as one more endpoint; only NET
                                           is re-routed by the next build
+    read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map]
+                                          a free read of the bare world (ore, water, cliffs;
+                                          trees and rocks counted) into GAME_DIR/<name>.terrain.json
 """
 from __future__ import annotations
 
@@ -105,6 +109,31 @@ def _sense(a, cat):
     return 0
 
 
+def _read_terrain(a):
+    """Read the bare world through the game link (FK_LINK=on) into <name>.terrain.json."""
+    from . import link, terrain
+    if os.environ.get("FK_LINK", "off").lower() != "on":
+        print("read-terrain: skipped, FK_LINK is not on (FK_LINK=on uses the game link)",
+              file=sys.stderr)
+        return 2
+    area = tuple(int(v) for v in a.area.split(","))
+    if len(area) != 4 or area[2] <= area[0] or area[3] <= area[1]:
+        print(f"error: --area X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0, got {a.area}", file=sys.stderr)
+        return 2
+    try:
+        with link.Rcon() as r:
+            data = terrain.read(r, a.surface, area)
+    except (OSError, link.LinkError) as exc:
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    os.makedirs(a.game, exist_ok=True)
+    path = os.path.join(a.game, f"{a.name}.terrain.json")
+    terrain.save(data, path)
+    print("\n".join(terrain.summary(terrain.from_dict(data), a.name)))
+    print(f"wrote {path}")
+    return 0
+
+
 def _render(lay, cat):
     w, h = lay.size
     surface = fkp.loads(f"fkp 1 surface view\nplot {lay.name} at 0,0 rot 0 size {w}x{h}\n")
@@ -153,7 +182,14 @@ def main(argv=None):
     sp.add_argument("--requester", action="store_true")
     sp.add_argument("--item")
     sp.add_argument("--rate")
+    rt = sub.add_parser("read-terrain")
+    rt.add_argument("game")
+    rt.add_argument("--surface", required=True)
+    rt.add_argument("--area", required=True)
+    rt.add_argument("--name", default="map")
     a = ap.parse_args(argv)
+    if a.cmd == "read-terrain":
+        return _read_terrain(a)
     cat = Catalog.load()
 
     if a.cmd == "render":
