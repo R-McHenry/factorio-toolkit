@@ -7,8 +7,8 @@ elaborate                                 # templates -> logical netlist + its c
 report_rates                              # nominal rate model, asserts, surface targets
 place           --keep pinned             # fragments by their @(x, y) hints; Literals stay
 route           --only stale --effort normal
+cover robots                              # roboports over the logistic chests (before power)
 cover power     --pole medium-electric-pole
-cover robots
 floorplan       --bridge-power            # plots + shared infra (a pole bridge), compose
 report_checks                             # invariants + warnings, connectivity of every net
 report_bom      --stock none

@@ -224,7 +224,7 @@ def _classify(new, prev):
     return out
 
 
-_OWN_POLE = re.compile(r"p\d+")
+_OWN_POLE = re.compile(r"[pr]\d+")          # a cover's own: poles p<k>, roboports r<k>
 
 
 def _pinned_covers(new, prev, cat):
@@ -345,7 +345,18 @@ def s_cover_power(ctx, args):
 
 
 def s_cover_robots(ctx, args):
-    return ["cover robots: not built in V1 yet; the surface file's robots lines are read only"], []
+    """Roboports so every logistic chest of a factory is in a logistic area (``fkcore.robots``);
+    before ``cover power`` in the script, so the poles power them."""
+    from . import robots
+    o = _opts(args, roboport="roboport")
+    lines, checks = [], []
+    for factory, lay in list(ctx.layouts.items()):
+        new, rep = robots.apply_robots(lay, ctx.cat, roboport=o["roboport"])
+        ctx.layouts[factory] = new
+        lines.append(f"{factory}: {rep.summary()}")
+        checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
+        checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
+    return lines, checks
 
 
 def s_floorplan(ctx, args):
@@ -405,7 +416,9 @@ def s_floorplan(ctx, args):
                 checks.append(Check("NO_POWER", f"{sf.name} {name}",
                                     "its grid reaches no generator (bridge it: floorplan "
                                     "--bridge-power)"))
-    return lines, checks + _invariant_checks(sf.name, s.problems)
+    from . import robots
+    rlines, rchecks = robots.check_surface(s, ctx.cat)
+    return lines + rlines, checks + rchecks + _invariant_checks(sf.name, s.problems)
 
 
 def s_report_checks(ctx, args):

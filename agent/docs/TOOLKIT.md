@@ -57,6 +57,11 @@ fixing in the source.
 - `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
   in the build script joins it to the plant's grid)
+- `NO_ROBOTS`: a logistic chest outside every logistic area of the main robot network (robots
+  won't serve it), or entities outside its construction area (robots won't build them). The kit's
+  roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`
+  gives a factory with chests its own roboport, which joins the network when it stands within 50
+  tiles of another one on both axes. Grow outward: the next factory within reach of the last.
 - `ON_TERRAIN`: something designed stands on water or a cliff
 - `MISPLACED` / `UNPLACED`: the paste did not land where the design says
 

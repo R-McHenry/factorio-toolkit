@@ -1,5 +1,6 @@
 fkp 1 surface nauvis
 cover bridge power
+cover kit robots
 plot plant at -34,-39 rot 0 size 17x16 module=plant
 claim kit box 2,6 23,21 "the starter kit: roboport, solar panels, accumulators, poles, six chests"
 e bridge/p0 medium-electric-pole -21.5,-21.5
@@ -9,3 +10,4 @@ e bridge/p3 medium-electric-pole -6.5,-6.5
 e bridge/p4 medium-electric-pole -1.5,-1.5
 e bridge/p5 medium-electric-pole 3.5,3.5
 e bridge/p6 medium-electric-pole 5.5,7.5
+e kit/r0 roboport 8,8

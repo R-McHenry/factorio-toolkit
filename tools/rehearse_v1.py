@@ -32,6 +32,9 @@ from kickoff import new_run, setup_v1  # noqa: E402
 
 MAPGEN = os.path.join(os.path.dirname(ROOT), "v4-hand", "kickoff", "map-gen-w3.json")
 RUN = os.path.join(ROOT, "out", "rehearsal-run")
+#: the gear plot: 30,-20 puts its requester outside the kit's logistic square, so cover
+#: robots must give it a roboport (rehearsal 2 found the chest unserved there)
+GEARS_AT = os.environ.get("FK_REHEARSE_GEARS_AT", "30,-20 16x16")
 REPORT = {}
 
 
@@ -123,18 +126,19 @@ def main(argv):
             # inside the kit roboport's logistic square (8,8 +- 25: x and y from -17 to 33); at
             # 30,-20 (rehearsal 2) the requester stood outside every logistic network
             with open(os.path.join(RUN, "game", "nauvis.surface"), "a", encoding="utf-8") as fh:
-                fh.write("\nplace gears = gears plot 14,-14 16x16\n")
+                fh.write(f"\nplace gears = gears plot {GEARS_AT}\n")
             code, text, s = fk("build")
             REPORT["build2_text"] = text
             apply_txt = open(os.path.join(RUN, "game", "out", "apply.txt"), encoding="utf-8").read()
             note("build gears", exit=code, seconds=round(s, 1), apply=apply_txt.splitlines()[1:3])
-            gears_area = (12, -16, 32, 4)
+            gx, gy = (int(v) for v in GEARS_AT.split()[0].split(","))
+            gears_area = (gx - 2, gy - 2, gx + 18, gy + 18)
             left, waited = wait_built(r, gears_area)
             note("robots gears", ghosts_left=left, waited_s=waited)
             r.call("hello from Rory's side (the rehearsal)")
             time.sleep(1)
             req = r.lua("local c = game.surfaces.nauvis.find_entities_filtered{name = 'requester-chest', "
-                        "area = {{12, -16}, {32, 4}}}[1] if not c then rcon.print('none') return end "
+                        f"area = {{{{{gears_area[0]}, {gears_area[1]}}}, {{{gears_area[2]}, {gears_area[3]}}}}}}}[1] if not c then rcon.print('none') return end "
                         "local out = {} local sec = c.get_logistic_sections() "
                         "for i = 1, sec.sections_count do for _, f in pairs(sec.get_section(i).filters) do "
                         "out[#out + 1] = (f.value and f.value.name or '?') .. ':' .. (f.min or 0) end end "
@@ -155,7 +159,7 @@ def main(argv):
             time.sleep(30)
             note("gears made", first_after_s=first, count_30s_later=made(),
                  plates_in_inbox=r.lua("local c = game.surfaces.nauvis.find_entities_filtered{name = 'requester-chest', "
-                                       "area = {{12, -16}, {32, 4}}}[1] rcon.print(c and c.get_inventory(defines.inventory.chest)"
+                                       f"area = {{{{{gears_area[0]}, {gears_area[1]}}}, {{{gears_area[2]}, {gears_area[3]}}}}}}}[1] rcon.print(c and c.get_inventory(defines.inventory.chest)"
                                        ".get_item_count('iron-plate') or -1)").strip())
             code, text, s = fk("measure", "--area", ",".join(str(v) for v in gears_area),
                                "--seconds", "30", timeout=120)

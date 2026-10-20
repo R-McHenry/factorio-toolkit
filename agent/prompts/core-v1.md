@@ -44,6 +44,9 @@ world back to what the source says. Small factories that work beat a big plan.
 
 - Give each factory its own plot (`place` in the surface file) on bare ground, on or next to
   the ore it needs (`map.terrain.json`, or `@patch(iron-ore)` on a miner row).
+- Robots build and serve chests only inside the robot network: the kit's roboport reaches 55
+  tiles each way for building and 25 for chests. A factory with chests gets its own roboport
+  (`cover robots`), so grow outward from spawn; `NO_ROBOTS` says when a factory is out of reach.
 - A build replaces whatever stands in the way of the design. That's intended: the design wins.
 - One net per belt. A net may carry several items (a sushi net), but only into machines that
   take them all.
