@@ -128,6 +128,13 @@ def step_apply(r, cat, a, offset):
     at = bbox_center(rows, cat)
     area = (box[0] - 2, box[1] - 2, box[2] + 2, box[3] + 2)
     t0 = time.time()
+    # a clean plot for every run, and lab terrain: the ore each drill row is designed for
+    cleared = r.lua(link.lua_destroy(SURF, area)).strip()
+    ore = {}
+    for e in s.entities.values():
+        if e.attrs.get("resource") and cat.kind(e.name) == "mining-drill":
+            ore.setdefault(e.attrs["resource"], []).extend(e.tiles)
+    seeded = r.lua(link.lua_seed(SURF, ore)).strip()
     built = link.paste(r, SURF, FORCE, bp, (at[0] - offset[0], at[1] - offset[1]))
     cap = link.snapshot(r, SURF, area, "bench-apply-ghosts")
     want = {(row["name"], float(row["x"]), float(row["y"])) for row in rows}
@@ -152,7 +159,8 @@ def step_apply(r, cat, a, offset):
     rep = sense.sense(s, live, cat, list(area), LAB_POLICY, net_items=nets)
     with open("/tmp/fk5-bench-apply.txt", "w") as fh:
         fh.write("\n".join(rep.lines()) + "\n")
-    out("apply", design=len(rows), pasted=built.strip(), ghosts_where_designed=len(want & got),
+    out("apply", cleared=cleared, ore_tiles=seeded, design=len(rows), pasted=built.strip(),
+        ghosts_where_designed=len(want & got),
         corrected=corrected, revived=revived[0] if revived else "?",
         revive_failed=revived[1] if len(revived) > 1 else "?",
         verdicts=rep.counts(), changes=len(rep.changes), seconds=round(time.time() - t0, 1))

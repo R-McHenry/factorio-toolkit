@@ -28,8 +28,8 @@ import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_destroy", "lua_produced", "lua_generate", "assert_safe", "snapshot", "paste",
-           "OUT_DIR"]
+           "lua_destroy", "lua_produced", "lua_generate", "lua_seed", "assert_safe", "snapshot",
+           "paste", "OUT_DIR"]
 
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
@@ -227,6 +227,22 @@ local r = {radius_chunks} * 32
 game.forces[{_q(force)}].chart(s, {{{{{center[0]} - r, {center[1]} - r}}, {{{center[0]} + r, {center[1]} + r}}}})
 local n = 0
 for _ in s.get_chunks() do n = n + 1 end
+rcon.print(n)
+"""
+
+
+def lua_seed(surface, tiles, amount=100000):
+    """Lab only: put resource ``name`` under the given tiles {name: [(x, y)]} (lab terrain: a
+    drill can only be placed on ore)."""
+    data = json.dumps({k: [[int(x), int(y)] for x, y in v] for k, v in tiles.items()})
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for name, ts in pairs(helpers.json_to_table({_q(data)})) do
+  for _, t in pairs(ts) do
+    if s.create_entity{{name = name, position = {{t[1] + 0.5, t[2] + 0.5}}, amount = {amount}}} then n = n + 1 end
+  end
+end
 rcon.print(n)
 """
 

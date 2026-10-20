@@ -265,7 +265,9 @@ def _drift(e, t, cat):
     if want_ug and t["ug"] and t["ug"] != want_ug:
         out.append(f"underground {t['ug']}, designed {want_ug}")
     want_recipe = e.attrs.get("recipe")
-    if want_recipe and t["recipe"] != want_recipe:
+    # a furnace picks its recipe from what it is fed: the game reports none while it is idle, and
+    # there is no setting to compare (found by the first in-game diff, 2026-10-20: 22 false DRIFTs)
+    if want_recipe and kind != "furnace" and t["recipe"] != want_recipe:
         out.append(f"recipe {t['recipe']}, designed {want_recipe}")
     return "; ".join(out)
 
