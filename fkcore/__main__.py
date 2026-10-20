@@ -12,6 +12,8 @@
                                           run the flow; reports in out/, checkpoints out/<step>/
     look GAME_DIR [--source design] [--area X0,Y0,X1,Y1]
                                           the composed surface of a game codebase, as designed
+    sense GAME_DIR CAPTURE.json --area X0,Y0,X1,Y1 [--write-marks]
+                                          the layout vs a captured scene inside the area only
 """
 from __future__ import annotations
 
@@ -66,6 +68,40 @@ def _look(a, cat):
     return 0
 
 
+def _composed(game, cat):
+    surfaces = [f for f in sorted(os.listdir(game)) if f.endswith(".surface")]
+    if not surfaces:
+        raise SystemExit(f"error: no .surface file in {game}")
+    sf = surfacemod.load(os.path.join(game, surfaces[0]))
+    lay_path = os.path.join(game, f"{sf.name}.fkp")
+    surface_lay = fkp.load(lay_path) if os.path.exists(lay_path) else surfacemod.floorplan(sf)
+    factories = {}
+    for p in sf.places.values():
+        path = os.path.join(game, f"{p.module}.fkp")
+        if os.path.exists(path):
+            lay = fkp.load(path)
+            lay.name = p.factory
+            factories[p.factory] = lay
+    return sf, surface_lay, lay_path, compose.compose(surface_lay, factories, cat)
+
+
+def _sense(a, cat):
+    import json
+    from . import scene, sense
+    sf, surface_lay, lay_path, s = _composed(a.game, cat)
+    with open(a.capture, encoding="utf-8") as fh:
+        live = scene.from_capture(json.load(fh))
+    area = [int(v) for v in a.area.split(",")]
+    rep = sense.sense(s, live, cat, area, sf)
+    print("\n".join(rep.lines()))
+    if a.write_marks and rep.marks:
+        for m in rep.marks:
+            surface_lay.marks[m.name] = m
+        fkp.save(surface_lay, lay_path, cat)
+        print(f"wrote {len(rep.marks)} mark(s) into {os.path.basename(lay_path)}")
+    return 0
+
+
 def _render(lay, cat):
     w, h = lay.size
     surface = fkp.loads(f"fkp 1 surface view\nplot {lay.name} at 0,0 rot 0 size {w}x{h}\n")
@@ -100,6 +136,11 @@ def main(argv=None):
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
     lk.add_argument("--area")
+    se = sub.add_parser("sense")
+    se.add_argument("game")
+    se.add_argument("capture")
+    se.add_argument("--area", required=True)
+    se.add_argument("--write-marks", action="store_true")
     a = ap.parse_args(argv)
     cat = Catalog.load()
 
@@ -115,6 +156,8 @@ def main(argv=None):
         return code
     if a.cmd == "look":
         return _look(a, cat)
+    if a.cmd == "sense":
+        return _sense(a, cat)
     flat = _flat(a.file)
     if a.cmd in ("layout", "explain", "unfold"):
         previous = fkp.load(_fkp_path(a.file)) if os.path.exists(_fkp_path(a.file)) else None
