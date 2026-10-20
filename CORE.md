@@ -109,9 +109,12 @@ throughput is V2.
 ## Flow script `build.fkb` [built; `diff` and `apply` live with the game link (FK_LINK=on); `run_models` reports and skips]
 
 Straight-line, one contained tool per line, each reads the previous checkpoint and writes its own
-(`out/<step>/<factory>.fkp`) plus `out/<step>.txt`: `read_surface`, `read_terrain`, `run_models`,
-`elaborate`, `report_rates`, `place`, `route` [built: v4's steiner tree router per net, splits,
-merges, direct insertion], `cover power` [built] `|robots`, `floorplan` [built, `--bridge-power`],
+(`out/<step>/<factory>.fkp`) plus `out/<step>.txt`: `read_surface`, `read_terrain` [built: a live
+map's ore, water and cliffs; `ON_TERRAIN`, `OFF_ORE`], `run_models`, `elaborate`, `report_rates`,
+`place` [built: hints, `@patch` for MinerRow], `route` [built: v4's steiner tree router per net,
+splits, merges, direct insertion, k->m through a hub, the underground guard; fluid nets by the fluid
+plug-in: pipes, pipe-to-ground], `cover power` [built] `|robots` [built], `floorplan` [built,
+`--bridge-power`],
 `report_checks`, `report_bom`, `write_layout`, `diff`, `apply`, `stop_on <check ...>` (default:
 invariants only). `fk build <surface> [--from X --to Y]`; every line is also a command on its own.
 Merge, insert, chests-to-net and net-to-chests edit source and layout only [built, on paper].

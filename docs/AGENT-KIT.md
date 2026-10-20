@@ -36,10 +36,11 @@ it (CLAUDE.md). A run with `"host": "local"` plays a laptop test server (the reh
 Every command ends with `fkcore poll`: chat lines since the last command, and the game's new
 alerts and reminders. Those are the only unasked channels in play (CORE-V1 decision 11).
 
-Built today: build (both halves), rates, check, explain, unfold, render, split-to-chest, chat,
-say, poll (chat part), look --design. Coming from the workers: the live look, alerts, stats,
-chart (worker sense), read-terrain and @patch (worker terrain). Still to do: the CLI of measure,
-adopt, merge, insert, chests-to-net and net-to-chests (the functions exist).
+Built (all merged on main, 2026-10-20): build (both halves), rates, check, explain, unfold,
+render, split-to-chest, merge, insert, chests-to-net, net-to-chests, the live look and look
+--design, measure, adopt, alerts (with reminders), stats, chart, read-terrain (and `@patch`),
+chat, say, poll (chat and alerts). Each was run in the game at least once (the lab, or the laptop
+rehearsal), except adopt from the CLI and the rewiring commands, which are tested on paper.
 
 ## The V1 kickoff (host side; drafted, not wired)
 
