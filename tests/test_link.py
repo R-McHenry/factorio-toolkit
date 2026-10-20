@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -38,6 +40,25 @@ class LinkLuaTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FK_LINK": "on"}), \
                 mock.patch.object(link, "Rcon", side_effect=OSError("connection refused")):
             self.assertEqual(link.open_from_env(), (None, "OSError: connection refused"))
+
+    def test_alert_and_stats_reads_leave_no_file_behind(self):
+        out = tempfile.mkdtemp(prefix="fkout-")
+        self.addCleanup(shutil.rmtree, out, True)
+        os.makedirs(os.path.join(out, "fk5"))
+
+        class Game:
+            """Writes what the Lua would write into script-output, replies with the count."""
+            def lua(self, body):
+                name = body.split("helpers.write_file('fk5/", 1)[1].split("'", 1)[0]
+                with open(os.path.join(out, "fk5", name), "w", encoding="utf-8") as fh:
+                    fh.write('{"tick": 7, "force": "lab", "alerts": {}, "items": {}}')
+                return "0"
+        with mock.patch.object(link, "OUT_DIR", out):
+            self.assertEqual(link.alerts(Game(), "lab")["tick"], 7)
+            self.assertEqual(link.stats(Game(), "lab", "lab")["tick"], 7)
+            self.assertEqual(os.listdir(os.path.join(out, "fk5")), [])
+            link.snapshot(Game(), "lab", (0, 0, 1, 1))              # a snapshot keeps its file
+            self.assertEqual(len(os.listdir(os.path.join(out, "fk5"))), 1)
 
     def test_a_statistics_window_is_checked_before_the_call(self):
         with self.assertRaises(link.LinkError):

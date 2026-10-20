@@ -439,14 +439,22 @@ def paste(rcon, surface, force, bp, at, chunk=CHUNK):
     return reply
 
 
-def read_output(rcon, lua, tag, what):
+def read_output(rcon, lua, tag, what, keep=True):
     """Run Lua that writes ``fk5/<tag>.json`` into script-output and replies with a count; ->
-    the file's JSON."""
+    the file's JSON. ``keep=False`` removes the file once read (best effort: the game server's
+    user owns it), for reads made on every agent command, like the alert panel."""
     n = rcon.lua(lua)
     if not n.strip().isdigit():
         raise LinkError(f"{what} failed: {n.strip()[:300]}")
-    with open(os.path.join(OUT_DIR, "fk5", f"{tag}.json"), encoding="utf-8") as fh:
-        return json.load(fh)
+    path = os.path.join(OUT_DIR, "fk5", f"{tag}.json")
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not keep:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return data
 
 
 def snapshot(rcon, surface, area, tag="snap"):
@@ -459,7 +467,7 @@ def snapshot(rcon, surface, area, tag="snap"):
 def alerts(rcon, force, tag="alerts"):
     """The raw alert panel read of ``force`` (``lua_alerts``); ``fkcore.alerts.normalise`` it."""
     tag = f"{tag}-{os.getpid()}"
-    return read_output(rcon, lua_alerts(force, tag), tag, "alerts")
+    return read_output(rcon, lua_alerts(force, tag), tag, "alerts", keep=False)
 
 
 def stats(rcon, force, surface, items=None, window="1min", tag="stats"):
@@ -467,7 +475,8 @@ def stats(rcon, force, surface, items=None, window="1min", tag="stats"):
     if window not in WINDOWS:
         raise LinkError(f"a statistics window is one of {', '.join(WINDOWS)}, got {window!r}")
     tag = f"{tag}-{os.getpid()}"
-    return read_output(rcon, lua_stats(force, surface, items, window, tag), tag, "stats")
+    return read_output(rcon, lua_stats(force, surface, items, window, tag), tag, "stats",
+                       keep=False)
 
 
 def chart(rcon, force, surface):
