@@ -10,7 +10,8 @@ report line, never a gate.
 ``run(script, frm=None, to=None)`` runs the whole script or the lines from ``frm`` to ``to``.
 Steps before ``frm`` that only read source (``read_surface``, ``read_terrain``, ``run_models``,
 ``elaborate``) are re-run quietly: source is cheap and pure. Layouts come from the checkpoint of
-the last layout step before ``frm``.
+the last layout step before ``frm``, and a ``floorplan`` before ``frm`` is replayed on them (it is
+pure too), so ``--from diff`` on the game host applies what a laptop build laid out.
 
 Steps: read_surface, read_terrain, run_models, elaborate, report_rates, place, route,
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
@@ -614,6 +615,9 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
     before = [ln.cmd for ln in lines[:first] if ln.cmd in _LAYOUT]
     if before:
         _load_checkpoint(ctx, before[-1])
+    plans = [ln for ln in lines[:first] if ln.cmd == "floorplan"]
+    if plans and ctx.layouts:
+        STEPS["floorplan"](ctx, plans[-1].args)
     width = len(lines)
     for i in range(first, last + 1):
         ln = lines[i]

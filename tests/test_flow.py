@@ -89,6 +89,16 @@ class FlowTest(unittest.TestCase):
         self.assertEqual([l.split("]")[0] for l in ctx.log], ["[ 8/16", "[ 9/16", "[10/16", "[11/16"])
         self.assertIn("12 connected", self.read("out/report_checks.txt"))
 
+    def test_from_diff_replays_the_floorplan(self):
+        # the laptop lays out (--to write_layout); the game host applies (--from diff)
+        self.build(to="write_layout")
+        code, ctx = self.build(frm="diff")
+        self.assertEqual(code, 0, ctx.log)
+        self.assertIsNotNone(ctx.composed)
+        self.assertEqual(len(ctx.composed.entities), 1014)    # 974 + the 40 poles of cover power
+        self.assertIn("skipped, no game link", self.read("out/diff.txt"))
+        self.assertIn("skipped, no game link", self.read("out/apply.txt"))
+
     def test_stop_on_stops_on_a_check(self):
         src = self.read("main.fk").replace("net cable:  cable -> circ\n", "")
         with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8") as fh:
