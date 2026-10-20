@@ -9,6 +9,7 @@ inst copper_mine MinerRow n=4 resource=copper-ore at 22,0 rot 0 sig d961447d53
 inst copper_smelt SmelterRow n=6 recipe=copper-plate at 34,9 rot 0 sig 031cd66ba4
 inst gears AsmRow n=3 recipe=iron-gear-wheel at 0,18 rot 0 sig 4e85950139
 inst green AsmRow n=6 recipe=logistic-science-pack at 17,28 rot 0 sig 19f759c977
+inst ins AsmRow n=1 recipe=inserter at 38,18 rot 0 sig 527246253b
 inst iron_mine MinerRow n=10 resource=iron-ore at 0,0 rot 0 sig 58f3826f75
 inst iron_smelt SmelterRow n=16 recipe=iron-plate at 0,9 rot 0 sig c1b9acd819
 inst labs LabRow n=10 at 0,38 rot 0 sig 0e54f4a3e7
@@ -266,6 +267,21 @@ e green/outb14 transport-belt 31.5,35.5 W net=packs
 e green/outb15 transport-belt 32.5,35.5 W net=packs
 e green/outb16 transport-belt 33.5,35.5 W net=packs
 e green/outb17 transport-belt 34.5,35.5 W net=packs
+e ins/f0 fast-inserter 38.5,20.5 N net=iron
+e ins/in1b0 transport-belt 38.5,19.5 E net=iron
+e ins/in1b1 transport-belt 39.5,19.5 E net=iron
+e ins/in1b2 transport-belt 40.5,19.5 S net=iron
+e ins/in2b0 transport-belt 38.5,18.5 E net=gear
+e ins/in2b1 transport-belt 39.5,18.5 E net=gear
+e ins/in3b0 transport-belt 38.5,26.5 E net=circ
+e ins/in3b1 transport-belt 39.5,26.5 E net=circ
+e ins/l0 long-handed-inserter 39.5,20.5 N net=gear
+e ins/m0 assembling-machine-1 39.5,22.5 recipe=inserter
+e ins/o0 fast-inserter 39.5,24.5 N net=ins_
+e ins/outb0 transport-belt 38.5,25.5 W net=ins_
+e ins/outb1 transport-belt 39.5,25.5 W net=ins_
+e ins/outb2 transport-belt 40.5,25.5 W net=ins_
+e ins/s0 long-handed-inserter 38.5,24.5 S net=circ
 e iron_mine/m0 electric-mining-drill 1.5,1.5 S resource=iron-ore
 e iron_mine/m1 electric-mining-drill 4.5,1.5 S resource=iron-ore
 e iron_mine/m2 electric-mining-drill 7.5,1.5 S resource=iron-ore

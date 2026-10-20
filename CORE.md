@@ -44,8 +44,9 @@ param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' 
 - **Templates expand visibly** [built: AsmRow, SmelterRow, MinerRow, LabRow, single machines]: an
   instance's fragment (machines, the belts and inserters of each role, attach points) is written into
   the `.fkp` under its keys, every carrier `net=` the net its role is bound to. Rows are counterflow
-  (all attach points at the head) and take one or two input belts in V1. `explain X` shows both
-  views; `unfold X` makes it a `Literal` and keeps every `.fkp` line.
+  (all attach points at the head). AsmRow takes up to three input belts, the third south of the
+  product belt by long-handed inserters (Rory, 2026-10-19); SmelterRow and LabRow up to two.
+  `explain X` shows both views; `unfold X` makes it a `Literal` and keeps every `.fkp` line.
 
 ## Keys
 

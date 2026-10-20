@@ -10,10 +10,12 @@ router later lays only the carriers between a role's attach point and the rest o
 Geometry is v4's proven stamps (C:\\fk-lead\\repo\\fk\\stamps\\assembler_row.py, miner_row.py,
 feed_rows.py lab_row, d6018d3) with every pole removed (power is a coverage step) and fast
 inserters throughout. Rows are counterflow: the product belt runs back west, so every attach point
-of a row is at its head (x = 0). V1 rows take one or two input belts (one net each, a net may be
-sushi); a recipe whose solid ingredients need a third belt raises FragmentError rather than
-inventing a layout. SmelterRow is new geometry in AsmRow's pattern: ore by fast inserter from the
-near belt, fuel by long-handed inserter from the far one, at the furnaces' pitch 2.
+of a row is at its head (x = 0). Input belts carry one net each (a net may be sushi). AsmRow takes
+up to three: two north of the machines as in v4, and a third south of the product belt, reached
+by long-handed inserters across it (Rory, 2026-10-19; for the inserter, engine and blue recipes).
+SmelterRow and LabRow take up to two; more raises FragmentError rather than inventing a layout.
+SmelterRow is new geometry in AsmRow's pattern: ore by fast inserter from the near belt, fuel by
+long-handed inserter from the far one, at the furnaces' pitch 2.
 
 Machine entities carry what a Literal needs to rebuild them (recipe, resource, fuel, role, rate),
 so ``unfold`` can turn any instance into a Literal with the same keys and the same netlist.
@@ -79,17 +81,19 @@ def _finish(frag: Fragment) -> Fragment:
     return frag
 
 
-def _inputs(inputs, kind):
-    if not 1 <= len(inputs) <= 2:
-        raise FragmentError(f"{kind} takes one or two input belts in V1, got {len(inputs)}: "
+def _inputs(inputs, kind, most=2):
+    if not 1 <= len(inputs) <= most:
+        raise FragmentError(f"{kind} takes 1 to {most} input belts in V1, got {len(inputs)}: "
                             + "; ".join(", ".join(b) for b in inputs)
                             + " (put two items on one sushi net, or split the row)")
     return inputs
 
 
 def asm_row(n, recipe, inputs, outputs, machine="assembling-machine-1", counter=True):
-    inputs = _inputs(inputs, "AsmRow")
-    two = len(inputs) == 2
+    """Rows north to south: in2, in1, feeders, machines (3), output inserters + in3 feeders,
+    product belt, in3. Without in2 everything shifts up one; in3 needs in2."""
+    inputs = _inputs(inputs, "AsmRow", most=3)
+    two, three = len(inputs) >= 2, len(inputs) == 3
     shift = 0 if two else -1
     in2_y, in1_y, feed_y = 0, 1 + shift, 2 + shift
     mach_y, out_ins_y, out_y = 4 + shift, 6 + shift, 7 + shift
@@ -102,6 +106,9 @@ def asm_row(n, recipe, inputs, outputs, machine="assembling-machine-1", counter=
                  for j in range(3 * n)]
     else:
         ents += _belt("outb", "out", 0, out_y, 3 * n)
+    in3_y = out_y + 1
+    if three:
+        ents += _belt("in3b", "in3", 0, in3_y, 3 * n - 1)    # the last feeder is at x = 3n - 3
     machines = []
     for k in range(n):
         cx = 3 * k + 0.5
@@ -110,13 +117,18 @@ def asm_row(n, recipe, inputs, outputs, machine="assembling-machine-1", counter=
             ents.append(FEnt(f"l{k}", _LONG, cx + 1, feed_y + 0.5, N, "in2"))
         ents.append(FEnt(f"m{k}", machine, cx + 1, mach_y + 0.5, None, None, {"recipe": recipe}))
         ents.append(FEnt(f"o{k}", _INSERTER, cx + 1, out_ins_y + 0.5, N, "out"))
+        if three:
+            # picks two tiles south (in3, over the product belt), drops two north (the machine)
+            ents.append(FEnt(f"s{k}", _LONG, cx, out_ins_y + 0.5, S, "in3"))
         machines.append(f"m{k}")
     roles = {"in1": Role("in1", "in", inputs[0], machines, [(0.5, in1_y + 0.5, E)])}
     if two:
         roles["in2"] = Role("in2", "in", inputs[1], machines, [(0.5, in2_y + 0.5, E)])
+    if three:
+        roles["in3"] = Role("in3", "in", inputs[2], machines, [(0.5, in3_y + 0.5, E)])
     out_at = (0.5, out_y + 0.5, W) if counter else (3 * n - 0.5, out_y + 0.5, E)
     roles["out"] = Role("out", "out", outputs[0] if outputs else [], machines, [out_at])
-    return ents, roles, (3 * n, out_y + 1)
+    return ents, roles, (3 * n, (in3_y if three else out_y) + 1)
 
 
 def smelter_row(n, recipe, inputs, outputs, machine="stone-furnace", fuel=None):

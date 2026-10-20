@@ -13,6 +13,8 @@ GAME = os.path.join(os.path.dirname(__file__), "..", "games", "spm10")
 REDGREEN = os.path.join(GAME, "redgreen.fk")
 
 _REACH = {"fast-inserter": 1, "inserter": 1, "long-handed-inserter": 2}
+# redgreen: 551 + the inserter row placed on 2026-10-19 (1 machine, 4 inserters, 10 belt tiles)
+ENTITIES = 551 + 15
 _DIRV = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 
 
@@ -23,6 +25,8 @@ def cases():
         out.append(("AsmRow", {"n": n, "recipe": "pipe"}, [["iron-plate"]], [["pipe"]]))
         out.append(("AsmRow", {"n": n, "recipe": "transport-belt"},
                     [["iron-plate"], ["iron-gear-wheel"]], [["transport-belt"]]))
+        out.append(("AsmRow", {"n": n, "recipe": "inserter"},
+                    [["iron-plate"], ["iron-gear-wheel"], ["electronic-circuit"]], [["inserter"]]))
         out.append(("SmelterRow", {"n": n, "_recipe": "iron-plate", "_fuel": "coal"},
                     [["iron-ore"], ["coal"]], [["iron-plate"]]))
         out.append(("SmelterRow", {"n": n, "_recipe": "iron-plate", "_fuel": "coal"},
@@ -94,11 +98,29 @@ class FragmentTest(unittest.TestCase):
                                        {"net": e.role} if e.role else {}))
                 self.assertEqual(fkp.invariants(lay, CAT), [], (kind, params, rot))
 
-    def test_a_third_input_belt_is_refused(self):
+    def test_the_third_belt_runs_south_of_the_product_belt(self):
+        frag = fragment("AsmRow", {"n": 2, "recipe": "inserter"},
+                        [["iron-plate"], ["iron-gear-wheel"], ["electronic-circuit"]],
+                        [["inserter"]])
+        at = index(frag)
+        self.assertEqual(frag.size, (6, 9))
+        self.assertEqual(frag.roles["in3"].attach, [(0.5, 8.5, 4)])
+        self.assertEqual(frag.roles["in3"].items, ["electronic-circuit"])
+        for k in range(2):
+            s = next(e for e in frag.entities if e.local == f"s{k}")
+            self.assertEqual((s.name, s.dir), ("long-handed-inserter", 8))
+            over = at[(math.floor(s.x), math.floor(s.y) + 1)]   # the tile it reaches across
+            self.assertEqual((over.name, over.role), ("transport-belt", "out"))
+
+    def test_too_many_input_belts_are_refused(self):
+        four = [["iron-plate"], ["iron-gear-wheel"], ["electronic-circuit"], ["pipe"]]
         with self.assertRaises(FragmentError) as cm:
-            fragment("AsmRow", {"n": 1, "recipe": "inserter"},
-                     [["iron-plate"], ["iron-gear-wheel"], ["electronic-circuit"]], [["inserter"]])
-        self.assertIn("one or two input belts", str(cm.exception))
+            fragment("AsmRow", {"n": 1, "recipe": "engine-unit"}, four, [["engine-unit"]])
+        self.assertIn("AsmRow takes 1 to 3 input belts", str(cm.exception))
+        with self.assertRaises(FragmentError) as cm:
+            fragment("SmelterRow", {"n": 1, "_recipe": "iron-plate", "_fuel": "coal"},
+                     [["iron-ore"], ["coal"], ["wood"]], [["iron-plate"]])
+        self.assertIn("SmelterRow takes 1 to 2 input belts", str(cm.exception))
 
     def test_signature_follows_the_footprint(self):
         a = fragment("AsmRow", {"n": 2, "recipe": "pipe"}, [["iron-plate"]], [["pipe"]])
@@ -116,10 +138,9 @@ class ExpandTest(unittest.TestCase):
 
     def test_redgreen_expands_cleanly(self):
         self.assertEqual(fkp.invariants(self.lay, CAT), [])
-        self.assertEqual(len(self.lay.entities), 551)
+        self.assertEqual(len(self.lay.entities), ENTITIES)
         self.assertEqual(self.lay.size, (46, 43))
-        self.assertEqual(len(self.notes), 1)
-        self.assertTrue(self.notes[0].startswith("ins: AsmRow takes one or two input belts"))
+        self.assertEqual(self.notes, [])                    # every instance is placed
 
     def test_every_carrier_names_a_net_of_the_factory(self):
         for key, e in self.lay.entities.items():
@@ -130,8 +151,14 @@ class ExpandTest(unittest.TestCase):
     def test_machine_keys_are_the_netlist_keys(self):
         placed = {k for k, e in self.lay.entities.items()
                   if CAT.kind(e.name) not in fkp.CARRIER_TYPES}
-        expected = {k for k, m in self.flat.machines.items() if m.inst != "ins"}
-        self.assertEqual(placed, expected)
+        self.assertEqual(placed, set(self.flat.machines))
+
+    def test_the_inserter_row_has_three_belts(self):
+        roles = {e.net for k, e in self.lay.entities.items() if k.startswith("ins/") and e.net}
+        self.assertEqual(roles, {"iron", "gear", "circ", "ins_"})
+        s0 = self.lay.entities["ins/s0"]
+        self.assertEqual((s0.name, s0.x, s0.y, s0.dir, s0.net),
+                         ("long-handed-inserter", 38.5, 24.5, 8, "circ"))
 
     def test_rotated_instance(self):
         rec = self.lay.insts["coal_copper"]
