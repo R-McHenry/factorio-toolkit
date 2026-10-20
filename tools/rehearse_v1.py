@@ -101,12 +101,22 @@ def main(argv):
             code, text, diff = judge()
             REPORT["diff1_text"] = diff
             note("diff plant", exit=code, verdicts=verdicts(diff))
-            power = r.lua("local s = game.surfaces.nauvis local n = {} for _, p in pairs(s.find_entities_filtered{"
-                          "type = 'electric-pole'}) do if p.electric_network_id then n[p.electric_network_id] = true end end "
-                          "local k = 0 for _ in pairs(n) do k = k + 1 end "
-                          "local re = s.find_entities_filtered{name = 'nuclear-reactor'}[1] "
-                          "rcon.print(k .. ' ' .. (re and string.format('%.0f', re.temperature) or '-'))").split()
-            note("power", networks=power[0], reactor_temperature=power[1])
+            def power():
+                return r.lua("local s = game.surfaces.nauvis local n = {} for _, p in pairs(s.find_entities_filtered{"
+                             "type = 'electric-pole'}) do if p.electric_network_id then n[p.electric_network_id] = true end end "
+                             "local k = 0 for _ in pairs(n) do k = k + 1 end "
+                             "local re = s.find_entities_filtered{name = 'nuclear-reactor'}[1] "
+                             "local fuel = re and re.get_fuel_inventory().get_item_count() or 0 "
+                             "local req = s.find_entities_filtered{name = 'requester-chest', area = {{-36, -41}, {-16, -22}}}[1] "
+                             "local cells = req and req.get_inventory(defines.inventory.chest).get_item_count('uranium-fuel-cell') or 0 "
+                             "rcon.print(k .. ' ' .. (re and string.format('%.0f', re.temperature) or '-') .. ' ' .. fuel .. ' ' .. cells)").split()
+            t0 = time.time()
+            p = power()
+            while float(p[1]) < 100 and time.time() - t0 < 150:      # the reactor heating: 5 s check-ins
+                time.sleep(5)
+                p = power()
+            note("power", networks=p[0], reactor_temperature=p[1], fuel_in_reactor=p[2],
+                 cells_in_requester=p[3], waited_s=round(time.time() - t0))
 
             shutil.copy(os.path.join(ROOT, "agent", "docs", "examples", "gears.fk"),
                         os.path.join(RUN, "game", "gears.fk"))
@@ -125,10 +135,18 @@ def main(argv):
             REPORT["footer2_text"] = text
             note("diff gears", exit=code, verdicts=verdicts(diff),
                  chat_in_footer="hello from Rory" in text)
-            time.sleep(20)
-            made = r.lua("local st = game.forces.player.get_item_production_statistics('nauvis') "
-                         "rcon.print(st.get_input_count('iron-gear-wheel'))").strip()
-            note("gears made", count=made)
+            def made():
+                return int(r.lua("local st = game.forces.player.get_item_production_statistics('nauvis') "
+                                 "rcon.print(st.get_input_count('iron-gear-wheel'))").strip())
+            t0 = time.time()
+            while made() == 0 and time.time() - t0 < 120:              # the first gears: 5 s check-ins
+                time.sleep(5)
+            first = round(time.time() - t0)
+            time.sleep(30)
+            note("gears made", first_after_s=first, count_30s_later=made(),
+                 plates_in_inbox=r.lua("local c = game.surfaces.nauvis.find_entities_filtered{name = 'requester-chest', "
+                                       "area = {{28, -22}, {48, -2}}}[1] rcon.print(c and c.get_inventory(defines.inventory.chest)"
+                                       ".get_item_count('iron-plate') or -1)").strip())
     with open(os.path.join(ROOT, "out", "rehearsal.json"), "w", encoding="utf-8") as fh:
         json.dump(REPORT, fh, indent=1, default=str)
     print("report: out/rehearsal.json")
