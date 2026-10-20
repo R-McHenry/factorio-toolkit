@@ -4,8 +4,8 @@ Copied from C:\\fk-lead\\repo\\fk\\catalog.py (d6018d3) with its measured fixtur
 (Factorio 2.0 + Space Age prototypes). Added for V1: a default path, ``load()`` with no argument,
 ``kind`` (the entity type), ``recipe_rates`` (per-second ingredients and products, fluids included)
 and the few base-game facts the fixture does not carry (``FUEL_USE_W``, ``FUEL_VALUE_J``,
-``MINING_TIME``). Every other module takes a Catalog instance instead of opening the fixture itself.
-Pure, stdlib only.
+``MINING_TIME``, ``MINING_RADIUS``). Every other module takes a Catalog instance instead of
+opening the fixture itself. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ import json
 import math
 import os
 
-__all__ = ["Catalog", "DEFAULT_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME"]
+__all__ = ["Catalog", "DEFAULT_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
+           "MINING_RADIUS"]
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
 
@@ -25,6 +26,10 @@ FUEL_USE_W = {"stone-furnace": 90e3, "steel-furnace": 90e3, "burner-mining-drill
 FUEL_VALUE_J = {"coal": 4e6, "wood": 2e6, "solid-fuel": 12e6, "rocket-fuel": 100e6}
 #: Mining time per resource (an electric drill at mining speed 0.5 makes 0.5/s of a time-1 ore).
 MINING_TIME = {"iron-ore": 1.0, "copper-ore": 1.0, "coal": 1.0, "stone": 1.0, "uranium-ore": 2.0}
+#: A drill mines the tiles whose centres lie within this distance of its centre on both axes
+#: (``mining_drill_radius``, read from the game, 2.0.77): an electric drill mines 5x5.
+MINING_RADIUS = {"electric-mining-drill": 2.49, "burner-mining-drill": 0.99,
+                 "big-mining-drill": 6.49, "pumpjack": 0.49}
 
 # Entity types that are powered by electricity. Inserters, mining drills and furnaces hold burner
 # and electric prototypes alike, so there the burners are named: every other inserter, drill
