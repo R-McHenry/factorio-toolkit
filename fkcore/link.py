@@ -16,8 +16,18 @@ save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
   entities (name + position); ``destroy`` (lab only) removes.
 - ``produced(force, surface, items)``: the force's production counts (two samples are a measure).
 - ``say(text)``: a line in game chat.
+- ``alerts(force)``: the game's alert panel of every player of the force, connected or not (the
+  game keeps alerts per player; ``LuaForce`` has no ``get_alerts``), plus every force's player
+  count; ``fkcore.alerts`` normalises, dedupes and tracks them (the only pushed alerts).
+- ``stats(force, surface, items, window)`` and ``chart(force, surface)``: the free reads of
+  decision 11 (production flow counts, charted chunks); ``fkcore.freereads`` prints them, and
+  nothing ever turns them into an alert.
 
-The RCON protocol is copied from C:\\fk-lead\\repo\\fk\\rcon.py (d6018d3), with a timeout. Stdlib only.
+Big replies (snapshot, alerts, stats) go through ``helpers.write_file`` and are read back from
+script-output (``read_output``): an RCON reply is one packet. The link is used only with
+``FK_LINK=on`` (``enabled``, ``open_from_env``), so a paper run on the game host never touches the
+game by accident. The RCON protocol is copied from C:\\fk-lead\\repo\\fk\\rcon.py (d6018d3), with a
+timeout. Stdlib only.
 """
 from __future__ import annotations
 
@@ -30,7 +40,9 @@ import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_destroy", "lua_produced", "lua_generate", "lua_seed",
-           "lua_say", "assert_safe", "snapshot", "paste", "OUT_DIR"]
+           "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe", "snapshot",
+           "paste", "alerts", "stats", "chart", "read_output", "enabled", "open_from_env",
+           "OUT_DIR", "WINDOWS"]
 
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
@@ -45,6 +57,21 @@ _FORBIDDEN = re.compile(r"\b(script\s*\.\s*on_\w+|commands\s*\.\s*add_command|re
 
 class LinkError(RuntimeError):
     pass
+
+
+def enabled():
+    """True when ``FK_LINK=on``: the only way any tool here talks to the game."""
+    return os.environ.get("FK_LINK", "off").lower() == "on"
+
+
+def open_from_env():
+    """-> (Rcon, None), or (None, why) when the link is off or the game can't be reached."""
+    if not enabled():
+        return None, "FK_LINK is not on (FK_LINK=on uses the game link)"
+    try:
+        return Rcon(), None
+    except (OSError, LinkError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def assert_safe(lua):
@@ -283,6 +310,102 @@ rcon.print(n .. ' ' .. wired .. ' ' .. k)
 """
 
 
+def lua_alerts(force, tag="alerts"):
+    """The alert panel of every player of ``force``, connected or not: one row per alert and
+    player (type name, surface, tick, target or prototype name, position; message and icon for a
+    custom alert), and every force's player count. Written to script-output; the reply is the
+    number of rows."""
+    return f"""
+local f = game.forces[{_q(force)}]
+if not f then rcon.print('no force ' .. {_q(force)}) return end
+local names = {{}}
+for k, v in pairs(defines.alert_type) do names[v] = k end
+local forces = {{}}
+for _, g in pairs(game.forces) do forces[g.name] = {{players = #g.players, connected = #g.connected_players}} end
+local rows, players = {{}}, {{}}
+for _, p in pairs(f.players) do
+  local n = 0
+  for si, by_type in pairs(p.get_alerts{{}}) do
+    local surface = game.get_surface(si)
+    for t, list in pairs(by_type) do
+      for _, a in pairs(list) do
+        n = n + 1
+        local row = {{type = names[t] or tostring(t), surface = surface and surface.name or tostring(si), tick = a.tick, player = p.name}}
+        local target = a.target
+        if target and target.valid then row.target = target.name elseif a.prototype then row.target = a.prototype.name end
+        local pos = a.position
+        if not pos and target and target.valid then pos = target.position end
+        if pos then row.x = pos.x row.y = pos.y end
+        if a.message then row.message = a.message end
+        if a.icon then row.icon = (a.icon.type or 'item') .. '/' .. a.icon.name end
+        rows[#rows + 1] = row
+      end
+    end
+  end
+  players[#players + 1] = {{name = p.name, connected = p.connected, alerts = n}}
+end
+helpers.write_file('fk5/{tag}.json', helpers.table_to_json({{tick = game.tick, force = f.name, players = players, forces = forces, alerts = rows}}), false)
+rcon.print(#rows)
+"""
+
+
+#: Statistics windows -> defines.flow_precision_index names.
+WINDOWS = {"5s": "five_seconds", "1min": "one_minute", "10min": "ten_minutes",
+           "1h": "one_hour", "10h": "ten_hours", "50h": "fifty_hours",
+           "250h": "two_hundred_fifty_hours", "1000h": "one_thousand_hours"}
+
+
+def lua_stats(force, surface, items=None, window="1min", tag="stats"):
+    """The force's item production statistics on ``surface``: per item, the flow counts of
+    ``get_item_production_statistics(surface)`` over ``window`` (per minute and as a count) and
+    the totals; every item with a total when ``items`` is None. Written to script-output."""
+    want = "nil" if not items else "{" + ", ".join(_q(i) for i in items) + "}"
+    return f"""
+local f = game.forces[{_q(force)}]
+local s = game.get_surface({_q(surface)})
+if not f or not s then rcon.print('no force or surface') return end
+local st = f.get_item_production_statistics(s)
+local p = defines.flow_precision_index[{_q(WINDOWS[window])}]
+local names, want = {{}}, {want}
+if want then for _, n in pairs(want) do names[n] = true end else
+  for n in pairs(st.input_counts) do names[n] = true end
+  for n in pairs(st.output_counts) do names[n] = true end
+end
+local rows = {{}}
+for n in pairs(names) do
+  if prototypes.item[n] then
+    local function flow(c, count) return st.get_flow_count{{name = n, category = c, precision_index = p, count = count}} end
+    rows[#rows + 1] = {{name = n, made_total = st.get_input_count(n), used_total = st.get_output_count(n), made_per_min = flow('input', false), used_per_min = flow('output', false), made = flow('input', true), used = flow('output', true)}}
+  else
+    rows[#rows + 1] = {{name = n, unknown = true}}
+  end
+end
+helpers.write_file('fk5/{tag}.json', helpers.table_to_json({{tick = game.tick, force = f.name, surface = s.name, window = {_q(window)}, items = rows}}), false)
+rcon.print(#rows)
+"""
+
+
+def lua_chart(force, surface):
+    """How many of the surface's generated chunks ``force`` has charted, and their chunk box."""
+    return f"""
+local f = game.forces[{_q(force)}]
+local s = game.get_surface({_q(surface)})
+if not f or not s then rcon.print('no force or surface') return end
+local n, total, x0, y0, x1, y1 = 0, 0, nil, nil, nil, nil
+for c in s.get_chunks() do
+  total = total + 1
+  if f.is_chunk_charted(s, {{c.x, c.y}}) then
+    n = n + 1
+    if not x0 or c.x < x0 then x0 = c.x end
+    if not y0 or c.y < y0 then y0 = c.y end
+    if not x1 or c.x > x1 then x1 = c.x end
+    if not y1 or c.y > y1 then y1 = c.y end
+  end
+end
+rcon.print(helpers.table_to_json({{tick = game.tick, force = f.name, surface = s.name, charted = n, chunks = total, box = x0 and {{x0, y0, x1, y1}} or nil}}))
+"""
+
+
 def lua_produced(force, surface, items):
     names = ", ".join(_q(i) for i in items)
     return f"""
@@ -316,13 +439,41 @@ def paste(rcon, surface, force, bp, at, chunk=CHUNK):
     return reply
 
 
+def read_output(rcon, lua, tag, what):
+    """Run Lua that writes ``fk5/<tag>.json`` into script-output and replies with a count; ->
+    the file's JSON."""
+    n = rcon.lua(lua)
+    if not n.strip().isdigit():
+        raise LinkError(f"{what} failed: {n.strip()[:300]}")
+    with open(os.path.join(OUT_DIR, "fk5", f"{tag}.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def snapshot(rcon, surface, area, tag="snap"):
     """Capture ``area``; -> the capture dict (read back from script-output). The file name
     carries the process id, so several tools can snapshot at once."""
     tag = f"{tag}-{os.getpid()}"
-    n = rcon.lua(lua_snapshot(surface, area, tag))
-    path = os.path.join(OUT_DIR, "fk5", f"{tag}.json")
-    if not n.strip().isdigit():
-        raise LinkError(f"snapshot failed: {n.strip()}")
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+    return read_output(rcon, lua_snapshot(surface, area, tag), tag, "snapshot")
+
+
+def alerts(rcon, force, tag="alerts"):
+    """The raw alert panel read of ``force`` (``lua_alerts``); ``fkcore.alerts.normalise`` it."""
+    tag = f"{tag}-{os.getpid()}"
+    return read_output(rcon, lua_alerts(force, tag), tag, "alerts")
+
+
+def stats(rcon, force, surface, items=None, window="1min", tag="stats"):
+    """The raw production statistics read (``lua_stats``)."""
+    if window not in WINDOWS:
+        raise LinkError(f"a statistics window is one of {', '.join(WINDOWS)}, got {window!r}")
+    tag = f"{tag}-{os.getpid()}"
+    return read_output(rcon, lua_stats(force, surface, items, window, tag), tag, "stats")
+
+
+def chart(rcon, force, surface):
+    """The raw chart read (``lua_chart``): a small reply, no file."""
+    text = rcon.lua(lua_chart(force, surface)).strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        raise LinkError(f"chart failed: {text[:300]}") from None

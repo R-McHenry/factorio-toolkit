@@ -479,14 +479,8 @@ def s_write_layout(ctx, args):
 def _link(ctx):
     """The game link, opened on first use; None (``ctx.link_error`` says why) without one."""
     if ctx.link is None and ctx.link_error is None:
-        if os.environ.get("FK_LINK", "off").lower() != "on":
-            ctx.link_error = "FK_LINK is not on (FK_LINK=on uses the game link)"
-        else:
-            from . import link
-            try:
-                ctx.link = link.Rcon()
-            except (OSError, link.LinkError) as exc:
-                ctx.link_error = f"{type(exc).__name__}: {exc}"
+        from . import link
+        ctx.link, ctx.link_error = link.open_from_env()
     return ctx.link
 
 

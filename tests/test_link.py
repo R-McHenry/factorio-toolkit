@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest import mock
 
 from fkcore import link
 
@@ -17,12 +19,29 @@ class LinkLuaTest(unittest.TestCase):
                     link.lua_revive("lab", (0, 0, 10, 10)),
                     link.lua_decon("lab", "lab", (0, 0, 10, 10)),
                     link.lua_destroy("lab", (0, 0, 10, 10), ["transport-belt"]),
-                    link.lua_produced("lab", "lab", ["iron-gear-wheel"])):
+                    link.lua_produced("lab", "lab", ["iron-gear-wheel"]),
+                    link.lua_alerts("player", "alerts-1"),
+                    link.lua_stats("lab", "lab", None, "1min", "stats-1"),
+                    link.lua_stats("lab", "lab", ["iron-plate", "coal"], "1h", "stats-2"),
+                    link.lua_chart("lab", "lab"),
+                    link.lua_say("[fk lab] transport-belt at 307.5,430.5: \"quoted\"")):
             link.assert_safe(lua)
             for line in lua.splitlines():
                 code = line.strip()
                 # RCON joins the Lua into one line, so a -- comment may only fill a whole line
                 self.assertFalse("--" in code and not code.startswith("--"), code)
+
+    def test_the_link_is_on_only_with_fk_link_on(self):
+        with mock.patch.dict(os.environ, {"FK_LINK": "off"}):
+            self.assertEqual(link.open_from_env(),
+                             (None, "FK_LINK is not on (FK_LINK=on uses the game link)"))
+        with mock.patch.dict(os.environ, {"FK_LINK": "on"}), \
+                mock.patch.object(link, "Rcon", side_effect=OSError("connection refused")):
+            self.assertEqual(link.open_from_env(), (None, "OSError: connection refused"))
+
+    def test_a_statistics_window_is_checked_before_the_call(self):
+        with self.assertRaises(link.LinkError):
+            link.stats(None, "lab", "lab", window="2min")
 
 
 if __name__ == "__main__":
