@@ -22,7 +22,8 @@ from . import fkp as fkpmod
 from .compose import turn
 from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
 
-__all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold"]
+__all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
+           "frame_of"]
 
 _SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump")
 
@@ -186,6 +187,27 @@ def _grow(cat, e, xmax, ymax):
 
 def _clean(v):
     return int(v) if float(v).is_integer() else v
+
+
+def attach_points(flat, lay, path, cat):
+    """[(role, side, net, (x, y, dir))] of a placed instance, in the factory frame."""
+    rec = lay.insts[path]
+    frag, binding = fragment_of(flat, path, cat)
+    out = []
+    for name, role in frag.roles.items():
+        net = binding.get(name)
+        for ax, ay, ad in role.attach:
+            x, y, d = turn(float(ax), float(ay), ad, rec.rot, frag.size)
+            out.append((name, role.side, net, (_clean(x + rec.x), _clean(y + rec.y), d)))
+    return out
+
+
+def frame_of(flat, lay, path, cat):
+    """(x0, y0, x1, y1): the tiles of a placed instance's turned frame."""
+    rec = lay.insts[path]
+    frag, _binding = fragment_of(flat, path, cat)
+    w, h = frag.size if rec.rot % 2 == 0 else frag.size[::-1]
+    return (int(rec.x), int(rec.y), int(rec.x) + w, int(rec.y) + h)
 
 
 def _span(keys):
