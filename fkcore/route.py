@@ -105,9 +105,25 @@ class NetJob:
     skip: str | None = None
     fluid: bool = False                            # a fluid net: the fluid plug-in routes it
     reserved: list = field(default_factory=list)   # tiles a fluid net's connections need
+    anchors: dict = field(default_factory=dict)    # "<inst>.<role>" -> what the route is laid to
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
+
+    def signature(self):
+        """Everything a route of this net is laid to: per role, its start or goal tiles with their
+        headings and the tiles of the machines it inserts into or picks from; and the reserved
+        tiles. A committed route is kept (``route --only stale``) only while this is the same: a
+        chest moved one tile changes no belt end, only its machine's tiles (1.2, the 0534 run)."""
+        return (tuple(sorted((o, tuple(sorted(a))) for o, a in self.anchors.items())),
+                tuple(sorted(self.reserved)))
+
+    def moved(self, other):
+        """The roles whose anchors differ between this job and ``other`` (the same net, another
+        layout), sorted."""
+        roles = set(self.anchors) | set(other.anchors)
+        return sorted(r for r in roles if sorted(self.anchors.get(r, ())) !=
+                      sorted(other.anchors.get(r, ())))
 
     def drivers(self):
         return len(self.starts) + len(self.sources)
@@ -185,20 +201,26 @@ def jobs(flat, lay, cat) -> dict:
             if net is None or net in fluids:
                 continue
             job = out.setdefault(net, NetJob(net))
+            mine = job.anchors.setdefault(f"{path}.{role}", [])
             if d is None:
                 for key in flat.insts[path].machines:
+                    if key not in lay.entities:          # an older layout, before the machine
+                        continue
                     ts = fkpmod.tiles_of(cat, lay.entities[key])
                     rect = (min(t[0] for t in ts), min(t[1] for t in ts),
                             max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
                     (job.sources if side == "out" else job.taps).append((key, rect))
+                    mine.append((side, key, rect))
                 job.owners.append(f"{path}.{role}")
                 continue
             h = _H[int(d)]
             tile = (math.floor(x), math.floor(y))
             if side == "out":
                 job.starts.append(((tile[0] + _DX[h], tile[1] + _DY[h]), h))
+                mine.append((side, job.starts[-1]))
             else:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
+                mine.append((side, job.goals[-1]))
             job.owners.append(f"{path}.{role}")
     for net, job in out.items():
         if job.skip is not None or job.fluid:

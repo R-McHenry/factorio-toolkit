@@ -328,32 +328,41 @@ def s_place(ctx, args):
 
 
 def _pinned_routes(flat, new, prev, cat):
-    """Carry over the committed routes of nets whose ends did not move (route --only stale)."""
+    """Carry over the committed routes of nets whose ends did not move (route --only stale):
+    -> (layout, nets kept, {net: why it is routed again}). A net is routed again when anything
+    its route is laid to moved (``route.NetJob.signature``: belt ends, and the machines it
+    inserts into or picks from), or when the new layout takes one of its tiles."""
     if prev is None:
-        return new, []
-    old_ends = {n: j.ends() for n, j in route.jobs(flat, prev, cat).items()} if prev.insts else {}
+        return new, [], {}
+    old = route.jobs(flat, prev, cat) if prev.insts else {}
     now = route.jobs(flat, new, cat)
     taken = set()
     for e in new.entities.values():
         taken |= fkp.tiles_of(cat, e)
-    kept = []
+    kept, again = [], {}
     by_net = {}
     for e in prev.entities.values():
         if e.owner.startswith("~"):
             by_net.setdefault(e.owner[1:], []).append(e)
     for net, ents in sorted(by_net.items()):
-        if net not in now or old_ends.get(net) != now[net].ends():
+        if net not in now:
+            continue
+        if net not in old or old[net].signature() != now[net].signature():
+            moved = now[net].moved(old[net]) if net in old else []
+            again[net] = (f"its ends moved since the committed .fkp ({', '.join(moved)})" if moved
+                          else "its ends changed since the committed .fkp")
             continue
         tiles = set()
         for e in ents:
             tiles |= fkp.tiles_of(cat, e)
         if tiles & taken:
+            again[net] = "the new layout takes some of its tiles"
             continue
         taken |= tiles
         for e in ents:
             new.add(fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
         kept.append(net)
-    return new, kept
+    return new, kept, again
 
 
 def _frame_blocked(ctx, factory, size):
@@ -370,9 +379,9 @@ def s_route(ctx, args):
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         flat = ctx.flats[factory]
-        pinned = []
+        pinned, again = [], {}
         if o["only"] == "stale":
-            lay, pinned = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
+            lay, pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
                                hand=o["hand"])
@@ -382,6 +391,7 @@ def s_route(ctx, args):
                      f"{r.passes} pass{'es' if r.passes != 1 else ''}"
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
                         else ""))
+        lines += [f"  stale     {n}: {why}; routed again" for n, why in sorted(again.items())]
         lines += [f"  {l}" for l in r.lines]
         checks += [Check("UNROUTED", f"{factory} net {n}", why) for n, why in r.failed.items()]
         checks += [Check("UNROUTED", f"{factory} net {l.split(':')[0].split()[-1]}",

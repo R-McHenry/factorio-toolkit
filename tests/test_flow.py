@@ -112,6 +112,47 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertTrue(ctx.log[-1].startswith("[ 4/17] elaborate"))
 
+    def test_a_moved_chest_routes_its_net_again(self):
+        # 1.2 (the 0534 run): a chest moved one tile changes no belt end, only the tiles its
+        # inserter reaches; its net's committed route was kept (pinned) and read UNROUTED
+        small = os.path.join(self.dir, "small")
+        os.makedirs(small)
+        files = {
+            "t.fk": "mine = MinerRow<n=1, resource=iron-ore> @(0, 0)\n"
+                    "dst  = Chest<provider>                  @(20, 3)\n"
+                    "net p: mine -> dst\n",
+            "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+                              "place t = t plot 0,0 30x12\n",
+            "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
+                                "place --keep pinned\nroute --only stale\nfloorplan\n"
+                                "report_checks\nwrite_layout\n"}
+        for name, text in files.items():
+            with open(os.path.join(small, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        script = os.path.join(small, "nauvis.build.fkb")
+
+        def build():
+            code, ctx = flow.run(script, cat=CAT, echo=lambda _line: None)
+            self.assertEqual(code, 0, ctx.log)
+            with open(os.path.join(small, "out", "route.txt"), encoding="utf-8") as fh:
+                route_txt = fh.read()
+            with open(os.path.join(small, "out", "report_checks.txt"), encoding="utf-8") as fh:
+                return route_txt, fh.read()
+
+        build()
+        route_txt, checks_txt = build()
+        self.assertIn("kept      p: its carriers are already laid (pinned)", route_txt)
+        with open(os.path.join(small, "t.fk"), encoding="utf-8") as fh:
+            src = fh.read().replace("@(20, 3)", "@(20, 4)")
+        with open(os.path.join(small, "t.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(src)
+        route_txt, checks_txt = build()
+        self.assertIn("stale     p: its ends moved since the committed .fkp (dst.in1); routed "
+                      "again", route_txt)
+        self.assertIn("routed    p:", route_txt)
+        self.assertNotIn("UNROUTED", checks_txt)
+        self.assertIn("1 nets: 1 connected", checks_txt)
+
     def test_a_malformed_script_is_refused(self):
         with open(self.script, "a", encoding="utf-8") as fh:
             fh.write("synth_design\n")
