@@ -14,7 +14,9 @@ design. What lab ground and the lab rules leave to a fixture, and nothing else:
            fluid its .fkp line names (the lab's free materials): run after the build
   measure  two samples ``--seconds`` apart: sulfur made (the lab force's production statistics),
            steam made, what the steam engines generate (energy_generated_last_tick), and the fluid
-           in the machines' boxes; sulfur against the chemical plant's full-speed rate
+           in the machines' boxes; sulfur against the chemical plant's full-speed rate. The
+           sulfur has no net, so a plant stops once its output is full: the measure empties the
+           output first (a lab fixture, as if taken by hand)
   info     what stands in the region, and which chunks of the apply's generation square exist
 
 Each step announces itself in game chat ([fk5 fluids] ...), for Rory watching with /lab.
@@ -120,6 +122,24 @@ rcon.print(fueled .. ' ' .. set)
 """
 
 
+def lua_empty(machines):
+    """Empty the output of every chemical plant of the design (its product has no net)."""
+    data = json.dumps([[x, y] for n, x, y in machines.values() if n == "chemical-plant"])
+    return f"""
+local s = game.get_surface('lab')
+local n = 0
+for _, p in pairs(helpers.json_to_table({json.dumps(data)})) do
+  local e = s.find_entity('chemical-plant', {{p[1], p[2]}})
+  if e then
+    local inv = e.get_output_inventory()
+    n = n + inv.get_item_count()
+    inv.clear()
+  end
+end
+rcon.print(n)
+"""
+
+
 def lua_sample(machines):
     data = json.dumps({k: [n, x, y] for k, (n, x, y) in machines.items()})
     return f"""
@@ -185,6 +205,8 @@ def step_start(r, a):
 
 def step_measure(r, a):
     _b, _p, machines = fixtures(composed())
+    taken = int(r.lua(lua_empty(machines)).strip() or 0)
+    print(f"measure: {taken} items taken out of the chemical plant's output first")
     s0 = json.loads(r.lua(lua_sample(machines)))
     time.sleep(a.seconds)
     s1 = json.loads(r.lua(lua_sample(machines)))

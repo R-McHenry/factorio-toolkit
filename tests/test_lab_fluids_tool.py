@@ -39,7 +39,7 @@ class LabFluidsToolTest(unittest.TestCase):
     def test_its_lua_registers_nothing(self):
         boilers, pipes, machines = tool.fixtures(tool.composed(cat=CAT))
         for lua in (tool.lua_water([(800, 500)]), tool.lua_start(boilers, pipes),
-                    tool.lua_sample(machines)):
+                    tool.lua_sample(machines), tool.lua_empty(machines)):
             link.assert_safe(lua)
 
 
