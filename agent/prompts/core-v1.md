@@ -41,7 +41,8 @@ around them.
 You don't need permission and you don't need a finished plan. Something running beats something
 planned: build a small piece, look at it, fix or grow it. If you notice you've spent a while reading
 or planning and nothing new is running in the game, stop and build the simplest useful thing you can.
-Mistakes are cheap here: a build replaces whatever was in the way.
+Mistakes are cheap here: a build replaces whatever was in the way, and takes up what it built before
+and your design no longer has (a moved plot's old ground, a row you replaced, an emptied factory).
 
 You can also write your own code and scripts, and read the game directly with Lua (`fk lua`), to
 find out what's going on. Use whatever helps.
@@ -58,7 +59,8 @@ out by hand:
 - what to research → `fk research`, then `fk research TECH`
 - a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
 - old items left on a rebuilt belt or in an inserter's hand jam it → `fk fresh X0,Y0,X1,Y1` takes
-  those up, and the next `fk build` lays them fresh
+  those up, and the next `fk build` lays them fresh (a belt or pipe the build lays under another
+  net is renewed by the build itself)
 - what is the factory really making → `fk stats`
 - anything else → `fk lua` reads the game for you
 
@@ -66,8 +68,8 @@ out by hand:
 
 ## Keep the base tidy as you grow
 
-- Keep chests inside the robots' reach: a factory with chests gets its own roboport, so grow outward
-  from spawn.
+- Keep chests inside the robots' reach: `cover robots` gives a factory a roboport (and a storage
+  chest beside it) only where the network doesn't reach its chests yet, so grow outward from spawn.
 - Make the next thing you need, not a pile of something. Enough beats too much, and a chest's
   `limit=` helps: a full chest stops what feeds it.
 - A trick for big rebuilds: stop what feeds a factory and let it run a few minutes to empty before

@@ -109,6 +109,16 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   look now lists where they are. The 0534 player's own patches are features: `inserter=` on rows,
   `item="a,b"` on a requester, a third lab belt, and `route --hand inserter`. See
   docs/RELEASE-1.1.md.
+  1.2 [built] (what 1.1 left of the 0534 run's FRICTION.md, all six with tests; none deferred):
+  the toolkit's own entities (`fkcore.own`, `out/own/<surface>.json`: what the applies pasted,
+  seeded once from the .fkp files last written) are no foreign change: one the design dropped is
+  `NOBODY` whatever the watch policy (a replaced row, a moved, shrunk or emptied plot, its unbuilt
+  ghosts too), and the apply's default scope reaches it; a carrier the record shows under
+  another net that holds what its new net doesn't carry (`WRONG_ITEM`, pipes' fluid too) is
+  ordered out before the paste, which lays it fresh; a moved endpoint makes its net's route
+  stale; `cover robots` counts the surface's network and puts a storage chest beside each
+  roboport it places; `floorplan --bridge-power` lays a bridge again around a plot laid over it;
+  `fk lua` takes any chunk (stdin over ssh, its lines kept). See docs/RELEASE-1.2.md.
 
 ## Rate model (nominal, V1) [built]
 
@@ -126,8 +136,10 @@ Straight-line, one contained tool per line, each reads the previous checkpoint a
 map's ore, water and cliffs; `ON_TERRAIN`, `OFF_ORE`], `run_models`, `elaborate`, `report_rates`,
 `place` [built: hints, `@patch` for MinerRow], `route` [built: v4's steiner tree router per net,
 splits, merges, direct insertion, k->m through a hub, the underground guard; fluid nets by the fluid
-plug-in: pipes, pipe-to-ground], `cover power` [built] `|robots` [built], `floorplan` [built,
-`--bridge-power`],
+plug-in: pipes, pipe-to-ground; 1.2: a net is routed again when anything it is laid to moved],
+`cover power` [built] `|robots` [built; 1.2: chests the surface's network reaches need no
+roboport, a storage chest beside each one placed], `floorplan` [built, `--bridge-power`; 1.2: a
+plot takes the bridge's poles, and the bridge is laid again around it],
 `report_checks`, `report_bom`, `write_layout`, `diff`, `apply`, `stop_on <check ...>` (default:
 invariants only). `fk build <surface> [--from X --to Y]`; every line is also a command on its own.
 Merge, insert, chests-to-net and net-to-chests edit source and layout only [built, on paper].
@@ -136,7 +148,9 @@ Merge, insert, chests-to-net and net-to-chests edit source and layout only [buil
 
 Per tile: `OK`, `GHOST`, `MISSING`, `WRONG` (another entity), `DRIFT` (direction, ug type, config),
 `CLAIMED`, `MARKED`, `NOBODY`. Per carrier: `WRONG_ITEM`. After robots finish, the diff inside the
-applied scope is empty: that is 1:1.
+applied scope is empty: that is 1:1. [1.2: the toolkit's own entities that the design dropped are
+`NOBODY` under any policy; `WRONG_ITEM` covers a pipe's fluid, and names the net a carrier was
+pasted under when that was another one.]
 
 ## Watch, notify, fair play [built: `sense` policies, notify nearby/all/off, the alert push with reminders, the free reads `stats` and `chart`; the `lab` scenario runs the test map, `/lab` used by Rory]
 

@@ -25,7 +25,14 @@ more supply than demand, and give a chest on it a `limit=` (`SHARED_SINK` says w
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step. Each
 step writes its report to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
-in the source: unchanged rows and routes stay where they are.
+in the source: unchanged rows and routes stay where they are, and a net is routed again when one
+of its ends moves (a chest one tile over, too).
+
+A build also takes back what it built before and your design no longer has: a row you replaced,
+the old ground of a plot you moved or shrank, a factory you emptied, its unbuilt ghosts too. The
+toolkit remembers what it pasted (`out\own\nauvis.json`), so this holds whatever `watch` says.
+A belt or pipe it lays again under another net, while it still holds the old net's items or
+fluid, is taken up and laid fresh in the same build.
 
 After `fk build`, the ghosts are in the game and the robots build them from the network's stock.
 Before the paste, `out\report_bom.txt` says what the network can't cover: its `STOCK:` line, and
@@ -48,15 +55,18 @@ Every designed entity in the area gets a verdict:
 - `MISSING`: nothing there (destroyed, or never built; the next build restores it)
 - `WRONG`: something else stands on its tiles
 - `DRIFT`: there but turned, or with another recipe
-- `WRONG_ITEM`: a belt carries an item its net doesn't (old items from a rebuild): `fk fresh
-  X0,Y0,X1,Y1` takes those belts up, and the next build lays them fresh
+- `WRONG_ITEM`: a belt or pipe holds an item or fluid its net doesn't (old items from a
+  rebuild). One the build laid under another net says so, and the next build renews it by
+  itself; for the others, `fk fresh X0,Y0,X1,Y1` takes those belts up, and the next build lays
+  them fresh
 
 Anything in the area that the design doesn't explain is:
 
 - `CLAIMED`: inside a claim (the starter kit)
 - `MARKED`: something placed by hand, kept for now (it is listed under "changes here", with who
   placed it, and a hint when it looks like a fix to a net)
-- `NOBODY`: nobody owns it; the next build removes it
+- `NOBODY`: nobody owns it; the next build removes it. This is also what the toolkit built and
+  your design no longer has ("the toolkit's own, dropped from the design")
 
 ## The checks
 
@@ -89,8 +99,11 @@ fixing in the source.
 - `NO_ROBOTS`: a logistic chest outside every logistic area of the main robot network (robots
   won't serve it), or entities outside its construction area (robots won't build them). The kit's
   roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`
-  gives a factory with chests its own roboport, which joins the network when it stands within 50
-  tiles of another one on both axes. Grow outward: the next factory within reach of the last.
+  gives a factory a roboport only for the chests no roboport of that network reaches yet (the
+  kit's, and every one joined to it), which joins the network when it stands within 50 tiles of
+  another one on both axes. It puts a storage chest beside each roboport it places, so what the
+  robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
+  the chest out). Grow outward: the next factory within reach of the last.
 - `ON_TERRAIN`: something designed stands on water or a cliff
 - `MISPLACED` / `UNPLACED`: the paste did not land where the design says
 - `LOW_STOCK`: the network holds fewer of an item than the build still needs
@@ -102,9 +115,9 @@ fixing in the source.
 ```
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
-fk fresh X0,Y0,X1,Y1             belts there with old items on them, and inserters stuck holding an
-                                 item their machine doesn't use, are taken up; the next build lays
-                                 them fresh
+fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them, and
+                                 inserters stuck holding an item their machine doesn't use, are
+                                 taken up; the next build lays them fresh
 fk merge . A,B --into C          two factories become one, both kept where they stand
 fk chests-to-net . C PROV REQ    a robot link (provider chest to requester chest) becomes a belt
 fk net-to-chests . C NET --provider P --requester R
@@ -144,9 +157,9 @@ fk lua "rcon.print(game.forces.player.current_research and game.forces.player.cu
 fk lua "local n = 0 for _, g in pairs(game.surfaces.nauvis.find_entities_filtered{type='entity-ghost'}) do n = n + 1 end rcon.print(n)"
 ```
 
-The chunk is sent as one line, so keep `--` comments on lines of their own. A big answer is
-better written to a file (`helpers.write_file('mine.json', helpers.table_to_json(t))`) on the
-game host and read there. For a script of your own, the game host is `computah-ct`
+The chunk goes to the game as you wrote it, lines, comments, quotes and all, and a long one is
+fine (a file of 40 kB works). A big answer is better written to a file
+(`helpers.write_file('mine.json', helpers.table_to_json(t))`) on the game host and read there. For a script of your own, the game host is `computah-ct`
 (`ssh computah-ct`); `run.json` names the toolkit there (`host_toolkit`: `fkcore.link.Rcon` is
 the RCON client) and your game codebase there (`host_game`).
 
@@ -170,7 +183,9 @@ target automation-science-pack 10/min         # a rate the whole surface should 
 ```
 
 A factory's `@(x, y)` positions are inside its own plot: (0, 0) is the plot's top-left corner.
-Plots never overlap. A factory can be moved by changing its plot alone.
+Plots never overlap. A factory can be moved by changing its plot alone: the build takes up what
+stood on the old ground. A plot laid over the power bridge (the poles between factories) takes
+its poles, and `floorplan --bridge-power` lays the bridge again around the plots.
 
 ## The build script
 

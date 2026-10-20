@@ -16,6 +16,9 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
   player's patch of route.py) keeps that: its build script's `route` line gets `--hand inserter`.
   The player's other patches (inserter=, item="a,b", a third lab belt) are 1.1 features. A Claude
   player's goal loop and hook (claude_loop.py, claude_hook.py) come into `.toolkit` too.
+- 1.2: nothing in the run's game files changes. The record of the toolkit's own entities
+  (`game\\out\\own\\<surface>.json`) starts at the next build, from the .fkp files last written.
+  The host's toolkit must be 1.2 too: bin\\fk.py sends `fk lua` chunks to `fkcore lua --file -`.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -150,12 +153,15 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.1 is in. Your own patches are part of it now: inserter= on rows, item="a,b" on a
-  requester, a third lab belt, and route --hand inserter in your build script (fast inserters are
-  researched now; drop it if you like). New: Chest<..., limit=N>, which stops what feeds a full
-  chest; fk fresh X0,Y0,X1,Y1, which takes up belts with old items on them so the next build lays
-  them fresh (use it in place of moving items by script); fk build says how long a big rip takes
-  (RIP); and fk merge, chests-to-net and net-to-chests are in docs\\TOOLKIT.md."""
+  Toolkit 1.2 is in, from your FRICTION.md. A build now takes back what it built before and your
+  design no longer has, whatever watch says: a row you replaced, the old ground of a moved or
+  shrunk plot, an emptied factory with its ghosts (empty spare plots aren't needed for that any
+  more). A belt or pipe laid again under another net, still holding the old net's items or fluid,
+  is taken up and laid fresh in the same build. A net is routed again when one of its ends moves.
+  cover robots adds a roboport only where the network doesn't reach a factory's chests yet, with a
+  storage chest beside it: on your base today it would add none, so you can put it back in your
+  build script if you like. A new plot over the power bridge re-lays the bridge around it. fk lua
+  takes long chunks with quotes and comments, from a file too. Details in docs\\TOOLKIT.md."""
 
 
 def main(argv=None):
