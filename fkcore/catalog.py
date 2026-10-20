@@ -4,8 +4,8 @@ Copied from C:\\fk-lead\\repo\\fk\\catalog.py (d6018d3) with its measured fixtur
 (Factorio 2.0 + Space Age prototypes). Added for V1: a default path, ``load()`` with no argument,
 ``kind`` (the entity type), ``recipe_rates`` (per-second ingredients and products, fluids included)
 and the few base-game facts the fixture does not carry (``FUEL_USE_W``, ``FUEL_VALUE_J``,
-``MINING_TIME``, ``STEAM_PER_S``). Every other module takes a Catalog instance instead of opening
-the fixture itself.
+``MINING_TIME``, ``STEAM_PER_S``, ``MINING_RADIUS``). Every other module takes a Catalog
+instance instead of opening the fixture itself.
 
 Fluid boxes (``fluidboxes.json``, read from the game over RCON, 2.0.77, see its ``source``):
 every fluid prototype's boxes and pipe connections per direction, and per crafting machine and
@@ -23,7 +23,7 @@ import os
 from collections import namedtuple
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
-           "STEAM_PER_S", "FluidBox", "PipeConn"]
+           "MINING_RADIUS", "STEAM_PER_S", "FluidBox", "PipeConn"]
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
@@ -54,6 +54,11 @@ PipeConn = namedtuple("PipeConn", "tile dir target flow type reach categories",
 #: filter or the recipe's fluid; None = whatever flows in), ``production`` (input, output,
 #: input-output, none) and ``conns`` (its PipeConns).
 FluidBox = namedtuple("FluidBox", "box fluid production conns")
+
+#: A drill mines the tiles whose centres lie within this distance of its centre on both axes
+#: (``mining_drill_radius``, read from the game, 2.0.77): an electric drill mines 5x5.
+MINING_RADIUS = {"electric-mining-drill": 2.49, "burner-mining-drill": 0.99,
+                 "big-mining-drill": 6.49, "pumpjack": 0.49}
 
 # Entity types that are powered by electricity. Inserters, mining drills and furnaces hold burner
 # and electric prototypes alike, so there the burners are named: every other inserter, drill

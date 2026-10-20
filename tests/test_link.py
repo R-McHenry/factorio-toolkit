@@ -26,7 +26,8 @@ class LinkLuaTest(unittest.TestCase):
                     link.lua_stats("lab", "lab", None, "1min", "stats-1"),
                     link.lua_stats("lab", "lab", ["iron-plate", "coal"], "1h", "stats-2"),
                     link.lua_chart("lab", "lab"),
-                    link.lua_say("[fk lab] transport-belt at 307.5,430.5: \"quoted\"")):
+                    link.lua_say("[fk lab] transport-belt at 307.5,430.5: \"quoted\""),
+                    link.lua_generate_area("lab", "lab", (480, 416, 600, 540))):
             link.assert_safe(lua)
             for line in lua.splitlines():
                 code = line.strip()

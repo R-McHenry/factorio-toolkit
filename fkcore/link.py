@@ -35,14 +35,15 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import os
 import re
 import socket
 import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
-           "lua_decon_list", "lua_destroy", "lua_produced", "lua_generate", "lua_seed",
-           "lua_ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
+           "lua_decon_list", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
+           "lua_seed", "lua_ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
            "open_from_env", "OUT_DIR", "WINDOWS"]
 
@@ -305,6 +306,29 @@ local r = {radius_chunks} * 32
 game.forces[{_q(force)}].chart(s, {{{{{center[0]} - r, {center[1]} - r}}, {{{center[0]} + r, {center[1]} + r}}}})
 local n = 0
 for _ in s.get_chunks() do n = n + 1 end
+rcon.print(n)
+"""
+
+
+def lua_generate_area(surface, force, area):
+    """Generate (and chart for ``force``) exactly the chunks under ``area`` and no others, so a
+    paste in a lab region generates nothing outside it; prints how many of them are generated."""
+    x0, y0, x1, y1 = (int(math.floor(v)) for v in area)
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for cx = math.floor({x0} / 32), math.floor(({x1} - 1) / 32) do
+  for cy = math.floor({y0} / 32), math.floor(({y1} - 1) / 32) do
+    if not s.is_chunk_generated({{cx, cy}}) then s.request_to_generate_chunks({{cx * 32 + 16, cy * 32 + 16}}, 0) end
+  end
+end
+s.force_generate_chunk_requests()
+game.forces[{_q(force)}].chart(s, {{{{{x0}, {y0}}}, {{{x1}, {y1}}}}})
+for cx = math.floor({x0} / 32), math.floor(({x1} - 1) / 32) do
+  for cy = math.floor({y0} / 32), math.floor(({y1} - 1) / 32) do
+    if s.is_chunk_generated({{cx, cy}}) then n = n + 1 end
+  end
+end
 rcon.print(n)
 """
 

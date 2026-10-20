@@ -1,0 +1,16 @@
+# nauvis.build.fkb: the default flow against the real terrain, on paper (no diff, no apply:
+# nauvis is read-only for this game). One contained tool per line; each writes out/<step>.txt.
+read_surface    nauvis                    # surface file: factories, plots, claims, mode, policy
+read_terrain    map                       # map.terrain.json: ore, water, cliffs, patches
+run_models      --stale                   # model scripts: derive and pin parameters
+elaborate                                 # templates -> logical netlist + its checks
+report_rates                              # nominal rate model, asserts, surface targets
+place           --keep pinned             # @(x, y) hints; @patch rows onto their ore
+route           --only stale --effort normal   # round water and cliffs (blocked tiles)
+cover power     --pole medium-electric-pole    # no pole on water or a cliff
+cover robots
+floorplan                                 # compose; ON_TERRAIN, OFF_ORE, drills on ore
+report_checks                             # invariants + warnings, connectivity of every net
+report_bom      --stock none
+write_layout                              # write the .fkp files (commit them)
+stop_on         invariant                 # the default: only malformed data stops the run

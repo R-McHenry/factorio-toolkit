@@ -1,0 +1,9 @@
+# gears.fk: plates from a requester chest west of the cliff wall into a gear assembler east of
+# it; gears into a provider chest (frame = plot, x 0..47, y 0..31; the wall is x 21..22,
+# y 14..31, with its hook west to x 18 at y 14..16).
+inbox = Chest<requester, item=iron-plate, rate=0.5/s> @(10, 24)
+gears = AsmRow<n=1, recipe=iron-gear-wheel>          @(30, 20)
+box   = Chest<provider>                              @(40, 26)
+
+net plates_in: inbox -> gears
+net gear:      gears -> box

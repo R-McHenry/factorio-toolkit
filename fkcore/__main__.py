@@ -1,5 +1,6 @@
 """python -m fkcore <command> ...  (each command is one contained tool; only the flow's diff and
-apply, look --source world, alerts, stats and chart use the game link, and only with FK_LINK=on)
+apply, look --source world, alerts, stats, chart, read-terrain and the game-link commands below
+use the game link, and only with FK_LINK=on)
 
     check FILE.fk                         netlist checks (report lines, never a gate)
     rates FILE.fk [--unbounded NET,...] [--share appetite|level] [--chain INST,...]
@@ -50,11 +51,15 @@ apply, look --source world, alerts, stats and chart use the game link, and only 
     poll GAME_DIR                         what every agent command ends with: new chat lines, and
                                           the game's new and still-open alerts once fkcore.alerts
                                           is built
+    read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map]
+                                          a free read of the bare world (ore, water, cliffs;
+                                          trees and rocks counted) into GAME_DIR/<name>.terrain.json
 """
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from . import compose, expand, fkp, flow, rates
@@ -300,10 +305,50 @@ def _adopt(a, cat):
     return 0
 
 
+def _read_terrain(a):
+    """Read the bare world through the game link (FK_LINK=on) into <name>.terrain.json."""
+    from . import link, terrain
+    if os.environ.get("FK_LINK", "off").lower() != "on":
+        print("read-terrain: skipped, FK_LINK is not on (FK_LINK=on uses the game link)",
+              file=sys.stderr)
+        return 2
+    area = tuple(int(v) for v in a.area.split(","))
+    if len(area) != 4 or area[2] <= area[0] or area[3] <= area[1]:
+        print(f"error: --area X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0, got {a.area}", file=sys.stderr)
+        return 2
+    try:
+        with link.Rcon() as r:
+            data = terrain.read(r, a.surface, area)
+    except (OSError, link.LinkError) as exc:
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    os.makedirs(a.game, exist_ok=True)
+    path = os.path.join(a.game, f"{a.name}.terrain.json")
+    terrain.save(data, path)
+    print("\n".join(terrain.summary(terrain.from_dict(data), a.name)))
+    print(f"wrote {path}")
+    return 0
+
+
 def _render(lay, cat):
     w, h = lay.size
     surface = fkp.loads(f"fkp 1 surface view\nplot {lay.name} at 0,0 rot 0 size {w}x{h}\n")
     return compose.render(compose.compose(surface, {lay.name: lay}, cat), cat, (0, 0, w, h))
+
+
+def _glue(argv):
+    """argparse reads ``--area -320,-288,256,288`` as two options: glue a coordinate list that
+    starts with a minus to its flag (``--area=-320,...``)."""
+    out, i = [], 0
+    while i < len(argv):
+        if argv[i] in ("--area", "--at") and i + 1 < len(argv) \
+                and re.fullmatch(r"-\d+(,-?\d+)+", argv[i + 1]):
+            out.append(f"{argv[i]}={argv[i + 1]}")
+            i += 2
+        else:
+            out.append(argv[i])
+            i += 1
+    return out
 
 
 def main(argv=None):
@@ -399,9 +444,16 @@ def main(argv=None):
     sy.add_argument("text", nargs="+")
     po = sub.add_parser("poll")
     po.add_argument("game")
-    a = ap.parse_args(argv)
+    rt = sub.add_parser("read-terrain")
+    rt.add_argument("game")
+    rt.add_argument("--surface", required=True)
+    rt.add_argument("--area", required=True)
+    rt.add_argument("--name", default="map")
+    a = ap.parse_args(_glue(sys.argv[1:] if argv is None else list(argv)))
     if a.cmd in ("chat", "say", "poll"):
         return _talk(a)
+    if a.cmd == "read-terrain":
+        return _read_terrain(a)
     cat = Catalog.load()
     if a.cmd in ("merge", "insert", "chests-to-net", "net-to-chests"):
         return _rewire(a)

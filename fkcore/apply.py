@@ -9,9 +9,11 @@ marks that for deconstruction). Then, by mode:
   explain and the watch policy leaves to the apply (``NOBODY``) is ordered for deconstruction;
   ``MARKED`` and ``CLAIMED`` ones stay. The paste must land where designed: a shifted paste is
   reported (``MISPLACED``), never cleaned up.
-- ``lab``: the area's chunks are generated and charted first (a new surface has none), each drill
-  row's designed resource is seeded under it (lab ground has no ore), a shifted paste is measured
-  and pasted again, and the ghosts are revived at once (lab rules: free materials).
+- ``lab``: the chunks under the area (and no others) are generated and charted first (a new
+  surface has none), each drill row's designed resource is seeded under it (lab ground has no
+  ore; ``seed=False`` when the surface has a real terrain, whose ore is already there), a
+  shifted paste is measured and pasted again, and the ghosts are revived at once (lab rules:
+  free materials).
 
 What the paste refuses (the game won't place an offshore pump from a blueprint: the kickoff
 found it on 2026-10-18, the V1 rehearsal again) is placed as single ghosts, still keyed and
@@ -23,7 +25,6 @@ call is one RCON command with the link's 5 s timeout.
 """
 from __future__ import annotations
 
-import math
 import time
 from dataclasses import dataclass, field
 
@@ -128,7 +129,7 @@ def diff(r, s, cat, area, policy, net_items=None, tag="diff"):
 
 
 def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None, keys=None,
-          net_items=None, tag="apply") -> ApplyReport:
+          net_items=None, tag="apply", seed=True) -> ApplyReport:
     """Paste the design inside ``area`` (default: all of ``s``) as one named blueprint."""
     t0 = time.time()
     rows = scope_rows(s, area, keys)
@@ -140,16 +141,16 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.notes.append("nothing designed in this scope")
         return rep
     if mode == "lab":
-        cx, cy = (area[0] + area[2]) / 2, (area[1] + area[3]) / 2
-        radius = max(1, math.ceil(max(area[2] - area[0], area[3] - area[1]) / 64) + 1)
-        rep.chunks = int(r.lua(link.lua_generate(s.name, force, (cx, cy), radius)).strip() or 0)
+        rep.chunks = int(r.lua(link.lua_generate_area(s.name, force, area)).strip() or 0)
         ore = {}
         for e in s.entities.values():
             if e.attrs.get("resource") and cat.kind(e.name) == "mining-drill" \
                     and _touches(e.tiles, area):
                 ore.setdefault(e.attrs["resource"], []).extend(e.tiles)
-        if ore:
+        if ore and seed:
             rep.seeded = int(r.lua(link.lua_seed(s.name, ore)).strip() or 0)
+        elif ore:
+            rep.notes.append("no ore seeded: the drills stand on the terrain's ore")
     elif policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before")
         nobody = [(v.name, v.x, v.y) for v in before.verdicts if v.verdict == "NOBODY"]

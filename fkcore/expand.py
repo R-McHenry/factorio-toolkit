@@ -4,9 +4,11 @@
 instance's keys (``red/m0``, ``red/f0``, ``red/in1b3``): from then on they are data, not code. A
 role is bound to the net its machines' endpoints sit on, which gives every carrier its ``net=``.
 Placement in V1 is manual: an instance's ``@(x, y, rot r)`` hint is the top-left of its turned
-frame, relative to its sub-module's own hint. Unplaced instances are listed, never guessed; the
-routes between attach points are the router's (the next step), so a factory expanded here has its
-template segments and none of the nets' own carriers yet.
+frame, relative to its sub-module's own hint. A MinerRow with ``@patch(resource)`` and no
+``@(x, y)`` is placed on its ore by ``fkcore.placer`` (given the terrain in the factory frame,
+``ground``), after every pinned instance, so it keeps clear of them. Unplaced instances are listed,
+never guessed; the routes between attach points are the router's (the next step), so a factory
+expanded here has its template segments and none of the nets' own carriers yet.
 
 ``explain`` prints one instance both ways: the template line and the plain entities, nets and
 attach points it stands for. ``unfold`` replaces the template line with ``Literal`` and keeps every
@@ -19,9 +21,11 @@ import math
 import re
 
 from . import fkp as fkpmod
+from . import placer
 from .codec import config_text
 from .compose import turn
 from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
+from .terrain import fmt_amount
 
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
            "frame_of"]
@@ -29,6 +33,9 @@ __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attac
 _SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump",
            "Boiler", "SteamEngine", "InfinityPipe")
 _NO_DIRECTION = ("infinity-pipe",)          # fluid prototypes the game never turns
+_H = {0: 0, 4: 1, 8: 2, 12: 3}
+_DX = (0, 1, 0, -1)
+_DY = (-1, 0, 1, 0)
 
 
 def belts(flat, key, side):
@@ -166,11 +173,14 @@ def _origin(flat, path):
     return x + hint[0], y + hint[1], int(hint[2]) % 4
 
 
-def expand_factory(flat, cat, previous=None):
-    """-> (factory Layout, notes). ``previous`` supplies a Literal's pinned entities."""
+def expand_factory(flat, cat, previous=None, ground=None, log=None):
+    """-> (factory Layout, notes). ``previous`` supplies a Literal's pinned entities. ``ground``
+    (a ``terrain.FrameGround``: blocked tiles, ore and the plot, in the factory frame) places the
+    ``@patch`` rows; ``log`` (a list) gets one line per row placed that way."""
     lay = fkpmod.Layout("factory", flat.name)
     notes = []
     xmax = ymax = 0
+    on_patch = []
     for path, inst in flat.insts.items():
         if inst.module is not None:
             continue
@@ -199,6 +209,9 @@ def expand_factory(flat, cat, previous=None):
                     xmax, ymax = _grow(cat, e, xmax, ymax)
             continue
         at = _origin(flat, path)
+        if at is None and "patch" in inst.hints:
+            on_patch.append(path)
+            continue
         if at is None:
             notes.append(f"{path}: unplaced (no @(x, y) hint)")
             continue
@@ -207,24 +220,106 @@ def expand_factory(flat, cat, previous=None):
         except FragmentError as exc:
             notes.append(str(exc) if str(exc).startswith(path) else f"{path}: {exc}")
             continue
-        x0, y0, rot = at
-        params = {k: _param_text(v) for k, v in inst.params.items()}
-        lay.insts[path] = fkpmod.Inst(path, inst.kind, params, x0, y0, rot, frag.sig)
-        for fe in frag.entities:
-            x, y, d = turn(float(fe.x), float(fe.y), fe.dir, rot, frag.size)
-            attrs = dict(fe.attrs)
-            if fe.role is not None:
-                net = binding.get(fe.role)
-                if net is None:
-                    notes.append(f"{path}/{fe.local}: role {fe.role} has no net (UNFED/UNCONSUMED)")
-                    continue
-                attrs["net"] = net
-            e = fkpmod.Entity(f"{path}/{fe.local}", fe.name, _clean(x + x0), _clean(y + y0), d,
-                              attrs)
-            lay.add(e)
+        for e in _put(lay, path, inst, frag, binding, at, notes):
+            xmax, ymax = _grow(cat, e, xmax, ymax)
+    for path in on_patch:
+        at, line, frag, binding = _on_patch(flat, lay, path, cat, ground)
+        if at is None:
+            notes.append(line)
+            continue
+        if log is not None:
+            log.append(line)
+        for e in _put(lay, path, flat.insts[path], frag, binding, at, notes):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     lay.size = (xmax, ymax)
     return lay, notes
+
+
+def _put(lay, path, inst, frag, binding, at, notes):
+    """Write one placed fragment into ``lay`` under its keys; -> the entities added."""
+    x0, y0, rot = at
+    params = {k: _param_text(v) for k, v in inst.params.items()}
+    lay.insts[path] = fkpmod.Inst(path, inst.kind, params, x0, y0, rot, frag.sig)
+    added = []
+    for fe in frag.entities:
+        x, y, d = turn(float(fe.x), float(fe.y), fe.dir, rot, frag.size)
+        attrs = dict(fe.attrs)
+        if fe.role is not None:
+            net = binding.get(fe.role)
+            if net is None:
+                notes.append(f"{path}/{fe.local}: role {fe.role} has no net (UNFED/UNCONSUMED)")
+                continue
+            attrs["net"] = net
+        e = fkpmod.Entity(f"{path}/{fe.local}", fe.name, _clean(x + x0), _clean(y + y0), d, attrs)
+        lay.add(e)
+        added.append(e)
+    return added
+
+
+def _taken(flat, lay, cat):
+    """Tiles a row placed now must keep clear of: every entity, every placed instance's frame
+    and the tiles its routes start or end on."""
+    taken = set()
+    for e in lay.entities.values():
+        taken |= fkpmod.tiles_of(cat, e)
+    for path, rec in lay.insts.items():
+        if rec.kind == "Literal" or path not in flat.insts:
+            continue
+        x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
+        taken |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        for _role, side, _net, (x, y, d) in attach_points(flat, lay, path, cat):
+            if d is None:
+                continue
+            k, sign = _H[int(d)], (1 if side == "out" else -1)
+            taken.add((math.floor(x) + sign * _DX[k], math.floor(y) + sign * _DY[k]))
+    return taken
+
+
+def _on_patch(flat, lay, path, cat, ground):
+    """(at, report line, fragment, binding) for a ``@patch`` row; at is None when it can't be
+    placed, and the line says why (and how many drills would fit: n is never changed)."""
+    inst = flat.insts[path]
+    res = inst.hints["patch"]
+    if inst.kind != "MinerRow":
+        return None, f"{path}: @patch places MinerRow rows only in V1; give it an @(x, y) hint", \
+            None, None
+    if inst.params.get("resource") != res:
+        return None, (f"{path}: @patch({res}), but the row mines {inst.params.get('resource')}"), \
+            None, None
+    if ground is None:
+        return None, (f"{path}: @patch({res}) needs the terrain (read_terrain <name>) and the "
+                      "factory's plot"), None, None
+    try:
+        frag, binding = fragment_of(flat, path, cat)
+    except FragmentError as exc:
+        return None, f"{path}: {exc}", None, None
+    n = int(inst.params["n"])
+    ore = ground.ore.get(res, {})
+    where = "the plot" + (f" (patch {ground.patch})" if ground.patch else "")
+    if not ore:
+        return None, f"{path}: @patch({res}): no {res} inside {where}", None, None
+    taken = _taken(flat, lay, cat)
+    spot = placer.place_on_patch(frag, cat, ore, ground.blocked, taken, ground.box)
+    xs, ys = [t[0] for t in ore], [t[1] for t in ore]
+    w, h = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+    span = f"the {res} in {where} spans {w}x{h}, long axis {'E-W' if w >= h else 'N-S'}"
+    if spot is None:
+        outs = [b[1] for b in belts(flat, inst.machines[0], "out")]
+
+        def make(k):
+            return fragment("MinerRow", dict(frag.params, n=k), [], outs)
+
+        k, alt = placer.largest_fit(make, n, cat, ore, ground.blocked, taken, ground.box)
+        line = (f"{path}: @patch({res}): no spot in {where} puts all {n} drills on {res} with "
+                f"no row entity on blocked or taken ground ({span}); "
+                + (f"n={k} would fit, at {alt.x},{alt.y} rot {alt.rot}; n stays {n}" if k
+                   else "not even one drill fits"))
+        return None, line, None, None
+    line = (f"{path}: @patch({res}) at {spot.x},{spot.y} rot {spot.rot}, the row runs "
+            f"{'E-W' if spot.rot % 2 == 0 else 'N-S'} ({span}): {spot.drills}/{n} drills on "
+            f"{res}, {spot.under} ore tiles under them ({fmt_amount(spot.under_amount)}), "
+            f"{spot.reach} in their mining areas ({fmt_amount(spot.reach_amount)})")
+    return (spot.x, spot.y, spot.rot), line, frag, binding
 
 
 def _grow(cat, e, xmax, ymax):

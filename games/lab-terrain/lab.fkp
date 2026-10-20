@@ -1,0 +1,3 @@
+fkp 1 surface lab
+plot gears at 480,576 rot 0 size 48x32 module=gears
+plot iron at 480,416 rot 0 size 144x140 module=iron patch='iron-ore#1'

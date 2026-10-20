@@ -15,7 +15,17 @@ pure too), so ``--from diff`` on the game host applies what a laptop build laid 
 
 Steps: read_surface, read_terrain, run_models, elaborate, report_rates, place, route,
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
-stop_on. ``diff`` and ``apply`` use the game link (``fkcore.link``: RCON, 5 s per call; the
+stop_on.
+
+The terrain (``read_terrain <name>``: ``<name>.terrain.json``, ``fkcore.terrain``) is the bare
+world every layout step designs against: ``place`` puts each ``@patch`` MinerRow on its ore inside
+its plot, ``route`` and ``cover power`` keep their carriers and poles off its blocked tiles
+(water, cliffs), each factory's in its own frame, and ``floorplan`` reports ``ON_TERRAIN`` for a
+composed entity on blocked ground and ``OFF_ORE`` for a drill with no ore of its resource in
+reach. They are checks, never gates. With a terrain, a lab ``apply`` seeds no ore: the ore is
+the terrain's.
+
+``diff`` and ``apply`` use the game link (``fkcore.link``: RCON, 5 s per call; the
 surface file's name is the game surface, its mode picks the force and the rules, see
 ``fkcore.apply``). The link is used only when ``FK_LINK=on`` is set (so a paper game run on the
 game host never pastes by accident); without it, or with no RCON password file or nothing
@@ -30,8 +40,9 @@ import re
 import shlex
 from dataclasses import dataclass, field
 
-from . import compose, connect, expand, fkp, rates, route
+from . import compose, connect, expand, fkp, placer, rates, route
 from . import surface as surfacemod
+from . import terrain as terrainmod
 from .catalog import Catalog
 from .elaborate import Check, ElabError, elaborate_file
 from .lang import FkSyntaxError
@@ -64,6 +75,7 @@ class Ctx:
     surface_lay: fkp.Layout | None = None
     composed: compose.Surface | None = None
     terrain: set = field(default_factory=set)        # blocked ground tiles (none on paper)
+    ground: object = None                            # the terrain.Terrain, when one is read
     stop_on: set = field(default_factory=lambda: {"INVARIANT"})
     log: list = field(default_factory=list)          # one summary line per step run
     checks: list = field(default_factory=list)       # [(step, Check)] of every step run so far
@@ -151,10 +163,41 @@ def s_read_terrain(ctx, args):
     if not os.path.exists(path):
         return [f"terrain {name}: no {name}.terrain.json in the game codebase"], [
             Check("TERRAIN", name, "no terrain file; the layout is not checked against the ground")]
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh)
-    ctx.terrain = {tuple(t) for t in data.get("blocked", ())}
-    return [f"terrain {name}: {len(ctx.terrain)} blocked tiles"], []
+    t = terrainmod.load(path)
+    ctx.ground = t
+    ctx.terrain = set(t.blocked)
+    lines, checks = terrainmod.summary(t, name), []
+    if ctx.surface is None:
+        return lines, checks
+    if t.surface != ctx.surface.name:
+        checks.append(Check("TERRAIN", name, f"read from surface {t.surface}; this surface is "
+                                             f"{ctx.surface.name}"))
+    x0, y0, x1, y1 = t.area
+    for p in _factories(ctx):
+        outside = p.w * p.h - (max(0, min(x1, p.x + p.w) - max(x0, p.x))
+                               * max(0, min(y1, p.y + p.h) - max(y0, p.y)))
+        lines.append("  " + _plot_ground(t, p))
+        if outside:
+            checks.append(Check("TERRAIN", f"{name} plot {p.factory}",
+                                f"{outside} of its {p.w * p.h} tiles are outside the terrain's "
+                                "area: unknown ground"))
+    return lines, checks
+
+
+def _plot_ground(t, p):
+    """One line: what the terrain holds inside a plot (blocked ground, ore by patch)."""
+    def inside(tile):
+        return p.x <= tile[0] < p.x + p.w and p.y <= tile[1] < p.y + p.h
+
+    parts = [f"{sum(1 for b in t.water if inside(b))} water",
+             f"{sum(1 for b in t.cliff_tiles if inside(b))} cliff",
+             f"{sum(1 for b in t.other if inside(b))} other blocked tiles"]
+    for res, ps in sorted(t.patches.items()):
+        held = [(pt.n, sum(1 for tile in pt.tiles if inside(tile))) for pt in ps]
+        held = [(n, k) for n, k in held if k]
+        if held:
+            parts.append(f"{res} " + ", ".join(f"#{n} {k} tiles" for n, k in held))
+    return f"plot {p.factory} at {p.x},{p.y} {p.w}x{p.h}: " + "; ".join(parts)
 
 
 def s_run_models(ctx, args):
@@ -255,7 +298,14 @@ def s_place(ctx, args):
     lines, checks = [], []
     for p in _factories(ctx):
         flat = ctx.flats[p.factory]
-        lay, notes = expand.expand_factory(flat, ctx.cat, ctx.previous.get(p.factory))
+        ground, placed = None, []
+        if ctx.ground is not None:
+            # a quarter-turned plot's frame depends on the factory's size, not known before it
+            # is laid out: the placer takes the frame to be the plot's own extent
+            ground = terrainmod.frame_ground(ctx.ground, p, terrainmod.frame_size(p),
+                                             patch=p.patch)
+        lay, notes = expand.expand_factory(flat, ctx.cat, ctx.previous.get(p.factory), ground,
+                                           placed)
         lay.name = p.factory
         pinned = _pinned_covers(lay, ctx.previous.get(p.factory), ctx.cat)
         if pinned:
@@ -270,6 +320,7 @@ def s_place(ctx, args):
                      f"{len(lay.entities)} entities, {lay.size[0]}x{lay.size[1]}; "
                      + ", ".join(f"{n} {c}" for c, n in sorted(count.items())))
         lines += [f"  {path}: {c}" for path, c in sorted(cls.items()) if c != "unchanged"]
+        lines += [f"  placed {line}" for line in placed]
         checks += [Check("UNPLACED", p.factory, n) for n in notes]
         checks += _invariant_checks(p.factory, fkp.invariants(lay, ctx.cat))
     return lines, checks
@@ -304,6 +355,14 @@ def _pinned_routes(flat, new, prev, cat):
     return new, kept
 
 
+def _frame_blocked(ctx, factory, size):
+    """The terrain's blocked tiles in ``factory``'s frame (empty on a paper surface)."""
+    if ctx.ground is None or ctx.surface is None or factory not in ctx.surface.places:
+        return frozenset()
+    p = ctx.surface.places[factory]
+    return terrainmod.frame_blocked(ctx.ground, p, size or terrainmod.frame_size(p))
+
+
 def s_route(ctx, args):
     o = _opts(args, only="all", effort="normal")
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -313,11 +372,14 @@ def s_route(ctx, args):
         pinned = []
         if o["only"] == "stale":
             lay, pinned = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
-        r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries)
+        blocked = _frame_blocked(ctx, factory, lay.size)
+        r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked)
         ctx.layouts[factory] = r.layout
         lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept "
                      f"({len(pinned)} pinned from the committed .fkp), {len(r.failed)} failed, "
-                     f"{r.passes} pass{'es' if r.passes != 1 else ''}")
+                     f"{r.passes} pass{'es' if r.passes != 1 else ''}"
+                     + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
+                        else ""))
         lines += [f"  {l}" for l in r.lines]
         checks += [Check("UNROUTED", f"{factory} net {n}", why) for n, why in r.failed.items()]
         checks += [Check("UNROUTED", f"{factory} net {l.split(':')[0].split()[-1]}",
@@ -335,10 +397,13 @@ def s_cover_power(ctx, args):
             Check("NO_POWER", "all factories", "no power coverage step yet")]
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
-        _poles, rep = cover.cover_power(lay, ctx.cat, pole=o["pole"])
-        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"])
+        keep_out = _frame_blocked(ctx, factory, lay.size)
+        _poles, rep = cover.cover_power(lay, ctx.cat, pole=o["pole"], keep_out=keep_out)
+        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"], keep_out=keep_out)
         ctx.layouts[factory] = new
-        lines.append(f"{factory}: {rep.summary()}")
+        lines.append(f"{factory}: {rep.summary()}"
+                     + (f"; {len(keep_out)} terrain tiles kept out" if ctx.ground is not None
+                        else ""))
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
     return lines, checks
@@ -384,6 +449,7 @@ def s_floorplan(ctx, args):
             keep |= {(x, y) for x in range(c.x0, c.x1) for y in range(c.y0, c.y1)}
         for m in s.marks.values():
             keep |= {(int(x), int(y)) for x, y in m.tiles}
+        keep |= ctx.terrain                          # no bridge pole on water or a cliff
         poles, blines = cover.bridge(list(s.entities.values()), ctx.cat, keep, pole)
         if poles and "bridge" not in ctx.surface_lay.covers:
             ctx.surface_lay.covers["bridge"] = fkp.Cover("bridge", "power", {"pole": pole})
@@ -395,6 +461,10 @@ def s_floorplan(ctx, args):
     s = ctx.composed
     lines.insert(0, f"surface {sf.name}: {len(s.plots)} plots, {len(s.claims)} claims, "
                     f"{len(s.marks)} marks, {len(s.entities)} entities composed, {len(s.tiles)} tiles")
+    if ctx.ground is not None:
+        tlines, tchecks = _on_terrain(ctx.ground, s, ctx.cat)
+        lines += tlines
+        checks += tchecks
     for name, p in sorted(s.plots.items()):
         lay = ctx.layouts.get(name)
         size = f"{lay.size[0]}x{lay.size[1]}" if lay is not None and lay.size else "?"
@@ -421,6 +491,45 @@ def s_floorplan(ctx, args):
     from . import robots
     rlines, rchecks = robots.check_surface(s, ctx.cat)
     return lines + rlines, checks + rchecks + _invariant_checks(sf.name, s.problems)
+
+
+def _on_terrain(t, s, cat):
+    """``ON_TERRAIN``: a composed entity on blocked ground (water, cliff); ``OFF_ORE``: a drill
+    with no ore of its resource in its mining area (the game would not place it). -> (report
+    lines, checks); checks, never gates."""
+    lines, checks, hits = [], [], 0
+    for key in sorted(s.entities, key=fkp.natural_key):
+        e = s.entities[key]
+        tiles = set(e.tiles)
+        parts = [(len(tiles & t.water), "water"), (len(tiles & t.cliff_tiles), "cliff"),
+                 (len(tiles & t.other), "other blocked")]
+        if not any(n for n, _k in parts):
+            continue
+        hits += 1
+        first = min(tiles & t.blocked, key=lambda q: (q[1], q[0]))
+        what = ", ".join(f"{n} {k}" for n, k in parts if n)
+        checks.append(Check("ON_TERRAIN", key,
+                            f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)} stands on {what} "
+                            f"tile{'s' if sum(n for n, _k in parts) != 1 else ''} (first "
+                            f"{first[0]},{first[1]})"))
+    drills = sorted((e for e in s.entities.values() if e.attrs.get("resource")
+                     and cat.has_entity(e.name) and cat.kind(e.name) == "mining-drill"),
+                    key=lambda e: fkp.natural_key(e.key))
+    full = under = amount = 0
+    for e in drills:
+        ore = t.resources.get(e.attrs["resource"], {})
+        body = [ore[q] for q in e.tiles if q in ore]
+        full += len(body) == len(e.tiles)
+        under += len(body)
+        amount += sum(body)
+        if not any(q in ore for q in placer.mining_area(e.name, float(e.x), float(e.y))):
+            checks.append(Check("OFF_ORE", e.key,
+                                f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)}: no "
+                                f"{e.attrs['resource']} in its mining area"))
+    lines.append(f"terrain: {hits} of {len(s.entities)} entities on blocked ground; "
+                 + (f"{full}/{len(drills)} drills with ore under every tile, {under} ore tiles "
+                    f"under them ({terrainmod.fmt_amount(amount)})" if drills else "no drills"))
+    return lines, checks
 
 
 def s_report_checks(ctx, args):
@@ -554,7 +663,8 @@ def s_apply(ctx, args):
     rep = applymod.apply(r, ctx.composed, ctx.cat, area, mode=ctx.surface.mode,
                          force=getattr(ctx.surface, "force", None), policy=ctx.surface,
                          keys=keys, net_items=_net_items(ctx),
-                         label=f"fk build {os.path.basename(ctx.script)}")
+                         label=f"fk build {os.path.basename(ctx.script)}",
+                         seed=ctx.ground is None)
     checks = []
     if rep.misplaced:
         checks.append(Check("MISPLACED", ctx.surface.name, f"{rep.misplaced} ghosts are not where "
