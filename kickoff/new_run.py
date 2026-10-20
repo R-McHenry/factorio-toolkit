@@ -16,6 +16,9 @@ RUN_DIR gets:
                        brief and its md5, the start time
   launch.json          for C:\\fk-player\\launch.ps1: the preflight command (one that reaches
                        the game) with the text its output must hold, and the first message
+  CLAUDE.md            with --player claude: the rules for a Claude Code session playing in this
+                       folder (it reads CLAUDE.md, not AGENTS.md; Rory, 2026-10-20: an Opus agent
+                       plays directly, no DeepSeek)
 
 Everything comes from the toolkit at SHA (git archive: the brief, the docs, bin, the template and
 fkcore), so a run is what that commit says, whatever the working tree holds. The toolkit is
@@ -61,8 +64,26 @@ LAUNCH = {
 }
 
 
+#: a Claude Code player's own file: it reads CLAUDE.md in its folder
+CLAUDE = """# You are the player
+
+This folder is your Factorio run. `AGENTS.md` is your brief: read it first, then `docs\\TOOLKIT.md`.
+
+- `fk` is your one command. Run it as `bin\\fk.cmd <command>` in PowerShell, or
+  `python bin/fk.py <command>` in Git Bash. `docs\\TOOLKIT.md` lists the commands, and every
+  command takes `--help`. It reaches the game for you.
+- Work only in this folder. Everything you need is here; don't read files outside it.
+- Touch the game only through `fk`: no ssh, no RCON, no scripts of your own that reach the game.
+- Your game codebase is `game\\`: the factories (`.fk`), `nauvis.surface`, `nauvis.build.fkb`.
+- `GOAL.md` is yours. Before you end a turn, rewrite it with what you aim for next; when your turn
+  ends, its text comes back to you as the next message.
+- `FRICTION.md`: write down what did not work (the command, what you expected, what happened).
+- Rory's chat messages appear at the end of `fk` commands; answer him with `fk say "text"`.
+"""
+
+
 def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
-         host_root="/home/computah/factorio/v1-runs", local=None):
+         host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek"):
     if os.path.exists(run) and os.listdir(run):
         raise SystemExit(f"new_run: {run} exists and is not empty")
     sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", sha], stdout=subprocess.PIPE,
@@ -86,10 +107,13 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     shutil.rmtree(src)
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump(LAUNCH, fh, indent=1)
+    if player == "claude":
+        with open(os.path.join(run, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(CLAUDE)
     name = os.path.basename(os.path.abspath(run))
     with open(os.path.join(run, "AGENTS.md"), "rb") as fh:
         md5 = hashlib.md5(fh.read()).hexdigest()
-    cfg = {"prompt": prompt, "prompt_md5": md5, "toolkit_sha": sha,
+    cfg = {"prompt": prompt, "prompt_md5": md5, "toolkit_sha": sha, "player": player,
            "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
     if local:
         cfg.update(host="local", env=local)
@@ -109,6 +133,7 @@ def main(argv=None):
     ap.add_argument("--host", default="computah-ct")
     ap.add_argument("--host-root", default="/home/computah/factorio/v1-runs")
     ap.add_argument("--local", action="store_true")
+    ap.add_argument("--player", default="deepseek", choices=("deepseek", "claude"))
     ap.add_argument("--rcon-port")
     ap.add_argument("--pw-file")
     ap.add_argument("--script-output")
@@ -117,7 +142,7 @@ def main(argv=None):
     if a.local:
         local = {"FK_RCON_PORT": a.rcon_port, "FK_RCON_PW_FILE": a.pw_file,
                  "FK_SCRIPT_OUTPUT": a.script_output}
-    cfg = make(a.run, a.prompt, a.sha, a.host, a.host_root, local)
+    cfg = make(a.run, a.prompt, a.sha, a.host, a.host_root, local, a.player)
     print(json.dumps(cfg, indent=1))
     return 0
 

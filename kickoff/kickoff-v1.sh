@@ -18,7 +18,9 @@
 #      bare ground read into it (read-terrain), and its first build: the plant and its pole chain
 #      pasted as ghosts, built by robots from the kit (5 s check-ins, at most 4 min).
 #   6. the map saved as server/factorio/saves/v1-RUN.zip, and v1.conf rewritten to start that
-#      save (no restart): a later restart resumes this map.
+#      save (no restart): a later restart resumes this map. This is done twice: right after the
+#      new map answers (so no later failure leaves the service making a new map on every
+#      start), and again at the end with the setup in it.
 #   7. joins open again.
 # Unchanged: the unit file, rcon.pw, the shelved world (instance/saves/world.zip and its copies),
 # the test map's save (server/factorio/saves/lab-test.zip), the v4 kickoff (kickoff.sh).
@@ -87,6 +89,19 @@ if [ "$DRY" != "--dry" ]; then
   [ -n "$up" ] || { say "the server did not answer RCON within 40 s"; exit 1; }
 fi
 run python3 $K/joins.py restore-file
+pin() {    # save the running map and make v1.conf start that save from now on (no restart)
+  run su computah -c "'$AS timeout 10 python3 $TK/kickoff/save_map.py v1-$RUN'"
+  if [ "$DRY" = "--dry" ]; then
+    echo "  would rewrite $D/v1.conf to start $SAVE"
+  else
+    for _ in $(seq 1 30); do [ -f "$SAVE" ] && break; sleep 1; done
+    [ -f "$SAVE" ] || { say "no save at $SAVE"; exit 1; }
+    conf "--start-server $SAVE" > $D/v1.conf
+    systemctl daemon-reload
+  fi
+}
+say "   the new map pinned: saved, and v1.conf starts the save"
+pin
 say "4. the starter world: bootstrap, kit, rules"
 run su computah -c "'$AS timeout 20 python3 $TK/kickoff/setup_v1.py'"
 say "5. the run's game codebase $G, the bare ground, the plant"
@@ -95,15 +110,8 @@ run cp -r $TK/kickoff/template/game $G
 run chown -R computah:computah $F/v1-runs/$RUN
 run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 60 python3 -m fkcore read-terrain . --surface nauvis --area=-192,-192,192,192 --name map'"
 run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 120 python3 -m fkcore build nauvis.build.fkb'"
-run su computah -c "'cd $G && PYTHONPATH=$TK $AS timeout 300 python3 $TK/kickoff/wait_built.py nauvis -36,-41,24,24 240'"
-say "6. save the map as $SAVE; v1.conf starts it from now on"
-run su computah -c "'$AS timeout 10 python3 $TK/kickoff/save_map.py v1-$RUN'"
-if [ "$DRY" = "--dry" ]; then
-  echo "  would rewrite $D/v1.conf to start $SAVE"
-else
-  for _ in $(seq 1 20); do [ -f "$SAVE" ] && break; sleep 1; done
-  [ -f "$SAVE" ] || { say "no save at $SAVE"; exit 1; }
-  conf "--start-server $SAVE" > $D/v1.conf
-  systemctl daemon-reload
-fi
+run su computah -c "'cd $G && PYTHONPATH=$TK $AS timeout 300 python3 $TK/kickoff/wait_built.py nauvis -36,-41,24,24 240'" \
+  || say "   the plant is not finished yet: the robots keep building it"
+say "6. save the map again as $SAVE, with the setup in it"
+pin
 say "7. joins open (on exit); done: the map runs, the run's game codebase is $G"

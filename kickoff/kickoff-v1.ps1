@@ -5,6 +5,8 @@ kickoff-v1: a V1 player run, the laptop side (the V1 successor of v4-hand\kickof
   kickoff-v1.cmd -Prompt NAME          ... on agent\prompts\NAME.md
   kickoff-v1.cmd -NoReset              no new map (the run folder and DeepSeek only)
   kickoff-v1.cmd -NoLaunch             no DeepSeek (the map and the run folder only)
+  kickoff-v1.cmd -Player claude        the run folder for a Claude Code player (its CLAUDE.md);
+                                       no DeepSeek: the Claude session is started in the folder
 
 Steps: stop earlier runs (as computah); deploy the toolkit at the commit (HEAD) to the host as
 its own dir fk-v5-<sha>, never over another; the host side, run from that dir:
@@ -14,7 +16,9 @@ run folder C:\fk-player\runs\<time>-<prompt> from new_run.py (everything from th
 then DeepSeek as computah through C:\fk-player\launch.ps1, whose preflight and first message
 come from the run's launch.json; then the feed window.
 #>
-param([string]$Prompt = "core-v1", [switch]$NoReset, [switch]$NoLaunch, [string]$Sha = "HEAD")
+param([string]$Prompt = "core-v1", [switch]$NoReset, [switch]$NoLaunch, [string]$Sha = "HEAD",
+      [ValidateSet("deepseek", "claude")][string]$Player = "deepseek")
+if ($Player -eq "claude") { $NoLaunch = $true }
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $v5 = Split-Path -Parent $here
@@ -45,7 +49,7 @@ if (-not $NoReset) {
 }
 
 # the run's folder, from the same commit
-python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha
+python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player
 if ($LASTEXITCODE -ne 0) { throw "new_run.py failed" }
 # the folder is made by this (Admin) account; DSH's sandbox, running as computah, rewrites the
 # workspace ACL at start (kickoff.ps1, 2026-10-18 09:53)
