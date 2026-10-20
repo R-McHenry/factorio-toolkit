@@ -38,9 +38,9 @@ param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' 
   takes every mall product not used inside the mall.
 - Kinds: `MinerRow<n, resource>`, `SmelterRow<n, recipe, fuel>`, `AsmRow<n, recipe>`, `LabRow<n>`,
   `Assembler`, `Furnace`, `ChemPlant`, `Refinery<recipe>`, `Pumpjack<rate>`, `OffshorePump<rate>`,
-  `Chest<provider|storage|requester, item, rate>`, `Literal` (its entities are pinned in the `.fkp`;
-  `Literal<file>` for a blueprint import is [spec]), and modules. `duty=` caps any instance (a
-  mall runs only while the network restocks).
+  `Chest<provider|storage|requester, item, rate>`, `Literal` (its entities are pinned in the `.fkp`,
+  or `Literal<file="x.json", box="x0,y0,x1,y1">` imports a blueprint or entity list [built]), and
+  modules. `duty=` caps any instance (a mall runs only while the network restocks).
 - **Templates expand visibly** [built: AsmRow, SmelterRow, MinerRow, LabRow, single machines]: an
   instance's fragment (machines, the belts and inserters of each role, attach points) is written into
   the `.fkp` under its keys, every carrier `net=` the net its role is bound to. Rows are counterflow
@@ -94,8 +94,8 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   that doesn't take every item on it), `DOUBLE` (an endpoint on two nets), `UNBOUNDED` (a source with
   no rate), `ASSERT` (a nominal rate assert failed); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
   `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
-  later `NO_POWER`, `NO_ROBOTS`, `LOW_STOCK`, `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1
-  `SHARED_BELT`.
+  [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; later `NO_ROBOTS`,
+  `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
 
 ## Rate model (nominal, V1) [built]
 
@@ -106,21 +106,23 @@ output. Damped fixed point; reports per machine utilization + the binding endpoi
 supply / demand / delivered, the binding chain, and every `assert`. No capacity in V1: routed
 throughput is V2.
 
-## Flow script `build.fkb` [spec]
+## Flow script `build.fkb` [built; `cover robots`, `run_models`, `diff`, `apply` report and skip]
 
-Straight-line, one contained tool per line, each reads the previous checkpoint `out/<step>.fkp` and
-writes its own plus `out/<step>.txt`: `read_surface`, `read_terrain`, `run_models`, `elaborate`,
-`report_rates`, `place`, `route`, `cover power|robots`, `floorplan`, `report_checks`, `report_bom`,
-`write_layout`, `diff`, `apply`, `stop_on <check ...>` (default: invariants only). `fk build <surface>
-[--from X --to Y]`; every line is also a command on its own.
+Straight-line, one contained tool per line, each reads the previous checkpoint and writes its own
+(`out/<step>/<factory>.fkp`) plus `out/<step>.txt`: `read_surface`, `read_terrain`, `run_models`,
+`elaborate`, `report_rates`, `place`, `route` [built: v4's steiner tree router per net, splits,
+merges, direct insertion], `cover power` [built] `|robots`, `floorplan` [built, `--bridge-power`],
+`report_checks`, `report_bom`, `write_layout`, `diff`, `apply`, `stop_on <check ...>` (default:
+invariants only). `fk build <surface> [--from X --to Y]`; every line is also a command on its own.
+Merge, insert, chests-to-net and net-to-chests edit source and layout only [built, on paper].
 
-## Diff verdicts [spec]
+## Diff verdicts [built: `sense` on captured scenes; not wired to the game]
 
 Per tile: `OK`, `GHOST`, `MISSING`, `WRONG` (another entity), `DRIFT` (direction, ug type, config),
 `CLAIMED`, `MARKED`, `NOBODY`. Per carrier: `WRONG_ITEM`. After robots finish, the diff inside the
 applied scope is empty: that is 1:1.
 
-## Watch, notify, fair play [spec]
+## Watch, notify, fair play [built: `sense` policies and notify, offline; `lab` scenario written, not deployed; alert push spec]
 
 - Foreign change, per region: `mark [expiry]` (sanctioned space), `keep` (plots), `revert`, `strict`.
 - Notify, per surface and actor: `nearby` (play default: only inside a look, sense or build), `all`
