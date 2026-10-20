@@ -4,7 +4,7 @@ Rory's go, as the supervising session relayed it: in-game testing, no play, on t
 session, with the live world shelved first. No player or DSH agent ran; nothing was registered
 through RCON (`fkcore.link.assert_safe` refuses such Lua); every game call was one RCON command
 with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
-`/home/computah/factorio/fk-v5-904f552`; its JSON is `/tmp/fk5-bench.json` on computah-ct.
+`/home/computah/factorio/fk-v5-570dc52`; its JSON is `/tmp/fk5-bench.json` on computah-ct.
 
 ## The shelve and the test map
 
@@ -50,7 +50,13 @@ with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
    and the paste then placed all 1014.
 3. **22 furnaces read as DRIFT** ("recipe None"). A furnace reports no recipe while idle and has no
    recipe setting, so `sense` no longer compares furnace recipes.
-4. Large blueprints go in RCON-sized chunks through `storage.fk5_bp`, then one build (`link.paste`).
+4. **The pasted poles were not wired.** All 40 of the layout's poles came out with 0 copper wires,
+   one electric network each: a blueprint without wires builds unwired poles. That answers the
+   power worker's open question. The codec now derives the wires (a minimum spanning forest within
+   wire reach, written as the game's own `[[a, 5, b, 5]]`; the format was taken from a blueprint
+   the game exported). The next paste gave **40 poles, 40 wired, 1 electric network**. Wires stay
+   derived, so the `.fkp` round trip is unchanged.
+5. Large blueprints go in RCON-sized chunks through `storage.fk5_bp`, then one build (`link.paste`).
 
 ## Not done, or still open
 
@@ -59,6 +65,6 @@ with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
 - **Alerts for an offline player:** run `python3 tools/lab_bench.py --steps alerts` after Rory
   disconnects. With no player in a force there is nothing to read, so the agent's force needs a
   player (connected or offline) for the alert push.
-- **Pole wires:** the lab layout has no poles (the bench pasted main without running cover).
-  Whether robots auto-wire pasted poles is still untested.
+- Wires through robots rather than revive: the blueprint now carries them, so ghosts should be
+  built wired; to be seen on the first robot-built apply.
 - The bench builds with revive (lab rules); a real apply goes through robots and stock.
