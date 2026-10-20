@@ -91,6 +91,9 @@ fk stats [--items iron-plate,copper-plate] [--window 10min]
                                  production statistics (free to read)
 fk chart                         how much of the map is explored (free to read)
 fk alerts                        the alert panel now (new alerts also come by themselves)
+fk lua "CODE"                    run a Lua chunk in the game: its rcon.print comes back (read,
+                                 investigate; see "Reading the game yourself")
+fk lua --file probe.lua          the same with a file of yours
 fk research                      what can be researched now, cheapest first, and what is running
 fk research TECH [TECH...]       queue research (labs and science packs do the rest)
 fk tech NAME                     a technology, or what opens an item or recipe: cost (or what to
@@ -103,6 +106,25 @@ fk say "text"                    one line in the game chat
 ```
 
 Every command takes `--help`.
+
+## Reading the game yourself
+
+`fk lua` sends a Lua chunk to the game over RCON and prints what it `rcon.print`s:
+
+```
+fk lua "rcon.print(game.forces.player.current_research and game.forces.player.current_research.name or 'none')"
+fk lua "local n = 0 for _, g in pairs(game.surfaces.nauvis.find_entities_filtered{type='entity-ghost'}) do n = n + 1 end rcon.print(n)"
+```
+
+The chunk is sent as one line, so keep `--` comments on lines of their own. A big answer is
+better written to a file (`helpers.write_file('mine.json', helpers.table_to_json(t))`) on the
+game host and read there. For a script of your own, the game host is `computah-ct`
+(`ssh computah-ct`); `run.json` names the toolkit there (`host_toolkit`: `fkcore.link.Rcon` is
+the RCON client) and your game codebase there (`host_game`).
+
+Use it to look and to understand; build only through `fk build` (ghosts and robots: nothing
+created or refilled by script). The link refuses Lua that registers an event handler, a command
+or an interface: that made every save unjoinable once.
 
 ## The surface file
 

@@ -73,6 +73,22 @@ A ghost that stays is a blocked build, not a slow one. `fk look` says why:
 what the network holds of each item. Build in the order the tech tree and the stock allow:
 what you can make now, then what that unlocks.
 
+## Your own tools
+
+Investigate, and build what you need. You may write code, run your own scripts, and read the
+game with Lua over RCON to find out what is going on: `fk lua "rcon.print(game.tick)"` runs a
+chunk in the game, `fk lua --file probe.lua` a file of yours, and anything it `rcon.print`s comes
+back. Read whatever helps you understand a problem, then fix the cause.
+
+Two rules stay:
+
+- **The game rule** (gameplay, not a tooling limit): you change the world only by building with
+  ghosts and robots (`fk build`). Nothing created by script: no entities, no items, no scripted
+  refills; recurring automation only through in-game machinery.
+- **Save safety:** never register an event handler, a command or an interface through RCON
+  (`script.on_event`, `commands.add_command`, `remote.add_interface`). That made every save
+  unjoinable once, so the link refuses such Lua.
+
 ## What you can see
 
 You see what you look at, like a player in front of the screen:

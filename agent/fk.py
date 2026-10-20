@@ -42,7 +42,7 @@ LOCAL = {"rates", "check", "explain", "unfold", "render", "layout", "split-to-ch
          "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "alerts", "stats", "chart", "read-terrain", "measure", "adopt",
-        "sense", "research", "tech", "recipes"}
+        "sense", "research", "tech", "recipes", "lua"}
 #: files only the host writes: pulled, never pushed
 HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/alerts.json", "out/inbox.txt")
 #: the build steps that read or write the game
@@ -196,6 +196,11 @@ def main(argv):
         push(cfg)
         footer(cfg)
         return code
+    if cmd == "lua" and "--file" in rest:
+        # the file is the player's (anywhere): its text travels as the argument
+        i = rest.index("--file")
+        with open(rest[i + 1], encoding="utf-8") as fh:
+            rest = rest[:i] + [fh.read()] + rest[i + 2:]
     if cmd in HOST:
         push(cfg)
         code = remote(cfg, [cmd] + ([] if cmd == "say" else ["."]) + rest,

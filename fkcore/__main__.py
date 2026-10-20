@@ -51,6 +51,9 @@ use the game link, and only with FK_LINK=on)
     poll GAME_DIR                         what every agent command ends with: the game's alerts
                                           (new, reminders, cleared; grouped), new chat lines and
                                           the research state (loud when nothing researches)
+    lua GAME_DIR CODE | --file F          run a Lua chunk in the game (RCON); its rcon.print is the
+                                          reply. For reading and investigating; the link refuses
+                                          Lua that registers handlers or commands (unjoinable saves)
     research GAME_DIR [TECH...]           queue research; without a name, what can be researched
                                           now and its cost (a free read)
     tech GAME_DIR NAME...                 a technology, or what unlocks a recipe or item: cost or
@@ -233,6 +236,30 @@ def _research_footer(r, game):
         return supply.research_line(supply.read(r, force, surface).research)
     except Exception as exc:          # a footnote must never break the command that asked
         return f"research: not read ({type(exc).__name__}: {exc})"
+
+
+def _lua(a):
+    """A Lua chunk through the link: the player's own probe (Rory, 2026-10-20: the player may write
+    code and read the game with Lua to investigate). The link still refuses Lua that registers a
+    handler, a command or an interface: that made every save unjoinable on 2026-10-18."""
+    from . import link
+    code = a.code
+    if a.file:
+        with open(a.file, encoding="utf-8") as fh:
+            code = fh.read()
+    if not code or not code.strip():
+        print("error: lua needs CODE or --file F", file=sys.stderr)
+        return 2
+    r = _game_link("lua")
+    if r is None:
+        return 2
+    with r:
+        try:
+            print(r.lua(code))
+        except link.LinkError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    return 0
 
 
 def _research(a):
@@ -494,6 +521,10 @@ def main(argv=None):
     sy.add_argument("text", nargs="+")
     po = sub.add_parser("poll")
     po.add_argument("game")
+    lu = sub.add_parser("lua")
+    lu.add_argument("game")
+    lu.add_argument("code", nargs="?")
+    lu.add_argument("--file")
     rs = sub.add_parser("research")
     rs.add_argument("game")
     rs.add_argument("techs", nargs="*")
@@ -514,6 +545,8 @@ def main(argv=None):
         return _talk(a)
     if a.cmd in ("research", "tech", "recipes"):
         return _research(a)
+    if a.cmd == "lua":
+        return _lua(a)
     if a.cmd == "read-terrain":
         return _read_terrain(a)
     cat = Catalog.load()

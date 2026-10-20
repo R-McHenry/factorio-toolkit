@@ -56,11 +56,11 @@ LAUNCH = {
     "preflight": "fk stats",
     "expect": "stats nauvis",
     "first": ("Play Factorio as your AGENTS.md describes.\n\n"
-              "The start works: the nuclear plant runs and the kit's robots are ready. A machine that "
-              "is not running yet does not mean something needs debugging.\n\n"
+              "The start works: the nuclear plant runs and the kit's robots are ready.\n\n"
               "You're free to act: no permission needed and no finished plan needed. Get something "
               "small running early (docs\\EXAMPLES.md has three factories that build cleanly), then "
-              "grow it."),
+              "grow it. When something does not work, find out why: fk look, the alerts, fk tech "
+              "and your own probes (fk lua, your own scripts) are all yours to use."),
 }
 
 
@@ -72,9 +72,17 @@ This folder is your Factorio run. `AGENTS.md` is your brief: read it first, then
 - `fk` is your one command. Run it as `bin\\fk.cmd <command>` in PowerShell, or
   `python bin/fk.py <command>` in Git Bash. `docs\\TOOLKIT.md` lists the commands, and every
   command takes `--help`. It reaches the game for you.
-- Work only in this folder. Everything you need is here; don't read files outside it.
-- Touch the game only through `fk`: no ssh, no RCON, no scripts of your own that reach the game.
 - Your game codebase is `game\\`: the factories (`.fk`), `nauvis.surface`, `nauvis.build.fkb`.
+- Investigate, and build your own tools. Write code, run your own scripts, read the game with
+  Lua (`fk lua "rcon.print(game.tick)"`, `fk lua --file probe.lua`), and read whatever helps.
+  The game runs on the host `computah-ct` (`ssh computah-ct`): `run.json` names the toolkit there
+  (`host_toolkit`; `fkcore.link.Rcon` is its RCON client) and your game codebase there
+  (`host_game`). One safety rule: never register an event handler, a command or an interface
+  through RCON (`script.on_event`, `commands.add_command`, `remote.add_interface`). That made
+  every save unjoinable once, so the link refuses such Lua.
+- The game rule (it is the game, not a tooling limit): change the world only by building with
+  ghosts and robots (`fk build`). Nothing created by script: no entities, no items, no scripted
+  refills; recurring automation only through in-game machinery.
 - `GOAL.md` is yours. Before you end a turn, rewrite it with what you aim for next; when your turn
   ends, its text comes back to you as the next message.
 - `FRICTION.md`: write down what did not work (the command, what you expected, what happened).
