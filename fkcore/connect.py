@@ -8,7 +8,10 @@ Every entity is a node; an edge is one way items move from one entity into anoth
   transport belt there takes them unless it faces back (head-on), an underground input only from
   behind, a splitter only from behind.
 - ``curve`` / ``sideload``: the same into the side of a belt. A curve when it is that belt's only
-  input (nothing from behind), else a side-load; into an underground's side, a side-load.
+  input (nothing from behind), else a side-load.
+- ``ug_sideload``: the same into the side of an underground (either end). Whether items get
+  through depends on the lane, and V1 tracks no lanes: the edge counts, and ``UG_SIDELOAD``
+  warns on every one (Rory, 2026-10-19).
 - ``ug``: an underground input to the output the game pairs it with. Both ends face the flow. The
   input looks ahead, up to the prototype's ``max_distance`` (catalog), through any other entity;
   the first underground of the same name facing the same way decides: an output pairs, anything
@@ -29,11 +32,12 @@ factory.
 endpoints (:func:`endpoints`) or, without a netlist, the machines its carriers pick from and drop
 into. A net is **connected** when every driver reaches every consumer through the net's own
 carriers. Report lines (``elaborate.Check``), never raised: ``UNROUTED`` (no driver reaches a
-consumer), ``OPEN`` (some pairs connect, not all), ``LEAK`` (an edge from one net's carrier into
-another net's: a belt or side-load feeding another net's belt, an inserter picking from another
-net's belt, an underground the game pairs with another net's; with a netlist also a carrier
-moving items into a machine that is not its net's consumer, or out of one that is not its
-driver). Pipes are carriers without edges so far. Pure, stdlib only, deterministic.
+consumer), ``OPEN`` (some pairs connect, not all), ``UG_SIDELOAD`` (above; a connected net can
+depend on one), ``LEAK`` (an edge from one net's carrier into another net's: a belt or side-load
+feeding another net's belt, an inserter picking from another net's belt, an underground the game
+pairs with another net's; with a netlist also a carrier moving items into a machine that is not
+its net's consumer, or out of one that is not its driver). Pipes are carriers without edges so
+far. Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
@@ -59,7 +63,8 @@ _FLUID_DRILLS = frozenset({"pumpjack"})
 _UG_REACH = 5                      # a tier the catalog gives no max_distance
 _SHOW = 4
 _VERB = {"belt": "feeds", "curve": "feeds", "sideload": "side-loads onto",
-         "ug": "pairs underground with", "drop": "drops onto", "mine": "drops onto"}
+         "ug_sideload": "side-loads onto", "ug": "pairs underground with", "drop": "drops onto",
+         "mine": "drops onto"}
 
 
 @dataclass
@@ -144,6 +149,7 @@ class NetReport:
     unpaired: list                 # the net's undergrounds the game leaves alone
     fluid: bool = False            # it has pipes, which are not traced yet
     leaks: list = field(default_factory=list)
+    ug_sideloads: list = field(default_factory=list)    # [(belt, underground)]: lane-dependent
 
     @property
     def connected(self):
@@ -159,7 +165,7 @@ class Report:
     graph: Graph
     nets: dict                     # name -> NetReport
     leaks: list                    # [Leak]
-    checks: list                   # [Check]: per net its UNROUTED/OPEN line, then its LEAKs
+    checks: list                   # [Check]: per net UNROUTED/OPEN, its LEAKs, its UG_SIDELOADs
 
     def lines(self):
         return [str(c) for c in self.checks]
@@ -272,7 +278,9 @@ def _belt_edges(g):
     for a, b, rel in raw:
         if rel == "straight":
             via = "belt"
-        elif g.nodes[b].kind == "transport-belt" and b not in behind and sides[b] == 1:
+        elif g.nodes[b].kind == "underground-belt":
+            via = "ug_sideload"
+        elif b not in behind and sides[b] == 1:
             via = "curve"
         else:
             via = "sideload"
@@ -438,6 +446,7 @@ def connect(ents, cat, nets=None) -> Report:
             table[name] = (_keys(d), _keys(c))
     leaks = [lk for a, b, via in g.edges()
              if (lk := _leak(g, a, b, via, None if nets is None else table)) is not None]
+    ug_sides = [(a, b) for a, b, via in g.edges() if via == "ug_sideload"]
     reports, checks = {}, []
     for name in sorted(table, key=natural_key):
         drivers, consumers = table[name]
@@ -456,11 +465,21 @@ def connect(ents, cat, nets=None) -> Report:
                       [k for k in mine if g.nodes[k].kind == "underground-belt"
                        and k not in g.pairs],
                       any(g.nodes[k].kind in _FLUID for k in mine),
-                      [lk for lk in leaks if lk.net == name])
+                      [lk for lk in leaks if lk.net == name],
+                      [(a, b) for a, b in ug_sides if g.nodes[a].net == name])
         reports[name] = r
         if not r.connected:
             checks.append(_status_line(r))
         checks += [Check("LEAK", f"net {name}", lk.text) for lk in r.leaks]
+        checks += [_ug_sideload_line(g, a, b) for a, b in r.ug_sideloads]
     checks += [Check("LEAK", f"net {lk.net}" if lk.net else "no net", lk.text)
                for lk in leaks if lk.net not in reports]
+    checks += [_ug_sideload_line(g, a, b) for a, b in ug_sides if g.nodes[a].net not in reports]
     return Report(g, reports, leaks, checks)
+
+
+def _ug_sideload_line(g, a, b):
+    net = g.nodes[a].net
+    return Check("UG_SIDELOAD", f"net {net}" if net else "no net",
+                 f"{a} side-loads onto underground {b}: whether items get through depends on "
+                 "the lane, and V1 tracks no lanes")

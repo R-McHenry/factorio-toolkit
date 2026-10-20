@@ -92,8 +92,10 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
 - **Checks** (report lines, never gates unless `build.fkb` says `stop_on`): `UNFED`, `UNCONSUMED`,
   `TYPE` (a ref adds no endpoint of the net's items), `SUSHI_SINK` (a sushi net reaches a consumer
   that doesn't take every item on it), `DOUBLE` (an endpoint on two nets), `UNBOUNDED` (a source with
-  no rate), `ASSERT` (a nominal rate assert failed), `UNROUTED`, `OPEN`, `LEAK` [built: connect]; later `NO_POWER`, `NO_ROBOTS`,
-  `LOW_STOCK`, `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
+  no rate), `ASSERT` (a nominal rate assert failed); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
+  `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
+  later `NO_POWER`, `NO_ROBOTS`, `LOW_STOCK`, `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1
+  `SHARED_BELT`.
 
 ## Rate model (nominal, V1) [built]
 
