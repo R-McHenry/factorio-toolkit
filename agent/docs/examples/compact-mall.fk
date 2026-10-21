@@ -1,71 +1,75 @@
 # compact-mall.fk: a mall laid out the way Rory prescribed (2026-10-21): machines in rows, no gap
 # between chains, a 1-tile gap inside a chain (that gap holds the one inserter that links a maker to
-# what takes its output: no belt). Two rows face one iron corridor (y 5..7): row A puts its products
-# up into chests, row B down. Belts only bring the plates in: 64 route carriers in all (50 belts),
-# 21 of its 23 nets are single inserters. More products: another pair of rows below, the same way.
+# what takes its output: no belt). Two rows face one 4-tile corridor (y 5..8) that carries the iron
+# in and the products out. One iron net, one copper net and one products net into one chest
+# (Rory: "one copper net and one products net, to save on logistics chests"): 1 provider chest
+# instead of one per product, 172 route carriers in all (152 belts), 17 of its 20 nets single
+# inserters.
+#
+# A maker whose product also feeds a neighbour stays on that link (a machine is on one net per item
+# and direction), so the products belt gets its pipes and yellow belts from makers of their own
+# (pipe, yb3). The products belt is sushi, so the build says CLOG: it runs while each product is
+# taken about as fast as it is made; one that piles up fills the chest and the belt and stops the
+# others. Limit production where that happens (the chest's limit=16 is the cap on all of them).
 #
 # In a base the plates come from your smelting or a bus tap, not from these requesters: name your
 # smelter row (or the tap) as the driver of `fe` and `cu`, and the router brings that belt to the
-# corridor's middle (x 20) and to row B's underside (x 20, y 14).
+# corridor's middle (x 24) and to row B's underside (x 49, y 13).
 
-# row A, products up: pipes, belts and undergrounds, splitters
-pipe   = Assembler<recipe=pipe>                   @(2, 2)
-ptg    = Assembler<recipe=pipe-to-ground>         @(6, 2)
-ga     = Assembler<recipe=iron-gear-wheel>        @(9, 2)
-yb     = Assembler<recipe=transport-belt>         @(13, 2)
-yu     = Assembler<recipe=underground-belt>       @(17, 2)
-gb     = Assembler<recipe=iron-gear-wheel>        @(20, 2)
-yb2    = Assembler<recipe=transport-belt>         @(24, 2)
-ys     = Assembler<recipe=splitter>               @(28, 2)
-ca     = Assembler<recipe=electronic-circuit>     @(32, 2)
-ka     = Assembler<recipe=copper-cable>           @(36, 2)
-pipe_c = Chest<provider, limit=2>                 @(3, 0)
-ptg_c  = Chest<provider, limit=2>                 @(7, 0)
-yb_c   = Chest<provider, limit=2>                 @(14, 0)
-yu_c   = Chest<provider, limit=2>                 @(18, 0)
-ys_c   = Chest<provider, limit=2>                 @(29, 0)
+# row A at y 2: belts and undergrounds, pipes and pipes-to-ground, splitters
+ga     = Assembler<recipe=iron-gear-wheel>        @(2, 2)
+yb     = Assembler<recipe=transport-belt>         @(6, 2)
+yu     = Assembler<recipe=underground-belt>       @(10, 2)
+gx     = Assembler<recipe=iron-gear-wheel>        @(13, 2)
+yb3    = Assembler<recipe=transport-belt>         @(17, 2)
+pipe   = Assembler<recipe=pipe>                   @(20, 2)
+pipe2  = Assembler<recipe=pipe>                   @(23, 2)
+ptg    = Assembler<recipe=pipe-to-ground>         @(27, 2)
+gs     = Assembler<recipe=iron-gear-wheel>        @(30, 2)
+yb2    = Assembler<recipe=transport-belt>         @(34, 2)
+ys     = Assembler<recipe=splitter>               @(38, 2)
+cs     = Assembler<recipe=electronic-circuit>     @(42, 2)
+ks     = Assembler<recipe=copper-cable>           @(46, 2)
 
-# row B, products down: inserters, assemblers, drills (cc feeds both of its neighbours; its cable
-# maker kc stands under it)
-gc     = Assembler<recipe=iron-gear-wheel>        @(2, 8)
-ins    = Assembler<recipe=inserter>               @(6, 8)
-cb     = Assembler<recipe=electronic-circuit>     @(10, 8)
-kb     = Assembler<recipe=copper-cable>           @(14, 8)
-gd     = Assembler<recipe=iron-gear-wheel>        @(17, 8)
-asm    = Assembler<recipe=assembling-machine-1>   @(21, 8)
-cc     = Assembler<recipe=electronic-circuit>     @(25, 8)
-drill  = Assembler<recipe=electric-mining-drill>  @(29, 8)
-ge     = Assembler<recipe=iron-gear-wheel>        @(33, 8)
-kc     = Assembler<recipe=copper-cable>           @(25, 12)
-ins_c  = Chest<provider, limit=2>                 @(7, 12)
-asm_c  = Chest<provider, limit=2>                 @(22, 12)
-drill_c = Chest<provider, limit=2>                @(30, 12)
+# row B at y 9: inserters, assemblers, drills; each circuit maker between its cable maker and the
+# machine it feeds
+gc     = Assembler<recipe=iron-gear-wheel>        @(2, 9)
+ins    = Assembler<recipe=inserter>               @(6, 9)
+cb     = Assembler<recipe=electronic-circuit>     @(10, 9)
+kb     = Assembler<recipe=copper-cable>           @(14, 9)
+gd     = Assembler<recipe=iron-gear-wheel>        @(17, 9)
+asm    = Assembler<recipe=assembling-machine-1>   @(21, 9)
+cc     = Assembler<recipe=electronic-circuit>     @(25, 9)
+kc     = Assembler<recipe=copper-cable>           @(29, 9)
+ge     = Assembler<recipe=iron-gear-wheel>        @(32, 9)
+drill  = Assembler<recipe=electric-mining-drill>  @(36, 9)
+cd     = Assembler<recipe=electronic-circuit>     @(40, 9)
+kd     = Assembler<recipe=copper-cable>           @(44, 9)
 
-# the plates in: iron at the corridor's middle, copper beside row A's cable maker and under row B's
-fe     = Chest<requester, item=iron-plate, rate=4/s>     @(20, 6)
-cua    = Chest<requester, item=copper-plate, rate=0.5/s> @(40, 3)
-cub    = Chest<requester, item=copper-plate, rate=1/s>   @(20, 14)
+# the one chest every product goes into, at the corridor's west end
+box    = Chest<provider, limit=16>                @(0, 6)
 
-net fe:  fe -> pipe, ptg, ga, yb, yu, gb, yb2, ys, ca, gc, ins, cb, gd, asm, cc, drill, ge
-net cua: cua -> ka
-net cub: cub -> kb, kc
-net pipeo: pipe -> ptg, pipe_c
-net ptgo:  ptg -> ptg_c
-net gao:   ga -> yb
-net ybo:   yb -> yu, yb_c
-net yuo:   yu -> yu_c
-net gbo:   gb -> yb2
-net yb2o:  yb2 -> ys
-net cao:   ca -> ys
-net kao:   ka -> ca
-net yso:   ys -> ys_c
-net gco:   gc -> ins
-net cbo:   cb -> ins
-net kbo:   kb -> cb
-net inso:  ins -> ins_c
-net gdo:   gd -> asm
-net cco:   cc -> asm, drill
-net kco:   kc -> cc
-net geo:   ge -> drill
-net asmo:  asm -> asm_c
-net drillo: drill -> drill_c
+# the plates in (stand-ins for the belts from your smelting)
+fe     = Chest<requester, item=iron-plate, rate=4/s>     @(24, 6)
+cu     = Chest<requester, item=copper-plate, rate=2/s>   @(49, 13)
+
+net fe: fe -> ga, yb, yu, gx, yb3, pipe, pipe2, ptg, gs, yb2, ys, cs, gc, ins, cb, gd, asm, cc, ge, drill, cd
+net cu: cu -> ks, kb, kc, kd
+net products: yu, yb3, pipe, ptg, ys, ins, asm, drill -> box
+net gao:  ga -> yb
+net ybo:  yb -> yu
+net gxo:  gx -> yb3
+net p2o:  pipe2 -> ptg
+net gso:  gs -> yb2
+net yb2o: yb2 -> ys
+net cso:  cs -> ys
+net kso:  ks -> cs
+net gco:  gc -> ins
+net cbo:  cb -> ins
+net kbo:  kb -> cb
+net gdo:  gd -> asm
+net cco:  cc -> asm
+net kco:  kc -> cc
+net geo:  ge -> drill
+net cdo:  cd -> drill
+net kdo:  kd -> cd

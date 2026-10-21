@@ -298,7 +298,9 @@ class SeveralDriversTest(unittest.TestCase):
 
     def test_the_compact_mall_packs_its_rows(self):
         # agent/docs/examples/compact-mall.fk (Rory, 2026-10-21): rows with no gap between chains
-        # and a 1-tile gap inside one; every product link one inserter, belts only for the plates
+        # and a 1-tile gap inside one; every link between makers one inserter. One iron, one
+        # copper and one products net into one chest, to save logistic chests (it took 8 provider
+        # chests and 2 copper requesters with a chest per product)
         path = os.path.join(os.path.dirname(__file__), "..", "agent", "docs", "examples",
                             "compact-mall.fk")
         flat = elaborate_file(path, CAT)
@@ -306,11 +308,14 @@ class SeveralDriversTest(unittest.TestCase):
         r = route.route_layout(flat, lay, CAT)
         self.assertEqual(r.failed, {})
         direct = {l.split()[1].rstrip(":") for l in r.lines if l.endswith("(direct insertion)")}
-        self.assertEqual(set(flat.nets) - direct, {"fe", "cub"})
+        self.assertEqual(set(flat.nets) - direct, {"fe", "cu", "products"})
+        chests = [e for e in lay.entities.values() if e.name.endswith("-chest")]
+        self.assertEqual(sorted(e.name for e in chests),
+                         ["passive-provider-chest", "requester-chest", "requester-chest"])
         carriers = sum(1 for k, e in r.layout.entities.items()
                        if k.startswith("~") and e.name in ("transport-belt", "underground-belt",
                                                            "splitter"))
-        self.assertLessEqual(carriers, 70)
+        self.assertLessEqual(carriers, 200)
 
     def test_rorys_bus_reads_as_one_literal(self):
         # agent/docs/examples/bus4.json: his demo as placed, splitter priorities kept

@@ -123,23 +123,31 @@ and circuits. Built in the game on a test server, every inserter link moves item
 fills. The file is in `docs\examples\`; it is long, so open it there rather than copying it from
 here.
 
-## compact-mall.fk: rows packed tight (39x16)
+## compact-mall.fk: rows packed tight, one chest for every product (50x16)
 
 Rory's layout (2026-10-21): "a row with gaps of zero, except 1 for an ingredient dependency", in
 several rows. A well-laid mall needs a few hundred belts at most, never thousands: big gaps between
-machines and ingredients made far from where they are used are what cost the belts.
+machines and ingredients made far from where they are used are what cost the belts. And to save
+logistic chests (before space science a requester can't be made, and the starter kit's run out):
+one copper net and one products net.
 
 - a chain (gear, then belt, then underground) stands in a line with a 1-tile gap between each
   maker and what takes its output: that gap holds the one inserter that links them
 - chains stand shoulder to shoulder with no gap
-- two rows face one shared corridor that brings the iron (in at its middle), row A puts its products
-  up into `limit=2` chests and row B down; a cable maker stands beside its circuit maker, and copper
-  comes only to them
-- a maker that feeds two machines stands between them (`cc` feeds the assembler and drill makers)
+- two rows face one 4-tile corridor: the iron comes in at its middle, and every product goes out
+  along it into one chest (`Chest<provider, limit=16>`) at its west end
+- each circuit maker stands between its cable maker and the machine it feeds; one copper net
+  reaches every cable maker
+- a maker whose product also feeds a neighbour stays on that link (one net per item and
+  direction), so the chest gets its pipes and yellow belts from makers of their own
 
-On paper: 23 nets, all routed, 21 of them single inserters; 50 belts, 12 underground ends and 2
-splitters bring the iron and copper. More products: another pair of rows below, the same way. In a
-base, the plates come from a smelter row or a bus tap instead of the requesters.
+On paper: 20 nets, all routed, 17 of them single inserters; 152 belts, 18 underground ends and 2
+splitters bring the iron and copper in and the products out. It uses 1 provider chest where one
+chest per product took 8: with the two plate requesters, 3 logistic chests instead of 11, and in a
+base whose plates come by belt from a smelter row or a bus tap, only the 1. The products belt is
+sushi, so the build says `CLOG`: it runs while each product is taken about as fast as it is made;
+one that piles up fills the chest and the belt and stops the others, so limit production there.
+More products: another pair of rows below, the same way.
 
 ## bus4.fk: Rory's 4-belt bus, a river of iron (54x18)
 
