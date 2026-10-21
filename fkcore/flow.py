@@ -83,6 +83,8 @@ class Ctx:
     link: object = None                              # the game link (fkcore.link.Rcon), on use
     link_error: str | None = None
     last_diff: object = None                         # the last diff's SenseReport this run
+    hands: tuple | None = None                       # the force's (hand, bulk hand, note), read once
+    rates_runs: int = 0                              # report_rates steps run so far
 
 
 def parse(text, path="<fkb>") -> list:
@@ -122,6 +124,78 @@ def _opts(args, **defaults):
             out.setdefault("_", []).append(a)
             i += 1
     return out
+
+
+def _count(o, key, lo=0):
+    """An option that must be a whole number (``--red 20``) -> int, None when not given."""
+    v = o.get(key)
+    if v is None:
+        return None
+    flag = "--" + key.replace("_", "-")
+    if v is True:
+        raise FlowError(f"{flag} needs a number")
+    try:
+        n = int(v)
+    except ValueError:
+        raise FlowError(f"{flag} needs a whole number, got {v!r}") from None
+    if n < lo:
+        raise FlowError(f"{flag} is at least {lo}, got {n}")
+    return n
+
+
+def _hands(ctx, o):
+    """(hand, bulk hand, note) for ``--hand N|auto`` and ``--bulk-hand N|auto``: a number as given;
+    ``auto`` (the default) the force's, 1 + its inserter capacity bonuses: read over the game link
+    once a build, else as the last ``diff`` saved them (``out/force.json``: the agent kit designs
+    on the laptop, where there is no link, and diffs on the game host), else 1 (the note says
+    which)."""
+    want = {}
+    for key in ("hand", "bulk_hand"):
+        if o.get(key, "auto") != "auto":
+            want[key] = _count(o, key, lo=1)
+    if len(want) < 2 and ctx.hands is None:
+        ctx.hands = _force_hands(ctx)
+    hand, bulk, note = ctx.hands if len(want) < 2 else (1, 1, "")
+    if want:
+        note = "inserter hands as given" if len(want) == 2 else note
+    return want.get("hand", hand), want.get("bulk_hand", bulk), note
+
+
+_FORCE_FILE = "force.json"                           # in out/: the force's hands, by diff
+
+
+def _force_hands(ctx):
+    r = _link(ctx) if ctx.surface is not None else None
+    if r is not None:
+        try:
+            hand, bulk = _save_hands(ctx, r)
+            return hand, bulk, f"inserter hands {hand}, bulk {bulk} (force {_force(ctx)}'s research)"
+        except Exception as exc:                    # noqa: BLE001 - a report line, not a stop
+            return 1, 1, f"inserter hands 1 (could not read the force's bonuses: {exc})"
+    try:
+        with open(os.path.join(ctx.out, _FORCE_FILE), encoding="utf-8") as fh:
+            saved = json.load(fh)
+        hand, bulk = int(saved["hand"]), int(saved["bulk_hand"])
+    except (OSError, ValueError, KeyError, TypeError):
+        why = ctx.link_error or "no surface read"
+        return 1, 1, (f"inserter hands 1 (no game link: {why}; no diff has saved the force's "
+                      f"yet; --hand N sets them)")
+    return hand, bulk, (f"inserter hands {hand}, bulk {bulk} (force {saved.get('force', '?')}'s "
+                        f"research at the last diff, out/{_FORCE_FILE})")
+
+
+def _save_hands(ctx, r):
+    """Read the force's inserter capacity bonuses over the link and save the hands in
+    ``out/force.json``. -> (hand, bulk hand)."""
+    force = _force(ctx)
+    reply = r.lua(f"local f = game.forces['{force}'] rcon.print(f.inserter_stack_size_bonus "
+                  ".. ' ' .. f.bulk_inserter_capacity_bonus)")
+    a, b = (int(float(x)) for x in reply.split())
+    os.makedirs(ctx.out, exist_ok=True)
+    with open(os.path.join(ctx.out, _FORCE_FILE), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"force": force, "hand": 1 + a, "bulk_hand": 1 + b}, fh)
+        fh.write("\n")
+    return 1 + a, 1 + b
 
 
 def _factories(ctx):
@@ -230,15 +304,24 @@ def s_elaborate(ctx, args):
 def s_report_rates(ctx, args):
     """The nominal rate model per factory (V1); once a factory is laid out (after ``place`` and
     ``route``), also its routed rates (V2, ``fkcore.routed``: the lanes and inserters as laid,
-    ``CAPACITY`` where a carrier binds). ``--hand N`` / ``--bulk-hand N``: the force's inserter
-    hand sizes (1 + its research bonus; default 1)."""
-    o = _opts(args, hand="1", bulk_hand="1")
+    ``CAPACITY`` where a carrier binds). ``--hand N`` / ``--bulk-hand N``: the inserter hand
+    sizes (1 + the research bonus); ``auto`` (the default) reads the force's over the game link.
+    Run again later in the script (after ``route``), it reports in full but adds as checks only
+    what is new: ``CAPACITY``, and a ``TARGET`` the nominal rates met and the routed ones don't
+    (the ``ASSERT`` and ``TARGET`` lines of the nominal model are the first run's)."""
+    o = _opts(args, hand="auto", bulk_hand="auto")
+    for key in ("hand", "bulk_hand"):
+        if o[key] != "auto":
+            _count(o, key, lo=1)
+    ctx.rates_runs += 1
+    again = ctx.rates_runs > 1
     lines, checks, made, routed_made = [], [], {}, None
+    hands = None
     for factory, flat in ctx.flats.items():
         model = rates.solve(flat)
         lines += rates.report(model, factory).splitlines() + [""]
         for text, ok, value, target, op in model.asserts:
-            if not ok:
+            if not ok and not again:
                 checks.append(Check("ASSERT", factory, f"{text}: {value * 60:.3f}/min"))
         for key, m in flat.machines.items():
             for item, r in m.makes.items():
@@ -246,8 +329,9 @@ def s_report_rates(ctx, args):
         lay = ctx.layouts.get(factory)
         if lay is not None:
             from . import routed
-            r_ = routed.solve(flat, lay, ctx.cat, model, hand=int(o["hand"]),
-                              bulk_hand=int(o["bulk_hand"]))
+            if hands is None:
+                hands = _hands(ctx, o)
+            r_ = routed.solve(flat, lay, ctx.cat, model, hand=hands[0], bulk_hand=hands[1])
             rlines, rchecks = routed.report(r_, factory)
             lines += rlines + [""]
             checks += rchecks
@@ -260,15 +344,17 @@ def s_report_rates(ctx, args):
     if ctx.surface is not None:
         for item, want in ctx.surface.targets.items():
             got = made.get(item, 0.0)
-            ok = got >= want - 1e-9
+            nominal_ok = ok = got >= want - 1e-9
             text = f"{got * 60:.3f}/min nominal"
             if routed_made is not None:
                 rgot = routed_made.get(item, 0.0)
                 ok = ok and rgot >= want - 1e-9
                 text += f", {rgot * 60:.3f}/min routed"
             lines.append(f"target {item} {want * 60:g}/min: {'met' if ok else 'NOT met'}, {text}")
-            if not ok:
+            if not ok and not (again and not nominal_ok):
                 checks.append(Check("TARGET", item, f"{text}, target {want * 60:g}/min"))
+    if hands is not None:
+        lines.append(hands[2])
     return lines, checks
 
 
@@ -425,28 +511,31 @@ def s_route(ctx, args):
 
 def s_tier(ctx, args):
     """Belt tiers per connector (CORE-V2, ``fkcore.tiers``): ``tier minimize|maximize|yellow``
-    (default minimize) ``--allow yellow,red,blue,turbo`` (the tiers it may use; yellow always)
-    ``--red N --blue N --turbo N`` (at most N entities of a tier), ``--hand N`` / ``--bulk-hand N``
-    (the force's inserter hand sizes, as for report_rates)."""
+    (default minimize) ``--allow yellow,red,blue,turbo`` (the tiers it may use; default yellow,
+    which yellow always is) ``--red N --blue N --turbo N`` (at most N entities gain a tier),
+    ``--downgrade`` (minimize and maximize may go below the tier a belt has; without it they
+    never do), ``--hand N`` / ``--bulk-hand N`` (the inserter hand sizes, as for report_rates)."""
     from . import tiers
-    o = _opts(args, allow=",".join(tiers.TIERS), hand="1", bulk_hand="1")
+    o = _opts(args, allow="yellow", hand="auto", bulk_hand="auto")
     mode = (o.get("_") or ["minimize"])[0]
-    allow = [t.strip() for t in str(o["allow"]).split(",") if t.strip()]
+    allow = [t.strip() for t in str(o["allow"]).split(",") if t.strip()] \
+        if o["allow"] is not True else []
     unknown = sorted(set(allow) - set(tiers.TIERS))
-    if unknown or mode not in ("minimize", "maximize", "yellow"):
+    if unknown or not allow or mode not in ("minimize", "maximize", "yellow"):
         raise FlowError("tier minimize|maximize|yellow [--allow yellow,red,blue,turbo] "
-                        "[--red N] [--blue N] [--turbo N]"
+                        "[--red N] [--blue N] [--turbo N] [--downgrade]"
                         + (f": unknown tier {', '.join(unknown)}" if unknown else ""))
-    budgets = {t: int(o[t]) for t in tiers.TIERS if isinstance(o.get(t), str)}
+    budgets = {t: _count(o, t) for t in tiers.TIERS if o.get(t) is not None}
+    hand, bulk, note = _hands(ctx, o)
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         new, tlines, _changed = tiers.assign(ctx.flats[factory], lay, ctx.cat, mode, allow,
-                                             budgets, hand=int(o["hand"]),
-                                             bulk_hand=int(o["bulk_hand"]))
+                                             budgets, hand=hand, bulk_hand=bulk,
+                                             downgrade=o.get("downgrade") is True)
         ctx.layouts[factory] = new
         lines += [f"{factory}: {tlines[0]}"] + tlines[1:]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
-    return lines, checks
+    return lines + [note], checks
 
 
 def s_cover_power(ctx, args):
@@ -796,6 +885,10 @@ def s_diff(ctx, args):
     if area is None:
         return ["diff: nothing is designed on this surface"], []
     rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx), own=own)
+    try:
+        _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
+    except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
+        pass
     ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "GHOST"})
     if ghosts:
         from . import supply
@@ -904,10 +997,8 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
         if ln.cmd == "stop_on":
             ctx.stop_on |= {a.upper() for a in ln.args}
     names = [ln.cmd for ln in lines]
-    if frm and frm not in names or to and to not in names:
-        raise FlowError(f"--from/--to must name a step of the script: {', '.join(names)}")
-    first = names.index(frm) if frm else 0
-    last = names.index(to) if to else len(lines) - 1
+    first = _at(names, frm) if frm else 0
+    last = _at(names, to) if to else len(lines) - 1
     os.makedirs(ctx.out, exist_ok=True)
     for ln in lines[:first]:
         if ln.cmd in _SOURCE:
@@ -919,6 +1010,7 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
     if plans and ctx.layouts:
         STEPS["floorplan"](ctx, plans[-1].args)
     width = len(lines)
+    written = set()
     for i in range(first, last + 1):
         ln = lines[i]
         report, checks = STEPS[ln.cmd](ctx, ln.args)
@@ -926,9 +1018,11 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
         text = [f"# {ln.text}   (line {ln.n} of {os.path.basename(script)})"] + report
         if checks:
             text += ["", "checks:"] + [f"  {c}" for c in checks]
-        with open(os.path.join(ctx.out, f"{ln.cmd}.txt"), "w", encoding="utf-8",
-                  newline="\n") as fh:
-            fh.write("\n".join(text) + "\n")
+        # a step the script runs again adds its report to the same file, after the first's
+        with open(os.path.join(ctx.out, f"{ln.cmd}.txt"), "a" if ln.cmd in written else "w",
+                  encoding="utf-8", newline="\n") as fh:
+            fh.write(("\n" if ln.cmd in written else "") + "\n".join(text) + "\n")
+        written.add(ln.cmd)
         if ln.cmd in _LAYOUT or ln.cmd == "floorplan":
             _write_checkpoint(ctx, ln.cmd)
         stops = [c for c in checks if c.code.upper() in ctx.stop_on]
@@ -944,6 +1038,21 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
             return 1, ctx
     _close(ctx)
     return 0, ctx
+
+
+def _at(names, spec):
+    """The index of the step ``spec`` names: ``route``, or ``report_rates:2`` for the second
+    report_rates of the script."""
+    name, _, k = spec.partition(":")
+    where = [i for i, n in enumerate(names) if n == name]
+    try:
+        k = int(k or 1)
+        if k < 1:
+            raise ValueError(k)
+        return where[k - 1]
+    except (ValueError, IndexError):
+        raise FlowError(f"--from/--to must name a step of the script, NAME or NAME:K for its K-th "
+                        f"time ({spec!r}): {', '.join(names)}") from None
 
 
 def _close(ctx):

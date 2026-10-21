@@ -6,8 +6,8 @@ netlist machine whose entity the layout holds on it (``fkcore.throughput``):
 - a crafter or a drill is a ``Machine``: its needs and products at full speed, times its duty, or
   times its nominal utilization where V1's rate model has it bound by a fluid (pipes are not
   modeled: 2.0's pipes are tanks, Rory), the fluids themselves left out;
-- a requester chest is a machine that makes its items at its rate; one without a rate puts on as
-  much as the carriers take (the solver's ``BIG``: "unbounded");
+- a requester chest puts its items on at its rate, each on its own (no recipe ties them); one
+  without a rate puts on as much as the carriers take (the solver's ``BIG``: "unbounded");
 - a sink (a provider or storage chest, a lab, a turret) takes what reaches it of the items of the
   nets that feed it, up to its rate split over them, without end when it has none.
 
@@ -57,6 +57,9 @@ class Routed:
         nid = (key, "")
         if nid in self.res.util:
             return self.res.util[nid] * self.base.get(key, 1.0)
+        if key in self.base and self.res.supply.get(nid):     # a requester at its rate
+            return min(self.res.supplied.get(nid, {}).get(i, 0.0) / x
+                       for i, x in self.res.supply[nid].items() if x > 0)                 if any(x > 0 for x in self.res.supply[nid].values()) else 0.0
         return None
 
     def asked(self, nid):
@@ -114,6 +117,11 @@ def _ends(flat, lay, cat, model, lg):
             if solid_makes:
                 supply[nid] = {i: INF for i in solid_makes}
             continue
+        if m.extra.get("role") == "requester":
+            if solid_makes:
+                supply[nid] = dict(solid_makes)
+                base[key] = 1.0
+            continue
         share = m.duty
         if _fluid_bound(model, key, cat):
             share = min(share, model.util.get(key, share))
@@ -140,18 +148,38 @@ def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
                   need.required_edge)
 
 
+def overflow(flat, net, item):
+    """The overflow chests of a net's item: chests without a rate (provider, storage, buffer) on a
+    net where something else consumes the item too. They take what the others leave, while they
+    have room: the design asks nothing of the carriers into them, and nothing runs short when
+    they get less. A chest that is the item's only kind of consumer is where the net goes."""
+    cons = [k for k, i in flat.nets[net].consumers if i == item]
+    chests = {k for k in cons if flat.machines[k].sink and flat.machines[k].drain is None
+              and flat.machines[k].extra.get("role") in _OVERFLOW}
+    return chests if len(chests) < len(cons) else set()
+
+
+_OVERFLOW = ("provider", "storage", "buffer")
+
+
 def required(flat, lay, cat, model=None, hand=1, bulk_hand=1, lg=None):
     """What the design asks of every connector: the flows with every machine at V1's nominal rate
     and no capacities (the solver's ``required``), so a lane that binds today still shows what it
-    would carry. An unbounded requester chest puts on what its nets deliver nominally, and a sink
-    without a rate asks its share of what its nets leave for sinks (the first chest on a belt would
-    otherwise ask it all). -> (lane graph, throughput.Result)."""
+    would carry. An unbounded requester chest puts on what its nets deliver nominally; an overflow
+    chest (``overflow``) asks nothing, and any other sink without a rate (a lab, a turret) its
+    share of what its nets leave for sinks (the first one on a belt would otherwise ask it all).
+    -> (lane graph, throughput.Result)."""
     model = model or ratesmod.solve(flat)
     lg = lg or lanesmod.build(lay, cat, hand=hand, bulk_hand=bulk_hand)
     machines, supply, demand, _base = _ends(flat, lay, cat, model, lg)
     for (net, item), st in model.nets.items():
+        spill = overflow(flat, net, item)
         sinks = [k for k, i in flat.nets[net].consumers
                  if i == item and demand.get((k, ""), {}).get(item) == INF]
+        for k in sinks:
+            if k in spill:
+                demand[(k, "")][item] = 0.0
+        sinks = [k for k in sinks if k not in spill]
         if not sinks or st.to_sinks == INF:
             continue
         finite = sum(demand.get((k, ""), {}).get(item, 0.0) for k, i in flat.nets[net].consumers
@@ -159,6 +187,11 @@ def required(flat, lay, cat, model=None, hand=1, bulk_hand=1, lg=None):
         each = max(0.0, st.to_sinks - finite) / len(sinks)
         for k in sinks:
             demand[(k, "")][item] = each
+    for nid, items in supply.items():
+        if nid[0] in _base and nid not in machines:      # a requester: at its nominal rate
+            u = model.util.get(nid[0], 1.0)
+            for i in items:
+                items[i] *= u
     for nid in machines:
         m, u = flat.machines[nid[0]], model.util.get(nid[0], 1.0)
         for i, r in m.needs.items():
@@ -208,10 +241,23 @@ def report(r: Routed, factory=None):
     """-> (report lines, CAPACITY checks)."""
     flat, res, lg = r.flat, r.res, r.lg
     where = f"{factory} " if factory else ""
-    lines = [f"routed {factory or flat.name} (V2: the lanes and inserters as laid): "
-             f"{len(lg.nodes)} connectors and machines, solved in {res.rounds} rounds"]
+    head = (f"routed {factory or flat.name} (V2: the lanes and inserters as laid): "
+            f"{len(lg.nodes)} connectors and machines; ")
+    if not r.machines:
+        head += "no machines"
+    elif res.settled:
+        head += f"the machines settled in {res.outer} round{'s' if res.outer != 1 else ''}"
+    else:
+        head += (f"the machines did NOT settle in {res.outer} rounds (a utilization still moves "
+                 f"by {res.moved:.4f} a round): the routed rates are approximate")
+    lines = [head]
     lines.append(f"  {'instance':<18} {'nominal':>7} {'routed':>7} {'lowest':>7}  limited by")
     starved = res.starved()
+    for nid in r.machines:              # a machine: what holds it at its utilization
+        starved.pop(nid, None)
+        for side, item in res.limits(nid):
+            if side == "in":
+                starved.setdefault(nid, {})[item] = None
     for path, inst in flat.insts.items():
         if inst.module is not None or not inst.machines:
             continue
@@ -226,9 +272,10 @@ def report(r: Routed, factory=None):
         if hungry:
             n = sum(1 for k, _u in us if (k, "") in starved)
             why.append(f"{n} of {len(us)} starved of {', '.join(hungry)}")
-        blocked = [k for k, _u in us if any(
-            res.supplied.get((k, ""), {}).get(i, 0.0) < x - 1e-6
-            for i, x in res.supply.get((k, ""), {}).items())]
+        blocked = [k for k, _u in us if any(s == "out" for s, _i in res.limits((k, ""))) or (
+            (k, "") not in r.machines and any(
+                res.supplied.get((k, ""), {}).get(i, 0.0) < x - 1e-6
+                for i, x in res.supply.get((k, ""), {}).items()))]
         if blocked:
             why.append(f"{len(blocked)} of {len(us)} blocked (output backs up)")
         lines.append(f"  {path:<18} {nominal:>7.3f} {mean:>7.3f} {low:>7.3f}  "
@@ -265,29 +312,46 @@ def _critical(r, mine):
 
 
 def _short(r, net):
-    """What the net leaves short of the nominal model: per item it delivers less to its
-    consumers than V1's nominal rates -> [text], the net's total first, then the machines below
-    their nominal utilization (a sink: what it gets). One machine starved while another takes up
-    its share (belt order) costs nothing, and gives nothing."""
+    """Who runs short of the net's items -> [text] per item: what the net delivers to its
+    consumers against the nominal model, then each consumer short of the item: a machine the item
+    holds below its nominal utilization, a sink with a rate that gets less than it asks, the
+    labs and turrets (sinks without a rate) when together they get less than their nominal share.
+    Left out: overflow chests (they take what is left), and a machine held by something else
+    (another input, its output backing up), which asks less."""
     res, flat, model = r.res, r.flat, r.model
-    cons = flat.nets[net].consumers
+    need = r.need or {}
     out = []
+
+    def got_(k, item):
+        return res.delivered.get((k, ""), {}).get(item, 0.0)
+
+    def need_(k, item):
+        return need.get((k, ""), {}).get(item, 0.0)
+
     for item in flat.nets[net].items:
-        st = model.nets.get((net, item))
-        if st is None or st.delivered == INF:
+        spill = overflow(flat, net, item)
+        cons = [k for k, i in flat.nets[net].consumers if i == item and k not in spill]
+        victims, open_ = [], []
+        for k in cons:
+            nid = (k, "")
+            if nid in r.machines:
+                u, nominal = r.util(k), model.util.get(k, 1.0)
+                if u is not None and u < nominal - 1e-3 and ("in", item) in res.limits(nid):
+                    victims.append(f"{k} runs at {u:.2f}, {nominal:.2f} nominal")
+            elif res.demand.get(nid, {}).get(item) == INF:
+                open_.append(k)
+            elif got_(k, item) < need_(k, item) * (1 - 1e-3) - 1e-6:
+                victims.append(f"{k} gets {got_(k, item):.2f}/s, {need_(k, item):.2f}/s nominal")
+        if sum(got_(k, item) for k in open_) < sum(need_(k, item) for k in open_) * (1 - 1e-3) \
+                - 1e-6:
+            victims += [f"{k} gets {got_(k, item):.2f}/s, {need_(k, item):.2f}/s nominal"
+                        for k in open_ if got_(k, item) < need_(k, item) * (1 - 1e-3) - 1e-6]
+        if not victims:
             continue
-        got = sum(res.delivered.get((k, ""), {}).get(i, 0.0) for k, i in cons if i == item)
-        if got >= st.delivered * (1 - 1e-3) - 1e-6:
-            continue
-        out.append(f"it delivers {got:.2f}/s of {item}, {st.delivered:.2f}/s nominal")
-        for key, i in cons:
-            u, nominal = r.util(key), model.util.get(key, 1.0)
-            if i != item:
-                continue
-            if u is None:
-                out.append(f"{key} gets {res.delivered.get((key, ''), {}).get(item, 0.0):.2f}/s")
-            elif u < nominal - 1e-3:
-                out.append(f"{key} runs at {u:.2f}, {nominal:.2f} nominal")
+        got = sum(got_(k, item) for k in cons)
+        want = sum(need_(k, item) for k in cons)
+        out.append(f"it delivers {got:.2f}/s of {item} to its consumers, {want:.2f}/s nominal")
+        out += victims
     return out
 
 

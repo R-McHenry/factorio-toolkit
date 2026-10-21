@@ -25,7 +25,10 @@ more supply than demand, and give a chest on it a `limit=` (`SHARED_SINK` says w
 After `fk build`, `out\report_rates.txt` also has the **routed** rates: what the belts and
 inserters as laid let through, with the first machines along a belt served first, as in the game.
 A belt lane carries 7.5 items/s (yellow; red 15, blue 22.5, turbo 30), a fast inserter 2.5/s, a
-long-handed one 1.2/s, a plain one about 0.85/s, more with the inserter capacity research.
+long-handed one 1.2/s, a plain one about 0.85/s, more with the inserter capacity research (the
+build uses your force's, as the last build saw it; the report's last line says which). Each
+routed section's first line says whether its machines settled; where they did not, its numbers
+are approximate.
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step. Each
 step writes its report to `game\out\<step>.txt`: read the one that matters
@@ -97,8 +100,10 @@ fixing in the source.
 - `DOUBLE`: one machine input or output on two nets
 - `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper (or,
   after a build, as routed)
-- `CAPACITY`: a net delivers less as laid than on paper, and some of its belt lanes or inserters
-  run full: the line says what is required there, what they carry, and which machines run short
+- `CAPACITY`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
+  and some of the net's belt lanes or inserters run full: the line says what is required there,
+  what they carry, and who runs short. A chest without a rate beside machines on a net takes what
+  they leave, so it is never short and asks nothing of the belts
 - `UNROUTED`: no belt route was found for a net (the reason follows: often a row is boxed in;
   leave a few tiles free around a row's head, where its belts attach)
 - `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net
@@ -200,8 +205,10 @@ its poles, and `floorplan --bridge-power` lays the bridge again around the plots
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design, or add
 `stop_on UNFED` before a big paste so a check stops the build. `fk build --from route --to
-report_checks` runs part of it. `tier minimize --allow yellow,red` lays red belts where a yellow
-lane is too thin for what the design asks (`--red 20` caps how many; `tier maximize` uses the
-fastest allowed everywhere; the default `--allow yellow` keeps every belt yellow).
+report_checks` runs part of it (`report_rates:2` names the second `report_rates`). `tier minimize
+--allow yellow,red` lays red belts where a yellow lane is too thin for what the design asks
+(`--red 20` caps how many; `tier maximize` uses the fastest allowed everywhere; the default
+`--allow yellow` keeps every belt yellow). A belt never goes down a tier unless you add
+`--downgrade`.
 `route --hand inserter` links machines with plain inserters
 instead of fast ones (rows take `inserter=inserter` for the same).

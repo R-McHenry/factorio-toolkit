@@ -70,7 +70,7 @@ class JoinBigTest(_Joined, unittest.TestCase):
                          [("CAPACITY", "join-big net iron")] * 2)
         lanes_, splitters = sorted((str(c) for c in self.checks), key=lambda s: "splitter" in s)
         self.assertIn("15.00/s required where its yellow lanes carry 7.50/s (ratio 2.00)", lanes_)
-        self.assertIn("it delivers 7.50/s of iron-plate, 15.00/s nominal", lanes_)
+        self.assertIn("it delivers 7.50/s of iron-plate to its consumers, 15.00/s nominal", lanes_)
         self.assertIn("required where its yellow splitters (a lane a side) carry 7.50/s", splitters)
 
     def test_tier_minimize_carries_it(self):

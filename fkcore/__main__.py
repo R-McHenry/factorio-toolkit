@@ -10,7 +10,7 @@ use the game link, and only with FK_LINK=on)
     explain FILE.fk INST                  one instance as a template and as entities and nets
     unfold FILE.fk INST                   INST becomes a Literal; .fk and .fkp rewritten, keys kept
     render FILE.fkp                       ASCII of a factory layout
-    build SCRIPT.fkb [--from STEP] [--to STEP]
+    build SCRIPT.fkb [--from STEP] [--to STEP]   (STEP:K for the K-th time a step runs)
                                           run the flow; reports in out/, checkpoints out/<step>/
     look GAME_DIR [--source design] [--area X0,Y0,X1,Y1]
                                           the composed surface of a game codebase, as designed

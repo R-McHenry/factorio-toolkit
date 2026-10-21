@@ -164,9 +164,24 @@ belts.
 **Machines.** The solver couples items through machines (a furnace takes ore and coal and makes
 plates) the way V1's rate model couples nets: each side of a machine is judged against the other
 side's potential (it asks for inputs as fast as its outputs let it run and offers products as fast
-as its inputs let it run), from everything at full speed, damped, until both hold. Belt order also
-closes V1's known gap: V1 shares a short net by appetite, while the game serves the first machines
-along the belt (agent `TOOLKIT.md`).
+as its inputs let it run), from everything at full speed until both hold. Belt order also closes
+V1's known gap: V1 shares a short net by appetite, while the game serves the first machines along
+the belt (agent `TOOLKIT.md`).
+
+How it settles (1.4.1, after the lead's review of 1.4: on the 2005 run's base the coupling used
+all 40 rounds and the answer moved with the round cap). Each endpoint of a machine has a grant. An
+endpoint short of what it asked is granted what it got; one served in full is granted what it
+asked and a margin more, so the machine tries a little faster the next round (an all-or-nothing
+jump to 1 swung between "unlimited" and the real supply). The margin halves each time the endpoint
+turns from served to short or back; each grant moves by its own step, halved each time it turns
+and grown again (x1.2) while it keeps its way. The base settles in 47 rounds (cap 80), and any
+step and margin factors tried give the same utilizations within 0.0003. Two bugs went with it: a
+machine node got item shares of its capacity (its input and output both cross it) and infinite
+capacity times a share of 0 is NaN, which stopped a cable maker's copper every few rounds; and a
+requester chest was a machine whose items a recipe tied, so a chest of three parts and the engine
+assembler it feeds held each other down to nothing. A requester is now a source per item. The
+report says "the machines settled in N rounds", or that they did NOT and the routed rates are
+approximate; "limited by" names the endpoints whose grant holds the machine.
 
 **The netlist on its layout** [built: `fkcore/routed.py`, `tests/test_routed.py`]. Every netlist
 machine the layout holds goes on the lane graph: a crafter or drill as a `Machine` (needs and
@@ -176,15 +191,23 @@ carriers decide), a sink as a demand for the items of the nets feeding it (its r
 them, or without end). `report_rates` runs again after `route` in the default flow (Rory): the
 nominal model as before, then the routed section (per instance the nominal and routed
 utilization and the lowest machine, per net and item what its consumers asked and got and its
-critical connector), and the routed rate of each surface target. `--hand N` / `--bulk-hand N` give
-the force's inserter hand sizes (1 on paper).
+critical connector), and the routed rate of each surface target; its checks are only the new ones
+(the nominal `ASSERT` and `TARGET` lines are the first run's), and its report follows the first
+run's in `out/report_rates.txt`. The inserter hand sizes are the force's (`--hand auto`, the
+default): read over the game link, else as the last `diff` saved them (`out/force.json`; the agent
+kit designs on the laptop, without a link), else 1; `--hand N` / `--bulk-hand N` set them.
 
 **`CAPACITY`** (a warning): one line per net and kind of connector (a belt tier's lanes, an
-inserter type) that binds, when the net delivers less to its consumers than V1's nominal rates.
-The line says what is required there, what the connector carries, the ratio, the connectors, what
-the net delivers against nominal and which machines run below their nominal utilization. A
-connector that binds while another machine takes up the slack (belt order) costs nothing and gives
-no line: redgreen's circuit row has a long-handed cable inserter at 1.2/s binding one assembler,
+inserter type) that binds, when a consumer runs short of the net's item: a machine the item holds
+below its nominal utilization, a sink with a rate that gets less than it asks, or the labs and
+turrets together. The line says what is required there, what the connector carries, the ratio,
+the connectors, what the net delivers to its consumers against nominal and who runs short. A
+machine held by something else (another input, its output backing up) asks less and is no victim;
+an overflow chest (a chest without a rate on a net where something else takes the item too) takes
+what is left, so nothing is required of the carriers into it and it is never short (1.4.1: the
+inserter into a provider chest beside a cable maker was named binding for the net's whole
+surplus). A connector that binds while another machine takes up the slack (belt order) costs
+nothing and gives no line: redgreen's circuit row has a long-handed cable inserter at 1.2/s binding one assembler,
 the other makes up for it, and the build has no `CAPACITY` line. Four green-circuit assemblers fed
 from one requester chest get two: the chest's one fast inserter (2.5 cables/s of 12 required) and
 the assemblers' long-handed ones (1.2 of 3).
@@ -205,12 +228,17 @@ machine at V1's nominal rate (`routed.required`; with the coupled machines a lan
 would throttle what feeds it and never ask for more). `tier minimize` gives each belt, underground
 pair and splitter on a net the slowest allowed tier that carries its required flow, `tier maximize`
 the fastest allowed on every one that carries anything, `tier yellow` only yellow; `--allow
-yellow,red,...` the tiers it may use, `--red N` (`--blue`, `--turbo`) at most N entities of a
-tier, the highest required ratios first, the rest a tier down. A tunnel's two ends change tier
-together and count as two; tunnels are laid at the yellow reach, so any upgrade fits. A Literal's
-entities keep theirs. The step runs after `route` and before the second `report_rates`; the
-kickoff template has `tier minimize --allow yellow` (nothing changes until the player allows red:
-no locked ghosts), `games/redgreen` `tier minimize` (no lane of it is too thin: 0 changed).
+yellow,red,...` the tiers it may use (default yellow: a bare `tier minimize` never ghosts a belt the
+force can't make), `--red N` (`--blue`, `--turbo`) at most N entities gain a tier, the highest
+required ratios first, the rest a tier down. Minimize and maximize never put a belt below the tier
+it has unless `--downgrade` (1.4.1: a rebuild with slightly other flows turned red belts yellow
+and back), and what a belt already has never counts against a budget. A tunnel's two ends change
+tier together and count as two, never to a tier whose reach (`max_distance`: 5, 7, 9, 11) is
+shorter than the tunnel; after that the pairing is checked as the game does it, and a pair whose
+partner a change would alter (a red entrance between a yellow pair's ends) keeps its old names.
+A Literal's entities keep theirs. The step runs after `route` and before the second
+`report_rates`; the kickoff template has `tier minimize --allow yellow`, `games/redgreen` `tier
+minimize` (no lane of it is too thin: 0 changed).
 
 The router test case (Rory): at most X red belts on a line of Y miners into Z smelters. The flow
 rises along the miners, peaks between the last miner and the first smelter, and falls along the
@@ -363,6 +391,9 @@ and up; a splitter with one output blocked; a machine's fluid port.
 4. V2.1: steer to whole belts, or let an agent plan odd lane counts?
 5. The path matrix (the "giga brain option"): when it is worth building.
 6. The next slices: the catalog's inserter speeds (now a table in `fkcore/lanes.py`); the
-   force's hand sizes read from the game when the link is up; the router's tier per connector (the
-   miner line case is a solver test already: red in the middle carries 9/s, red at the ends 7.5);
-   `fk rates` (the agent's command) showing the routed section too.
+   router's tier per connector (the miner line case is a solver test already: red in the middle
+   carries 9/s, red at the ends 7.5); `fk rates` (the agent's command) showing the routed section
+   too.
+7. V1's rate model ties a requester chest's items together the way 1.4's routed one did: a chest
+   of three parts and the engine assembler it feeds are 0.000 nominal (the 2005 run's blue
+   science). Found in 1.4.1; `fkcore/rates.py` is V1 and was left alone.

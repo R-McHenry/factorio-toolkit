@@ -155,22 +155,41 @@ def _steps(script):
     return names
 
 
+def _at(names, spec):
+    """The index of ``spec`` in the script's steps: NAME, or NAME:K for its K-th time."""
+    name, _, k = spec.partition(":")
+    where = [i for i, n in enumerate(names) if n == name]
+    try:
+        k = int(k or 1)
+        if k < 1:
+            raise ValueError(k)
+        return where[k - 1]
+    except (ValueError, IndexError):
+        sys.exit(f"fk: --from/--to names a step of the script, NAME or NAME:K: {', '.join(names)}")
+
+
+def _spec(names, i):
+    """The step at ``i`` as --from/--to name it (NAME:K when the script runs it more than once)."""
+    k = names[:i + 1].count(names[i])
+    return names[i] if names.count(names[i]) == 1 else f"{names[i]}:{k}"
+
+
 def build(cfg, args):
     """Design here up to write_layout, then the game steps (diff, apply) on the host."""
     script = _script()
     names = _steps(script)
-    frm = args[args.index("--from") + 1] if "--from" in args else names[0]
-    to = args[args.index("--to") + 1] if "--to" in args else names[-1]
-    i, j = names.index(frm), names.index(to)
+    i = _at(names, args[args.index("--from") + 1]) if "--from" in args else 0
+    j = _at(names, args[args.index("--to") + 1]) if "--to" in args else len(names) - 1
     link_at = [k for k, n in enumerate(names) if n in LINK_STEPS]
     split = link_at[0] if link_at else len(names)
     code = 0
     if i < split:
-        code = local(cfg, ["build", script, "--from", frm, "--to", names[min(j, split - 1)]])
+        code = local(cfg, ["build", script, "--from", _spec(names, i),
+                           "--to", _spec(names, min(j, split - 1))])
     if code == 0 and j >= split:
         push(cfg)
-        code = remote(cfg, ["build", script, "--from", names[max(i, split)], "--to", to],
-                      footer=False)
+        code = remote(cfg, ["build", script, "--from", _spec(names, max(i, split)),
+                            "--to", _spec(names, j)], footer=False)
         pull(cfg)
     else:
         push(cfg)

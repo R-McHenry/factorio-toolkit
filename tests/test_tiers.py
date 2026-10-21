@@ -1,8 +1,9 @@
 """Belt tiers per connector (fkcore.tiers, CORE-V2.md "Tier per connector", Rory): minimize,
 maximize and only yellow, with budgets, from the flow solver's required flows."""
 import unittest
+from dataclasses import replace
 
-from fkcore import expand, fkp, lanes, lang, route, routed, tiers
+from fkcore import connect, expand, fkp, lanes, lang, route, routed, tiers
 from fkcore import throughput as tp
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
@@ -36,6 +37,26 @@ def miner_line(red=()):
 
 def red_tiles(chosen):
     return sorted(int(k[3:]) for k, t in chosen.items() if t == 1 and k.startswith("a/b"))
+
+
+def line(rows, supply, demand):
+    """rows -> (layout, lane graph, required flows); ore fed onto and drained from the left lane
+    of the given belts."""
+    lay = L(rows)
+    lg = lanes.build(lay, CAT)
+    req = tp.solve(lg, supply={(k, "L"): {ORE: v} for k, v in supply.items()},
+                   demand={(k, "L"): {ORE: float("inf")} for k in demand}).required
+    return lay, lg, req
+
+
+def renamed(lay, chosen):
+    """The layout's entities with the chosen tiers."""
+    out = []
+    for k, e in lay.entities.items():
+        if k in chosen:
+            e = replace(e, name=tiers.FAMILY[tiers.tier_of(e.name)[0]][chosen[k]])
+        out.append(e)
+    return out
 
 
 def delivered(red):
@@ -109,6 +130,103 @@ class UndergroundPairTest(unittest.TestCase):
         self.assertEqual(sum(chosen.values()), 4)
 
 
+class NoDowngradeTest(unittest.TestCase):
+    """minimize and maximize never take a tier away unless asked (downgrade=True)."""
+
+    def setUp(self):
+        rows = [f"e a/b{x} fast-transport-belt {x}.5,0.5 E net=a" for x in range(4)]
+        self.lay, self.lg, self.req = line(rows, {"a/b0": 2}, ["a/b3"])
+
+    def choose(self, **kw):
+        return tiers.choose(self.lg, self.req, CAT, self.lay.entities, **kw)
+
+    def test_red_that_yellow_would_carry_stays_red(self):
+        chosen, notes = self.choose()
+        self.assertEqual(set(chosen.values()), {1})
+        self.assertEqual(notes, [])
+        chosen, _notes = self.choose(mode="maximize", allow=("yellow",))
+        self.assertEqual(set(chosen.values()), {1})
+        chosen, _notes = self.choose(downgrade=True)
+        self.assertEqual(set(chosen.values()), {0})
+        chosen, _notes = self.choose(mode="yellow")                 # asked for: always yellow
+        self.assertEqual(set(chosen.values()), {0})
+
+    def test_a_budget_never_takes_what_is_there(self):
+        chosen, notes = self.choose(budgets={"red": 2})
+        self.assertEqual(set(chosen.values()), {1})
+        self.assertEqual(notes, ["4 entities already red keep it: the red budget (2) is over by 2"])
+
+
+class TunnelReachTest(unittest.TestCase):
+    def test_a_red_tunnel_longer_than_yellow_reaches(self):
+        # red ends 6 apart (yellow reaches 5), 1/s: the belts go yellow, the pair stays red
+        rows = ["e a/b0 fast-transport-belt 0.5,0.5 E net=a",
+                "e a/u0 fast-underground-belt 1.5,0.5 E net=a ug=in",
+                "e a/u1 fast-underground-belt 7.5,0.5 E net=a ug=out",
+                "e a/b1 fast-transport-belt 8.5,0.5 E net=a"]
+        lay, lg, req = line(rows, {"a/b0": 1}, ["a/b1"])
+        self.assertEqual(lg.graph.pairs["a/u0"], "a/u1")
+        for mode in ("minimize", "yellow"):
+            chosen, notes = tiers.choose(lg, req, CAT, lay.entities, mode, downgrade=True)
+            self.assertEqual(chosen, {"a/b0": 0, "a/u0": 1, "a/u1": 1, "a/b1": 0})
+            self.assertIn("1 underground pair at the slowest tier that reaches its tunnel: "
+                          "a/u0 (6 tiles, red)", notes)
+
+
+class PairingTest(unittest.TestCase):
+    """On one row: yellow pair A (1 -> 4) with red pair B (3 -> 7) interleaved, legal since
+    different names pass under each other. A carries 10/s and wants red; red A's entrance would
+    meet B's red entrance first and lose its exit to it, so A goes back to yellow."""
+
+    def setUp(self):
+        rows = ["e a/b0 transport-belt 0.5,0.5 E net=a",
+                "e a/u0 underground-belt 1.5,0.5 E net=a ug=in",
+                "e b/b0 fast-transport-belt 2.5,0.5 E net=b",
+                "e b/u0 fast-underground-belt 3.5,0.5 E net=b ug=in",
+                "e a/u1 underground-belt 4.5,0.5 E net=a ug=out",
+                "e a/b1 transport-belt 5.5,0.5 E net=a",
+                "e b/u1 fast-underground-belt 7.5,0.5 E net=b ug=out",
+                "e b/b1 fast-transport-belt 8.5,0.5 E net=b"]
+        self.lay, self.lg, self.req = line(rows, {"a/b0": 10, "b/b0": 1}, ["a/b1", "b/b1"])
+        self.pairs = connect.graph(self.lay, CAT).pairs
+        self.assertEqual((self.pairs["a/u0"], self.pairs["b/u0"]), ("a/u1", "b/u1"))
+
+    def test_a_change_that_steals_a_partner_is_reverted(self):
+        chosen, notes = tiers.choose(self.lg, self.req, CAT, self.lay.entities)
+        self.assertEqual((chosen["a/b0"], chosen["a/b1"]), (1, 1))     # the belts still go red
+        self.assertEqual({k: chosen[k] for k in ("a/u0", "a/u1", "b/u0", "b/u1")},
+                         {"a/u0": 0, "a/u1": 0, "b/u0": 1, "b/u1": 1})
+        self.assertIn("reverted 1 underground pair whose pairing a tier change would alter: "
+                      "a/u0, a/u1", notes)
+        self.assertEqual(connect.graph(renamed(self.lay, chosen), CAT).pairs, self.pairs)
+
+    def test_a_swap_that_keeps_the_pairing_stands(self):
+        # with downgrade B goes yellow too: red A and yellow B pair as before, nothing reverted
+        chosen, notes = tiers.choose(self.lg, self.req, CAT, self.lay.entities, downgrade=True)
+        self.assertEqual({k: chosen[k] for k in ("a/u0", "a/u1", "b/u0", "b/u1")},
+                         {"a/u0": 1, "a/u1": 1, "b/u0": 0, "b/u1": 0})
+        self.assertFalse(any("reverted" in n for n in notes))
+        self.assertEqual(connect.graph(renamed(self.lay, chosen), CAT).pairs, self.pairs)
+
+
+class PinnedTest(unittest.TestCase):
+    def test_pinned_entities_keep_their_tier(self):
+        # assign pins a Literal's entities: fixed = the keys whose owner is a Literal instance.
+        # A pinned underground end pins its partner.
+        rows = ["e a/b0 fast-transport-belt 0.5,0.5 E net=a",
+                "e a/u0 fast-underground-belt 1.5,0.5 E net=a ug=in",
+                "e a/u1 fast-underground-belt 4.5,0.5 E net=a ug=out",
+                "e a/b1 fast-transport-belt 5.5,0.5 E net=a",
+                "e a/b2 fast-transport-belt 6.5,0.5 E net=a"]
+        lay, lg, req = line(rows, {"a/b0": 1}, ["a/b2"])
+        chosen, _notes = tiers.choose(lg, req, CAT, lay.entities, downgrade=True,
+                                      fixed={"a/b0", "a/u0"})
+        self.assertEqual(chosen, {"a/b1": 0, "a/b2": 0})
+        chosen, _notes = tiers.choose(lg, req, CAT, lay.entities, mode="yellow",
+                                      fixed={"a/b0", "a/u0"})
+        self.assertEqual(chosen, {"a/b1": 0, "a/b2": 0})
+
+
 SMELTER = """
 ore   = MinerRow<n=18, resource=iron-ore> @(4, 0, rot 2)
 coal  = MinerRow<n=2, resource=coal>      @(34, 0, rot 2)
@@ -163,6 +281,16 @@ class SmelterRowTest(unittest.TestCase):
                                            budgets={"red": 5})
         self.assertEqual(len(changed), 5)
         self.assertIn("the red budget (5) takes 5 of the 11 entities that want red", lines[1])
+
+    def test_a_rebuild_keeps_red(self):
+        red, _lines, _changed = tiers.assign(self.flat, self.lay, CAT, "minimize")
+        _new, lines, changed = tiers.assign(self.flat, red, CAT, "minimize", allow=("yellow",))
+        self.assertEqual(changed, {})
+        self.assertIn("11 red", lines[0])
+        _new, lines, changed = tiers.assign(self.flat, red, CAT, "minimize", allow=("yellow",),
+                                            downgrade=True)
+        self.assertEqual(len(changed), 11)
+        self.assertIn("; downgrade)", lines[0])
 
 
 if __name__ == "__main__":
