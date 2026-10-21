@@ -257,6 +257,23 @@ class SeveralDriversTest(unittest.TestCase):
         self.assertIn("transport-belt", names)
         self.assertIn("1 inserter (direct insertion), then", r.lines[0])
 
+    def test_the_early_mall_links_its_products_by_inserters(self):
+        # agent/docs/examples/early-mall.fk (Rory, 2026-10-20): every product link one inserter,
+        # belts only for the iron, copper and circuit feeds
+        path = os.path.join(os.path.dirname(__file__), "..", "agent", "docs", "examples",
+                            "early-mall.fk")
+        flat = elaborate_file(path, CAT)
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT)
+        self.assertEqual(r.failed, {})
+        direct = {l.split()[1].rstrip(":") for l in r.lines if l.endswith("(direct insertion)")}
+        products = {"ybo", "yuo", "yso", "rbo", "ruo", "rso", "inso", "finso", "linso", "asmo",
+                    "drillo", "pipeo", "ptgo"}
+        self.assertEqual(products - direct, set())
+        belts = sum(1 for k, e in r.layout.entities.items()
+                    if k.startswith("~") and e.name == "transport-belt")
+        self.assertLessEqual(belts, 100)
+
     def test_two_sushi_chests_into_two_chests(self):
         # the lab game's shape (games/lab-kxm): each consumer must get every driver's item
         flat, lay = build("""

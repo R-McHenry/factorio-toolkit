@@ -101,6 +101,25 @@ On paper: 8 nets, all routed, 179 entities (126 belts). A chest one tile from it
 around them for its belts: packed tighter, it doesn't route. A requester feeds its net through
 one inserter; a busy net can take a second requester (several drivers merge onto one net).
 
+## early-mall.fk: an early-tier mall (49x24)
+
+Yellow and red belts, undergrounds and splitters, inserters (plain, fast, long-handed), assemblers,
+drills, pipes and pipes-to-ground, each into its own chest (`limit=2`). It saves belts by where
+things stand:
+
+- each machine stands within 3 tiles of what it feeds, so the link is one inserter (a fast one
+  across a 1-tile gap, a long-handed one across 2 or 3): the yellow belt assembler hands belts to
+  the underground, splitter and red belt assemblers around it, each yellow item to its red one, every
+  machine to its chest
+- gears and circuits are made beside what takes them: a gear assembler next to each red item,
+  a circuit assembler under each splitter, a cable assembler beside each circuit one
+- each iron or copper requester stands in the gap between two of its machines and feeds both by
+  an inserter; only what is further away gets a belt
+
+On paper: 30 nets, all routed: 24 of them are inserters only, and the 80 belts bring iron, copper
+and circuits. The file is in `docs\examples\`; it is long, so open it there rather than copying it
+from here.
+
 ## steam.fk: a steam power plant, 3.6 MW (16x26)
 
 ```
