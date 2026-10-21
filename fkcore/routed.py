@@ -27,7 +27,7 @@ from . import rates as ratesmod
 from . import throughput as tp
 from .elaborate import Check
 
-__all__ = ["Routed", "solve", "report", "TIER_WORD"]
+__all__ = ["Routed", "solve", "required", "report", "TIER_WORD"]
 
 INF = float("inf")
 #: what a belt tier is called in a report line
@@ -44,11 +44,12 @@ class Routed:
     flat: object
     lay: object
     lg: object                    # fkcore.lanes.LaneGraph
-    res: object                   # fkcore.throughput.Result
+    res: object                   # fkcore.throughput.Result: the routed flows
     model: object                 # V1's nominal rates.Model
     machines: dict                # node id -> throughput.Machine
     base: dict                    # machine key -> the share of full speed it was given (duty, fluid)
     net_of: dict                  # node id -> net name (from the layout's net=)
+    need: dict = None             # node id -> {item: items/s} the design asks (``required``)
 
     def util(self, key):
         """A machine's routed utilization (absolute, duty included)."""
@@ -57,17 +58,27 @@ class Routed:
             return self.res.util[nid] * self.base.get(key, 1.0)
         return None
 
+    def asked(self, nid):
+        """What the design asks of a node, items/s (every item)."""
+        return sum((self.need or {}).get(nid, {}).values())
+
+    def ratio(self, nid):
+        """Required ratio: what the design asks of a node over its capacity."""
+        cap = self.res.cap.get(nid, INF)
+        return 0.0 if cap in (0, INF) else self.asked(nid) / cap
+
+    def binds(self, nid):
+        """At capacity as routed, while the design asks more of it than it carries."""
+        return self.res.load(nid) >= 1 - 1e-6 and self.ratio(nid) > 1 + 1e-6
+
 
 def _fluid_bound(model, key, cat):
     b = model.binding.get(key)
     return b is not None and b[0] in ("in", "out") and b[1] is not None and cat.is_fluid(b[1])
 
 
-def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
-    """The netlist ``flat`` on its layout ``lay`` through the flow solver. ``hand``/``bulk_hand``:
-    the force's inserter hand sizes (1 = no research)."""
-    model = model or ratesmod.solve(flat)
-    lg = lanesmod.build(lay, cat, hand=hand, bulk_hand=bulk_hand)
+def _ends(flat, lay, cat, model, lg):
+    """(machines, supply, demand, base) of the netlist's machines the layout holds."""
     machines, supply, demand, base = {}, {}, {}, {}
     fed = {}
     for (key, item), nets in flat._in_hold.items():
@@ -94,13 +105,64 @@ def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
         base[key] = share
         machines[nid] = tp.Machine({i: r * share for i, r in solid_needs.items()},
                                    {i: r * share for i, r in solid_makes.items()})
+    return machines, supply, demand, base
+
+
+def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
+    """The netlist ``flat`` on its layout ``lay`` through the flow solver. ``hand``/``bulk_hand``:
+    the force's inserter hand sizes (1 = no research)."""
+    model = model or ratesmod.solve(flat)
+    lg = lanesmod.build(lay, cat, hand=hand, bulk_hand=bulk_hand)
+    machines, supply, demand, base = _ends(flat, lay, cat, model, lg)
     res = tp.solve(lg, supply=supply, demand=demand, machines=machines)
     net_of = {}
     for nid in lg.nodes:
         e = lay.entities.get(nid[0])
         if e is not None and e.attrs.get("net"):
             net_of[nid] = e.attrs["net"]
-    return Routed(flat, lay, lg, res, model, machines, base, net_of)
+    _lg, need = required(flat, lay, cat, model, lg=lg)
+    return Routed(flat, lay, lg, res, model, machines, base, net_of, need.required)
+
+
+def required(flat, lay, cat, model=None, hand=1, bulk_hand=1, lg=None):
+    """What the design asks of every connector: the flows with every machine at V1's nominal rate
+    and no capacities (the solver's ``required``), so a lane that binds today still shows what it
+    would carry. An unbounded requester chest puts on what its nets deliver nominally, and a sink
+    without a rate asks its share of what its nets leave for sinks (the first chest on a belt would
+    otherwise ask it all). -> (lane graph, throughput.Result)."""
+    model = model or ratesmod.solve(flat)
+    lg = lg or lanesmod.build(lay, cat, hand=hand, bulk_hand=bulk_hand)
+    machines, supply, demand, _base = _ends(flat, lay, cat, model, lg)
+    for (net, item), st in model.nets.items():
+        sinks = [k for k, i in flat.nets[net].consumers
+                 if i == item and demand.get((k, ""), {}).get(item) == INF]
+        if not sinks or st.to_sinks == INF:
+            continue
+        finite = sum(demand.get((k, ""), {}).get(item, 0.0) for k, i in flat.nets[net].consumers
+                     if i == item and flat.machines[k].sink and k not in sinks)
+        each = max(0.0, st.to_sinks - finite) / len(sinks)
+        for k in sinks:
+            demand[(k, "")][item] = each
+    for nid in machines:
+        m, u = flat.machines[nid[0]], model.util.get(nid[0], 1.0)
+        for i, r in m.needs.items():
+            if not cat.is_fluid(i):
+                demand.setdefault(nid, {})[i] = r * u
+        for i, r in m.makes.items():
+            if not cat.is_fluid(i) and r != INF:
+                supply.setdefault(nid, {})[i] = r * u
+    for nid, items in supply.items():
+        for i, v in list(items.items()):
+            if v != INF:
+                continue
+            total = 0.0
+            for n in flat._out_hold.get((nid[0], i), ()):
+                st = model.nets.get((n, i))
+                if st is not None and st.delivered != INF:
+                    drivers = sum(1 for _k, it in flat.nets[n].drivers if it == i)
+                    total += st.delivered / max(1, drivers)
+            items[i] = total
+    return lg, tp.solve(lg, supply=supply, demand=demand)
 
 
 # -- report ---------------------------------------------------------------------------------------
@@ -168,21 +230,22 @@ def report(r: Routed, factory=None):
             got = sum(res.delivered.get((k, ""), {}).get(i, 0.0) for k, i in cons if i == item)
             ask = "unbounded" if asked == INF else f"{asked:.3f}"
             lines.append(f"  {net:<16} {item:<26} {ask:>8} {got:>8.3f}  "
-                         + _critical(res, lg, mine))
+                         + _critical(r, mine))
         checks += _capacity(r, net, mine, where)
     return lines, checks
 
 
-def _critical(res, lg, mine):
+def _critical(r, mine):
+    res, lg = r.res, r.lg
     finite = [nid for nid in mine if res.cap.get(nid, INF) not in (0, INF)]
     if not finite:
         return "-"
-    nid = max(finite, key=lambda v: (res.required_ratio(v), str(v)))
-    req = res.total(nid, res.required)
+    nid = max(finite, key=lambda v: (r.ratio(v), str(v)))
+    req = r.asked(nid)
     if req >= tp.BIG / 2:
         return f"{nid[0]} ({_word(lg, nid)}): unbounded"
     return (f"{nid[0]}{'.' + nid[1] if nid[1] else ''} ({_word(lg, nid)}): "
-            f"{req:.3f}/s required of {res.cap[nid]:.3f}/s, ratio {res.required_ratio(nid):.2f}")
+            f"{req:.3f}/s required of {res.cap[nid]:.3f}/s, ratio {r.ratio(nid):.2f}")
 
 
 def _short(r, net):
@@ -219,16 +282,16 @@ def _capacity(r, net, mine, where):
     short = _short(r, net)
     if not short:
         return []
-    binding = [nid for nid in mine if res.binds(nid) and res.total(nid, res.required) < tp.BIG / 2]
+    binding = [nid for nid in mine if r.binds(nid) and r.asked(nid) < tp.BIG / 2]
     groups = {}
     for nid in binding:
         groups.setdefault(_word(lg, nid), []).append(nid)
     out = []
     for word, nids in sorted(groups.items()):
-        nids.sort(key=lambda v: (-res.required_ratio(v), str(v)))
+        nids.sort(key=lambda v: (-r.ratio(v), str(v)))
         top = nids[0]
-        msg = (f"{res.total(top, res.required):.2f}/s required where its {word} carry "
-               f"{res.cap[top]:.2f}/s (ratio {res.required_ratio(top):.2f}): {_keys(nids)}; "
+        msg = (f"{r.asked(top):.2f}/s required where its {word} carry "
+               f"{res.cap[top]:.2f}/s (ratio {r.ratio(top):.2f}): {_keys(nids)}; "
                + "; ".join(short[:_SHOW + 1])
                + (f" and {len(short) - _SHOW - 1} more" if len(short) > _SHOW + 1 else ""))
         out.append(Check("CAPACITY", f"{where}net {net}", msg))

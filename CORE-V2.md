@@ -81,7 +81,8 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
   one pair.
 - Otherwise one net per routed belt, on one lane. The templates own the lane joins at their inputs.
 - The tier is chosen per connector, from the model, with flags: only yellow; at most N red belts;
-  minimize (the slowest tier that carries the flow) or maximize (the fastest available).
+  minimize (the slowest tier that carries the flow) or maximize (the fastest available). [built:
+  the `tier` step after `route`, below]
 - No direct insertion where a net's flow is above a threshold: a lane, or what the lab finds.
   Inserters bind early.
 - 2.x: side-loads as merges (the smelter stack's side-loader) and lane separation (a splitter,
@@ -175,13 +176,27 @@ path: for nets that share lanes toward different sinks, and for the router. A li
 max-flow formulation could solve the same physics. For now max-flow is a check: the solver never
 delivers more than the max flow.
 
-**Tier per connector** (Rory). From the required flows, minimize gives each connector the slowest
-tier that carries its flow, "at most N red" upgrades the highest required ratios first, and
-maximize takes the fastest tier available. A tunnel's two ends change tier together; tunnels are
-laid at the yellow reach, so any upgrade fits. The router test case (Rory): at most X red belts on
-a line of Y miners into Z smelters. The flow rises along the miners, peaks between the last miner
-and the first smelter, and falls along the smelters, so the red belts go in the middle and the ends
-stay yellow.
+**Tier per connector** (Rory) [built: `fkcore/tiers.py`, the flow step `tier`,
+`tests/test_tiers.py`]. The tiers come from what the design asks: the required flows with every
+machine at V1's nominal rate (`routed.required`; with the coupled machines a lane that binds today
+would throttle what feeds it and never ask for more). `tier minimize` gives each belt, underground
+pair and splitter on a net the slowest allowed tier that carries its required flow, `tier maximize`
+the fastest allowed on every one that carries anything, `tier yellow` only yellow; `--allow
+yellow,red,...` the tiers it may use, `--red N` (`--blue`, `--turbo`) at most N entities of a
+tier, the highest required ratios first, the rest a tier down. A tunnel's two ends change tier
+together and count as two; tunnels are laid at the yellow reach, so any upgrade fits. A Literal's
+entities keep theirs. The step runs after `route` and before the second `report_rates`; the
+kickoff template has `tier minimize --allow yellow` (nothing changes until the player allows red:
+no locked ghosts), `games/redgreen` `tier minimize` (no lane of it is too thin: 0 changed).
+
+The router test case (Rory): at most X red belts on a line of Y miners into Z smelters. The flow
+rises along the miners, peaks between the last miner and the first smelter, and falls along the
+smelters, so the red belts go in the middle and the ends stay yellow. Measured on the solver
+(18 drills, 29 furnaces): minimize turns tiles 46 to 62 red and the line carries 9/s instead of
+7.5; a budget of 10 keeps one stretch around the peak (more than 7.6/s), 10 at the ends gives 7.5.
+A smelter row of 26 furnaces into four chests: its output lane asks 8.12/s of yellow's 7.5;
+minimize turns 11 belts red and the row runs at its nominal rate; a red budget of 5 gains nothing
+(the greedy order does not yet test whether a partial stretch helps).
 
 An example, on paper: a MinerRow of 20 drills (10 ore/s, 5 on each lane) into a row of 32 stone
 furnaces that takes ore on one lane of an ore|coal belt.

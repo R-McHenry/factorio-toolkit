@@ -13,7 +13,7 @@ Steps before ``frm`` that only read source (``read_surface``, ``read_terrain``, 
 the last layout step before ``frm``, and a ``floorplan`` before ``frm`` is replayed on them (it is
 pure too), so ``--from diff`` on the game host applies what a laptop build laid out.
 
-Steps: read_surface, read_terrain, run_models, elaborate, report_rates, place, route,
+Steps: read_surface, read_terrain, run_models, elaborate, report_rates, place, route, tier,
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
 stop_on.
 
@@ -420,6 +420,32 @@ def s_route(ctx, args):
         checks += [Check("UNROUTED", f"{factory} net {l.split(':')[0].split()[-1]}",
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]
         checks += _invariant_checks(factory, fkp.invariants(r.layout, ctx.cat, nets=flat.nets))
+    return lines, checks
+
+
+def s_tier(ctx, args):
+    """Belt tiers per connector (CORE-V2, ``fkcore.tiers``): ``tier minimize|maximize|yellow``
+    (default minimize) ``--allow yellow,red,blue,turbo`` (the tiers it may use; yellow always)
+    ``--red N --blue N --turbo N`` (at most N entities of a tier), ``--hand N`` / ``--bulk-hand N``
+    (the force's inserter hand sizes, as for report_rates)."""
+    from . import tiers
+    o = _opts(args, allow=",".join(tiers.TIERS), hand="1", bulk_hand="1")
+    mode = (o.get("_") or ["minimize"])[0]
+    allow = [t.strip() for t in str(o["allow"]).split(",") if t.strip()]
+    unknown = sorted(set(allow) - set(tiers.TIERS))
+    if unknown or mode not in ("minimize", "maximize", "yellow"):
+        raise FlowError("tier minimize|maximize|yellow [--allow yellow,red,blue,turbo] "
+                        "[--red N] [--blue N] [--turbo N]"
+                        + (f": unknown tier {', '.join(unknown)}" if unknown else ""))
+    budgets = {t: int(o[t]) for t in tiers.TIERS if isinstance(o.get(t), str)}
+    lines, checks = [], []
+    for factory, lay in list(ctx.layouts.items()):
+        new, tlines, _changed = tiers.assign(ctx.flats[factory], lay, ctx.cat, mode, allow,
+                                             budgets, hand=int(o["hand"]),
+                                             bulk_hand=int(o["bulk_hand"]))
+        ctx.layouts[factory] = new
+        lines += [f"{factory}: {tlines[0]}"] + tlines[1:]
+        checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
     return lines, checks
 
 
@@ -836,12 +862,13 @@ def s_stop_on(ctx, args):
 STEPS = {
     "read_surface": s_read_surface, "read_terrain": s_read_terrain, "run_models": s_run_models,
     "elaborate": s_elaborate, "report_rates": s_report_rates, "place": s_place, "route": s_route,
+    "tier": s_tier,
     "cover_power": s_cover_power, "cover_robots": s_cover_robots, "floorplan": s_floorplan,
     "report_checks": s_report_checks, "report_bom": s_report_bom, "write_layout": s_write_layout,
     "diff": s_diff, "apply": s_apply, "stop_on": s_stop_on,
 }
 _SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "stop_on")
-_LAYOUT = ("place", "route", "cover_power", "cover_robots")
+_LAYOUT = ("place", "route", "tier", "cover_power", "cover_robots")
 
 
 def _write_checkpoint(ctx, step):

@@ -42,9 +42,10 @@ class CircuitRowTest(unittest.TestCase):
         self.assertEqual([(c.code, c.where) for c in self.checks],
                          [("CAPACITY", "t net cable_in"), ("CAPACITY", "t net cable_in")])
         fast, long_ = sorted((str(c) for c in self.checks), key=lambda s: "long" in s)
-        self.assertIn("12.00/s required where its fast-inserters carry 2.50/s (ratio 4.80): "
+        # what the design asks: the row at its nominal 0.75, 9 cables/s, 2.25 an assembler
+        self.assertIn("9.00/s required where its fast-inserters carry 2.50/s (ratio 3.60): "
                       "~cable_in/i0", fast)
-        self.assertIn("3.00/s required where its long-handed-inserters carry 1.20/s (ratio 2.50)",
+        self.assertIn("2.25/s required where its long-handed-inserters carry 1.20/s (ratio 1.88)",
                       long_)
         self.assertIn("it delivers 2.50/s of copper-cable, 9.00/s nominal", fast)
 

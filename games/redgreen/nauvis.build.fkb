@@ -7,6 +7,7 @@ elaborate                                 # templates -> logical netlist + its c
 report_rates                              # nominal rate model, asserts, surface targets
 place           --keep pinned             # fragments by their @(x, y) hints; Literals stay
 route           --only stale --effort normal
+tier            minimize                  # belt tier per lane: the slowest that carries what the design asks
 report_rates                              # again, routed: the lanes and inserters as laid (CAPACITY)
 cover power     --pole medium-electric-pole
 cover robots

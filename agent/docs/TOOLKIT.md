@@ -200,5 +200,8 @@ its poles, and `floorplan --bridge-power` lays the bridge again around the plots
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design, or add
 `stop_on UNFED` before a big paste so a check stops the build. `fk build --from route --to
-report_checks` runs part of it. `route --hand inserter` links machines with plain inserters
+report_checks` runs part of it. `tier minimize --allow yellow,red` lays red belts where a yellow
+lane is too thin for what the design asks (`--red 20` caps how many; `tier maximize` uses the
+fastest allowed everywhere; the default `--allow yellow` keeps every belt yellow).
+`route --hand inserter` links machines with plain inserters
 instead of fast ones (rows take `inserter=inserter` for the same).
