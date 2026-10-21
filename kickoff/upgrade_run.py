@@ -153,7 +153,11 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.3 is in. The build can now say what your belts and inserters as laid let through: add
+  Toolkit 1.4 is in. Machines that stand within 3 tiles of each other are now joined by an
+  inserter, not a belt, whenever one machine feeds several (or several feed one): place a
+  producer next to what takes its output and the router does the rest. docs\\examples\\early-mall.fk
+  is an early-tier mall built that way (24 of its 30 nets are single inserters; 83 belts).
+  It also has 1.3: The build can now say what your belts and inserters as laid let through: add
   a line `report_rates` after `route` in game\\nauvis.build.fkb, and out\\report_rates.txt gets
   the routed rates; a CAPACITY line names a belt lane, splitter or inserter that is too thin for
   what your design asks (a yellow lane carries 7.5/s, a fast inserter 2.5/s). To lay red belts
