@@ -112,13 +112,16 @@ things stand:
   the underground, splitter and red belt assemblers around it, each yellow item to its red one, every
   machine to its chest
 - gears and circuits are made beside what takes them: a gear assembler next to each red item,
-  a circuit assembler under each splitter, a cable assembler beside each circuit one
+  a circuit assembler under each splitter, a cable assembler beside each circuit one (two beside
+  the one that feeds four machines: with one, the fast-inserter and drill assemblers waited 13
+  minutes for circuits in the game)
 - each iron or copper requester stands in the gap between two of its machines and feeds both by
   an inserter; only what is further away gets a belt
 
-On paper: 30 nets, all routed: 24 of them are inserters only, and the 80 belts bring iron, copper
-and circuits. The file is in `docs\examples\`; it is long, so open it there rather than copying it
-from here.
+On paper: 30 nets, all routed: 24 of them are inserters only, and the 83 belts bring iron, copper
+and circuits. Built in the game on a test server, every inserter link moves items and every chest
+fills. The file is in `docs\examples\`; it is long, so open it there rather than copying it from
+here.
 
 ## steam.fk: a steam power plant, 3.6 MW (16x26)
 

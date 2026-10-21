@@ -523,20 +523,32 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
     per tile."""
     taken, out = set(), {}
     for net in sorted(todo):
-        job = js[net]
-        if len(job.sources) != 1 or job.starts or not job.taps:
+        pairs = _direct_pairs_of(js[net])
+        if not pairs:
             continue
         grid = _Bounded(_ground(cat, ents, frames, js, net, terrain), box)
-        (_k, src), = job.sources
         mine = set()
-        for _key, rect in job.taps:
-            got = _direct_pair(src, rect, grid, taken | mine)
+        for src, dst in pairs:
+            got = _direct_pair(src, dst, grid, taken | mine)
             if got:
                 mine.add((math.floor(got["x"]), math.floor(got["y"])))
         if mine:
             out[net] = mine
             taken |= mine
     return out
+
+
+def _direct_pairs_of(job):
+    """[(driver rect, consumer rect)] a direct inserter may join: one machine driver and each
+    consumer machine, or (1.4) each of several machine drivers and one consumer machine (two
+    cable assemblers beside one circuit assembler). [] for any other net."""
+    if job.starts or job.goals:
+        return []
+    if len(job.sources) == 1 and job.taps:
+        return [(job.sources[0][1], rect) for _k, rect in job.taps]
+    if len(job.taps) == 1 and len(job.sources) > 1:
+        return [(rect, job.taps[0][1]) for _k, rect in job.sources]
+    return []
 
 
 def _hub_job(cat, job, blocked, spans, clear, box, limit):
@@ -567,6 +579,27 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
                 plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
             else:
                 plan, how = _tree_job(cat, sub, set(blocked) | taken, spans, clear, box, limit)
+            if plan is None:
+                return None, how
+            return direct + plan, f"{n}, then {how}"
+    if len(job.taps) == 1 and len(job.sources) > 1 and not job.starts and not job.goals:
+        # several machine drivers beside one consumer machine: each hands to it by an inserter
+        # of its own (1.4); only the drivers left are laid as a belt tree into it
+        (_tk, dst), = job.taps
+        taken, direct, rest = set(), [], []
+        for key, rect in job.sources:
+            got = _direct_pair(rect, dst, grid, taken)
+            if got:
+                direct.append(got)
+                taken.add((math.floor(got["x"]), math.floor(got["y"])))
+            else:
+                rest.append((key, rect))
+        if direct:
+            n = f"{len(direct)} inserter{'s' if len(direct) > 1 else ''} (direct insertion)"
+            if not rest:
+                return direct, n
+            sub = NetJob(job.net, taps=list(job.taps), sources=rest, owners=list(job.owners))
+            plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
             if plan is None:
                 return None, how
             return direct + plan, f"{n}, then {how}"
