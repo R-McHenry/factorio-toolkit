@@ -4,7 +4,8 @@ use the game link, and only with FK_LINK=on)
 
     check FILE.fk                         netlist checks (report lines, never a gate)
     rates FILE.fk [--unbounded NET,...] [--share appetite|level] [--chain INST,...]
-                                          the nominal rate model and its asserts
+                                          the nominal rate model and its asserts; n=auto rows
+                                          sized first, as the build's size step sizes them
     plan ITEM RATE | plan ITEM --machines N [--asm A] [--furnace F] [--mining-productivity L]
          [--recipe ITEM=RECIPE,...] [--raw ITEM,...]
                                           the other way round: the machines, furnaces and
@@ -79,6 +80,7 @@ import re
 import sys
 
 from . import compose, expand, fkp, flow, plan, rates
+from . import size as sizemod
 from . import surface as surfacemod
 from .catalog import Catalog
 from .elaborate import ElabError, elaborate_file
@@ -90,11 +92,18 @@ def _fkp_path(path):
 
 
 def _flat(path, layout=None):
+    """The file's netlist; its n=auto rows sized as the build's size step sizes them (with the
+    surface file beside it, when that places it), the Sizing on ``flat._sizing``."""
     if layout is None and os.path.exists(_fkp_path(path)):
         layout = fkp.load(_fkp_path(path))
+    cat = Catalog.load()
     try:
-        return elaborate_file(path, Catalog.load(), layout=layout)
-    except (FkSyntaxError, ElabError, OSError) as exc:
+        flat = elaborate_file(path, cat, layout=layout)
+        if sizemod.has_auto(flat):
+            flat, sz, note = sizemod.size_file(path, cat, layout)
+            flat._sizing = (sz, note)
+        return flat
+    except (FkSyntaxError, ElabError, OSError, surfacemod.SurfaceError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(2)
 
@@ -680,6 +689,15 @@ def main(argv=None):
         print(f"error: {exc}", file=sys.stderr)
         return 2
     title = flat.name + (f" (unbounded: {', '.join(unbounded)})" if unbounded else "")
+    sizing = getattr(flat, "_sizing", None)
+    if sizing is not None:
+        sz, note = sizing
+        lines, checks = sizemod.report(sz, cat)
+        print(f"{lines[0]}\n  sized {note}; fk build --to size writes out/size.txt, what "
+              "each count serves")
+        for c in checks:
+            print(f"  {c}")
+        print()
     print(rates.report(model, title))
     for path in [p for p in a.chain.split(",") if p]:
         if path not in flat.insts:

@@ -30,6 +30,7 @@ cover   := ('power'|'robots') name ':' 'cover' ('all' | refs) (',' param)*
 module  := 'module' Name '{' stmt* '}'                          # a sub-module, a template written in .fk
 import  := 'import' Name (',' Name)* 'from' "file.fk"           # inside the same game codebase
 param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' | '@patch(' resource ')'
+value   := N ('/s'|'/min'|'/h')? | word ('|' word)* | STRING | 'auto' (N '..' N)?   # n=auto: 1.6
 ```
 
 - A ref names an instance (all its machines) or a machine in a sub-module (`mall.belts`). On a net it
@@ -41,6 +42,11 @@ param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' 
   `Chest<provider|storage|requester, item, rate>`, `Literal` (its entities are pinned in the `.fkp`,
   or `Literal<file="x.json", box="x0,y0,x1,y1">` imports a blueprint or entity list [built]), and
   modules. `duty=` caps any instance (a mall runs only while the network restocks).
+- 1.6 [built] `n=auto` (`n=auto LO..HI`; plain `auto` is 1..100) on `MinerRow`, `SmelterRow`,
+  `AsmRow`, `LabRow`: the build's `size` step chooses the count (Rory, 2026-10-21: "the original
+  factory source code should have been parametric for number of bldgs"), the fewest machines
+  that meet the surface's targets, the factory's asserts and what the row's consumers ask.
+  `LabRow<n, rate=>`: each lab takes at most `rate` of each pack it is fed.
 - `@(x, y, rot r)` puts the instance's frame, turned r quarter turns clockwise, with its top-left at
   (x, y) of its module's frame. On a sub-module instance it turns the module's whole contents inside
   the module's frame (its origin and its placed children's frames), the way a plot turns a factory;
@@ -99,7 +105,10 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   no rate), `ASSERT` (a nominal rate assert failed); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
   `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
   [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; [built: cover robots]
-  `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`.
+  `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`;
+  1.6 [built: size] `SIZE` (an `n=auto` row can't meet a target, an assert or what its
+  consumers ask, and what stops it; after route, a sized net that asks more than its belts carry)
+  and `FIT` (a sized row runs past its plot or into another instance's frame).
   1.1 [built] limited production (Rory, 2026-10-20: in the game a sink takes what reaches it first,
   never a proportional share). The lines say what can happen, never how to build: mixed belts and
   chests are fine where production is limited. `CLOG` (a sushi net that machines drive, or an
@@ -133,13 +142,17 @@ output. Damped fixed point; reports per machine utilization + the binding endpoi
 supply / demand / delivered, the binding chain, and every `assert`. No capacity in V1: routed
 throughput is V2. 1.3 [built]: `report_rates` again after `route` gives the routed rates and
 `CAPACITY`, and the `tier` step lays a belt tier per connector (`CORE-V2.md`,
-docs/RELEASE-1.3.md).
+docs/RELEASE-1.3.md). 1.6 [built]: the `size` step (`fkcore.size`) runs this model to choose the
+`n=auto` counts: plan's demand propagation on the design's nets as the seed, then, while a
+constraint fails, more machines on the row its binding chain names, then one fewer on each row
+while everything still holds; `out/size.txt` says what each count serves.
 
 ## Flow script `build.fkb` [built; `diff` and `apply` live with the game link (FK_LINK=on); `run_models` reports and skips]
 
 Straight-line, one contained tool per line, each reads the previous checkpoint and writes its own
 (`out/<step>/<factory>.fkp`) plus `out/<step>.txt`: `read_surface`, `read_terrain` [built: a live
-map's ore, water and cliffs; `ON_TERRAIN`, `OFF_ORE`], `run_models`, `elaborate`, `report_rates`,
+map's ore, water and cliffs; `ON_TERRAIN`, `OFF_ORE`], `run_models`, `elaborate`, `size` [built
+1.6: the `n=auto` counts, `FIT`], `report_rates`,
 `place` [built: hints, `@patch` for MinerRow], `route` [built: v4's steiner tree router per net,
 splits, merges, direct insertion, k->m through a hub, the underground guard; fluid nets by the fluid
 plug-in: pipes, pipe-to-ground; 1.2: a net is routed again when anything it is laid to moved],

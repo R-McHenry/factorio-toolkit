@@ -39,7 +39,8 @@ class MSpec:
     makes: dict                    # item -> items/s at full speed (INF for an unbounded source)
     takes: frozenset | None        # items it accepts as a consumer; None = anything (a chest)
     sink: bool = False             # takes whatever reaches it beyond its needs (chest, lab)
-    drain: float | None = None     # a sink's cap in items/s (None = unlimited)
+    drain: float | None = None     # a sink's cap in items/s (None = unlimited); extra["each"]:
+                                   # the cap of each item it is fed (a lab's rate=), not of all
     source: bool = False           # an unbounded source (a requester chest with no rate)
     extra: dict = field(default_factory=dict)
 
@@ -240,10 +241,15 @@ def infinity_pipe(params, cat):
 
 
 def lab_row(params, cat):
-    """``LabRow<n>``: n labs; each takes every science pack that reaches it (a sink)."""
-    _only(params, ("n",))
+    """``LabRow<n, rate=>``: n labs; each takes every science pack that reaches it (a sink), or,
+    with ``rate`` (1.6), up to ``rate`` of each pack it is fed: a research unit of T seconds
+    takes one of each pack in T seconds, so ``rate=2/min`` for 30 s. Labs with a rate hold the
+    science rows back when they can't keep up, and ``n=auto`` sizes them to take what comes."""
+    _only(params, ("n", "rate"))
     packs = science_packs(cat)
-    return [MSpec(f"m{k}", "lab", None, {}, {}, packs, sink=True)
+    rate = _rate(params, "rate")
+    return [MSpec(f"m{k}", "lab", None, {}, {}, packs, sink=True, drain=rate,
+                  extra={} if rate is None else {"each": True})
             for k in range(_int(params, "n"))]
 
 
@@ -362,7 +368,8 @@ def literal_machines(entities, cat):
             spec.local = local
             out.append(spec)
         elif kind == "lab":
-            out.append(MSpec(local, e.name, None, {}, {}, science_packs(cat), sink=True))
+            out.append(MSpec(local, e.name, None, {}, {}, science_packs(cat), sink=True,
+                             drain=rate, extra={} if rate is None else {"each": True}))
         elif kind in ("container", "logistic-container") and "role" in a:
             params = {a["role"]: True, "chest": e.name}
             for k in ("item", "rate"):

@@ -4,6 +4,7 @@ read_surface    lab                       # surface file: factories, plots, clai
 read_terrain    none                      # the lab surface: no ore, water or cliffs
 run_models      --stale                   # model scripts: derive and pin parameters
 elaborate                                 # templates -> logical netlist + its checks
+size                                      # n=auto rows: the fewest machines for the targets, asserts and consumers (out/size.txt)
 report_rates                              # nominal rate model, asserts, surface targets
 place           --keep pinned             # fragments by their @(x, y) hints; Literals stay
 route           --only stale --effort normal

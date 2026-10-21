@@ -30,7 +30,7 @@ The templates:
 | `MinerRow<n, resource>` | n electric drills facing a belt between them; 3 tiles per pair, 7 tall | the ore leaves at the row's head |
 | `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in | 2 in, 1 out |
 | `AsmRow<n, recipe>` | n assemblers, 3 tiles each, 7 to 9 tall | up to 3 in (the third under the product belt, by long-handed inserters), 1 out |
-| `LabRow<n>` | n labs, 3 tiles each | 1 to 3 science belts in (the third by long-handed inserters) |
+| `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up | 1 to 3 science belts in (the third by long-handed inserters) |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
 | `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for | |
@@ -46,6 +46,42 @@ FILE INST` shows any row as its exact entities, with its size and where its belt
 
 `duty=0.5` on any instance caps it (a row that runs only part of the time). `inserter=inserter`
 on a row puts plain inserters in place of the fast ones.
+
+## Counts the build chooses: `n=auto`
+
+`n=auto` on a `MinerRow`, `SmelterRow`, `AsmRow` or `LabRow` leaves its count to the build. The
+`size` step (right after `elaborate` in the build script) gives each such row the fewest
+machines that meet:
+
+- the surface file's `target` lines (what the whole surface makes),
+- the factory's `assert INST.rate >= R` lines,
+- what the row's consumers ask: a net an auto row drives carries what the machines on it take,
+  and what a chest or labs with a `rate=` take. A chest or labs without a rate take what is
+  left and ask nothing, so a row that only feeds those grows for a target or an assert,
+- for `LabRow<n=auto, rate=...>`: the labs take what the science rows make.
+
+`n=auto 4..30` keeps the count within 4 and 30; plain `auto` is 1 to 100. Write the counts you
+want as numbers and leave the rest `auto`:
+
+```
+red   = AsmRow<n=10, recipe=automation-science-pack>  @(16, 34)    # ten red science
+gears = AsmRow<n=auto, recipe=iron-gear-wheel>        @(16, 22)    # as many as red takes
+smelt = SmelterRow<n=auto, recipe=iron-plate>         @(16, 12)    # as many as gears take
+ore   = MinerRow<n=auto, resource=iron-ore>           @(16, 2, rot 2)
+```
+
+`fk build --to size` shows the counts without laying anything out: `out\size.txt` lists each
+row's count and what it serves (`net gear: iron-gear-wheel for red`, `target ... 1/s`), and
+says when a constraint can't be met (`SIZE`: a row at the top of its bounds, a requester chest at
+its rate, a row whose count you wrote at full speed). `fk rates FILE.fk` sizes the same way before
+it shows the rates. Counts sized to a rate balance a net exactly, so `fk rates` may name either
+side of it as what binds (the ore is exactly what the furnaces' output needs).
+
+Rows grow, and you arrange them: a row that grows runs further east (at rot 0), so leave it
+room. When a sized row runs past its plot or into another instance, the size step says so
+(`FIT`, both rows and how far), and the build stops at `place` if their entities overlap. After
+the routing, `report_rates` says (`SIZE`) when a net of a sized row asks more than its belts
+carry: a yellow lane carries 7.5 items/s.
 
 ## Nets
 
@@ -66,7 +102,7 @@ the consumers take them.
 ## Checks on paper
 
 `assert INST.rate >= 10/min` (or `/s`, `/h`): checked by the rate model (`fk rates`); a failed one
-is an `ASSERT` line, not an error.
+is an `ASSERT` line, not an error. With `n=auto` rows the build sizes them to meet it.
 
 ## Modules and imports
 

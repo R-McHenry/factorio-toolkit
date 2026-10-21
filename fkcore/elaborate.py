@@ -10,6 +10,11 @@ else the drivers' products), 4. explicit consumers, 5. ``X.*`` consumers (free i
 A ref adds only endpoints of the net's items. The checks are report lines and never stop anything:
 TYPE, SUSHI_SINK, UNFED, UNCONSUMED, DOUBLE, UNBOUNDED. Malformed source (an unknown template, a
 ref that resolves to nothing, a bad parameter) raises ElabError: no netlist exists for it.
+
+An ``n=auto`` row (1.6, ``AUTO_KINDS``) is elaborated with the count ``sizes`` gives it (the
+build's ``size`` step, ``fkcore.size``), else the count the factory's .fkp laid out last, else its
+low bound; its Inst keeps the bounds (``auto``) and its params the count, so everything after
+elaboration sees a plain row. The netlist's structure (nets, endpoints) is the same at any count.
 Pure, stdlib only.
 """
 from __future__ import annotations
@@ -20,7 +25,11 @@ from dataclasses import dataclass, field
 from . import lang
 from .templates import MSpec, TemplateError, literal_machines, machines as template_machines
 
-__all__ = ["ElabError", "Machine", "FlatNet", "Check", "Flat", "load", "elaborate", "elaborate_file"]
+__all__ = ["ElabError", "Machine", "FlatNet", "Check", "Flat", "load", "elaborate", "elaborate_file",
+           "AUTO_KINDS"]
+
+#: the templates whose count may be ``n=auto``: the rows
+AUTO_KINDS = ("MinerRow", "SmelterRow", "AsmRow", "LabRow")
 
 
 class ElabError(ValueError):
@@ -85,6 +94,7 @@ class Inst:
     scope: dict | None         # name -> Inst for a sub-module instance
     line: int
     literal: tuple | None = None   # Literal<file>: (entities, frame size, file origin, sig)
+    auto: tuple | None = None      # n=auto: (lo, hi), the bounds of the count in params["n"]
 
 
 @dataclass
@@ -132,10 +142,10 @@ def _imports(f, folder, modules, seen):
             modules[name] = g.modules[name]
 
 
-def elaborate_file(path, cat, name=None, layout=None):
+def elaborate_file(path, cat, name=None, layout=None, sizes=None):
     f, modules = load(path)
     return elaborate(f, modules, cat, name or os.path.splitext(os.path.basename(path))[0],
-                     layout)
+                     layout, sizes)
 
 
 # -- elaboration ----------------------------------------------------------------------------------
@@ -152,10 +162,12 @@ def _duty(params, path, line, src):
     return float(v)
 
 
-def elaborate(f, modules, cat, name="main", layout=None) -> Flat:
-    """``layout`` (the factory's .fkp) is needed only by Literal instances."""
+def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
+    """``layout`` (the factory's .fkp) is needed by Literal instances, and gives an ``n=auto``
+    row the count it laid out; ``sizes`` ({instance path: n}, the size step's) overrides it."""
     flat = Flat(name, f.path)
     flat._layout = layout
+    flat._sizes = dict(sizes or {})
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     _resolve_nets(flat)
     _endpoint_checks(flat)
@@ -184,6 +196,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                         flat.scopes[path], inst.line)
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
+            auto = _auto(flat, path, inst, src)
+            if auto is not None:
+                params["n"] = auto[2]
             imported = None
             try:
                 if inst.kind == "Literal":
@@ -202,6 +217,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                 keys.append(m.key)
             node = Inst(path, inst.kind, inst.params, inst.hints, keys, None, None, inst.line,
                         imported)
+            if auto is not None:
+                node.params = dict(inst.params, n=auto[2])
+                node.auto = auto[:2]
         scope[inst.name] = node
         flat.insts[path] = node
     for net in mod.nets:
@@ -213,6 +231,27 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         flat.asserts.append((a, prefix))
     for c in mod.covers:
         flat.covers.append((c, prefix))
+
+
+def _auto(flat, path, inst, src):
+    """(lo, hi, n) of an ``n=auto`` row, None for any other instance: n is the size step's
+    (``sizes``), else what the factory's .fkp laid out last, else the low bound."""
+    autos = [k for k, v in inst.params.items() if isinstance(v, lang.Auto)]
+    if not autos:
+        return None
+    if autos != ["n"] or inst.kind not in AUTO_KINDS:
+        raise ElabError(src, inst.line, f"{path}: {autos[0]}=auto: auto is the count of a row, "
+                                        f"n=auto on {', '.join(AUTO_KINDS)}")
+    a = inst.params["n"]
+    n = flat._sizes.get(path)
+    rec = flat._layout.insts.get(path) if flat._layout is not None else None
+    if n is None and rec is not None and rec.kind == inst.kind:
+        try:
+            n = int(rec.params.get("n", ""))
+        except ValueError:
+            n = None
+    n = a.lo if n is None else min(max(int(n), a.lo), a.top)
+    return a.lo, a.top, n
 
 
 def _literal_entities(flat, path, params, cat, src):
