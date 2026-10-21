@@ -157,7 +157,12 @@ Kept current through the night; the last check-in is the last line of the timeli
 - It worked. At 14:01 the east chain was off the solar grid and the spawn roboports had jumped
   from 1.4 to 15.8 MJ. By 14:10 they were back in a robot network (net 59) and the network saw
   the spawn chests again.
+- At 14:27 network 59 had a single working construction robot, which built the first boiler.
+  12 more construction robots sat in its chests as items. The note to the player at 14:28 was
+  that a requester and an inserter into a spawn roboport put them to work.
 - No item was added, nothing was changed by script, and no rule was bent.
+- 14:40 toolkit 1.6 (`469416f`, tag `v1.6`) went to both runs, merged from the `size` and `bus`
+  branches (529 tests OK). Both runs' designs lay out byte for byte as before (checked on copies).
 
 ## For you
 
