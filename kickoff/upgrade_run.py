@@ -153,7 +153,10 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.4.2 is in: fk syncs by content (a background fk no longer undoes an edit), the world
+  Toolkit 1.5 is in: `fk plan ITEM RATE` (or `fk plan ITEM --machines N`) sizes a factory before
+  you write it, every step of the recipe tree down to the drills; the world line says which pack
+  the labs wait for; docs\\examples has compact-mall.fk and Rory's bus (bus4.json).
+  It has 1.4.2: fk syncs by content (a background fk no longer undoes an edit), the world
   line names ghosts no powered roboport reaches (UNREACHED), OFF_WATER flags a dry offshore pump,
   a Literal reads a bare entity list, and `trash` on a requester sends back what it no longer
   asks for. It has 1.4.1: The routed rates in out\\report_rates.txt settle now (its first line says

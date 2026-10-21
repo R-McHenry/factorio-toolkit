@@ -133,9 +133,7 @@ output. Damped fixed point; reports per machine utilization + the binding endpoi
 supply / demand / delivered, the binding chain, and every `assert`. No capacity in V1: routed
 throughput is V2. 1.3 [built]: `report_rates` again after `route` gives the routed rates and
 `CAPACITY`, and the `tier` step lays a belt tier per connector (`CORE-V2.md`,
-docs/RELEASE-1.3.md). `plan ITEM RATE | --machines N` [built] goes the other way, from a target
-rate to the machines, furnaces and drills of each item of its recipe tree, on a hand calc's terms:
-full speed, no modules, one recipe per item (`fkcore/plan.py`).
+docs/RELEASE-1.3.md).
 
 ## Flow script `build.fkb` [built; `diff` and `apply` live with the game link (FK_LINK=on); `run_models` reports and skips]
 
