@@ -22,6 +22,10 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
 - 1.6: the build script gets the template's `size` line after `elaborate` (the build counts the
   `n=auto` rows); a script without one says so when a factory has such a row. The host's
   toolkit must be 1.6 too: it replays the size step for `--from diff`.
+- 1.7: the build script's `write_layout` moves to just before `apply`, as in the template, so
+  `fk build --to diff` writes nothing (a dry run had made its design the one the next build kept
+  to). A run without `helpers\\` gets the template's (the player's reusable features); one that
+  has it keeps its own. The host's toolkit must be 1.7 too: it runs `write_layout` now.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -85,6 +89,23 @@ def _size(text):
     return "".join(lines)
 
 
+def _write_last(text):
+    """The build script with ``write_layout`` just before ``apply`` (1.7), so ``--to diff`` and
+    ``--to report_bom`` write nothing (None: nothing to change)."""
+    lines = text.splitlines(True)
+    steps = [line.split("#")[0].split()[:1] for line in lines]
+    if ["write_layout"] not in steps or ["apply"] not in steps:
+        return None
+    w, a = steps.index(["write_layout"]), steps.index(["apply"])
+    if w > a or not any(steps[w + 1:a]):
+        return None                    # after the paste, or no step between: --to diff writes none
+    line = lines.pop(w)
+    if not line.endswith("\n"):
+        line += "\n"
+    lines.insert(a - 1, line)
+    return "".join(lines)
+
+
 def _hand(text):
     """The build script with ``--hand inserter`` on its route line (None: nothing to change)."""
     lines = text.splitlines(True)
@@ -125,6 +146,10 @@ def upgrade(run, sha, dry=False):
         if sized:
             new_script = sized
             changes.append("size after elaborate (the build counts the n=auto rows)")
+        last = _write_last(new_script or text)
+        if last:
+            new_script = last
+            changes.append("write_layout just before apply (--to diff writes nothing)")
         if _plain_hands(run):
             hand = _hand(new_script or text)
             if hand:
@@ -135,13 +160,17 @@ def upgrade(run, sha, dry=False):
     if new_script:
         plan.append("  game/nauvis.build.fkb: " + "; ".join(changes)
                     + f" (old kept as nauvis.build.fkb.before-{sha})")
+    helpers = not os.path.exists(os.path.join(run, "helpers"))
+    if helpers:
+        plan.append("  helpers/: the template's (the run has none)")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:
         return plan
     src = os.path.join(run, f".kit-{sha}")
     claude = cfg.get("player") == "claude"
     _archive(sha, src, ("agent", "fkcore")
-             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py") if claude else ()))
+             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py") if claude else ())
+             + (("kickoff/template/helpers",) if helpers else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
     for p in REPLACED:
@@ -158,6 +187,10 @@ def upgrade(run, sha, dry=False):
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
     shutil.copy(os.path.join(agent, "bin", "fk.cmd"), os.path.join(run, "bin", "fk.cmd"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))
+    if helpers:
+        shutil.copytree(os.path.join(src, "kickoff", "template", "helpers"),
+                        os.path.join(run, "helpers"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy(os.path.join(agent, "prompts", f"{cfg.get('prompt', 'core-v1')}.md"),
                 os.path.join(run, "AGENTS.md"))
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:
@@ -181,7 +214,16 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.6 is in: `n=auto` on a row leaves its count to the build (the new `size` step after
+  Toolkit 1.7 is in: a rebuild keeps what stands. The poles and roboports a build laid stay
+  where the new design leaves them room, new ones go only where something new needs them, and
+  old ones stay up until the new ones stand, so power and robots keep running (`cover power
+  --fresh` lays them all anew). `fk build --to diff` is a dry run now: the design is written just
+  before the paste. `fk fresh` also takes up a crafter's old product (and its chest's). `Lab`
+  beside a multi-item chest takes its packs by one inserter, and a products belt into chests that
+  take anything draws no CLOG. `MinerRow<drill=burner-mining-drill>` mines on the coal its belt
+  brings. docs\\STRATEGY.md is what worked in earlier runs; helpers\\ is the place for reusable
+  features (its README says how).
+  It has 1.6: `n=auto` on a row leaves its count to the build (the new `size` step after
   `elaborate` gives it the fewest machines that meet your targets and asserts; out\\size.txt says
   why each count), and `Bus<belts=4, length, item, load=, tap=>` is Rory's bus as a template
   (`net iron1: smelt -> bus.load1`, `net fe: bus.tap1 -> gears`); docs\\LANGUAGE.md has both.
