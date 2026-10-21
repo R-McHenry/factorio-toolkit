@@ -56,10 +56,18 @@ pairs with another net's; with a netlist also a carrier moving items into a mach
 its net's consumer, or out of one that is not its driver). A fluid LEAK is any join between two
 nets: a pipe or pipe-to-ground of one fluid net joined to another's, and with a netlist also to a
 machine box that is not its endpoint, or two machines' boxes of different nets joined directly.
+
+A **joint** is where one net hands its items to another on purpose: a bus port (Rory's bus,
+``fkcore.fragments.bus``), a belt that is a consumer of one net and a driver of the next. A load's
+belt is its net's last carrier and feeds the bus's first splitter; the bus's last splitter feeds a
+tap's belt, its net's first. With a netlist, an edge between two nets' carriers is no LEAK where
+one of its ends is such a port of both nets (a consumer of the net the items leave, a driver of
+the one they enter), and a net's consumer that is another net's carrier counts as reached.
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
+import json
 import math
 from collections import deque
 from dataclasses import dataclass, field
@@ -100,6 +108,7 @@ class Node:
     tiles: tuple
     ug: str | None = None          # "in" | "out" for an underground end
     recipe: str | None = None      # a crafting machine's recipe (it decides its fluid boxes)
+    prio: tuple | None = None      # a splitter's (input, output) priority: left, right or None
 
     @property
     def carrier(self):
@@ -146,17 +155,22 @@ class Graph:
             for b, via in self.succ.get(a, ()):
                 yield a, b, via
 
-    def reach(self, starts, net, forward=True):
+    def reach(self, starts, net, forward=True, ends=()):
         """Every node reached from ``starts`` along the edges (against them when not
         ``forward``), passing only through carriers of ``net``; a machine is reached, never
-        passed through."""
+        passed through, and so is a node of ``ends`` (a bus port: another net's carrier)."""
         adj = self.succ if forward else self.pred
         seen = set(starts)
         todo = deque(sorted(seen, key=natural_key))
         while todo:
             for k, _via in adj.get(todo.popleft(), ()):
                 n = self.nodes[k]
-                if k in seen or (n.carrier and n.net != net):
+                if k in seen:
+                    continue
+                if k in ends:
+                    seen.add(k)
+                    continue
+                if n.carrier and n.net != net:
                     continue
                 seen.add(k)
                 if n.carrier:
@@ -280,12 +294,26 @@ def _add_node(g, e, cat):
             g.problems.append(f"{e.key}: an underground with no ug=in|out")
             ug = None
     g.nodes[e.key] = Node(e.key, e.name, kind, net, float(e.x), float(e.y), d, tiles, ug,
-                          e.attrs.get("recipe"))
+                          e.attrs.get("recipe"), _priority(e) if kind == "splitter" else None)
     for t in tiles:
         if t in g.at:
             g.problems.append(f"{e.key}: tile {t[0]},{t[1]} is already {g.at[t]}")
         else:
             g.at[t] = e.key
+
+
+def _priority(e):
+    """A splitter's (input, output) priority from its game settings (``config``): "left",
+    "right" or None each; None for a splitter without any."""
+    try:
+        fields = json.loads(e.attrs.get("config") or "{}")
+    except ValueError:
+        return None
+    if not isinstance(fields, dict):
+        return None
+    got = tuple(fields.get(k) if fields.get(k) in ("left", "right") else None
+                for k in ("input_priority", "output_priority"))
+    return got if any(got) else None
 
 
 def _edge(g, a, b, via):
@@ -600,11 +628,19 @@ def _net_word(n):
     return f"net {n.net}" if n.net else "no net"
 
 
+def _joint(a, b, na, nb, table):
+    """An edge from one net's carrier into another's that is a bus port's: one of its ends is a
+    consumer of the net the items leave and a driver of the one they enter."""
+    if table is None or na.net not in table or nb.net not in table:
+        return False
+    return any(k in table[na.net][1] and k in table[nb.net][0] for k in (a, b))
+
+
 def _leak(g, a, b, via, table):
     """The Leak an edge makes, or None."""
     na, nb = g.nodes[a], g.nodes[b]
     if na.carrier and nb.carrier:
-        if na.net == nb.net:
+        if na.net == nb.net or _joint(a, b, na, nb, table):
             return None
         if via == "pickup":
             return Leak(na.net, a, b, via, f"{b} ({_net_word(nb)}) picks from {a}")
@@ -680,7 +716,7 @@ def connect(ents, cat, nets=None) -> Report:
                 got = {nid[0] for nid in g.fluid_reach(starts, name, owners)
                        if owners.get(nid) == name}
             else:
-                got = g.reach({d}, name) if d in g.nodes else set()
+                got = g.reach({d}, name, ends=set(consumers)) if d in g.nodes else set()
             for c in consumers:
                 if c in got:
                     reached += 1

@@ -20,7 +20,9 @@ One thing `fk rates` gets wrong: it shares a short net in proportion to what eac
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
 one side of a splitter) takes its fill, and the ones further on get what is left, or nothing. So a
 net that is short on paper starves its far machines rather than slowing them all a little: give it
-more supply than demand, and give a chest on it a `limit=` (`SHARED_SINK` says where).
+more supply than demand, and give a chest on it a `limit=` (`SHARED_SINK` says where). A bus
+(`Bus<...>`, see LANGUAGE.md) is a pool on paper: what its loads bring, its taps share; along the
+real bus the first tap takes its fill first.
 
 After `fk build`, `out\report_rates.txt` also has the **routed** rates: what the belts and
 inserters as laid let through, with the first machines along a belt served first, as in the game.

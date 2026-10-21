@@ -17,6 +17,11 @@ consumers asked and got, and its critical connector (the largest required ratio)
 ``CAPACITY`` per net and kind of connector that binds (it runs at capacity while more is required
 through it): the required flow, what the connector carries, the ratio and the consumers it starves.
 Checks warn, never gate. Pure, stdlib only.
+
+A bus (``Bus<...>``) is its belts and splitters here, as laid: no pool, the lanes carry what they
+carry (a yellow belt 15/s across its two lanes, 7.5 a lane), and its staircases' splitters keep
+their priorities. A bus port is no machine: a net's row counts what crosses its belt, and the
+consumers a net starves are those beyond the bus too (a load's net, the bus, its taps' nets).
 """
 from __future__ import annotations
 
@@ -289,13 +294,43 @@ def report(r: Routed, factory=None):
             continue
         cons = _consumers(flat, net)
         for item in flat.nets[net].items:
-            asked = sum(res.demand.get((k, ""), {}).get(i, 0.0) for k, i in cons if i == item)
-            got = sum(res.delivered.get((k, ""), {}).get(i, 0.0) for k, i in cons if i == item)
+            asked = sum(_took(r, k, i, True) for k, i in cons if i == item)
+            got = sum(_took(r, k, i, False) for k, i in cons if i == item)
             ask = "unbounded" if asked == INF else f"{asked:.3f}"
             lines.append(f"  {net:<16} {item:<26} {ask:>8} {got:>8.3f}  "
                          + _critical(r, mine))
         checks += _capacity(r, net, mine, where)
     return lines, checks
+
+
+def _took(r, key, item, asked):
+    """What a consumer asked of an item (``asked``), or got, as routed. A bus port is no machine:
+    what crosses its belt, both lanes (what the design asks of it, or the flow)."""
+    if r.flat.machines[key].extra.get("port"):
+        table = (r.need or {}) if asked else r.res.flow
+        return sum(table.get((key, lane), {}).get(item, 0.0) for lane in ("L", "R"))
+    table = r.res.demand if asked else r.res.delivered
+    return table.get((key, ""), {}).get(item, 0.0)
+
+
+def through(flat, net, item):
+    """The net and every net its ``item`` goes on to through bus ports: a load's bus, the bus's
+    taps' nets, and on (what one net brings to a bus, the bus's taps hand on)."""
+    out, todo = [], [net]
+    while todo:
+        n = todo.pop(0)
+        if n in out:
+            continue
+        out.append(n)
+        for key, it in flat.nets[n].consumers:
+            m = flat.machines[key]
+            if it != item or not m.extra.get("port"):
+                continue
+            if m.extra["port"] == "load":
+                todo.append(m.inst)
+            else:
+                todo += [x for x in flat._out_hold.get((key, item), ()) if x != m.inst]
+    return out
 
 
 def _critical(r, mine):
@@ -329,8 +364,12 @@ def _short(r, net):
         return need.get((k, ""), {}).get(item, 0.0)
 
     for item in flat.nets[net].items:
-        spill = overflow(flat, net, item)
-        cons = [k for k, i in flat.nets[net].consumers if i == item and k not in spill]
+        spill, cons = set(), []
+        for n in through(flat, net, item):          # past a bus: who the taps feed
+            spill |= overflow(flat, n, item)
+            cons += [k for k, i in flat.nets[n].consumers
+                     if i == item and not flat.machines[k].extra.get("port")]
+        cons = [k for k in cons if k not in spill]
         victims, open_ = [], []
         for k in cons:
             nid = (k, "")

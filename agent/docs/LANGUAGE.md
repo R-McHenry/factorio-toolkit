@@ -39,6 +39,7 @@ The templates:
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
 | `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines | pipes |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. Its frame is its entities' box, so a lone roboport needs a pole of its own beside it | |
+| `Bus<belts=4, length, item, load=s11, tap=n26\|s33>` | Rory's bus: `belts` belts of one item, `length` tiles, running east at rot 0. Its loads and taps are ports (below) | one belt per port, beside the bus |
 
 Rows are **counterflow**: every belt of a row attaches at its head, the west end at rot 0. Leave
 a few free tiles at a row's head and between rows: the router lays the belts there. `fk explain
@@ -62,6 +63,37 @@ the consumers take them.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the
   splitters.
+
+## A bus
+
+```
+bus   = Bus<belts=4, length=54, item=iron-plate, load=s11, tap=n26|s33> @(0, 10)
+net iron1: smelt -> bus.load1          # a smelter row loads the bus
+net fe:    bus.tap1 -> gears, belts    # a tap feeds machines
+net spare: bus.tap2 -> box
+```
+
+Rory's bus, "a river of iron, that you keep adding more iron inputs to, and pull iron out when
+you need it". Its frame is `belts` + 2 tall: the belts are its rows 1..4 here, and rows 0 and 5
+are where the ports' belts meet it. A port is a side and a tile along the bus, counted from its
+head (where its belts start): `s11` is a load from the south whose belt comes in at x 11. The
+sides are compass sides where you place it (in a module, as the module is written): `n` and `s`
+for a bus running east or west, `e` and `w` for one running south or north. Nets name the ports in
+order: `bus.load1`, `bus.tap1`, `bus.tap2`.
+
+- A load merges into every belt by a staircase of splitters, one per belt, that fills the far belt
+  first and then the next; a tap takes from the far belt first. Each staircase takes `belts` tiles
+  along the bus beside its port's tile, and no two ports may share one.
+- The router lays the belts to a load and from a tap, never the bus itself. A port no net names
+  keeps its staircase and gets no belt.
+- The bus is a net of its own, named as the instance. `fk rates` treats it as a pool: what the
+  loads bring is what the taps share, by appetite. In the game the first tap along the bus takes
+  its fill first, and a load after a tap never reaches it (`OPEN` on the bus's net says so).
+- A yellow belt carries 15/s on its two lanes, 7.5 each. A smelter row puts its plates on one
+  lane, so one row into a load brings at most 7.5/s; the routed rates and `CAPACITY` say where
+  a lane is full. Grow a bus longer and add ports; a second item is a second bus beside it (a
+  gap row between them), and a net crosses a 4-belt bus by an underground from one of its outer
+  rows to the other.
 
 ## Checks on paper
 
