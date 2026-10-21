@@ -10,16 +10,20 @@ Kept current through the night; the last check-in is the last line of the timeli
   | | 2005 run | lead world |
   |---|---|---|
   | 02:17 | 6.1 h game time, 29 techs; oil plot lost to biters | 1.1 h game time, 9 techs; red science only |
-  | 08:33 | 12.4 h, 48 techs; blue science, construction and logistic robots, production science, 13 turrets against the biters | 7.4 h, 32 techs; all three sciences, oil, plastics, advanced circuits, construction robots; logistic robots next |
+  | 10:34 | 14.5 h, 49 techs; four sciences (purple ~1/min), construction and logistic robots, 11 labs, 16 to 19 turrets against the biters; green starved | 9.4 h, 34 techs; all three sciences, oil, plastics, advanced circuits, construction and logistic robots, an outpost; blue starved |
 
-- Turns: each loop has ended 5 rounds since 01:52 and plays its 6th. A Claude player does not end
-  its own turn while there is work (the 2005 player never has), so a round runs to the 2-hour
-  cap: about 3 rounds in 6 hours. 30 turns at this cap is 2.5 days; a shorter cap (30 min) gives
-  4 a hour and brings GOAL.md back more often, if turns are what you want to count.
+- Turns: since 01:52 the 2005 loop has ended 10 rounds and the lead world's 7. While a player has
+  work in hand it keeps its turn, so most rounds ran to the 2-hour cap (about 3 in 6 hours); the
+  2005 player began ending its own turns at 08:52 (41 and 16 minutes). 30 turns at the cap is 2.5
+  days; a 30-minute cap gives 4 an hour and brings GOAL.md back more often, if turns are what you
+  want to count.
 - Space is still far: both runs make 4 to 10 science packs a minute per colour. Their next steps
   are the right ones (logistic robots, production science, more iron).
 - Toolkit: 1.4.1 and 1.4.2 (fixes from the players' FRICTION.md) went into both runs at 01:55
-  and 02:11.
+  and 02:11; at 10:37 the world line learned to say which pack the labs wait for (`9659789`).
+- Cost: the conversations are long now, about 800k tokens of context per call in the 2005 run
+  and 530k in the lead world, so a 15-to-30-minute round costs a few dollars; a fresh
+  conversation every few hours with NOTES.md as the hand-over would cost less.
 
 ## The two runs
 
@@ -93,6 +97,25 @@ Kept current through the night; the last check-in is the last line of the timeli
   techs, 13 turrets, iron 315/min) pulled its west outpost back from the biters and took the
   stray poles up; the lead world (32 techs, construction robotics done) researches
   logistic-robotics and upgrades its shop to assembling-machine-2.
+- 08:52 and 09:08 the 2005 player ended two rounds on its own (41 min, $6.11; 16 min, $10.66),
+  with clear reports: the factory is stable, and purple (production) science runs at the oil plot
+  (1.5/min, 11 labs). All 7 requester chests are in use and none can be made before space science
+  (Space Age puts logistic-system there), so it fed the purple corner from a spare one and laid
+  its lab chain by hand (`game/purple.json`): the toolkit has no lab row fed from a chest. The
+  lead world (32 techs) caught its own SHARED_SINK mistake and got blue back to 4/min.
+- 09:54 the 2005 run (9 rounds ended; 49 techs, none new in 40 minutes): advanced circuits at 0
+  and all 51 logistic robots busy; the player took the robot count as fixed until robot speed
+  research (yellow science). One line to it with your tips from earlier runs: more robots raise
+  the cap now, belt the big flows, keep making robots (its brief and notes didn't have them; the
+  lead world's notes pack did). The lead world: 33 techs, logistic robots climbing (53).
+- 10:34 research stood still in both, and the world line only said "11%": the lead world's 6 labs
+  all had red and green but no blue (its one blue maker short of ingredients); in the 2005 run 8
+  of 11 labs lacked green (3 of its 4 green makers short), while the player thought robot trips
+  were its cap. The watcher now says which packs the waiting labs lack and how many of their
+  makers are short (`9659789`; every lab waiting is RESEARCH STALLED, said again every 10
+  minutes). Both loops restarted onto it at 10:37, and within seconds both players went for
+  the starved pack: "Research is stalled on blue", "Now green science is short (3 of 4 makers
+  lack ingredients)".
 
 ## For you
 
