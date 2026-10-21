@@ -153,7 +153,10 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.4 is in. Machines that stand within 3 tiles of each other are now joined by an
+  Toolkit 1.4.1 is in. The routed rates in out\\report_rates.txt settle now (its first line says
+  so), CAPACITY names only what runs short of a net's item, and `tier` never lowers a belt's tier
+  (unless --downgrade) and allows only yellow unless you add --allow.
+  It has 1.4: Machines that stand within 3 tiles of each other are now joined by an
   inserter, not a belt, whenever one machine feeds several (or several feed one): place a
   producer next to what takes its output and the router does the rest. docs\\examples\\early-mall.fk
   is an early-tier mall built that way (24 of its 30 nets are single inserters; 83 belts).

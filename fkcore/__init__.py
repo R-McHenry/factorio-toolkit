@@ -1,4 +1,4 @@
 """fkcore: the V1 core of the Factorio toolkit (CORE.md). Pure, stdlib only."""
 
-#: the release (docs/RELEASE-1.4.md); a run's run.json names the commit it plays
-__version__ = "1.4"
+#: the release (docs/RELEASE-1.4.1.md); a run's run.json names the commit it plays
+__version__ = "1.4.1"
