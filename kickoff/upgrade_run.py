@@ -181,7 +181,11 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.5 is in: `fk plan ITEM RATE` (or `fk plan ITEM --machines N`) sizes a factory before
+  Toolkit 1.6 is in: `n=auto` on a row leaves its count to the build (the new `size` step after
+  `elaborate` gives it the fewest machines that meet your targets and asserts; out\\size.txt says
+  why each count), and `Bus<belts=4, length, item, load=, tap=>` is Rory's bus as a template
+  (`net iron1: smelt -> bus.load1`, `net fe: bus.tap1 -> gears`); docs\\LANGUAGE.md has both.
+  It has 1.5: `fk plan ITEM RATE` (or `fk plan ITEM --machines N`) sizes a factory before
   you write it, every step of the recipe tree down to the drills; the world line says which pack
   the labs wait for; docs\\examples has compact-mall.fk and Rory's bus (bus4.json).
   It has 1.4.2: fk syncs by content (a background fk no longer undoes an edit), the world

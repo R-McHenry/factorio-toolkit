@@ -1,11 +1,30 @@
-# Toolkit 1.6 (draft, 2026-10-21): the build counts the rows
+# Toolkit 1.6 (2026-10-21): the build counts the rows, and a bus
 
 Rory (2026-10-21): "the original factory source code should have been parametric for number of
 bldgs, maybe we just need a solver that's better at setting those parameters to meet constraints
 during a build." That is his principle "Design first: from a target rate, the model and layout".
 Until now a count was written by hand and the rate model only checked it. Now a row may leave
-its count to the build. No new rules: checks warn, never gate. Branch `size`; not merged, not
-deployed, `__version__` not bumped (the lead decides).
+its count to the build. And Rory's 4-belt bus is a template that nets load into and tap out of.
+No new rules: checks warn, never gate. Merged from the branches `size` (c815572) and `bus`
+(0d1c773), 529 tests OK.
+
+## The bus
+
+- **`Bus<belts=4, length, item, load=, tap=>`** (`fkcore/fragments.py`, `tests/test_bus.py`):
+  Rory's demo (`docs\examples\bus4.json`, read from the lead world) as a building block. At his
+  parameters it lays his demo's bus entity for entity, splitter priorities included. A load fills
+  the far belt first, a tap takes from the far belt first. A port is a compass side and a tile
+  along the bus (`load=s11`, `tap=n26|s33`); ports are endpoints named `load1..`, `tap1..`, each
+  one belt beside the bus, so the router lays single-belt nets to and from them and never the bus:
+  `net iron1: smelt -> bus.load1`, `net fe: bus.tap1 -> gears`.
+- The bus is a net of its own, named as the instance. `connect` reads a port as a joint, not a
+  LEAK. A net crosses a 4-belt bus by an underground between its outer rows.
+- `fk rates`: every net through a bus is one pool, what the loads bring and the taps share;
+  `bus.rate` and `bus.tap1.rate`. V2's lane graph keeps the splitter priorities, and CAPACITY names
+  the victims beyond the bus: a yellow belt is 15/s, 7.5 a lane, so one smelter row into a load
+  brings at most 7.5/s.
+- Not yet measured in the game: the staircases' priorities follow the game's documented
+  behaviour.
 
 ## New
 
@@ -121,8 +140,7 @@ steps (size among them) on the game host for `--from diff`: a run on this templa
 toolkit on the host as well as on the laptop (an older one refuses the script: "unknown step
 'size'"). A running run keeps its script until an upgrade: `kickoff/upgrade_run.py` now adds the
 template's `size` line after `elaborate` (old script kept beside it, as for its other edits). With
-no `n=auto` in its source a run builds exactly as before. Its TELL text for 1.6 is the release's
-to write; `__version__` is still 1.5.
+no `n=auto` in its source a run builds exactly as before.
 
 ## Known, not done
 
