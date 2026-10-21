@@ -68,6 +68,39 @@ On paper: 18 red science/min (three assemblers at full speed), the assert passes
 belts (gears and copper); every row's head is at x = 8, so the router has the columns 0..7 for
 its belts. To grow it: more `red` (n=5), and a second `gears` row feeding the same `gear` net.
 
+## mall.fk: a mall of single machines (34x44)
+
+A mall doesn't need rows: `Assembler<recipe>` stands anywhere, rows and single machines mix, and
+the router lays the belts between them.
+
+```
+fein  = Chest<requester, item=iron-plate, rate=2/s>   @(0, 11)
+cuin  = Chest<requester, item=copper-plate, rate=1/s> @(0, 26)
+gear  = Assembler<recipe=iron-gear-wheel>             @(6, 2)
+belt  = Assembler<recipe=transport-belt>              @(13, 2)
+ins   = Assembler<recipe=inserter>                    @(20, 10)
+cable = Assembler<recipe=copper-cable>                @(6, 25)
+circ  = Assembler<recipe=electronic-circuit>          @(13, 18)
+pipe  = AsmRow<n=2, recipe=pipe>                      @(6, 33)
+bbox  = Chest<provider, limit=4>                      @(18, 3)
+ibox  = Chest<provider, limit=4>                      @(25, 11)
+pbox  = Chest<provider, limit=4>                      @(14, 34)
+
+net fe:    fein -> gear, circ, belt, ins, pipe
+net cu:    cuin -> cable
+net gears: gear -> belt, ins
+net cab:   cable -> circ
+net circs: circ -> ins
+net belts: belt -> bbox
+net inss:  ins -> ibox
+net pipes: pipe -> pbox
+```
+
+On paper: 8 nets, all routed, 179 entities (126 belts). A chest one tile from its machine (`bbox`,
+`ibox`) gets a single inserter, no belt. A net with many machines (`fe`) needs a few free tiles
+around them for its belts: packed tighter, it doesn't route. A requester feeds its net through
+one inserter; a busy net can take a second requester (several drivers merge onto one net).
+
 ## steam.fk: a steam power plant, 3.6 MW (16x26)
 
 ```
