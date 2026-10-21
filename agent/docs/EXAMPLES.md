@@ -123,6 +123,33 @@ and circuits. Built in the game on a test server, every inserter link moves item
 fills. The file is in `docs\examples\`; it is long, so open it there rather than copying it from
 here.
 
+## compact-mall.fk: rows packed tight (39x16)
+
+Rory's layout (2026-10-21): "a row with gaps of zero, except 1 for an ingredient dependency", in
+several rows. A well-laid mall needs a few hundred belts at most, never thousands: big gaps between
+machines and ingredients made far from where they are used are what cost the belts.
+
+- a chain (gear, then belt, then underground) stands in a line with a 1-tile gap between each
+  maker and what takes its output: that gap holds the one inserter that links them
+- chains stand shoulder to shoulder with no gap
+- two rows face one shared corridor that brings the iron (in at its middle), row A puts its products
+  up into `limit=2` chests and row B down; a cable maker stands beside its circuit maker, and copper
+  comes only to them
+- a maker that feeds two machines stands between them (`cc` feeds the assembler and drill makers)
+
+On paper: 23 nets, all routed, 21 of them single inserters; 50 belts, 12 underground ends and 2
+splitters bring the iron and copper. More products: another pair of rows below, the same way. In a
+base, the plates come from a smelter row or a bus tap instead of the requesters.
+
+## bus4.fk: Rory's 4-belt bus, a river of iron (54x18)
+
+Four belts run east. A feeder from the south merges into all four by a staircase of four splitters
+(input priority on the feeder's side, so it fills one belt after another), and two taps pull out by
+staircases of four splitters each, one going north, one south. Rory: "a river of iron, that you keep
+adding more iron inputs to, and pull iron out of when you need it". `bus4.json` is his demo exactly
+as he placed it; `bus = Literal<file="bus4.json"> @(x, y)` pastes it. A smelter row whose product
+belt ends at a feeder loads the bus, and a row whose input belt starts at a tap takes from it.
+
 ## steam.fk: a steam power plant, 3.6 MW (16x26)
 
 ```

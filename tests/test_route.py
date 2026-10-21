@@ -296,6 +296,33 @@ class SeveralDriversTest(unittest.TestCase):
                     if k.startswith("~") and e.name == "transport-belt")
         self.assertLessEqual(belts, 100)
 
+    def test_the_compact_mall_packs_its_rows(self):
+        # agent/docs/examples/compact-mall.fk (Rory, 2026-10-21): rows with no gap between chains
+        # and a 1-tile gap inside one; every product link one inserter, belts only for the plates
+        path = os.path.join(os.path.dirname(__file__), "..", "agent", "docs", "examples",
+                            "compact-mall.fk")
+        flat = elaborate_file(path, CAT)
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT)
+        self.assertEqual(r.failed, {})
+        direct = {l.split()[1].rstrip(":") for l in r.lines if l.endswith("(direct insertion)")}
+        self.assertEqual(set(flat.nets) - direct, {"fe", "cub"})
+        carriers = sum(1 for k, e in r.layout.entities.items()
+                       if k.startswith("~") and e.name in ("transport-belt", "underground-belt",
+                                                           "splitter"))
+        self.assertLessEqual(carriers, 70)
+
+    def test_rorys_bus_reads_as_one_literal(self):
+        # agent/docs/examples/bus4.json: his demo as placed, splitter priorities kept
+        from fkcore import literal
+        path = os.path.join(os.path.dirname(__file__), "..", "agent", "docs", "examples",
+                            "bus4.json")
+        rows, _wires = literal.read_entities(path)
+        self.assertEqual(len(rows), 227)
+        splitters = [r for r in rows if r[0] == "splitter"]
+        self.assertEqual(len(splitters), 12)
+        self.assertTrue(all("input_priority" in r[4].get("config", "") for r in splitters))
+
     def test_two_sushi_chests_into_two_chests(self):
         # the lab game's shape (games/lab-kxm): each consumer must get every driver's item
         flat, lay = build("""

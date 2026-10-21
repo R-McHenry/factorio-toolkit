@@ -1,0 +1,8 @@
+# bus4.fk: Rory's 4-belt bus (2026-10-21), a river of iron: four belts east (y 8..11 of its box),
+# one feeder from the south at x 11 that merges into all four by a staircase of splitters (input
+# priority on the feeder side: it fills belt after belt), and two taps that pull out by staircases of
+# splitters (north at x 26, south at x 33). bus4.json is the demo as Rory placed it.
+# Grow it by pasting it again further east, or by more feeders and taps of the same shape. A smelter
+# row whose product belt ends at a feeder's south end loads the bus; a row whose input belt starts at
+# a tap's end takes from it.
+bus = Literal<file="bus4.json"> @(0, 0)
