@@ -41,6 +41,10 @@ param   := name '=' value | flag        hint := '@(' x ',' y (',' 'rot' r)? ')' 
   `Chest<provider|storage|requester, item, rate>`, `Literal` (its entities are pinned in the `.fkp`,
   or `Literal<file="x.json", box="x0,y0,x1,y1">` imports a blueprint or entity list [built]), and
   modules. `duty=` caps any instance (a mall runs only while the network restocks).
+- `@(x, y, rot r)` puts the instance's frame, turned r quarter turns clockwise, with its top-left at
+  (x, y) of its module's frame. On a sub-module instance it turns the module's whole contents inside
+  the module's frame (its origin and its placed children's frames), the way a plot turns a factory;
+  each child's own rot adds to it [built].
 - **Templates expand visibly** [built: AsmRow, SmelterRow, MinerRow, LabRow, single machines]: an
   instance's fragment (machines, the belts and inserters of each role, attach points) is written into
   the `.fkp` under its keys, every carrier `net=` the net its role is bound to. Rows are counterflow

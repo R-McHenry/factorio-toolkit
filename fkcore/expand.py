@@ -4,11 +4,13 @@
 instance's keys (``red/m0``, ``red/f0``, ``red/in1b3``): from then on they are data, not code. A
 role is bound to the net its machines' endpoints sit on, which gives every carrier its ``net=``.
 Placement in V1 is manual: an instance's ``@(x, y, rot r)`` hint is the top-left of its turned
-frame, relative to its sub-module's own hint. A MinerRow with ``@patch(resource)`` and no
-``@(x, y)`` is placed on its ore by ``fkcore.placer`` (given the terrain in the factory frame,
-``ground``), after every pinned instance, so it keeps clear of them. Unplaced instances are listed,
-never guessed; the routes between attach points are the router's (the next step), so a factory
-expanded here has its template segments and none of the nets' own carriers yet.
+frame, relative to its sub-module's own hint; a sub-module instance's ``rot`` turns its whole
+contents inside the module's frame, the way a plot turns a factory (``_origin``). A MinerRow with
+``@patch(resource)`` and no ``@(x, y)`` is placed on its ore by ``fkcore.placer`` (given the
+terrain in the factory frame, ``ground``), after every pinned instance, so it keeps clear of them.
+Unplaced instances are listed, never guessed; the routes between attach points are the router's
+(the next step), so a factory expanded here has its template segments and none of the nets' own
+carriers yet.
 
 ``explain`` prints one instance both ways: the template line and the plain entities, nets and
 attach points it stands for. ``unfold`` replaces the template line with ``Literal`` and keeps every
@@ -172,18 +174,78 @@ def _param_text(v):
     return str(v)
 
 
-def _origin(flat, path):
-    """Absolute (x, y, rot) of an instance: its hint plus every enclosing module's hint."""
-    x = y = 0
-    parts = path.split("/")
-    for i in range(1, len(parts)):
-        hint = flat.insts["/".join(parts[:i])].hints.get("at")
-        if hint:
-            x, y = x + hint[0], y + hint[1]
+def _origin(flat, path, cat=None, size=(0, 0), frames=None):
+    """Absolute (x, y, rot) of an instance, None when it has no ``@(x, y)`` hint. ``size`` is
+    its own frame (w, h), unturned.
+
+    A module instance ``@(x, y, rot r)`` turns its whole contents r quarter turns clockwise inside
+    its frame (``_module_frame``), the way a plot turns a factory: a child's turned frame lands
+    where turning the module's frame puts it, then moves by (x, y), and the child's rot adds the
+    module's. Under unturned modules only the hints add up, so ``size`` and ``cat`` (for the
+    module frames; ``frames`` caches them) matter only under a turned one."""
     hint = flat.insts[path].hints.get("at")
     if hint is None:
         return None
-    return x + hint[0], y + hint[1], int(hint[2]) % 4
+    rot = int(hint[2]) % 4
+    w, h = size if rot % 2 == 0 else size[::-1]
+    box = (hint[0], hint[1], hint[0] + w, hint[1] + h)
+    parts = path.split("/")
+    for i in range(len(parts) - 1, 0, -1):            # the innermost module first
+        mod = "/".join(parts[:i])
+        mx, my, mr = flat.insts[mod].hints.get("at") or (0, 0, 0)
+        mr = int(mr) % 4
+        if mr:
+            box = _turn_box(box, mr, _module_frame(flat, mod, cat, frames))
+        box = (box[0] + mx, box[1] + my, box[2] + mx, box[3] + my)
+        rot += mr
+    return _clean(box[0]), _clean(box[1]), rot % 4
+
+
+def _turn_box(box, rot, frame):
+    """``box`` (x0, y0, x1, y1) inside ``frame`` (the same) turned ``rot`` quarter turns
+    clockwise, the turned frame's top-left on the frame's own."""
+    fx, fy = frame[0], frame[1]
+    size = (frame[2] - fx, frame[3] - fy)
+    ax, ay, _d = turn(box[0] - fx, box[1] - fy, None, rot, size)
+    bx, by, _d = turn(box[2] - fx, box[3] - fy, None, rot, size)
+    return min(ax, bx) + fx, min(ay, by) + fy, max(ax, bx) + fx, max(ay, by) + fy
+
+
+def _module_frame(flat, path, cat, frames=None):
+    """(x0, y0, x1, y1): module instance ``path``'s frame in its own coordinates, the box of its
+    origin and every placed child's turned frame. A child with no ``@(x, y)`` hint (unplaced, or
+    ``@patch``: placed in the factory frame), a pinned Literal (its entities stay where the
+    .fkp has them) and one whose fragment fails (its note says why) are not in it."""
+    if frames is not None and path in frames:
+        return frames[path]
+    x0 = y0 = x1 = y1 = 0
+    for child in flat.scopes[path].values():
+        hint = child.hints.get("at")
+        own = None if hint is None else _own_frame(flat, child.path, cat, frames)
+        if own is None:
+            continue
+        w, h = own[2] - own[0], own[3] - own[1]
+        if int(hint[2]) % 2:
+            w, h = h, w
+        bx, by = hint[0] + own[0], hint[1] + own[1]
+        x0, y0, x1, y1 = min(x0, bx), min(y0, by), max(x1, bx + w), max(y1, by + h)
+    if frames is not None:
+        frames[path] = (x0, y0, x1, y1)
+    return x0, y0, x1, y1
+
+
+def _own_frame(flat, path, cat, frames):
+    """An instance's unturned frame (x0, y0, x1, y1) in its own coordinates, or None."""
+    inst = flat.insts[path]
+    if inst.module is not None:
+        return _module_frame(flat, path, cat, frames)
+    if inst.kind == "Literal":
+        return None if inst.literal is None else (0, 0) + tuple(inst.literal[1])
+    try:
+        frag, _binding = fragment_of(flat, path, cat)
+    except FragmentError:
+        return None
+    return (0, 0) + tuple(frag.size)
 
 
 def expand_factory(flat, cat, previous=None, ground=None, log=None):
@@ -194,13 +256,14 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
     notes = []
     xmax = ymax = 0
     on_patch = []
+    frames = {}                                 # module path -> its frame, for turned modules
     for path, inst in flat.insts.items():
         if inst.module is not None:
             continue
         if inst.kind == "Literal" and inst.literal is not None:
             # imported from a file: placed by its hint like any fragment, keys from the import
             ents, size, _file_corner, sig = inst.literal
-            hint = _origin(flat, path) or (0, 0, 0)
+            hint = _origin(flat, path, cat, size, frames) or (0, 0, 0)
             x0, y0, rot = hint
             params = {k: _param_text(v) for k, v in inst.params.items()}
             lay.insts[path] = fkpmod.Inst(path, "Literal", params, x0, y0, rot, sig)
@@ -221,11 +284,10 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
                     lay.add(fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
                     xmax, ymax = _grow(cat, e, xmax, ymax)
             continue
-        at = _origin(flat, path)
-        if at is None and "patch" in inst.hints:
+        if "at" not in inst.hints and "patch" in inst.hints:
             on_patch.append(path)
             continue
-        if at is None:
+        if "at" not in inst.hints:
             notes.append(f"{path}: unplaced (no @(x, y) hint)")
             continue
         try:
@@ -233,6 +295,7 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
         except FragmentError as exc:
             notes.append(str(exc) if str(exc).startswith(path) else f"{path}: {exc}")
             continue
+        at = _origin(flat, path, cat, frag.size, frames)
         for e in _put(lay, path, inst, frag, binding, at, notes):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     for path in on_patch:
