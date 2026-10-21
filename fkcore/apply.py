@@ -9,7 +9,10 @@ marks that for deconstruction). Then, by mode:
   explain and the watch policy leaves to the apply (``NOBODY``) is ordered for deconstruction, an
   unbuilt ghost too (the game removes a ghost ordered out at once); ``MARKED`` and ``CLAIMED``
   ones stay. The paste must land where designed: a shifted paste is reported (``MISPLACED``),
-  never cleaned up.
+  never cleaned up. Scaffolding (1.7, :func:`scaffold`): a ``NOBODY`` pole or roboport on no
+  tile of the design stays up while the design's own poles (or roboports) in the area are not
+  all built, so a rebuild doesn't cut power or the robot network; the first apply after they
+  stand takes it up.
 - ``own`` (1.2, ``fkcore.own``): the record of what the applies pasted. The toolkit's own
   entities that the design dropped are ``NOBODY`` whatever the watch policy says, so a moved,
   shrunk or emptied plot, or a replaced row, leaves nothing behind; with no ``area`` the scope
@@ -53,7 +56,8 @@ from . import own as ownmod
 from .fkp import natural_key
 
 __all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
-           "force_for", "rip_points", "rip_load", "rip_minutes", "moved", "rip_report"]
+           "force_for", "scaffold", "rip_points", "rip_load", "rip_minutes", "moved",
+           "rip_report"]
 
 #: a rip worth a RIP check: this many minutes of robot time, or this many structures
 RIP_WARN_MIN, RIP_WARN_N = 3.0, 100
@@ -61,6 +65,8 @@ RIP_WARN_MIN, RIP_WARN_N = 3.0, 100
 RIP_VERDICTS = ("NOBODY", "WRONG")
 #: taken-up structures coming back as new ghosts of the same names: a factory moved
 MOVED_N = 30
+#: kinds an apply leaves standing until the design's own of that kind stand (1.7, scaffolding)
+SCAFFOLD_KINDS = ("electric-pole", "roboport")
 
 
 @dataclass
@@ -77,6 +83,7 @@ class ApplyReport:
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
+    held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
     own: dict | None = None            # the record of what the applies pasted, after this one
     chunks: int = 0
@@ -99,6 +106,10 @@ class ApplyReport:
             out.append(f"  play: {self.decon} NOBODY entities ordered for deconstruction"
                        + (f" ({self.dropped} of them the toolkit's own, dropped from the design)"
                           if self.dropped else "") + "; robots build the ghosts")
+            if self.held:
+                out.append(f"  scaffold: {self.held} old poles and roboports stay up until the "
+                           "design's own stand here, so power and robots keep running; the "
+                           "first apply after that takes them up")
         if self.relaid:
             items = sorted({i for v in self.relaid for i in v.wrong_items})
             out.append(f"  {len(self.relaid)} carriers laid under another net held "
@@ -193,11 +204,15 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     standing = []
     if mode != "lab" and policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own)
-        nobody = [(v.name, v.x, v.y) for v in before.verdicts if v.verdict == "NOBODY"]
+        held = scaffold(before, s, cat, area)
+        gone = [v for v in before.verdicts
+                if v.verdict == "NOBODY" and (v.name, v.x, v.y) not in held]
+        # the toolkit's own that still stand stay in the record: ordered out, or held up
         standing = [ownmod.at(v.name, v.x, v.y) for v in before.verdicts
                     if v.verdict == "NOBODY" and v.action == "own"]
-        rep.dropped = len(standing)
-        rep.decon = _decon(r, s.name, force, nobody)
+        rep.dropped = sum(1 for v in gone if v.action == "own")
+        rep.held = len(held)
+        rep.decon = _decon(r, s.name, force, [(v.name, v.x, v.y) for v in gone])
         # ordered out before the paste, so the paste lays a fresh one on each (a paste over the
         # same entity not ordered out places nothing, and the old items stay)
         rep.relaid = [v for v in before.verdicts if v.renet and v.wrong_items
@@ -253,6 +268,37 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.revive_failed = int(got[1]) if len(got) > 1 else 0
     rep.seconds = time.time() - t0
     return rep
+
+
+def scaffold(before, s, cat, area):
+    """What an apply leaves standing for now (1.7, Rory 2026-10-21: old poles and roboports stay
+    up until the new grid stands, so a rebuild doesn't cut power or the robot network; both
+    overnight players lost power to a re-laid grid): the built ``NOBODY`` poles and roboports on
+    no tile of the design, while a pole (or roboport) the design has in ``area`` is not built
+    yet (a ghost, missing, or under something else). One under a design tile goes as before (the
+    paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}."""
+    def kind(name):
+        try:
+            return cat.kind(name)
+        except KeyError:
+            return None
+
+    waiting = {kind(v.name) for v in before.verdicts
+               if v.verdict in ("GHOST", "MISSING", "WRONG") and kind(v.name) in SCAFFOLD_KINDS}
+    if not waiting:
+        return set()
+    taken = set()
+    for e in s.entities.values():
+        if _touches(e.tiles, area):
+            taken |= {tuple(t) for t in e.tiles}
+    out = set()
+    for v in before.verdicts:
+        if v.verdict != "NOBODY" or v.ghost or kind(v.name) not in waiting:
+            continue
+        tiles = {tuple(t) for t in cat.tiles(v.name, float(v.x), float(v.y), 0)}
+        if not tiles & taken:
+            out.add((v.name, v.x, v.y))
+    return out
 
 
 #: entities per decon order (one RCON command each; pastes go in 3000-character chunks)

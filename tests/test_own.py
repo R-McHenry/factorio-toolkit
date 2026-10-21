@@ -12,7 +12,7 @@ from unittest import mock
 from fkcore import apply as applymod, fkp, flow, link, own, scene, sense
 from fkcore.catalog import Catalog
 from tests.test_fkp import MINI
-from tests.test_sense import AREA, NETS, SURFACE, WATCH, live_as_designed, surface
+from tests.test_sense import AREA, NETS, SURFACE, WATCH, find, live_as_designed, surface
 
 CAT = Catalog.load()
 OLD_BELT = own.Row("nauvis:mini/~old/b0", "transport-belt", 16.5, 1.5, 4, "mini/old")
@@ -184,6 +184,39 @@ class ApplyTest(unittest.TestCase):
         rec = record_of(self.s, OLD_BELT)
         r, rep = self.run_apply(live, rec, area=(16, 0, 18, 3))      # only the old belt's tile
         self.assertEqual(r.ordered, [("transport-belt", 16.5, 1.5)])
+
+    def test_old_poles_stay_up_until_the_new_ones_stand(self):
+        # 1.7 (Rory, 2026-10-21): scaffolding. The design's pole is still a ghost, so the old one
+        # stays up and power keeps running; once the new one stands, the next apply takes it up
+        live = copy.deepcopy(live_as_designed(self.s))
+        find(live, "small-electric-pole", 13.5, 1.5)["ghost"] = True
+        live["things"].append(scene.thing(name="small-electric-pole", type="electric-pole",
+                                          x=16.5, y=3.5))
+        old = own.Row("nauvis:mini/power/p7", "small-electric-pole", 16.5, 3.5, None, None)
+        r, rep = self.run_apply(live, record_of(self.s, old))
+        self.assertEqual((r.ordered, rep.held, rep.decon, rep.dropped), ([], 1, 0, 0))
+        self.assertIn("scaffold: 1 old poles and roboports stay up until the design's own stand",
+                      "\n".join(rep.lines()))
+        self.assertIn(own.at("small-electric-pole", 16.5, 3.5), rep.own)   # still the toolkit's
+        find(live, "small-electric-pole", 13.5, 1.5)["ghost"] = False         # the new one stands
+        r, rep = self.run_apply(live, rep.own)
+        self.assertEqual((r.ordered, rep.held, rep.dropped),
+                         ([("small-electric-pole", 16.5, 3.5)], 0, 1))
+
+    def test_an_old_pole_on_the_design_s_ground_or_a_ghost_goes_at_once(self):
+        live = copy.deepcopy(live_as_designed(self.s))
+        find(live, "small-electric-pole", 13.5, 1.5)["ghost"] = True
+        live["things"].remove(find(live, "assembling-machine-1", 11.5, 3.5))  # m0 not built yet
+        under = own.Row("nauvis:mini/power/p8", "small-electric-pole", 11.5, 3.5, None, None)
+        ghost = own.Row("nauvis:mini/power/p9", "small-electric-pole", 16.5, 4.5, None, None)
+        live["things"] += [
+            scene.thing(name="small-electric-pole", type="electric-pole", x=11.5, y=3.5),
+            scene.thing(name="small-electric-pole", type="electric-pole", x=16.5, y=4.5,
+                        ghost=True)]
+        r, rep = self.run_apply(live, record_of(self.s, under, ghost))
+        self.assertEqual(sorted(r.ordered), [("small-electric-pole", 11.5, 3.5),
+                                             ("small-electric-pole", 16.5, 4.5)])
+        self.assertEqual(rep.held, 0)
 
     def test_the_decon_list_finds_a_ghost_by_the_entity_it_stands_for(self):
         lua = link.lua_decon_list("nauvis", "player", [("assembling-machine-1", 25.5, 3.5)])

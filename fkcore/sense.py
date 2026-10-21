@@ -67,6 +67,7 @@ class Verdict:
     action: str | None = None         # mark | keep | revert | strict | own, for a foreign change
     wrong_items: list = field(default_factory=list)
     renet: str | None = None          # the net the toolkit pasted this carrier under, if another
+    ghost: bool = False               # NOBODY: an unbuilt ghost, not a built entity (1.7)
 
     def __str__(self):
         where = f"{_fmt(self.x)},{_fmt(self.y)}"
@@ -249,7 +250,8 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             why = ("ordered out: robots take it up" if t.get("decon") else
                    "dropped from the design: the next apply removes it")
             verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], mine.key,
-                                    f"the toolkit's own, {why}", None, "own"))
+                                    f"the toolkit's own, {why}", None, "own",
+                                    ghost=bool(t["ghost"])))
             changes.append(f"{what}: the toolkit's own ({mine.key}), {why.split(':')[0]} "
                            f"({region}); {why.split(': ')[1]}")
             continue
@@ -272,7 +274,8 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             owners[i] = "NOBODY"
             verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], None,
                                     "the next apply removes it" if action == "revert" else
-                                    "unattributed (strict)", actor, action))
+                                    "unattributed (strict)", actor, action,
+                                    ghost=bool(t["ghost"])))
         changes.append(f"{what}: {'built by ' + actor if actor != 'unknown' else 'no last_user'}"
                        f" ({region}, {action}){'; ' + hint if hint else ''}")
     marks, taken = [], set(surface.marks)

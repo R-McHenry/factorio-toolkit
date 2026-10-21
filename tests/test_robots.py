@@ -65,6 +65,51 @@ class RobotsTest(unittest.TestCase):
         self.assertIn("nothing to judge against", lines[0])
 
 
+FAR = ("fkp 1 factory t\nsize 80x12\ninst m Literal at 0,0 rot 0 sig -\n"
+       "e m/c0 passive-provider-chest 2.5,2.5\n")
+
+
+class PinnedRoboportsTest(unittest.TestCase):
+    """1.7 (Rory, 2026-10-21: pin and patch): a rebuild keeps the roboports that stand, so the
+    robot network doesn't move under a factory that only grew."""
+
+    def own(self, lay):
+        return {(e.key, e.name, e.x, e.y) for e in lay.entities.values() if e.owner == "robots"}
+
+    def test_a_pinned_roboport_and_its_chest_stay_and_new_ones_only_fill_gaps(self):
+        first, _rep = robots.apply_robots(fkp.loads(FAR), CAT, storage="storage-chest")
+        self.assertEqual({k for k, *_r in self.own(first)}, {"robots/r0", "robots/s0"})
+        grown = fkp.loads(FAR + "e m/c1 passive-provider-chest 70.5,2.5\n")
+        pinned = [e for e in first.entities.values() if e.owner == "robots"]
+        out, rep = robots.apply_robots(grown, CAT, storage="storage-chest", pinned=pinned)
+        self.assertTrue(self.own(first) <= self.own(out))
+        self.assertEqual({k for k, *_r in self.own(out)},
+                         {"robots/r0", "robots/s0", "robots/r1", "robots/s1"})
+        self.assertEqual((rep.pinned, rep.covered, rep.chests), (1, 2, 2))
+        self.assertIn("2 roboports (1 kept where they stand), 2 storage chests", rep.summary())
+        self.assertEqual(fkp.invariants(out, CAT), [])
+
+    def test_a_pinned_roboport_that_reaches_no_chest_goes(self):
+        far = [fkp.Entity("robots/r0", "roboport", 70, 6), fkp.Entity("robots/s0", "storage-chest",
+                                                                       67.5, 4.5)]
+        out, rep = robots.apply_robots(fkp.loads(FAR), CAT, storage="storage-chest", pinned=far)
+        port, = [e for e in out.entities.values() if e.name == "roboport"]
+        self.assertLess(port.x, 30)                               # by the chest, laid anew
+        self.assertEqual(rep.pinned, 0)
+        self.assertNotIn(("robots/s0", "storage-chest", 67.5, 4.5), self.own(out))
+
+    def test_a_pinned_roboport_under_a_new_entity_goes(self):
+        first, _rep = robots.apply_robots(fkp.loads(FAR), CAT)
+        port, = [e for e in first.entities.values() if e.name == "roboport"]
+        over = fkp.loads(FAR + f"e m/a assembling-machine-1 {port.x - 0.5},{port.y - 0.5} "
+                               "recipe=iron-gear-wheel\n")
+        out, rep = robots.apply_robots(over, CAT, pinned=[port])
+        self.assertEqual(rep.pinned, 0)
+        self.assertNotIn((port.x, port.y), {(e.x, e.y) for e in out.entities.values()
+                                            if e.name == "roboport"})
+        self.assertEqual(fkp.invariants(out, CAT), [])
+
+
 KIT = [fkp.Entity("kit/r0", "roboport", 8, 8)]
 
 

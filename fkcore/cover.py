@@ -25,13 +25,20 @@ tiles, plot edges and anything else to keep clear come in as ``keep_out``. The s
    that can be joined: a BFS over free spots, each step within wire reach, inside the box around
    both components plus ``BRIDGE_PAD`` tiles. A component nothing can join stays apart, reported.
 3. **Prune**: drop each new pole, newest first, whose entities other poles power too and whose
-   removal splits no component. Greedy cover leaves a few of those.
+   removal splits no component. Greedy cover leaves a few of those. The wired neighbours of a
+   pole that went are looked at again (a bridge to it can be idle now).
 
 New poles are numbered north to south, then west to east. Poles already under ``owner`` and named
 ``p<k>`` are the previous run's: they are ignored (neither obstacle nor wire node) and
 :func:`apply_cover` replaces them; every other pole in the layout is an existing wire node that is
-never moved. What cannot be done is a report line, never raised: ``NO_POWER`` for an entity no
-free spot can power (with what takes the spots), ``POWER_SPLIT`` for a pole component left apart.
+never moved. 1.7 (Rory, 2026-10-21: rebuilds pin what stands and patch, they don't regenerate):
+``pinned`` poles, the committed .fkp's own ``p<k>``, stay where they still fit (no new entity or
+keep-out tile under them) and power what they reach, so a rebuild adds poles only where coverage
+is missing and never re-lays the grid that stands (both overnight players lost power to a re-laid
+grid). New poles take numbers after the pinned ones; the prune step drops a pinned pole only when
+it powers nothing at all and joins nothing (a new pole never replaces a standing one). What
+cannot be done is a report line, never raised: ``NO_POWER`` for an entity no free spot can power
+(with what takes the spots), ``POWER_SPLIT`` for a pole component left apart.
 
 Taken from C:\\fk-lead\\repo (d6018d3), copied, never imported: from fk\\power.py ``cover`` (the
 greedy cover, its tie-break, existing poles as wire nodes, the bridge loop), ``unpowered`` and
@@ -79,6 +86,7 @@ class CoverReport:
     pruned: int                    # greedy picks dropped again as redundant
     existing: int                  # poles already in the layout (wire nodes)
     checks: list = field(default_factory=list)      # [Check]: NO_POWER, POWER_SPLIT
+    pinned: int = 0                # of ``poles``, the committed ones kept where they stand (1.7)
 
     @property
     def ok(self):
@@ -89,9 +97,11 @@ class CoverReport:
 
     def summary(self):
         s = "" if self.components == 1 else "s"
+        kept = f"{self.pinned} kept where they stand, " if self.pinned else ""
         return (f"cover {self.owner} power pole={self.pole}: {len(self.poles)} poles "
-                f"({self.bridges} bridging, {self.existing} existing); {self.covered}/{self.total} "
-                f"electric entities covered; {self.components} wire component{s}")
+                f"({kept}{self.bridges} bridging, {self.existing} existing); "
+                f"{self.covered}/{self.total} electric entities covered; "
+                f"{self.components} wire component{s}")
 
 
 @dataclass
@@ -370,11 +380,12 @@ def _check_args(lay, cat, pole, owner):
         raise ValueError(f"{pole} is not an electric pole in the catalog")
 
 
-def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=()):
+def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=()):
     """``(poles, report)``: the poles to add to ``lay`` and a :class:`CoverReport`.
 
     ``keep_out`` is an iterable of ``(x, y)`` tiles no pole may use (a route's tiles, a reserved
-    lane). ``lay`` is not changed.
+    lane). ``pinned``: the committed poles to keep where they still fit (they come back among
+    ``poles``, under their own keys). ``lay`` is not changed.
     """
     _check_args(lay, cat, pole, owner)
     s, wire = cat.pole_supply(pole), cat.pole_reach(pole)
@@ -398,6 +409,22 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
             electric.append((e.key, _rect(tiles)))
     ground = _Ground(taken, {(math.floor(x), math.floor(y)) for x, y in keep_out}, lay.size,
                      cat.size(pole))
+
+    # The committed poles that still fit: kept as they stand (wire nodes, prunable last).
+    kept = []
+    for e in sorted(pinned, key=lambda e: natural_key(e.key)):
+        try:
+            tiles = fkp.tiles_of(cat, e)
+        except (KeyError, ValueError):
+            continue
+        spot = (min(x for x, _y in tiles), min(y for _x, y in tiles))
+        if e.name != pole or not ground.free(spot):
+            continue
+        ground.place(spot)
+        kept.append(_Node(float(e.x), float(e.y), s, wire, key=e.key, spot=spot))
+    keep_keys = {n.key for n in kept}
+    fixed = len(existing)                        # the layout's own wire nodes, never pruned
+    existing = existing + kept
 
     def powered(rect, nodes):
         return any(_overlap(rect, n.x, n.y, n.supply) for n in nodes)
@@ -460,11 +487,18 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         groups = _groups(nodes)
 
     # 3. Prune: a new pole whose entities others power too, and whose loss splits nothing, goes.
+    # New poles first (newest first), then the pinned ones, and a standing pole only when it
+    # powers nothing at all (a new one never replaces it). A bridge kept to join a pole that went
+    # is looked at again.
     rects = [rect for _k, rect in electric]
+    order = [n for n in reversed(nodes) if n.spot is not None and n.key not in keep_keys] + \
+            [n for n in reversed(nodes) if n.key in keep_keys]
     pruned = 0
-    for k in range(len(nodes) - 1, len(existing) - 1, -1):
-        n = nodes[k]
-        rest = nodes[:k] + nodes[k + 1:]
+    while order:
+        n = order.pop(0)
+        if n.key in keep_keys and any(_overlap(r, n.x, n.y, n.supply) for r in rects):
+            continue
+        rest = [m for m in nodes if m is not n]
         if any(not powered(r, rest) for r in rects if _overlap(r, n.x, n.y, n.supply)):
             continue
         regrouped = _groups(rest)
@@ -473,14 +507,21 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         nodes, groups = rest, regrouped
         ground.lift(n.spot)
         pruned += 1
+        # A neighbour kept only to join this one may be idle now: it is looked at again.
+        order += [m for m in rest if m.spot is not None and _wired(m, n)
+                  and all(m is not o for o in order)]
 
-    # Keys north to south, then west to east; the report.
-    new = sorted((n for n in nodes if n.spot is not None), key=lambda n: (n.spot[1], n.spot[0]))
-    poles = [Entity(f"{owner}/p{k}", pole, n.x, n.y) for k, n in enumerate(new)]
+    # Keys north to south, then west to east, after the pinned ones'; the report.
+    new = sorted((n for n in nodes if n.spot is not None and n.key not in keep_keys),
+                 key=lambda n: (n.spot[1], n.spot[0]))
+    top = max([int(k.rsplit("/p", 1)[1]) for k in keep_keys] + [-1]) + 1
+    poles = [Entity(f"{owner}/p{top + k}", pole, n.x, n.y) for k, n in enumerate(new)]
     key_of = {id(n): e.key for n, e in zip(new, poles)}
     for n in nodes:
         if n.key is not None:
             key_of[id(n)] = n.key
+    still = [n for n in nodes if n.key in keep_keys]
+    poles += [Entity(n.key, pole, n.x, n.y) for n in still]
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
@@ -499,7 +540,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
                             f"{fkp.fmt(wire)} tiles apart joins them"))
     rep = CoverReport(owner, pole, [e.key for e in poles], len(electric),
                       len(electric) - len(uncovered), len(groups), uncovered, splits,
-                      sum(1 for n in new if n.bridge), pruned, len(existing), checks)
+                      sum(1 for n in new if n.bridge), pruned, fixed, checks, len(still))
     return poles, rep
 
 
@@ -532,10 +573,10 @@ def _why_not(ground, rect, s, pole, size):
     return f"all {len(spots)} spots a {pole} could power it from are taken: " + "; ".join(parts)
 
 
-def apply_cover(lay, cat, pole="medium-electric-pole", owner="power", keep_out=()):
-    """A new Layout: ``lay`` without ``owner``'s previous poles, with the new ones and the record
-    ``cover <owner> power pole=<pole>``. ``lay`` is not changed."""
-    poles, _rep = cover_power(lay, cat, pole, owner, keep_out)
+def apply_cover(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=()):
+    """A new Layout: ``lay`` without ``owner``'s previous poles, with the pinned ones that still
+    fit, the new ones and the record ``cover <owner> power pole=<pole>``. ``lay`` is not changed."""
+    poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned)
     out = copy.deepcopy(lay)
     out.entities = {k: e for k, e in out.entities.items() if not _is_own_pole(e, owner, cat)}
     old = out.covers.get(owner)

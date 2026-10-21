@@ -89,6 +89,31 @@ class FlowTest(unittest.TestCase):
         self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 LEAK",
                       self.read("out/report_checks.txt"))
 
+    def test_a_moved_row_keeps_the_poles_that_stand(self):
+        # 1.7 (Rory, 2026-10-21: pin and patch): a rebuild keeps the committed poles where they
+        # still fit, so the grid that stands is not re-laid; cover power --fresh lays it anew
+        def poles():
+            lay = fkp.load(os.path.join(self.dir, "main.fkp"))
+            return {(e.key, e.x, e.y) for e in lay.entities.values() if e.owner == "power"}
+
+        self.build()
+        first = poles()
+        src = self.read("main.fk").replace("@(16, 45)", "@(16, 47)")       # labs, 2 down
+        with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(src)
+        code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        self.assertIn("40 poles (37 kept where they stand, 0 bridging, 0 existing); 185/185",
+                      self.read("out/cover_power.txt"))
+        self.assertEqual(len(first & poles()), 37)
+        script = self.read("nauvis.build.fkb").replace("cover power", "cover power --fresh")
+        with open(self.script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(script)
+        code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        self.assertNotIn("kept where they stand", self.read("out/cover_power.txt"))
+        self.assertLess(len(first & poles()), 37)
+
     def test_from_and_to_use_the_checkpoints(self):
         self.build(to="tier")
         self.assertFalse(os.path.exists(os.path.join(self.dir, "main.fkp")))

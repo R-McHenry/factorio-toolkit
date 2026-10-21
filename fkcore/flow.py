@@ -587,7 +587,19 @@ def s_tier(ctx, args):
     return lines + [note], checks
 
 
+def _own(prev, owner, prefix):
+    """The committed .fkp's own entities of cover ``owner`` keyed ``<owner>/<prefix><k>``."""
+    if prev is None:
+        return []
+    pat = re.compile(re.escape(prefix) + r"\d+")
+    return [e for e in prev.entities.values()
+            if e.owner == owner and pat.fullmatch(e.key[len(owner) + 1:])]
+
+
 def s_cover_power(ctx, args):
+    """Poles for every electric entity (``fkcore.cover``). 1.7 (Rory, 2026-10-21: pin and patch):
+    the committed poles stay where they still fit and new ones go only where coverage is missing;
+    ``--fresh`` lays every pole anew, as before."""
     o = _opts(args, pole="medium-electric-pole")
     try:
         from . import cover
@@ -597,8 +609,10 @@ def s_cover_power(ctx, args):
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         keep_out = _frame_blocked(ctx, factory, lay.size)
-        _poles, rep = cover.cover_power(lay, ctx.cat, pole=o["pole"], keep_out=keep_out)
-        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"], keep_out=keep_out)
+        pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
+        _poles, rep = cover.cover_power(lay, ctx.cat, pole=o["pole"], keep_out=keep_out,
+                                        pinned=pinned)
+        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"], keep_out=keep_out, pinned=pinned)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}"
                      + (f"; {len(keep_out)} terrain tiles kept out" if ctx.ground is not None
@@ -621,7 +635,9 @@ def s_cover_robots(ctx, args):
     """Roboports so every logistic chest of a factory is in a logistic area (``fkcore.robots``);
     before ``cover power`` in the script, so the poles power them. A chest the surface's network
     already reaches (the kit's roboport and every roboport joined to it) needs none (1.2), and
-    each roboport placed gets a storage chest beside it (``--storage none``: no chest)."""
+    each roboport placed gets a storage chest beside it (``--storage none``: no chest). 1.7 (pin
+    and patch): the committed roboports and their chests stay where they still fit and reach a
+    chest; ``--fresh`` places them all anew, as before."""
     from . import robots
     o = _opts(args, roboport="roboport", storage="storage-chest")
     if ctx.surface is not None and ctx.surface.mode == "lab":
@@ -637,8 +653,11 @@ def s_cover_robots(ctx, args):
     for factory, lay in list(ctx.layouts.items()):
         near = robots.served(places, infra, ctx.layouts, factory, ctx.cat)
         keep_out = _frame_blocked(ctx, factory, lay.size)        # no roboport or chest on water
+        prev = ctx.previous.get(factory)
+        pinned = [] if o.get("fresh") is True else \
+            _own(prev, "robots", "r") + _own(prev, "robots", "s")
         new, rep = robots.apply_robots(lay, ctx.cat, keep_out=keep_out, roboport=o["roboport"],
-                                       served=near, storage=storage)
+                                       served=near, storage=storage, pinned=pinned)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]

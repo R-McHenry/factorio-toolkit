@@ -108,6 +108,38 @@ class CoverTest(unittest.TestCase):
                          "(0 bridging, 0 existing); 1/1 electric entities covered; "
                          "1 wire component")
 
+    def test_pinned_poles_stay_and_new_ones_only_fill_gaps(self):
+        # 1.7 (Rory, 2026-10-21: pin and patch): a rebuild that adds a machine keeps the poles that
+        # stand and adds one only where the new machine has none (it used to re-lay all of them)
+        lay = L(ROW, "12x7")
+        first, _rep = cover_power(lay, CAT)
+        grown = L(ROW + "e r/m4 assembling-machine-1 13.5,3.5 recipe=iron-gear-wheel\n", "16x7")
+        poles, rep = cover_power(grown, CAT, pinned=first)
+        kept = {(p.key, p.x, p.y) for p in first}
+        self.assertTrue(kept <= {(p.key, p.x, p.y) for p in poles})
+        self.assertEqual(rep.pinned, len(first))
+        self.assertEqual(audit(grown, poles), ([], 1))
+        new = [p for p in poles if (p.key, p.x, p.y) not in kept]
+        self.assertTrue(all(int(p.key.rsplit("p", 1)[1]) >= len(first) for p in new))
+        self.assertIn(f"{len(first)} kept where they stand", rep.summary())
+
+    def test_a_pinned_pole_under_a_new_entity_goes(self):
+        lay = L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel", "6x6")
+        first, _rep = cover_power(lay, CAT)                       # power/p0 at 3.5,0.5
+        moved = L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel\n"
+                  "e m/c wooden-chest 3.5,0.5", "6x6")
+        poles, rep = cover_power(moved, CAT, pinned=first)
+        self.assertEqual(rep.pinned, 0)
+        self.assertNotIn((3.5, 0.5), {(p.x, p.y) for p in poles})
+        self.assertEqual(audit(moved, poles), ([], 1))
+
+    def test_a_pinned_pole_that_powers_nothing_goes(self):
+        far = [fkp.Entity("power/p0", MEDIUM, 3.5, 0.5), fkp.Entity("power/p1", MEDIUM, 20.5, 0.5)]
+        lay = L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel", "24x6")
+        poles, rep = cover_power(lay, CAT, pinned=far)
+        self.assertEqual([(p.key, p.x, p.y) for p in poles], [("power/p0", 3.5, 0.5)])
+        self.assertEqual((rep.pinned, rep.pruned), (1, 2))        # p1, and the bridge laid to it
+
     def test_apply_adds_the_poles_and_the_record(self):
         lay = L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel", "6x6")
         out = apply_cover(lay, CAT)

@@ -17,7 +17,9 @@ A factory without logistic chests gets none (building it is the network's job). 
 ``<owner>/s<k>``, so what robots take up nearby is stored nearby (1.2: the run's rebuilds far
 from spawn sent every taken-up item 110 tiles to the kit's chests). Run it before ``cover
 power``, so the poles power the roboports too. :func:`apply_robots` returns the layout with them
-and ``cover robots robots``.
+and ``cover robots robots``. 1.7 (Rory, 2026-10-21: pin and patch): the committed roboports
+(``pinned``) stay where they still fit and still reach a chest, so a rebuild adds roboports only
+where none reaches and never moves the network that stands.
 
 :func:`check_surface` judges a composed surface: roboports join one logistic network when their
 logistic squares meet (centres at most twice the radius apart on both axes); the **main** network
@@ -48,14 +50,17 @@ _Port = namedtuple("_Port", "key name x y plot")
 
 class RobotReport:
     def __init__(self, owner, roboports, chests, covered, uncovered, served=0, storage=(),
-                 no_room=0):
+                 no_room=0, pinned=0):
         self.owner, self.roboports, self.chests, self.covered, self.uncovered = (
             owner, roboports, chests, covered, uncovered)
         self.served, self.storage, self.no_room = served, list(storage), no_room
+        self.pinned = pinned           # of ``roboports``, the committed ones kept where they stand
         self.checks = [Check("NO_ROBOTS", key, why) for key, why in uncovered]
 
     def summary(self):
         text = f"cover {self.owner} robots: {len(self.roboports)} roboports"
+        if self.pinned:
+            text += f" ({self.pinned} kept where they stand)"
         if self.storage or self.no_room:
             text += f", {len(self.storage)} storage chests beside them"
             if self.no_room:
@@ -80,10 +85,13 @@ def _is_own(e, owner):
 
 
 def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", served=(),
-                 storage=None):
+                 storage=None, pinned=()):
     """-> (new Entities: roboports keyed ``<owner>/r<k>`` and, with ``storage`` (a chest
     prototype), a storage chest beside each keyed ``<owner>/s<k>``; RobotReport). ``served``:
-    [(x, y, radius)] logistic squares of the surface's network in this factory's frame."""
+    [(x, y, radius)] logistic squares of the surface's network in this factory's frame.
+    ``pinned``: the committed .fkp's own ``r<k>`` / ``s<k>`` (1.7, pin and patch): a roboport
+    that still fits and still reaches a chest of the factory stays where it stands, and so does
+    its storage chest where that still fits; new roboports go only where no kept one reaches."""
     r = _radius(cat, roboport, "logistic_radius")
     ents = sorted(lay.entities.values(), key=lambda e: natural_key(e.key))
     chests = [e for e in ents if e.name in LOGISTIC_CHESTS and not _is_own(e, owner)]
@@ -98,8 +106,35 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", ser
             taken[t] = e.key
     w, h = cat.size(roboport)
     ground = _Ground(taken, set(map(tuple, keep_out)), lay.size, (w, h))
+    avoid = _hands_and_fronts(cat, ents) if storage else set()
+    old = {e.key[len(owner) + 1:]: e for e in pinned if _is_own(e, owner)}
+    kept, kept_chests = [], {}
+    for local in sorted((k for k in old if k.startswith("r")), key=natural_key):
+        e = old[local]
+        try:
+            tiles = fkp.tiles_of(cat, e)
+        except (KeyError, ValueError):
+            continue
+        spot = (min(x for x, _y in tiles), min(y for _x, y in tiles))
+        if e.name != roboport or not ground.free(spot) or not any(
+                _inside(float(c.x), float(c.y), float(e.x), float(e.y), r) for c in chests):
+            continue
+        ground.place(spot)
+        kept.append((int(local[1:]), spot, float(e.x), float(e.y)))
+    for k, _spot, _x, _y in kept:
+        c = old.get(f"s{k}")
+        if c is None or not storage or c.name != storage:
+            continue
+        try:
+            tile = min(fkp.tiles_of(cat, c))
+        except (KeyError, ValueError):
+            continue
+        if _free_tile(ground, tile, avoid):
+            ground.placed.add(tile)
+            kept_chests[k] = tile
     left = [c for c in chests if c not in outside
-            and not any(_inside(float(c.x), float(c.y), float(p.x), float(p.y), r) for p in existing)]
+            and not any(_inside(float(c.x), float(c.y), float(p.x), float(p.y), r) for p in existing)
+            and not any(_inside(float(c.x), float(c.y), x, y, r) for _k, _s, x, y in kept)]
     placed = []
     if left:
         cx = sum(float(c.x) for c in left) / len(left)
@@ -129,13 +164,15 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", ser
         placed.append((spot, px, py))
         left = [c for c in left if not _inside(float(c.x), float(c.y), px, py, r)]
     placed.sort(key=lambda p: (p[2], p[1]))
+    top = max([k for k, *_rest in kept] + [-1]) + 1      # new ones are numbered after the kept
+    ports = [(k, spot, x, y) for k, spot, x, y in kept] + \
+            [(top + k, spot, x, y) for k, (spot, x, y) in enumerate(placed)]
     news = [Entity(f"{owner}/r{k}", roboport, _clean(x), _clean(y), None, {})
-            for k, (_spot, x, y) in enumerate(placed)]
+            for k, _spot, x, y in ports]
     chests_out, no_room = [], 0
     if storage:
-        avoid = _hands_and_fronts(cat, ents)
-        for k, (spot, _x, _y) in enumerate(placed):
-            tile = _beside(ground, spot, avoid)
+        for k, spot, _x, _y in ports:
+            tile = kept_chests.get(k) or _beside(ground, spot, avoid)
             if tile is None:
                 no_room += 1
                 continue
@@ -145,8 +182,17 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", ser
     uncovered = [(c.key, "no free 4x4 spot inside the factory's frame reaches it") for c in left]
     rep = RobotReport(owner, [e.key for e in news], len(chests), len(chests) - len(left),
                       uncovered, served=len(outside), storage=[e.key for e in chests_out],
-                      no_room=no_room)
+                      no_room=no_room, pinned=len(kept))
     return news + chests_out, rep
+
+
+def _free_tile(ground, t, avoid):
+    """True when a 1x1 chest fits on tile ``t``: inside the frame, on no entity, keep-out or
+    placed tile, and off ``avoid``."""
+    size = ground.size
+    if size is not None and not (0 <= t[0] < size[0] and 0 <= t[1] < size[1]):
+        return False
+    return not (t in ground.taken or t in ground.keep_out or t in ground.placed or t in avoid)
 
 
 def _hands_and_fronts(cat, ents):
@@ -164,13 +210,9 @@ def _beside(ground, spot, avoid):
             + [(i + w, y) for y in range(j, j + h)]
             + [(x, j + h) for x in range(i + w, i - 2, -1)]
             + [(i - 1, y) for y in range(j + h - 1, j - 1, -1)])
-    size = ground.size
     for t in ring:
-        if size is not None and not (0 <= t[0] < size[0] and 0 <= t[1] < size[1]):
-            continue
-        if t in ground.taken or t in ground.keep_out or t in ground.placed or t in avoid:
-            continue
-        return t
+        if _free_tile(ground, t, avoid):
+            return t
     return None
 
 
@@ -179,10 +221,10 @@ def _clean(v):
 
 
 def apply_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", served=(),
-                 storage=None):
+                 storage=None, pinned=()):
     """A new Layout: ``lay`` without ``owner``'s previous roboports and storage chests, with the
-    new ones."""
-    news, rep = cover_robots(lay, cat, owner, keep_out, roboport, served, storage)
+    new ones (the pinned ones that stay among them)."""
+    news, rep = cover_robots(lay, cat, owner, keep_out, roboport, served, storage, pinned)
     out = copy.deepcopy(lay)
     out.entities = {k: e for k, e in out.entities.items() if not _is_own(e, owner)}
     if news or owner in out.covers:
