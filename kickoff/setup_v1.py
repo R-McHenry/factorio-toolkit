@@ -16,6 +16,10 @@ Steps, each one RCON call (``fkcore.link``: 5 s, nothing registered):
    roboport (8,8) with 50 construction + 50 logistic robots, 6 solar panels, 2 accumulators, the
    7 panel poles, and three crude-oil wells north of spawn (Rory 2026-10-18).
 2. **kit**: six storage chests holding the settled kit (93 medium poles: 100 with the bootstrap).
+   Small on purpose (Rory, 2026-10-21: the player owns its supplies and manages the scarce
+   logistic chests), with 10 burner mining drills added that day: a kit of plates and no drill
+   deadlocked the lead world when its starter iron went to belts first (every electric drill
+   takes plates; a burner drill mines on the kit's coal).
 3. **rules**: robot speed 1 and cargo 1 only, steam power and electronics granted (there is no
    character to unlock them by hand), every player a spectator, no crash site.
 
@@ -52,7 +56,7 @@ KIT = [("roboport", 5), ("assembling-machine-1", 3), ("medium-electric-pole", 93
        ("copper-plate", 200), ("iron-ore", 400), ("copper-ore", 400), ("coal", 200),
        ("stone", 200), ("transport-belt", 200), ("inserter", 50), ("long-handed-inserter", 20),
        ("fast-inserter", 20), ("pipe", 200), ("iron-chest", 1), ("underground-belt", 20),
-       ("splitter", 10)]
+       ("splitter", 10), ("burner-mining-drill", 10)]
 RESEARCH = {"worker-robots-speed-1": True, "worker-robots-storage-1": True, "steam-power": True,
             "electronics": True}
 RESEARCH.update({f"worker-robots-speed-{n}": False for n in range(2, 8)})

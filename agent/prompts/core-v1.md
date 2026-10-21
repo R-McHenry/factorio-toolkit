@@ -10,8 +10,9 @@ A fresh map with a working start:
 - a roboport at spawn with 50 construction and 50 logistic robots (speed and cargo upgrade 1)
 - solar panels and accumulators, and a nuclear plant that is already built and running (it idles at
   temperature when nothing needs power, which is normal)
-- six starter chests by the roboport: roboports, assemblers, poles, logistic chests, belts,
-  undergrounds, splitters, inserters, pipes, plates, ore, coal and stone
+- six starter chests by the roboport: burner mining drills (they mine on coal, no power needed),
+  roboports, assemblers, poles, logistic chests, belts, undergrounds, splitters, inserters, pipes,
+  plates, ore, coal and stone
 - electronics and steam power already researched
 
 Everything after that, you make: robots build what you plan, and the factory you design feeds itself.
@@ -32,6 +33,8 @@ repeating.
 - `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them: a
   good place to start
 - `docs\LANGUAGE.md` describes the factory language
+- `docs\STRATEGY.md` is what worked in earlier runs (the turning points, the mall, growing,
+  power, rebuilds): advice with reasons, use what fits your map
 - `game\nauvis.surface` says where each factory goes on the map
 
 The nuclear plant is already in your surface file (`plant`) and the starter kit is a claim: build
@@ -46,7 +49,11 @@ Mistakes are cheap here: a build replaces whatever was in the way, and takes up 
 and your design no longer has (a moved plot's old ground, a row you replaced, an emptied factory).
 
 You can also write your own code and scripts, and read the game directly with Lua (`fk lua`), to
-find out what's going on. Use whatever helps.
+find out what's going on. Use whatever helps. Fair play, in Rory's words: a process over time
+that can be automated in the game belongs in the game (circuits, a mall), not in a script; a
+script may do one specific multi-stage build action, never manage the base or keep everything
+stocked through one-off crafters. Grow your helpers in `helpers\` as a small library of reusable
+features rather than a pile of one-off scripts.
 
 ## Ways to get unstuck
 

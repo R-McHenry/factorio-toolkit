@@ -232,11 +232,14 @@ fine (a file of 40 kB works). A big answer is better written to a file
 (`ssh computah-ct`); `run.json` names the toolkit there (`host_toolkit`: `fkcore.link.Rcon` is
 the RCON client) and your game codebase there (`host_game`).
 
-Use it to look and to understand. Changes go through the game: `fk build` (ghosts and robots),
-and a script of yours can fix things the same way, by taking up the belts and inserters that hold
-stale items so the next build lays them again (`fk fresh` does just that). Nothing is created,
-refilled or moved by script. The link refuses Lua that registers an event handler, a command or
-an interface: that made every save unjoinable once.
+Use it to look and to understand. Changes go through the game: `fk build` (ghosts and robots).
+A script of yours may do one specific multi-stage build action the same way (`fk fresh` is one:
+it takes up the belts, inserters and crafter output that hold stale items, so the next build lays
+them again). A process over time that the game can automate (circuits, a mall) belongs in the
+game, not in a script that manages the base or keeps everything stocked through one-off
+crafters. Nothing is created, refilled or moved by script. The link refuses Lua that registers an
+event handler, a command or an interface: that made every save unjoinable once. Reusable helpers
+go in `helpers\` (its README says how).
 
 ## The surface file
 

@@ -184,6 +184,26 @@ def miner_row(n, resource, outputs, drill="electric-mining-drill"):
     return ents, roles, (3 * north, 7 if south else 4)
 
 
+def burner_miner_row(n, resource, inputs, outputs, drill="burner-mining-drill"):
+    """A row of 2x2 burner drills (Rory's kit, 2026-10-21: burner drills mine on the kit's coal
+    before there are plates for electric ones). One-sided: the fuel belt north (in1), one fast
+    inserter into each drill, the drills facing south onto the product belt (counterflow, west),
+    which runs under every drill (facing south, a burner drill drops below its east half).
+    ``MinerRow<n, resource, drill=burner-mining-drill, fuel=coal>``; the fuel net binds to in1."""
+    inputs = _inputs(inputs, "MinerRow (burner)", most=1)
+    ents = _belt("in1b", "in1", 0, 0, 2 * n)
+    machines = []
+    for k in range(n):
+        ents.append(FEnt(f"f{k}", _INSERTER, 2 * k + 0.5, 1.5, N, "in1"))
+        ents.append(FEnt(f"m{k}", drill, 2 * k + 1, 3, S, None, {"resource": resource}))
+        machines.append(f"m{k}")
+    ents += [FEnt(f"outb{j}", "transport-belt", j + 0.5, 4.5, W, "out") for j in range(2 * n)]
+    roles = {"in1": Role("in1", "in", inputs[0], machines, [(0.5, 0.5, E)]),
+             "out": Role("out", "out", outputs[0] if outputs else [resource], machines,
+                         [(0.5, 4.5, W)])}
+    return ents, roles, (2 * n, 5)
+
+
 def lab_row(n, inputs):
     """Labs west to east. in1 north (inserters), in2 south. A third belt (1.1, from the 0534
     player's own patch) runs north of in1: long-handed inserters reach over in1 to it, and
@@ -376,8 +396,10 @@ FRAGMENTS = {
                                       p.get("machine", "assembling-machine-1")),
     "SmelterRow": lambda p, i, o: smelter_row(int(p["n"]), p["_recipe"], i, o,
                                               p.get("machine", "stone-furnace"), p.get("_fuel")),
-    "MinerRow": lambda p, i, o: miner_row(int(p["n"]), p["resource"], o,
-                                          p.get("drill", "electric-mining-drill")),
+    "MinerRow": lambda p, i, o: (
+        burner_miner_row(int(p["n"]), p["resource"], i, o, p["drill"])
+        if str(p.get("drill", "")).startswith("burner") else
+        miner_row(int(p["n"]), p["resource"], o, p.get("drill", "electric-mining-drill"))),
     "LabRow": lambda p, i, o: lab_row(int(p["n"]), i),
     "Bus": lambda p, i, o: _bus(p),
 }
