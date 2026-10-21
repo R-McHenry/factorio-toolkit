@@ -257,6 +257,28 @@ class SeveralDriversTest(unittest.TestCase):
         self.assertIn("transport-belt", names)
         self.assertIn("1 inserter (direct insertion), then", r.lines[0])
 
+    def test_direct_insertion_never_costs_a_net(self):
+        # 1.4.1 (the router review): a net 1.3 routed with belts must still route. Here the direct
+        # inserters took every side of the requester the belt tree needed (b2), and a direct
+        # inserter stood on the net's own belt end into a row (a1); both nets failed in 1.4.
+        b2 = build("""
+            inbox = Chest<requester, item=iron-plate>   @(10, 10)
+            a1    = Assembler<recipe=iron-gear-wheel>   @(9, 6)
+            a2    = Assembler<recipe=iron-gear-wheel>   @(9, 12)
+            a3    = Assembler<recipe=iron-gear-wheel>   @(6, 9)
+            box   = Chest<provider>                     @(11, 10)
+            a5    = Assembler<recipe=iron-gear-wheel>   @(20, 20)
+            net p: inbox -> a1, a2, a3, a5
+        """)
+        connected(self, b2[0], route.route_layout(*b2, CAT))
+        a1 = build("""
+            s   = Assembler<recipe=transport-belt>        @(10, 10)
+            m   = Assembler<recipe=splitter>              @(14, 10)
+            row = AsmRow<n=1, recipe=underground-belt>    @(13, 7, rot 3)
+            net x: s -> m, row
+        """)
+        connected(self, a1[0], route.route_layout(*a1, CAT))
+
     def test_the_early_mall_links_its_products_by_inserters(self):
         # agent/docs/examples/early-mall.fk (Rory, 2026-10-20): every product link one inserter,
         # belts only for the iron, copper and circuit feeds

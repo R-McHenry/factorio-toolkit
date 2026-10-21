@@ -527,9 +527,9 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
         if not pairs:
             continue
         grid = _Bounded(_ground(cat, ents, frames, js, net, terrain), box)
-        mine = set()
+        mine, ends = set(), set(js[net].ends())
         for src, dst in pairs:
-            got = _direct_pair(src, dst, grid, taken | mine)
+            got = _direct_pair(src, dst, grid, taken | mine | ends)
             if got:
                 mine.add((math.floor(got["x"]), math.floor(got["y"])))
         if mine:
@@ -559,11 +559,15 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
     belts to the underground, splitter and red belt assemblers beside it), and only the rest is
     laid as a belt tree from the driver."""
     grid = _Bounded(blocked, box, spans)
+    # 1.4.1 (the router review): a direct inserter never stands on the net's own belt ends, and
+    # when the belt tree for the consumers left can't get out (the direct inserters and other
+    # nets' claims took every side of the driver), the whole net is laid as a tree, as before 1.4
+    ends = set(job.ends())
     if len(job.sources) == 1 and not job.starts and job.taps:
         (_sk, src), = job.sources
         taken, direct, rest = set(), [], []
         for key, rect in job.taps:
-            got = _direct_pair(src, rect, grid, taken)
+            got = _direct_pair(src, rect, grid, taken | ends)
             if got:
                 direct.append(got)
                 taken.add((math.floor(got["x"]), math.floor(got["y"])))
@@ -579,16 +583,16 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
                 plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
             else:
                 plan, how = _tree_job(cat, sub, set(blocked) | taken, spans, clear, box, limit)
-            if plan is None:
-                return None, how
-            return direct + plan, f"{n}, then {how}"
+            if plan is not None:
+                return direct + plan, f"{n}, then {how}"
+            return _hub_search(cat, job, blocked, spans, clear, box, limit)
     if len(job.taps) == 1 and len(job.sources) > 1 and not job.starts and not job.goals:
         # several machine drivers beside one consumer machine: each hands to it by an inserter
         # of its own (1.4); only the drivers left are laid as a belt tree into it
         (_tk, dst), = job.taps
         taken, direct, rest = set(), [], []
         for key, rect in job.sources:
-            got = _direct_pair(rect, dst, grid, taken)
+            got = _direct_pair(rect, dst, grid, taken | ends)
             if got:
                 direct.append(got)
                 taken.add((math.floor(got["x"]), math.floor(got["y"])))
@@ -600,9 +604,9 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
                 return direct, n
             sub = NetJob(job.net, taps=list(job.taps), sources=rest, owners=list(job.owners))
             plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
-            if plan is None:
-                return None, how
-            return direct + plan, f"{n}, then {how}"
+            if plan is not None:
+                return direct + plan, f"{n}, then {how}"
+            return _hub_search(cat, job, blocked, spans, clear, box, limit)
     return _hub_search(cat, job, blocked, spans, clear, box, limit)
 
 
