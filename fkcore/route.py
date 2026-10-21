@@ -516,6 +516,29 @@ def _direct(cat, job, grid):
     return [got] if got else None
 
 
+def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
+    """{net: tiles} for the direct inserters of every net with one machine driver, picked before
+    any route is laid, so no other net's tree is laid over them: trees are routed first (by their
+    belt ends), and a mall's machine-to-machine nets have none. Greedy, net by net, one inserter
+    per tile."""
+    taken, out = set(), {}
+    for net in sorted(todo):
+        job = js[net]
+        if len(job.sources) != 1 or job.starts or not job.taps:
+            continue
+        grid = _Bounded(_ground(cat, ents, frames, js, net, terrain), box)
+        (_k, src), = job.sources
+        mine = set()
+        for _key, rect in job.taps:
+            got = _direct_pair(src, rect, grid, taken | mine)
+            if got:
+                mine.add((math.floor(got["x"]), math.floor(got["y"])))
+        if mine:
+            out[net] = mine
+            taken |= mine
+    return out
+
+
 def _hub_job(cat, job, blocked, spans, clear, box, limit):
     """hub: merge every driver into a trunk, split it to every consumer. -> (plan, how).
 
@@ -729,13 +752,18 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     w, h = lay.size or (0, 0)
     box = bounds or (0, 0, w + margin, h + margin)
     retries = len(todo) if retries is None else retries
+    claims = _direct_claims(cat, js, todo, list(lay.entities.values()), frames, box, terrain)
     best = None
     order = list(todo)
     for attempt in range(retries + 1):
         ents = list(lay.entities.values())
         added, failed, how = {}, {}, {}
         for net in order:
-            got, why = _route_one(cat, js[net], ents, frames, js, box, limit, terrain)
+            avoid = set()
+            for other, tiles in claims.items():
+                if other != net:
+                    avoid |= tiles
+            got, why = _route_one(cat, js[net], ents, frames, js, box, limit, terrain, avoid)
             if got is None:
                 failed[net] = why
                 continue
