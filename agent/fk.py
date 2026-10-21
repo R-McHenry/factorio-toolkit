@@ -6,9 +6,9 @@ run) and ``run.json``, which names the game host, the host's copy of the run and
 toolkit (also pinned: files a running session uses never change under it). Each command:
 
 1. runs where it belongs. Design and every pure command run here, where the CPU is (elaborate,
-   rates, place, route, cover, floorplan, checks, write_layout). Whatever reads or writes the game
-   runs on the host, where RCON is: diff, apply, a live look, measure, alerts, stats, chart,
-   terrain, chat.
+   rates, plan, place, route, cover, floorplan, checks, write_layout). Whatever reads or writes
+   the game runs on the host, where RCON is: diff, apply, a live look, measure, alerts, stats,
+   chart, terrain, chat.
 2. keeps the two copies of ``game\\`` in step: what changed here is pushed before a host step, and
    what the host wrote is pulled after it. Changed means content (``out\\.synced`` keeps each
    file's hash at the last sync), a pull keeps a file edited here since (the next push sends
@@ -47,8 +47,8 @@ GAME = os.path.join(RUN, "game")
 STAMP = os.path.join(GAME, "out", ".synced")
 
 #: commands that are pure: they run here, on the run's own toolkit
-LOCAL = {"rates", "check", "explain", "unfold", "render", "layout", "split-to-chest", "merge",
-         "insert", "chests-to-net", "net-to-chests"}
+LOCAL = {"rates", "plan", "check", "explain", "unfold", "render", "layout", "split-to-chest",
+         "merge", "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "alerts", "stats", "chart", "read-terrain", "measure", "adopt",
         "sense", "research", "tech", "recipes", "lua", "fresh"}

@@ -50,6 +50,43 @@ marks it GHOST SHORT or GHOST LOCKED (below), and waiting won't change that.
 Every command ends with the game's new alerts (grouped per kind), Rory's new chat lines and the
 research line (`RESEARCH: NONE` when nothing researches).
 
+## How many machines and drills for a rate
+
+`fk rates` checks a factory you have written; `fk plan` sizes one before you write it, from an
+item and a rate or from the machines you want on that item:
+
+```
+fk plan chemical-science-pack --machines 15
+                                 what 15 blue science assemblers take, every step down to the ore
+fk plan chemical-science-pack 1/s
+                                 the same for a rate (60/min, 0.5/h; a bare number is /s)
+fk plan electronic-circuit 10/s --raw iron-plate,copper-plate
+                                 the plates come from elsewhere: plan only the rest
+```
+
+One line per item of the recipe tree: the rate it takes (/s and /min), its recipe and machine, and
+how many machines that is (`machines` as a fraction, `build` rounded up). Under an item that feeds
+several recipes, `for ...` says how much each one takes, which is what its net carries to each row.
+Then the raw inputs: ore and coal (furnace fuel included) with their electric mining drills, crude
+oil with its pumpjacks, water with its offshore pumps. For 15 blue science assemblers that is 11.25
+iron and 7.03 copper plates a second: 36 + 23 stone furnaces and 15 more for steel, then 23 iron,
+15 copper and 7 coal drills.
+
+The plan runs every machine at full speed, without modules or beacons: assembling-machine-2 for
+crafting, stone furnaces burning coal for smelting, chemical plants, oil refineries, and electric
+drills at 0.5 ore/s. These change it:
+
+- `--asm assembling-machine-1` or `--asm assembling-machine-3`
+- `--furnace steel-furnace` or `--furnace electric-furnace` (no coal)
+- `--mining-productivity N`: your research level, +10% ore a level
+- `--recipe ITEM=RECIPE`: the recipe for an item that has several (the notes name them)
+
+Petroleum gas comes from basic oil processing, the oil recipe the research opens first. With
+`--recipe petroleum-gas=advanced-oil-processing` it comes from advanced oil processing, without
+cracking, and the heavy and light oil nothing takes show as `surplus` (a refinery stops when one
+of its outputs is full). Pumpjacks are counted at 100% yield, 10 crude oil a second each: a well's
+yield is in its tooltip.
+
 ## What `fk look` says
 
 Every designed entity in the area gets a verdict:
@@ -127,6 +164,8 @@ fixing in the source.
 ## When you need something
 
 ```
+fk plan ITEM RATE                the machines, furnaces and drills a rate takes, every step down to
+                                 the ore (fk plan ITEM --machines N: what N machines take)
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
 fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them, and

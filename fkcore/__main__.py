@@ -5,6 +5,10 @@ use the game link, and only with FK_LINK=on)
     check FILE.fk                         netlist checks (report lines, never a gate)
     rates FILE.fk [--unbounded NET,...] [--share appetite|level] [--chain INST,...]
                                           the nominal rate model and its asserts
+    plan ITEM RATE | plan ITEM --machines N [--asm A] [--furnace F] [--mining-productivity L]
+         [--recipe ITEM=RECIPE,...] [--raw ITEM,...]
+                                          the other way round: the machines, furnaces and
+                                          drills a rate takes, per item of its recipe tree
     layout FILE.fk [--render]             expand placed instances into FILE.fkp (the writer
                                           refuses a layout that breaks an invariant)
     explain FILE.fk INST                  one instance as a template and as entities and nets
@@ -74,7 +78,7 @@ import os
 import re
 import sys
 
-from . import compose, expand, fkp, flow, rates
+from . import compose, expand, fkp, flow, plan, rates
 from . import surface as surfacemod
 from .catalog import Catalog
 from .elaborate import ElabError, elaborate_file
@@ -415,6 +419,20 @@ def _read_terrain(a):
     return 0
 
 
+def _plan(a, cat):
+    """``plan ITEM RATE`` or ``plan ITEM --machines N`` (fkcore.plan): Rory, 2026-10-21, asked
+    whether an agent can easily work out how many miners 15 blue science assemblers need."""
+    try:
+        rate = None if a.rate is None else plan.parse_rate(a.rate)
+        p = plan.plan(cat, a.item, rate, a.machines, a.asm, a.furnace, a.mining_productivity,
+                      plan.parse_recipes(a.recipe), [x for x in a.raw.split(",") if x])
+    except plan.PlanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(plan.report(p))
+    return 0
+
+
 def _render(lay, cat):
     w, h = lay.size
     surface = fkp.loads(f"fkp 1 surface view\nplot {lay.name} at 0,0 rot 0 size {w}x{h}\n")
@@ -447,6 +465,20 @@ def main(argv=None):
     r.add_argument("--unbounded", default="")
     r.add_argument("--share", default="appetite", choices=("appetite", "level"))
     r.add_argument("--chain", default="")
+    pl = sub.add_parser("plan", description="the machines, furnaces and drills a rate takes, "
+                        "per item of its recipe tree (fkcore.plan)")
+    pl.add_argument("item")
+    pl.add_argument("rate", nargs="?", help="1/s, 60/min or 0.5/h (a bare number is /s)")
+    pl.add_argument("--machines", type=float, metavar="N",
+                    help="what N machines of ITEM's recipe make")
+    pl.add_argument("--asm", default="assembling-machine-2", choices=plan.ASSEMBLERS)
+    pl.add_argument("--furnace", default="stone-furnace", choices=plan.FURNACES)
+    pl.add_argument("--mining-productivity", type=int, default=0, metavar="LEVEL",
+                    help="the research level: +10%% ore a level")
+    pl.add_argument("--recipe", default="", metavar="ITEM=RECIPE,...",
+                    help="make ITEM with RECIPE (petroleum-gas=advanced-oil-processing)")
+    pl.add_argument("--raw", default="", metavar="ITEM,...",
+                    help="items that come in from elsewhere: not planned further")
     lo = sub.add_parser("layout")
     lo.add_argument("file")
     lo.add_argument("--render", action="store_true")
@@ -568,6 +600,8 @@ def main(argv=None):
     if a.cmd == "adopt":
         return _adopt(a, cat)
 
+    if a.cmd == "plan":
+        return _plan(a, cat)
     if a.cmd == "render":
         print(_render(fkp.load(a.file), cat))
         return 0
