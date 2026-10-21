@@ -32,7 +32,7 @@ Kept current through the night; the last check-in is the last line of the timeli
 | folder | `C:\fk-player\runs\20261020-2005-core-v1` | `C:\fk-player\runs\20261021-0110-lead-world` |
 | game | the live host, computah-ct (biters) | a laptop server, RCON 27099 (peaceful), fresh map |
 | player | Claude Opus 5.5 in `claude_loop.py`, auto mode | the same, with the lead's notes pack |
-| toolkit | 1.4.2 (`ba0b9ce`) since 02:11 | 1.4.2 (`ba0b9ce`) since 02:11 |
+| toolkit | 1.4.2 (`ba0b9ce`) from 02:11, `9659789` (the labs line) from 10:37 | the same |
 
 ## What happened
 
@@ -116,6 +116,19 @@ Kept current through the night; the last check-in is the last line of the timeli
   minutes). Both loops restarted onto it at 10:37, and within seconds both players went for
   the starved pack: "Research is stalled on blue", "Now green science is short (3 of 4 makers
   lack ingredients)".
+
+## This morning, with Rory in the lead world
+
+- 10:50 his scaling hint to both players (about 10 red and 10 green science assemblers before blue,
+  8 to 15 each of blue, advanced circuit and engine assemblers, a proper dedicated mall, grow
+  exponentially), with the numbers it implies (1 pack/s of each colour: about 1170 iron and 600
+  copper plates a minute). It is in the brief for new runs ("Grow big", `8b93bd6`).
+- 11:00 his mall layout (rows, no gap between chains, a 1-tile gap inside one) to both players,
+  and as `docs\examples\compact-mall.fk`: 23 nets, 21 single inserters, 64 route carriers.
+- 11:05 his 4-belt bus demo (his ghosts at -77,145 in the lead world), read into
+  `docs\examples\bus4.json` (a Literal, splitter priorities kept), to both players with
+  `9125139`. Proposed as sessions: `fk plan` (machines and drills for a target rate; started) and
+  a Bus template that nets load into and tap out of.
 
 ## For you
 
