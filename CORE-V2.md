@@ -10,7 +10,7 @@ test server (`tools/laptop_server.py`, Factorio 2.0.77) before code relies on it
 | version | a net is | the router | the model |
 |---|---|---|---|
 | V1 | connected or not; one net per belt, both lanes | trees of belts, splitters and undergrounds; no side-loads | nominal, no capacity |
-| V2 | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; lays no side-loads; two nets that share a belt somewhere share it everywhere | capacity per connector, the load, routed rates |
+| V2 | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; tier per connector; lays no side-loads; two nets that share a belt somewhere share it everywhere | the flow solver: flow, load, starved and blocked machines, routed rates |
 | 2.x | as V2 | knows side-loads: 2-to-1 merges, and lane separation (a splitter, then an underground side-load per net) | as V2 |
 | V2.1 | k lanes in one step (2, 3, ...): the bus | lays k-lane nets | as V2 |
 
@@ -24,15 +24,16 @@ plans odd lane counts. [open, V2.1: steer to whole belts, or let it be]
   2). It carries half the tier's belt rate: yellow 7.5/s, red 15, blue 22.5, turbo 30.
 - **width**: the lanes a net takes. V2: 1, and 2 for a two-sided MinerRow. V2.1: any.
 - **tier**: transport, fast, express, turbo (belts, undergrounds and splitters alike).
-- **connector** [proposed]: one lane of one carrier on a net's route (a belt, an underground pair,
-  a splitter), and each inserter, side-load joint and pump. The report groups a run of connectors
-  that carry the same flow.
-- **flow**: what the rate model says a connector carries, in items/s.
-- **capacity**: the most a connector can carry.
-- **load** = flow / capacity. **A net's load** is the largest over its connectors (Rory), at its
-  **critical connector**.
-- **binds**: a connector binds when its capacity is what stops more flow; a machine binds when its
-  speed, duty, inputs or outputs do.
+- **connector** (Rory): one lane of one carrier (a belt, an underground, a splitter half), or one
+  inserter, side-load joint or pump. The report groups a run of connectors that carry the same flow.
+- **capacity**: the most a connector can carry, in items/s.
+- **flow**: what the flow solver says a connector carries. **required**: what it would carry with
+  no capacities anywhere.
+- **load** = flow / capacity, at most 1. **required ratio** = required / capacity; a net's required
+  ratio is the largest over its connectors (Rory), at its **critical connector**.
+- **binds**: a connector binds when it runs at capacity while a consumer below it is starved; a
+  machine binds when its speed, duty, inputs or outputs do.
+- **starved** consumer: it gets less than its demand. **blocked** driver: its output backs up.
 
 ## Lane physics
 
@@ -51,23 +52,25 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
 
 ## Nets, carriers and the record
 
-- A lane holds at most one net, so a belt holds at most two. The layout assigns nets to lanes (Rory).
+- A lane or an inserter can carry several nets, as long as they all go to the same sink (Rory):
+  one inserter feeding a furnace ore from one lane and coal from the other carries two nets into
+  one furnace. The nets on a lane share its capacity. Most lanes carry one net, so a belt mostly
+  holds one or two.
 - Lanes are layout, never source: the `.fk` names no lane. A template sets lanes by its own
   geometry and enforces them at its inputs (Rory); the router records the lane its net's items
   are on.
 - The two-sided MinerRow stays: it is the 99.9% template (Rory). [proposed] Its ore is one net on
   both lanes, north drills on L, south drills on R.
 - `.fkp` [proposed]: a belt, underground or splitter line carries `net=iron|coal` (L|R),
-  `net=iron|` (L only) or `net=|coal`. A V1 `net=iron` means both lanes, so every V1 layout stays
-  valid and nothing in the world changes until a design uses lanes. Inserters, pipes and pumps
-  keep one `net=`.
-- Invariants [proposed]: two nets on one lane; a belt line with a lane net beside a whole-belt net.
-- Checks: `LANE` [proposed]: a net's items land on a lane the layout gives another net (`LEAK` at
-  lane level). `UG_SIDELOAD` goes: a side-loaded underground is a valid connection for the
-  open-side lane and a blocked one for the other (Rory). `SHARED_BELT` (1.1 spec, never built)
-  goes: two nets on one belt is normal now.
+  `net=iron|` (L only) or `net=|coal`, and `net=ore+fuel|` for two nets on one lane. A V1
+  `net=iron` means both lanes, so every V1 layout stays valid and nothing in the world changes
+  until a design uses lanes. Inserters, pipes and pumps keep their `net=` (`+` for several).
+- Checks [proposed]: `LANE` when a net's items land on a lane the layout gives other nets, or nets
+  share a lane or an inserter without going to the same sink (`LEAK` at lane level).
+  `UG_SIDELOAD` goes: a side-loaded underground is a valid connection for the open-side lane and a
+  blocked one for the other (Rory). `SHARED_BELT` (1.1 spec, never built) goes.
 - `WRONG_LANE` goes (Rory): an item gets no leniency for being on the right belt in the wrong net.
-  An item on a lane whose net doesn't carry it is `WRONG_ITEM`, per lane. The snapshot already
+  An item on a lane whose nets don't carry it is `WRONG_ITEM`, per lane. The snapshot already
   reads each lane, and only adds them up today.
 
 ## The router in V2.0 (Rory)
@@ -77,60 +80,91 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
 - Two nets that share a belt on one connector share it on every connector: the router lays them as
   one pair.
 - Otherwise one net per routed belt, on one lane. The templates own the lane joins at their inputs.
-- The tier comes from the model, per net, with flags: only yellow; at most N red belts; minimize
-  (the slowest tier that carries the flow) or maximize (the fastest available).
-  [open: per net or per connector]
+- The tier is chosen per connector, from the model, with flags: only yellow; at most N red belts;
+  minimize (the slowest tier that carries the flow) or maximize (the fastest available).
 - No direct insertion where a net's flow is above a threshold: a lane, or what the lab finds.
   Inserters bind early.
 - 2.x: side-loads as merges (the smelter stack's side-loader) and lane separation (a splitter,
   then each branch side-loads an underground that passes only its own net).
 
-## Throughput [proposed; still being brainstormed]
+## Flow [proposed: Rory's approach, written out]
 
-**Flow per connector.** V2 routes are trees: a merge tree from the drivers into a trunk and a split
-tree from it to the consumers, plus the rows' own belts with one inserter tap per machine. On a
-tree, every connector's flow follows from the nominal model's endpoint rates:
+The flow model works per net on the **lane graph** of a layout: one node per connector (each lane
+of each belt, underground and splitter half, each inserter, each pump), and the machines at the
+ends. An edge is one way items move, by the lane physics above. Every connector i has a capacity
+c_i: a lane its tier's lane rate, an inserter its rate (below), a pump 1200/s, a pipe none.
 
-    flow(c) = min(what the drivers upstream of c put on its lane, what the consumers downstream of c take)
+The rate model gives each driver d a supply s_d and each consumer k a demand r_k (items/s,
+nominal). The solver finds the flow f_i on every connector that the game would settle to:
 
-On the split side that is the consumers below it, on the merge side the drivers above it, and on the
-trunk the whole net. Along a row's input belt it falls after each tap. Each lane is its own
-connector: a two-sided MinerRow's north drills fill L, its south drills R. [open: a route that is
-not a tree]
+1. **Bounds.** 0 <= f_i <= c_i. A driver puts out at most s_d; a consumer takes at most r_k.
+2. **Conservation.** In steady state a connector stores nothing: what enters it leaves it, onward
+   or into the inserters that pick from it.
+3. **Belt order.** First come, first served along a lane: the inserters that pick from it are served
+   in belt order, each taking min(what is left, its demand, its rate).
+4. **Splitters** split each lane evenly between their outputs; when one output can't take its half,
+   the other takes the rest. When both outputs are full, they take evenly from the two inputs.
+5. **Merges.** Where a lane is offered more than it carries (a side-load, two branches joining), the
+   inputs are served evenly: an input offering less than its share keeps all of it, and the others
+   share the rest. [lab: whether items already on the lane go ahead of a side-load]
+6. **Back-pressure.** What a connector is offered but can't pass backs up: everything above it
+   carries less, a splitter above it sends more to its other output, and a driver whose output
+   backs up slows down.
 
-**Capacity per connector.** A lane: its tier's lane rate. A side-load joint: the target lane, since
-both incoming lanes squeeze into it. An inserter: its rate (below). A pump: its rate. A pipe: none.
+**The solver** (Rory): start from an even split along the topology (every splitter halves, every
+consumer asks its demand, no capacities), then repeat until the flows stop changing:
 
-**Load.** load(c) = flow(c) / capacity(c), and the net's load is the largest (Rory). Below 1, the
-route carries what the machines ask and the machines bind. Above 1, the carriers bind, and the
-load says by how much: 1.33 needs a lane a third faster, or a second lane in V2.1.
+- backward, from the consumers up: each connector's acceptance a_i = min(c_i, what its own
+  inserters want + the acceptance of what it feeds); a consumer accepts its demand;
+- forward, from the drivers down in topological order: each connector passes min(its inflow, a_i),
+  split among its outputs evenly but never above an output's acceptance (water-filling); a merge
+  admits its inputs evenly up to its acceptance;
+- what an input offered but was not admitted lowers its acceptance for the next round, so the
+  splitter above it sends that part the other way.
 
-**Routed rates.** Solve the model again with every connector over 1 as a cap on the endpoints
-behind it (the consumers it leads to, or the drivers it drains), shared by appetite like a short
-net in V1. Caps only lower flows, so only the connectors over 1 in the nominal pass can bind (a
-sink takes what is left: check those once more). The binding chain names the connector.
+Flows only fall toward what the capacities admit, so it settles; a cap on rounds covers a ring of
+belts.
 
-**Report.** `report_rates` runs before routing (the rows' own connectors: an inserter that can't
-keep up already shows here) and again after `route` (the routed ones). `CAPACITY` is a warning per
-net over 1, naming the critical connector, its flow and its capacity.
+**What it reports**, once it settles:
 
-**The tier choice reads the loads.** Minimize: each connector gets the slowest tier at or above its
-flow. Only yellow: no choice, and the loads report. At most N red: upgrade the highest loads
-first. Maximize: the fastest tier available everywhere. A tunnel's two ends change tier together;
-the router lays tunnels at the yellow reach, so any upgrade fits.
+- per connector: flow, capacity, load; whether it binds.
+- per consumer: delivered / demand. Below 1 it is starved, and belt order says which ones: the
+  last ones along the lane.
+- per driver: delivered / supply. Below 1 it is blocked: its output backs up and it slows.
+- per net: delivered / min(supply, demand), its binding connectors, and its required ratio (from
+  the first pass, with no capacities): how much faster its critical connector would have to be.
+- for the whole factory: the same over every net.
+
+**With the rate model.** The delivered rates cap the machines (a starved consumer and a blocked
+driver run slower), the rate model solves again, and the two alternate until they agree: V1's
+damped fixed point, one level up. Belt order also closes V1's known gap: V1 shares a short net by
+appetite, while the game serves the first machines along the belt (agent `TOOLKIT.md`).
+
+**Later: Rory's "giga brain option".** The full matrix of driver-to-consumer paths, with a flow per
+path: for nets that share lanes toward different sinks, and for the router. A linear-algebra or
+max-flow formulation could solve the same physics. For now max-flow is a check: the solver never
+delivers more than the max flow.
+
+**Tier per connector** (Rory). From the required flows, minimize gives each connector the slowest
+tier that carries its flow, "at most N red" upgrades the highest required ratios first, and
+maximize takes the fastest tier available. A tunnel's two ends change tier together; tunnels are
+laid at the yellow reach, so any upgrade fits. The router test case (Rory): at most X red belts on
+a line of Y miners into Z smelters. The flow rises along the miners, peaks between the last miner
+and the first smelter, and falls along the smelters, so the red belts go in the middle and the ends
+stay yellow.
 
 An example, on paper: a MinerRow of 20 drills (10 ore/s, 5 on each lane) into a row of 32 stone
 furnaces that takes ore on one lane of an ore|coal belt.
 
-| connector | flow | capacity | load |
+| connector | required | capacity | required ratio |
 |---|---|---|---|
 | the miner belt, L and R | 5/s each | 7.5/s | 0.67 |
 | the smelter row's head: both ore lanes side-loaded onto L | 10/s | 7.5/s | **1.33** |
-| one furnace's feeder (a fast inserter) | 0.33/s | about 2.3/s | 0.14 |
+| one furnace's feeder (a fast inserter) | 0.33/s | 2.5/s | 0.13 |
 
-Net ore has a load of 1.33 at the smelter row's head, so the report has a `CAPACITY` line, and the
-routed model runs the row at 75%. In the game, the first 24 furnaces run and the last 8 starve. A
-red input lane, a second smelter row, or V2.1's two lanes fixes it.
+The solver delivers 7.5/s past the row's head: the first 24 furnaces run and the last 8 starve
+(belt order), and the drills are blocked to 75%. A red input lane, a second smelter row, or
+V2.1's two lanes fixes it.
 
 ## Inserters
 
@@ -146,14 +180,52 @@ red input lane, a second smelter row, or V2.1's two lanes fixes it.
   set by research (the force's inserter and bulk bonuses), and quality later. On paper the hand is
   1; live, it is the force's. A bulk inserter's hand is 1 + the bulk bonus, a stack inserter's
   5 + it.
-- An inserter is one connector, one lane: two nets through one inserter share its rate.
-  [open: one net, or several, through a shared inserter]
+- An inserter is one connector with one lane: every net through it shares its rate, and they all
+  go to its one target (Rory).
 
-## The benchmark (Rory)
+## The benchmark: Rory's smelter stack
 
-The smelter stack with opposing splitters side-loading onto opposing belts: the design that proves
-V2 out, and a template after that. [open: its exact layout. A blueprint string of it would let the
-toolkit import it as a `Literal`, judge its lanes and loads, and compare that with the lab]
+Rory pasted it as ghosts on nauvis (x 86 to 109, y 108 to 117, 105 ghosts; read once, read-only,
+saved as `games/v2-bench/smelter-stack-ghosts.json`): a unit 11 tiles wide that tiles east to west,
+pasted twice with the start of a third. One unit (F a stone furnace, `i>` an inserter dropping
+east, `U` an underground entrance and `u` an exit, `S` a splitter half, each with its flow):
+
+```
+      86 87 88 89 90 91 92 93 94 95 96
+108    ^  .  F  F  .  v  .  F  F  .  ^
+109    ^ i>  F  F i>  v i<  F  F i<  ^
+110    ^ i>  F  F i> Uv i<  F  F i<  ^
+111    ^  .  F  F  .  .  .  F  F  .  ^
+112    ^  .  .  .  v  < S<  .  .  .  ^
+113    ^ U< u< Sv Sv U< S< u<  .  .  ^
+114    ^  <  <  <  >  >  >  >  >  >  ^
+115    .  .  . S^ S^ uv  .  .  .  .  .
+116    .  .  .  ^  .  v  .  .  .  .  .
+117    .  .  .  ^  .  v  .  .  .  .  .
+```
+
+- Ore comes in from the south at x 89, and a splitter facing north (y 115) halves it.
+- Coal runs west along y 113 through every unit, passing under the input columns by undergrounds.
+  In each unit a splitter facing west (x 92) sends half of what reaches it round to a splitter
+  facing south (y 113), and passes the rest west to the next unit.
+- The two splitters face each other across y 114, where two belts run apart. Each gets ore
+  side-loaded from the south and coal from the north, so each carries ore on one lane and coal on
+  the other: 2-to-1 merges, both lanes of a splitter output onto one lane (V1's judge sees the same
+  8 side-load edges in the two units).
+- The west belt turns north at x 86 and the east one at x 96: the two input columns. One plain
+  inserter per furnace picks both lanes into it: two nets through one inserter into one sink.
+- The plates go onto the middle belt (x 91, flowing south): the west column's inserters fill its
+  left lane, the east column's its right. An underground (y 110 to 115) takes it under the
+  manifold and out to the south.
+- The stack grows north (the ghost has 2 furnaces per column). At 24 per column a unit eats a full
+  yellow belt of ore (15/s) and makes a full belt of plates, with every ore lane at exactly its
+  capacity.
+
+What V2 has to get right on it: the 2-to-1 side-loads (a required ratio of exactly 1 at 24
+furnaces per column, so a 25th starves), the coal chain of splitters (an even split first, then
+each unit takes its fuel and passes the rest on), the underground pass-throughs, and two nets
+through one inserter. [lab: measure a few tiled units, with ore and coal from loaders and the
+plates into a chest, as the solver's ground truth]
 
 ## Lab tests (a laptop test server, never the live game)
 
@@ -163,17 +235,14 @@ two-item belt into a furnace, an assembler and a chest; side-loads onto belts an
 underground ends; splitters; drill drops; inserter rates per type at three research levels,
 chest to chest, from a moving belt and onto one; a full yellow belt; the prototype values.
 
-Still to measure: a single lane per tier and the faster loaders; dropping onto a faster belt at
-hand 3 and up; a splitter with one output blocked; a machine's fluid port.
+Still to measure: the benchmark's throughput; whether items already on a lane go ahead of a
+side-load; a single lane per tier and the faster loaders; dropping onto a faster belt at hand 3
+and up; a splitter with one output blocked; a machine's fluid port.
 
 ## Open
 
-1. Connector: one per lane of each carrier (as above), or something else?
-2. A shared inserter (a furnace fed ore and coal by one inserter from an ore|coal belt): one merged
-   net, or several nets into a machine that takes them all?
-3. The tier per net, or per connector (a red trunk with yellow branches)?
-4. A route that is not a tree.
-5. V2.1: steer to whole belts, or let an agent plan odd lane counts?
-6. The benchmark's exact layout.
-7. When the model should share by position (the game's first come, first served) instead of by
-   appetite.
+1. How the nets on one shared lane split its capacity (in proportion to what each offers?).
+2. A route that is not a tree, and a ring of belts.
+3. The `.fkp` lane notation and the `LANE` check (my proposals above).
+4. V2.1: steer to whole belts, or let an agent plan odd lane counts?
+5. The path matrix (the "giga brain option"): when it is worth building.
