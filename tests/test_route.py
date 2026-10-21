@@ -230,6 +230,33 @@ class SeveralDriversTest(unittest.TestCase):
                          [("fast-inserter", 3.5, 2.5, 12)])       # picks from the chest, west
         self.assertIn("1 inserter (direct insertion)", r.lines[0])
 
+    def test_a_machine_hands_to_every_neighbour_by_an_inserter(self):
+        # 1.3 (Rory, 2026-10-20: a mall placed with care): one machine driver, its consumers one
+        # tile away each take from it by an inserter of their own; only the far one gets a belt
+        near = build("""
+            yb  = Assembler<recipe=transport-belt>        @(4, 4)
+            yu  = Assembler<recipe=underground-belt>      @(4, 0)
+            ys  = Assembler<recipe=splitter>              @(8, 4)
+            rb  = Assembler<recipe=fast-transport-belt>   @(4, 8)
+            ybc = Chest<provider, limit=2>                @(2, 5)
+            net ybo: yb -> yu, ys, rb, ybc
+        """)
+        r = route.route_layout(*near, CAT)
+        connected(self, near[0], r)
+        self.assertEqual(sorted(e.name for e in carriers(r, "ybo")), ["fast-inserter"] * 4)
+        self.assertIn("4 inserters (direct insertion)", r.lines[0])
+        far = build("""
+            yb  = Assembler<recipe=transport-belt>        @(4, 4)
+            yu  = Assembler<recipe=underground-belt>      @(4, 0)
+            far = Assembler<recipe=underground-belt>      @(14, 12)
+            net ybo: yb -> yu, far
+        """)
+        r = route.route_layout(*far, CAT)
+        connected(self, far[0], r)
+        names = [e.name for e in carriers(r, "ybo")]
+        self.assertIn("transport-belt", names)
+        self.assertIn("1 inserter (direct insertion), then", r.lines[0])
+
     def test_two_sushi_chests_into_two_chests(self):
         # the lab game's shape (games/lab-kxm): each consumer must get every driver's item
         flat, lay = build("""

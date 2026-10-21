@@ -489,10 +489,9 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f):
     return rtree.cost() + ftree.cost(), plan, rres["counts"], fres["counts"]
 
 
-def _direct(cat, job, grid):
-    """One machine driver into one machine: a single inserter between them, if one fits."""
-    (_sk, src), = job.sources
-    (_tk, dst), = job.taps
+def _direct_pair(src, dst, grid, taken=()):
+    """An inserter from machine rect ``src`` into machine rect ``dst`` on a free tile not in
+    ``taken`` (one this plan already holds), if one fits: a short hand first, else a long one."""
     for hands in _HANDS:
         for name in hands:
             r = _REACH[name]
@@ -501,21 +500,59 @@ def _direct(cat, job, grid):
                     for g in range(4):           # the inserter faces its pickup side, g
                         q = (x - _DX[g] * r, y - _DY[g] * r)
                         drop = (q[0] - _DX[g] * r, q[1] - _DY[g] * r)
-                        if grid.blocked(q) or not (dst[0] <= drop[0] < dst[2]
-                                                   and dst[1] <= drop[1] < dst[3]):
+                        if q in taken or grid.blocked(q) or not (dst[0] <= drop[0] < dst[2]
+                                                                 and dst[1] <= drop[1] < dst[3]):
                             continue
-                        return [{"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5,
-                                 "direction": g * 4, "role": "ins"}]
+                        return {"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5,
+                                "direction": g * 4, "role": "ins"}
     return None
 
 
+def _direct(cat, job, grid):
+    """One machine driver into one machine: a single inserter between them, if one fits."""
+    (_sk, src), = job.sources
+    (_tk, dst), = job.taps
+    got = _direct_pair(src, dst, grid)
+    return [got] if got else None
+
+
 def _hub_job(cat, job, blocked, spans, clear, box, limit):
-    """hub: merge every driver into a trunk, split it to every consumer. -> (plan, how)."""
+    """hub: merge every driver into a trunk, split it to every consumer. -> (plan, how).
+
+    One machine driver (1.3, Rory 2026-10-20: a mall placed with care): every consumer machine
+    standing next to it takes from it by an inserter of its own (a yellow belt assembler hands its
+    belts to the underground, splitter and red belt assemblers beside it), and only the rest is
+    laid as a belt tree from the driver."""
     grid = _Bounded(blocked, box, spans)
-    if len(job.sources) == 1 and len(job.taps) == 1 and not job.starts and not job.goals:
-        plan = _direct(cat, job, grid)
-        if plan:
-            return plan, "1 inserter (direct insertion)"
+    if len(job.sources) == 1 and not job.starts and job.taps:
+        (_sk, src), = job.sources
+        taken, direct, rest = set(), [], []
+        for key, rect in job.taps:
+            got = _direct_pair(src, rect, grid, taken)
+            if got:
+                direct.append(got)
+                taken.add((math.floor(got["x"]), math.floor(got["y"])))
+            else:
+                rest.append((key, rect))
+        if direct:
+            n = f"{len(direct)} inserter{'s' if len(direct) > 1 else ''} (direct insertion)"
+            if not rest and not job.goals:
+                return direct, n
+            sub = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=rest,
+                         sources=list(job.sources), owners=list(job.owners))
+            if sub.mode == "hub":
+                plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
+            else:
+                plan, how = _tree_job(cat, sub, set(blocked) | taken, spans, clear, box, limit)
+            if plan is None:
+                return None, how
+            return direct + plan, f"{n}, then {how}"
+    return _hub_search(cat, job, blocked, spans, clear, box, limit)
+
+
+def _hub_search(cat, job, blocked, spans, clear, box, limit):
+    """The hub search proper: a trunk from every driver, split to every consumer."""
+    grid = _Bounded(blocked, box, spans)
     cands = _hubs(grid, job)
     if not cands:
         return None, "no free tile is reached from every driver and consumer (no hub)"
