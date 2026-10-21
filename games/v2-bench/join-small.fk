@@ -1,0 +1,35 @@
+# join-small.fk (tests/test_join.py): can several iron works and several iron consumers share ONE
+# net? Three iron works (miners + 4 furnaces each, 3.75 plates/s in all), three consumer works,
+# ONE iron net from every smelter row to every consumer row. Iron works export their plates as a
+# free endpoint (no chest net inside the module); consumers take plates as a free endpoint.
+module IronWorks {
+  ore   = MinerRow<n=3, resource=iron-ore>   @(4, 2, rot 2)
+  coal  = MinerRow<n=1, resource=coal>       @(13, 2, rot 2)
+  smelt = SmelterRow<n=4, recipe=iron-plate> @(4, 12)
+  net ore_: ore -> smelt
+  net fuel: coal -> smelt
+}
+module GearWorks {
+  gears = AsmRow<n=1, recipe=iron-gear-wheel> @(4, 0)
+  box   = Chest<provider>                     @(1, 9)
+  net gear: gears -> box
+}
+module PipeWorks {
+  pipes = AsmRow<n=1, recipe=pipe>            @(4, 0)
+  box   = Chest<provider>                     @(1, 9)
+  net pipe: pipes -> box
+}
+module StickWorks {
+  sticks = AsmRow<n=1, recipe=iron-stick>     @(4, 0)
+  box    = Chest<provider>                    @(1, 9)
+  net stick: sticks -> box
+}
+
+a = IronWorks  @(0, 0)
+b = IronWorks  @(20, 0)
+c = IronWorks  @(40, 0)
+g = GearWorks  @(0, 26)
+p = PipeWorks  @(20, 26)
+s = StickWorks @(40, 26)
+
+net iron: a.smelt, b.smelt, c.smelt -> g.gears, p.pipes, s.sticks

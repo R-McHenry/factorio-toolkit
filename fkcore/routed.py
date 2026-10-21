@@ -50,6 +50,7 @@ class Routed:
     base: dict                    # machine key -> the share of full speed it was given (duty, fluid)
     net_of: dict                  # node id -> net name (from the layout's net=)
     need: dict = None             # node id -> {item: items/s} the design asks (``required``)
+    need_edge: dict = None        # (src, dst) -> {item: items/s} the design asks of an edge
 
     def util(self, key):
         """A machine's routed utilization (absolute, duty included)."""
@@ -63,9 +64,23 @@ class Routed:
         return sum((self.need or {}).get(nid, {}).values())
 
     def ratio(self, nid):
-        """Required ratio: what the design asks of a node over its capacity."""
+        """Required ratio: what the design asks of a node over its capacity, or of the fullest
+        of its capped edges (one half of a splitter's lane)."""
         cap = self.res.cap.get(nid, INF)
-        return 0.0 if cap in (0, INF) else self.asked(nid) / cap
+        v = 0.0 if cap in (0, INF) else self.asked(nid) / cap
+        for k in self.res._capped(nid):
+            v = max(v, sum((self.need_edge or {}).get(k, {}).values()) / self.res.edge_cap[k])
+        return v
+
+    def at(self, nid):
+        """(what the design asks, what it carries) where a node binds: a splitter's fullest half
+        (one lane per side), anything else itself."""
+        capped = self.res._capped(nid)
+        if self.lg.nodes[nid].kind == "splitter" and capped:
+            k = max(capped, key=lambda k: sum((self.need_edge or {}).get(k, {}).values())
+                    / self.res.edge_cap[k])
+            return sum((self.need_edge or {}).get(k, {}).values()), self.res.edge_cap[k]
+        return self.asked(nid), self.res.cap.get(nid, INF)
 
     def binds(self, nid):
         """At capacity as routed, while the design asks more of it than it carries."""
@@ -121,7 +136,8 @@ def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
         if e is not None and e.attrs.get("net"):
             net_of[nid] = e.attrs["net"]
     _lg, need = required(flat, lay, cat, model, lg=lg)
-    return Routed(flat, lay, lg, res, model, machines, base, net_of, need.required)
+    return Routed(flat, lay, lg, res, model, machines, base, net_of, need.required,
+                  need.required_edge)
 
 
 def required(flat, lay, cat, model=None, hand=1, bulk_hand=1, lg=None):
@@ -171,7 +187,7 @@ def _word(lg, nid):
     if n.kind == "inserter":
         return f"{n.name}s"
     tier = TIER_WORD.get(n.name, n.name)
-    return f"{tier} {'splitter ' if n.kind == 'splitter' else ''}lanes"
+    return f"{tier} splitters (a lane a side)" if n.kind == "splitter" else f"{tier} lanes"
 
 
 def _keys(nids):
@@ -241,11 +257,11 @@ def _critical(r, mine):
     if not finite:
         return "-"
     nid = max(finite, key=lambda v: (r.ratio(v), str(v)))
-    req = r.asked(nid)
+    req, cap = r.at(nid)
     if req >= tp.BIG / 2:
         return f"{nid[0]} ({_word(lg, nid)}): unbounded"
     return (f"{nid[0]}{'.' + nid[1] if nid[1] else ''} ({_word(lg, nid)}): "
-            f"{req:.3f}/s required of {res.cap[nid]:.3f}/s, ratio {r.ratio(nid):.2f}")
+            f"{req:.3f}/s required of {cap:.3f}/s, ratio {r.ratio(nid):.2f}")
 
 
 def _short(r, net):
@@ -290,8 +306,9 @@ def _capacity(r, net, mine, where):
     for word, nids in sorted(groups.items()):
         nids.sort(key=lambda v: (-r.ratio(v), str(v)))
         top = nids[0]
-        msg = (f"{r.asked(top):.2f}/s required where its {word} carry "
-               f"{res.cap[top]:.2f}/s (ratio {r.ratio(top):.2f}): {_keys(nids)}; "
+        req, cap = r.at(top)
+        msg = (f"{req:.2f}/s required where its {word} carry "
+               f"{cap:.2f}/s (ratio {r.ratio(top):.2f}): {_keys(nids)}; "
                + "; ".join(short[:_SHOW + 1])
                + (f" and {len(short) - _SHOW - 1} more" if len(short) > _SHOW + 1 else ""))
         out.append(Check("CAPACITY", f"{where}net {net}", msg))

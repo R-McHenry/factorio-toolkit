@@ -18,6 +18,22 @@ V2.1 goes from one lane straight to k lanes, not "a full belt, then several" (Ro
 unconventional: an agent may plan a bus of 5 iron lanes and 3 copper lanes, where a person never
 plans odd lane counts. [open, V2.1: steer to whole belts, or let it be]
 
+**V2.1 next, and how (Rory, 2026-10-20):** go straight to multi-lane nets, but do not route them
+with the general router. Two ways to support them:
+
+1. **A bus router**: lays a net as a parallel bus of k belts, with undergrounds and splitters
+   where needed, as one unit.
+2. **Main-bus templates with single-belt inputs and outputs** (simpler, more versatile, more
+   future-proof): a balancer, a bus run, a tap that takes one belt off the bus, a merge onto it.
+   The router keeps laying single-belt nets between template ends; the templates make the thick
+   part. Rory's 4-to-4 balancer (`games/v2-bench`) is the first one, and it is already measured
+   (throughput-unlimited in 7 setups).
+
+[open, for V2.1: how a net says it goes through a bus instance (a balancer has no machines, so it
+is no endpoint today: its roles would be on the net, and the router would route drivers to the
+bus's inputs and its outputs to the consumers); which bus templates come first; whether the bus
+router is needed once the templates exist]
+
 ## Words
 
 - **lane** (Rory): one side of a belt, L or R looking downstream (the game's transport lines 1 and
@@ -282,6 +298,43 @@ one coal inserter) all match, within 2%: the balancer is throughput-unlimited, a
 plates/s, 26 per column still make 15, and one coal inserter (2.5/s) gives the east unit its full
 1.08 coal/s and shares the rest between the other two (9.86 plates/s each solved, 9.69 measured
 once settled, which takes the game about 3000 s).
+
+## Many factories, one net (Rory's join case)
+
+Rory: "taking a few factories that produce iron, a few that consume it, and combining them all and
+merging that all with one net." A subagent tried it on paper (`games/v2-bench/join-*.fk`,
+`tests/test_join.py`):
+
+- **It is easy to write.** Each factory is a module with no chest net of its own; one top-level
+  net names rows inside the modules: `net iron: a.smelt, b.smelt, c.smelt -> g.gears, p.pipes,
+  s.sticks`. It elaborates with no check line but `UNLIMITED` on the consumers' chests. `fk merge`
+  of six separate factories, then deleting their chest pairs and nets and adding the same line,
+  gives the same netlist and the same route.
+- **It routes.** The router lays it as a hub, every driver merging into one trunk that splits to
+  every consumer: `routed iron: 3 -> 3, 175 belts, 2 underground ends, 2 merges, 2 splitters`,
+  connected (480 of 480 pairs), no LEAK.
+- **The trunk is one lane.** The rows drop their plates on one lane, and merging keeps it there:
+  at 3.75/s everything arrives; at 15/s the trunk delivers 7.5, and `CAPACITY` names the trunk's
+  yellow lanes and the hub's yellow splitters. `tier minimize` turns 51 belts and splitters red
+  and all 15/s arrive. Beyond turbo's 30/s a lane it needs V2.1.
+- **The merge tree is not fair.** Two even merge splitters give the last driver half the trunk and
+  the other two a quarter each, as in the game: with a thin trunk the last factory runs at 0.75
+  and the others at 0.375.
+- **Found on the way** (not fixed): a module instance's `rot` is ignored (`expand._origin`, a V1
+  bug: it lands unturned, with no check line); a row bound to two nets for one item
+  (`DOUBLE`) takes the first and the other reads `no driver role is placed`; the routed report
+  adds up a consumer's item from every net it sits on; a whole-module ref as a consumer takes its
+  chests too (by design, and `CLOG` says so); `chests-to-net` joins one provider to one requester
+  and does not check the net's name.
+- **A first-class `fk join`** could gather the drivers and consumers of the named nets wherever
+  they sit in the module tree, drop the robot-link chests and their nets, write one top-level net,
+  and print the joined rate against one lane of the trunk's tier. It does not have to exist yet
+  (Rory).
+
+The solver had the hub's splitters wrong until this case: it gave a splitter lane both halves'
+capacity, so a yellow splitter passed 10/s on one side into a red belt. Now every edge into or out
+of a splitter half carries at most one lane of its tier, and its tier and `CAPACITY` line read the
+fullest half.
 
 ## Lab tests (a laptop test server, never the live game)
 

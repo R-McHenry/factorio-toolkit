@@ -43,10 +43,12 @@ def _rate(cat, tier):
     return float(cat.entity(FAMILY["transport-belt"][tier])["belt_speed"]) * 60 * 4
 
 
-def choose(lg, required, cat, entities, mode="minimize", allow=TIERS, budgets=None, fixed=()):
+def choose(lg, required, cat, entities, mode="minimize", allow=TIERS, budgets=None, fixed=(),
+           required_edge=None):
     """The tier of every belt-type entity of ``entities`` ({key: entity}) on a net:
     -> ({key: tier index}, notes). ``required``: the solver's required flows per node
-    ({(key, lane): {item: items/s}}); ``fixed``: keys that keep their tier."""
+    ({(key, lane): {item: items/s}}); ``required_edge`` per edge, which gives a splitter what one
+    of its halves carries (else half its lane's); ``fixed``: keys that keep their tier."""
     if mode not in ("minimize", "maximize", "yellow"):
         raise ValueError(f"tier mode is minimize, maximize or yellow, got {mode!r}")
     allowed = sorted({TIERS.index(t) for t in allow} | {0})
@@ -60,8 +62,13 @@ def choose(lg, required, cat, entities, mode="minimize", allow=TIERS, budgets=No
         info = tier_of(e.name)
         if info is None or key in fixed or not e.attrs.get("net"):
             continue
-        halves = 2 if info[0] == "splitter" else 1
-        lanes = [sum(required.get((key, lane), {}).values()) / halves for lane in ("L", "R")]
+        if info[0] == "splitter" and required_edge is not None:
+            lanes = [sum(required_edge.get((e.src, e.dst), {}).values())
+                     for lane in ("L", "R") for e in lg.inn.get((key, lane), []) +
+                     lg.out.get((key, lane), []) if e.cap != float("inf")] or [0.0]
+        else:
+            halves = 2 if info[0] == "splitter" else 1
+            lanes = [sum(required.get((key, lane), {}).values()) / halves for lane in ("L", "R")]
         need[key] = max(lanes)
     for key in need:
         unit = tuple(sorted({key, pair[key]} & set(need))) if key in pair else (key,)
@@ -115,7 +122,8 @@ def assign(flat, lay, cat, mode="minimize", allow=TIERS, budgets=None, hand=1, b
     lg, res = routed.required(flat, lay, cat, hand=hand, bulk_hand=bulk_hand)
     fixed = {k for k, e in lay.entities.items()
              if e.owner in flat.insts and flat.insts[e.owner].kind == "Literal"}
-    tiers, notes = choose(lg, res.required, cat, lay.entities, mode, allow, budgets, fixed)
+    tiers, notes = choose(lg, res.required, cat, lay.entities, mode, allow, budgets, fixed,
+                          res.required_edge)
     new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
                         dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
     changed, count = {}, {}

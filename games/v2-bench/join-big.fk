@@ -1,0 +1,39 @@
+# join-big.fk (tests/test_join.py): join-small.fk at the size that does not fit one yellow lane.
+# Three iron works of 16 stone furnaces each (5 plates/s each, 15/s in all) and three consumer
+# works that ask 15 plates/s together (gears 5 x 2/s, pipes 3 x 1/s, sticks 2 x 1/s), joined by
+# ONE iron net. Each consumer puts its product into two chests, so no output inserter binds (one
+# fast inserter is 2.5/s).
+module IronWorks {
+  ore   = MinerRow<n=10, resource=iron-ore>   @(4, 2, rot 2)
+  coal  = MinerRow<n=1, resource=coal>        @(22, 2, rot 2)
+  smelt = SmelterRow<n=16, recipe=iron-plate> @(4, 12)
+  net ore_: ore -> smelt
+  net fuel: coal -> smelt
+}
+module GearWorks {
+  gears = AsmRow<n=5, recipe=iron-gear-wheel> @(4, 0)
+  box   = Chest<provider>                     @(1, 9)
+  box2  = Chest<provider>                     @(3, 10)
+  net gear: gears -> box, box2
+}
+module PipeWorks {
+  pipes = AsmRow<n=3, recipe=pipe>            @(4, 0)
+  box   = Chest<provider>                     @(1, 9)
+  box2  = Chest<provider>                     @(3, 10)
+  net pipe: pipes -> box, box2
+}
+module StickWorks {
+  sticks = AsmRow<n=2, recipe=iron-stick>     @(4, 0)
+  box    = Chest<provider>                    @(1, 9)
+  box2   = Chest<provider>                    @(3, 10)
+  net stick: sticks -> box, box2
+}
+
+a = IronWorks  @(0, 0)
+b = IronWorks  @(40, 0)
+c = IronWorks  @(80, 0)
+g = GearWorks  @(0, 26)
+p = PipeWorks  @(40, 26)
+s = StickWorks @(80, 26)
+
+net iron: a.smelt, b.smelt, c.smelt -> g.gears, p.pipes, s.sticks

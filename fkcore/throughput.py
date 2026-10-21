@@ -64,17 +64,29 @@ class Result:
     cap: dict                      # node id -> capacity
     rounds: int = 0
     residual: float = 0.0
+    required_edge: dict = None     # (src, dst) -> {item: items/s} with no capacities
+    edge_cap: dict = None          # (src, dst) -> capacity, the edges that have one
 
     def total(self, nid, table=None):
         return sum((table or self.flow).get(nid, {}).values())
 
+    def _capped(self, nid):
+        return [k for k in (self.edge_cap or {}) if nid in k]
+
     def load(self, nid):
+        """Flow over capacity: the node's, or the fullest of its capped edges (a splitter half)."""
         c = self.cap.get(nid, INF)
-        return 0.0 if c in (0, INF) else self.total(nid) / c
+        v = 0.0 if c in (0, INF) else self.total(nid) / c
+        for k in self._capped(nid):
+            v = max(v, sum(self.edge_flow.get(k, {}).values()) / self.edge_cap[k])
+        return v
 
     def required_ratio(self, nid):
         c = self.cap.get(nid, INF)
-        return 0.0 if c in (0, INF) else self.total(nid, self.required) / c
+        v = 0.0 if c in (0, INF) else self.total(nid, self.required) / c
+        for k in self._capped(nid):
+            v = max(v, sum((self.required_edge or {}).get(k, {}).values()) / self.edge_cap[k])
+        return v
 
     def binds(self, nid):
         """At capacity while more was required through it."""
@@ -204,7 +216,7 @@ def _prepare(lg, order, item, takes, gives, sources, sinks):
     return [v for v in order if v in keep], ins, outs, split
 
 
-def _solve_item(prep, sup, dem, cap, rounds, tol):
+def _solve_item(prep, sup, dem, cap, ecap, rounds, tol):
     """-> (admitted into each node, flow on each edge, consumed per node, left per node,
     rounds, residual)."""
     order, ins, outs, split = prep
@@ -232,7 +244,8 @@ def _solve_item(prep, sup, dem, cap, rounds, tol):
             rest = g - e_
             placed = 0.0
             for group in split.get(v, ((), ())):
-                caps_ = [acc.get((e.src, e.dst), INF) for e in group]
+                caps_ = [min(acc.get((e.src, e.dst), INF), ecap.get((e.src, e.dst), INF))
+                         for e in group]
                 for e, a in zip(group, _fill(rest - placed, caps_)):
                     new[(e.src, e.dst)] = a
                     placed += a
@@ -249,7 +262,8 @@ def _solve_item(prep, sup, dem, cap, rounds, tol):
                 group = rows[rank]
                 offers = [new.get((e.src, v), 0.0) for e in group]
                 for i, e in enumerate(group):
-                    acc[(e.src, v)] = _share(avail, offers[:i] + offers[i + 1:])
+                    acc[(e.src, v)] = min(_share(avail, offers[:i] + offers[i + 1:]),
+                                          ecap.get((e.src, v), INF))
                 avail = max(0.0, avail - sum(offers))
         residual = max((abs(new.get(k, 0.0) - offer.get(k, 0.0)) for k in set(new) | set(offer)),
                        default=0.0)
@@ -284,11 +298,15 @@ def _solve_all(lg, preps, supply, demand, caps_on, shares, rounds, tol):
         dem = {v: t[item] for v, t in demand.items() if item in t and t[item] > EPS}
         if not sup:
             continue
+        cap, ecap = {}, {}
         if caps_on:
             cap = {v: lg.nodes[v].cap * shares.get(v, {}).get(item, 1.0) for v in prep[0]}
-        else:
-            cap = {}
-        got, off, eat, lft, n, res = _solve_item(prep, sup, dem, cap, rounds, tol)
+            for rows in prep[2].values():
+                for e in rows:
+                    if e.cap != INF:
+                        at = e.src if lg.nodes[e.src].kind == "splitter" else e.dst
+                        ecap[(e.src, e.dst)] = e.cap * shares.get(at, {}).get(item, 1.0)
+        got, off, eat, lft, n, res = _solve_item(prep, sup, dem, cap, ecap, rounds, tol)
         for v, x in got.items():
             if x > EPS:
                 flow.setdefault(v, {})[item] = x
@@ -376,7 +394,8 @@ def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, out
                                      (("in", mach.needs), ("out", mach.makes)) for i in rows]))
             for m, mach in machines.items()}
     caps = {v: node.cap for v, node in lg.nodes.items()}
-    return Result(flow, edge, req, ate, left, dem, sup, util, caps, n, res)
+    ecaps = {(e.src, e.dst): e.cap for e in lg.edges() if e.cap != INF}
+    return Result(flow, edge, req, ate, left, dem, sup, util, caps, n, res, req_edge, ecaps)
 
 
 def _shares(lg, order, req, req_edge, sup, dem):

@@ -92,6 +92,7 @@ class Edge:
     dst: tuple
     via: str                       # straight turn tunnel side ug_side pickup drop mine
     rank: int = 0                  # priority at dst: lower is served first
+    cap: float = INF               # items/s the edge carries: one half of a splitter's lane
 
 
 @dataclass
@@ -113,6 +114,14 @@ class LaneGraph:
             if e.dst == dst:
                 return
         e = Edge(src, dst, via, rank)
+        # a splitter's lane node stands for both halves; what goes in or out of one half is one
+        # lane of its tier (a yellow splitter passes 7.5/s a lane per side, whatever feeds it)
+        for end in (src, dst):
+            n = self.nodes[end]
+            other = self.nodes[dst if end == src else src]
+            if n.kind == "splitter" and other.kind != "inserter" or \
+                    n.kind == "splitter" and via == "drop":
+                e.cap = min(e.cap, n.cap / 2)
         self.out.setdefault(src, []).append(e)
         self.inn.setdefault(dst, []).append(e)
 
