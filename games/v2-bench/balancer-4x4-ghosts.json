@@ -1,0 +1,444 @@
+{
+ "area": [
+  104,
+  119,
+  112,
+  137
+ ],
+ "ghosts": [
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 120.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 121.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 120.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 121.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 121.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 120.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 120.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 121.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 122.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 122.5
+  },
+  {
+   "d": 0,
+   "ip": "none",
+   "lu": "Rory_618",
+   "n": "splitter",
+   "op": "none",
+   "t": "splitter",
+   "x": 107,
+   "y": 123.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 122.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 122.5
+  },
+  {
+   "d": 0,
+   "ip": "none",
+   "lu": "Rory_618",
+   "n": "splitter",
+   "op": "none",
+   "t": "splitter",
+   "x": 109,
+   "y": 123.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "underground-belt",
+   "t": "underground-belt",
+   "ug": "output",
+   "x": 107.5,
+   "y": 124.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 124.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 125.5
+  },
+  {
+   "d": 12,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 125.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "underground-belt",
+   "t": "underground-belt",
+   "ug": "output",
+   "x": 108.5,
+   "y": 124.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 124.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 125.5
+  },
+  {
+   "d": 4,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 125.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 127.5
+  },
+  {
+   "d": 4,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 127.5
+  },
+  {
+   "d": 0,
+   "ip": "none",
+   "lu": "Rory_618",
+   "n": "splitter",
+   "op": "none",
+   "t": "splitter",
+   "x": 108,
+   "y": 126.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 127.5
+  },
+  {
+   "d": 12,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 127.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "underground-belt",
+   "t": "underground-belt",
+   "ug": "input",
+   "x": 107.5,
+   "y": 128.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 129.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 128.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "underground-belt",
+   "t": "underground-belt",
+   "ug": "input",
+   "x": 108.5,
+   "y": 128.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 129.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 128.5
+  },
+  {
+   "d": 0,
+   "ip": "none",
+   "lu": "Rory_618",
+   "n": "splitter",
+   "op": "none",
+   "t": "splitter",
+   "x": 108,
+   "y": 129.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 131.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 131.5
+  },
+  {
+   "d": 0,
+   "ip": "none",
+   "lu": "Rory_618",
+   "n": "splitter",
+   "op": "none",
+   "t": "splitter",
+   "x": 107,
+   "y": 130.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 131.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 131.5
+  },
+  {
+   "d": 0,
+   "ip": "none",
+   "lu": "Rory_618",
+   "n": "splitter",
+   "op": "none",
+   "t": "splitter",
+   "x": 109,
+   "y": 130.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 133.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 133.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 132.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 132.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 133.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 133.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 132.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 132.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 107.5,
+   "y": 134.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 106.5,
+   "y": 134.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 109.5,
+   "y": 134.5
+  },
+  {
+   "d": 0,
+   "lu": "Rory_618",
+   "n": "transport-belt",
+   "t": "transport-belt",
+   "x": 108.5,
+   "y": 134.5
+  }
+ ],
+ "surface": "nauvis",
+ "tick": 188999
+}

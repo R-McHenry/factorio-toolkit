@@ -1,8 +1,9 @@
 """lab_lanes: the V2 lane and inserter facts, measured on a laptop test server.
 
     python tools/lab_lanes.py [TEST ...]    TEST: protos drop sideload ugside splitter drill pickup
-                                            rates (default: all). Prints every case and writes
-                                            out/lab-lanes.json.
+                                            rates (default: all of these), and Rory's benchmarks:
+                                            balancer stack (about a minute), stackcoal (4 min).
+                                            Prints every case and writes out/lab-lanes.json.
 
 CORE-V2.md ("Lane physics", "Inserters") rests on these facts. Each test builds small fixtures on
 the lab surface of a short-lived laptop server (tools/laptop_server.py: the laptop's own Factorio,
@@ -32,7 +33,10 @@ SURF, FORCE = "lab", "v2lab"
 SPEED = 10
 OUT = os.path.join(ROOT, "out", "lab-lanes.json")
 CELL = 24                     # one fixture per CELL x CELL tiles
-ROWS = {"drop": 0, "sideload": 1, "ugside": 2, "splitter": 3, "drill": 4, "pickup": 5, "rates": 6}
+ROWS = {"drop": 0, "sideload": 1, "ugside": 2, "splitter": 3, "drill": 4, "pickup": 5, "rates": 6,
+        "balancer": 7}
+BENCH = os.path.join(ROOT, "games", "v2-bench")
+STACK_Y = 360                 # the smelter stacks stand from here down (they are 70 tiles tall)
 
 PRELUDE = """
 local s = game.get_surface('lab')
@@ -512,7 +516,11 @@ def read_meters(r, meters):
                   "o.n[#o.n + 1] = {label = p.label, v = v} end out(o)")
 
 
-def measure(r, meters, seconds):
+def measure(r, meters, seconds, clear=False):
+    if clear:                                       # a lab fixture: empty the sinks first
+        rows = ", ".join("{%s, %s}" % (m["x"], m["y"]) for m in meters if m["kind"] == "chest")
+        run(r, "for _, p in pairs({" + rows + "}) do local c = s.find_entity('steel-chest', "
+               "{p[1], p[2]}) if c then c.clear_items_inside() end end out({ok = true})")
     a = read_meters(r, meters)
     time.sleep(seconds)
     b = read_meters(r, meters)
@@ -527,6 +535,124 @@ def bonus(r, inserter, bulk):
     return run(r, "local f = game.forces[F] f.inserter_stack_size_bonus = @i@ "
                   "f.bulk_inserter_capacity_bonus = @b@ out({inserter = f.inserter_stack_size_bonus, "
                   "bulk = f.bulk_inserter_capacity_bonus})", i=inserter, b=bulk)
+
+
+# -- Rory's benchmarks: the 4-to-4 balancer and the smelter stack ---------------------------------
+def _ghosts(name):
+    with open(os.path.join(BENCH, name), encoding="utf-8") as fh:
+        return json.load(fh)["ghosts"]
+
+
+def _rows(ghosts):
+    """A Lua table of the ghosts: {name, x, y, direction, underground type or false}."""
+    return "{" + ", ".join("{%s, %s, %s, %d, %s}" % (
+        json.dumps(g["n"]), g["x"], g["y"], g["d"],
+        json.dumps(g["ug"]) if g.get("ug") else "false") for g in ghosts) + "}"
+
+
+_PUT = """
+local function put(r, dx, dy)
+  local extra = nil
+  if r[5] then extra = {type = r[5]} end
+  return E(r[1], r[2] + dx, r[3] + dy, r[4], extra)
+end
+"""
+
+#: (label, inputs fed, outputs taken): inputs and outputs numbered 1 to 4 west to east
+BALANCER = (("4 in, 4 out", (1, 2, 3, 4), (1, 2, 3, 4)), ("in 1-3, out 1-3", (1, 2, 3), (1, 2, 3)),
+            ("in 1,2,4, out 2-4", (1, 2, 4), (2, 3, 4)), ("in 1, 4 out", (1,), (1, 2, 3, 4)),
+            ("4 in, out 1", (1, 2, 3, 4), (1,)), ("4 in, out 1,4", (1, 2, 3, 4), (1, 4)),
+            ("in 1,2, out 3,4", (1, 2), (3, 4)))
+
+
+def t_balancer(r):
+    """Rory's balancer, one copy per setup: a loader puts a full belt on each fed input, a loader
+    takes each taken output into a chest, the other outputs end."""
+    ghosts = _ghosts("balancer-4x4-ghosts.json")
+    meters = []
+    for i, (label, fed, taken) in enumerate(BALANCER):
+        ox, oy = origin("balancer", i)
+        dx, dy = ox + 4 - 106, oy + 4 - 118
+        run(r, _PUT + """
+for _, row in pairs(@rows@) do put(row, @dx@, @dy@) end
+for _, k in pairs({@fed@}) do
+  local x = 105 + k + @dx@
+  local c = E('infinity-chest', x + 0.5, 136.5 + @dy@)
+  c.set_infinity_container_filter(1, {name = 'iron-plate', count = 100, mode = 'at-least'})
+  E('loader-1x1', x + 0.5, 135.5 + @dy@, D.north, {type = 'output'})
+end
+for _, k in pairs({@taken@}) do
+  local x = 105 + k + @dx@
+  E('steel-chest', x + 0.5, 118.5 + @dy@)
+  E('loader-1x1', x + 0.5, 119.5 + @dy@, D.north, {type = 'input'})
+end
+out({ok = true})""", rows=_rows(ghosts), dx=dx, dy=dy, fed=", ".join(map(str, fed)),
+            taken=", ".join(map(str, taken)))
+        for k in taken:
+            meters.append({"case": f"balancer {label}: out {k}", "kind": "chest",
+                           "x": 105 + k + dx + 0.5, "y": 118.5 + dy})
+    return meters
+
+
+def t_stack(r, units, bands, x0, coal="loader"):
+    """Rory's smelter stack: ``units`` of his unit side by side (x 86..96 of the ghost), each
+    ``bands`` bands of 2 furnaces per column; ore by a loader at the bottom of each unit, plates
+    into a chest by a loader, coal from the east (a loader: a full belt, or ``coal="inserter"``:
+    one fast inserter, 2.5/s on one lane); medium poles on an energy interface."""
+    unit = [g for g in _ghosts("smelter-stack-ghosts.json") if 86 <= g["x"] < 97]
+    band = [g for g in unit if 108 <= g["y"] < 112 and g["n"] not in ("transport-belt",
+                                                                      "underground-belt")]
+    dx0, dy = x0 - 86, STACK_Y - 118
+    east = dx0 + 11 * (units - 1)
+    coal_lua = ("""
+local c = E('infinity-chest', 101.5 + @east@, 113.5 + @dy@)
+c.set_infinity_container_filter(1, {name = 'coal', count = 100, mode = 'at-least'})
+E('loader-1x1', 100.5 + @east@, 113.5 + @dy@, D.west, {type = 'output'})""" if coal == "loader" else """
+local ins = inserter('fast-inserter', 100.5 + @east@, 113.5 + @dy@, 99 + @east@, 113 + @dy@)
+local c = source(ins, 'coal')
+E('medium-electric-pole', 100.5 + @east@, 112.5 + @dy@)""")
+    run(r, _PUT + """
+for u = 0, @units@ - 1 do
+  local dx = @dx0@ + 11 * u
+  for _, row in pairs(@unit@) do put(row, dx, @dy@) end
+  for b = 1, @bands@ - 1 do
+    for _, row in pairs(@band@) do put(row, dx, @dy@ - 4 * b) end
+    for y = 108, 111 do
+      E('transport-belt', 86.5 + dx, y + 0.5 + @dy@ - 4 * b, D.north)
+      E('transport-belt', 91.5 + dx, y + 0.5 + @dy@ - 4 * b, D.south)
+      E('transport-belt', 96.5 + dx, y + 0.5 + @dy@ - 4 * b, D.north)
+    end
+  end
+  for b = 0, @bands@ - 1 do
+    E('medium-electric-pole', 90.5 + dx, 108.5 + @dy@ - 4 * b)
+    E('medium-electric-pole', 95.5 + dx, 108.5 + @dy@ - 4 * b)
+  end
+  local ore = E('infinity-chest', 89.5 + dx, 119.5 + @dy@)
+  ore.set_infinity_container_filter(1, {name = 'iron-ore', count = 100, mode = 'at-least'})
+  E('loader-1x1', 89.5 + dx, 118.5 + @dy@, D.north, {type = 'output'})
+  E('loader-1x1', 91.5 + dx, 118.5 + @dy@, D.south, {type = 'input'})
+  E('steel-chest', 91.5 + dx, 119.5 + @dy@)
+end
+E('underground-belt', 98.5 + @east@, 113.5 + @dy@, D.west, {type = 'input'})
+E('transport-belt', 99.5 + @east@, 113.5 + @dy@, D.west)
+""" + coal_lua + """
+E('medium-electric-pole', 85.5 + @dx0@, 108.5 + @dy@)
+local ei = E('electric-energy-interface', 84 + @dx0@, 111 + @dy@)
+ei.power_production = 100000000
+ei.electric_buffer_size = 100000000
+out({ok = true})""", units=units, bands=bands, unit=_rows(unit), band=_rows(band), dx0=dx0, dy=dy,
+        east=east)
+    return [{"case": f"stack {units}x{bands} bands, coal by {coal}: unit {u + 1} plates",
+             "kind": "chest", "x": 91.5 + dx0 + 11 * u, "y": 119.5 + dy,
+             "item": "iron-plate"} for u in range(units)]
+
+
+def powered(r, x0, y0, x1, y1):
+    """How many inserters in the box have no power (an inserter's electric network)."""
+    return run(r, "local n, off = 0, 0 for _, e in pairs(s.find_entities_filtered{area = "
+                  "{{@x0@, @y0@}, {@x1@, @y1@}}, type = 'inserter', force = F}) do n = n + 1 "
+                  "if not e.electric_network_id then off = off + 1 end end "
+                  "out({inserters = n, unpowered = off})", x0=x0, y0=y0, x1=x1, y1=y1)
 
 
 # -- main -----------------------------------------------------------------------------------------
@@ -559,7 +685,7 @@ def main(argv):
         with srv.rcon() as r:
             r.lua(f"if not game.forces['{FORCE}'] then game.create_force('{FORCE}') end "
                   "rcon.print('ok')")
-            r.lua(link.lua_generate_area(SURF, FORCE, (-8, 0, 20 * CELL, 8 * CELL + 48)))
+            r.lua(link.lua_generate_area(SURF, FORCE, (-8, 0, 20 * CELL, STACK_Y + 16)))
             if "protos" in tests:
                 report["protos"] = t_protos(r)
                 for row in report["protos"]["rows"]:
@@ -621,6 +747,37 @@ def main(argv):
                           f"{set_to['bulk']} over {ticks} ticks:")
                     for k, v in got.items():
                         print(f"           {k:<44} {v}/s")
+            if "stackcoal" in tests:
+                # scarce coal takes long to settle: furnace fuel slots and belts fill first
+                meters = t_stack(r, 3, 12, 100, coal="inserter")
+                r.lua("game.speed = 30 rcon.print('ok')")
+                report["stackcoal"] = []
+                # back to back short windows, each emptying the sinks first, so no plate chest
+                # ever fills (a full one stops its furnaces, which then bank coal)
+                for window in range(60):
+                    got, ticks = measure(r, meters, 3, clear=True)
+                    tick = run(r, "out({tick = game.tick})")["tick"]
+                    report["stackcoal"].append({"tick": tick, "ticks": ticks, "per_s": got})
+                    if window % 6 == 5:
+                        print(f"stackcoal at {tick / 60:.0f} s: "
+                              + ", ".join(f"{v}/s" for v in got.values()))
+            if "balancer" in tests or "stack" in tests:
+                meters = []
+                if "balancer" in tests:
+                    meters += t_balancer(r)
+                if "stack" in tests:
+                    meters += t_stack(r, 2, 12, 20)
+                    meters += t_stack(r, 1, 13, 60)
+                    meters += t_stack(r, 3, 12, 100, coal="inserter")
+                    report["stack_power"] = powered(r, 0, STACK_Y - 80, 160, STACK_Y + 4)
+                    print(f"stack inserters: {report['stack_power']}")
+                r.lua(f"game.speed = {SPEED} rcon.print('ok')")
+                time.sleep(12)                               # 120 game seconds to fill up
+                got, ticks = measure(r, meters, 6)
+                report["benchmarks"] = {"ticks": ticks, "per_s": got}
+                print(f"benchmarks over {ticks} ticks:")
+                for k, v in got.items():
+                    print(f"           {k:<52} {v}/s")
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=1)

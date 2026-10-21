@@ -1,0 +1,398 @@
+"""fkcore.throughput: the V2 flow solver over a lane graph (CORE-V2.md "Flow", Rory's approach).
+
+Per item, sources put items on (``supply``), sinks take them off (``demand``), and every node of
+the lane graph (``fkcore.lanes``) passes at most its capacity. The rules are the game's, as
+measured (docs/LAB-LANES-20261020.md):
+
+- **belt order**: a lane serves the inserters picking from it before what flows on, so along a
+  lane the first machines are served first;
+- **splitters** split evenly, and an output that can't take its half leaves the rest to the other;
+- **admission**: a node offered more than it can take serves its inputs by rank: a source at the
+  node first, then what flows on from behind, then side-loads in the order they enter the lane,
+  then drops; evenly within a rank;
+- **back-pressure**: what a node does not admit backs up; a splitter above it sends that part the
+  other way, a source behind it is blocked.
+
+The solver (Rory): a forward pass in topological order distributes the flow by those rules, each
+output capped by what it accepted in the round before (nothing, at first: the even split along the
+topology); a backward pass then works out what every node accepts (its own demand plus what its
+outputs accept, at most its capacity) and, per input, what it would admit from that input given
+what the others offer. The two repeat until the flows stop changing. ``solve`` runs it twice:
+without capacities (the **required** flows) and with them (the **flows**).
+
+Several items on one node share its capacity: where they meet, by the rank of their inputs (so a
+side-load's upstream lane goes first, as measured), and down a lane in the shares they met with.
+A tighter spot further down cuts them in those shares, where the game would hold back the later
+one first: a limit of this first version, until a joint solve of all items.
+
+Machines (``Machine``: a furnace takes ore and coal and makes plates) couple the items. As in V1's
+rate model, each side of a machine is judged against the other side's potential: it asks for its
+inputs as fast as its outputs let it run and offers its products as fast as its inputs let it run,
+from everything at full speed, damped, until both hold; it runs at the lower of the two. Pure,
+stdlib only.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .lanes import INF
+
+__all__ = ["Machine", "Result", "solve", "report"]
+
+EPS = 1e-9
+
+
+@dataclass
+class Machine:
+    needs: dict                    # item -> items/s at full speed
+    makes: dict = field(default_factory=dict)
+
+
+@dataclass
+class Result:
+    flow: dict                     # node id -> {item: items/s admitted into it}
+    edge_flow: dict                # (src, dst) -> {item: items/s}
+    required: dict                 # node id -> {item: items/s} with no capacities
+    delivered: dict                # node id -> {item: items/s it consumed}
+    supplied: dict                 # node id -> {item: items/s that left it}
+    demand: dict                   # node id -> {item: items/s it asked}
+    supply: dict                   # node id -> {item: items/s it offered}
+    util: dict                     # machine node id -> utilization 0..1
+    cap: dict                      # node id -> capacity
+    rounds: int = 0
+    residual: float = 0.0
+
+    def total(self, nid, table=None):
+        return sum((table or self.flow).get(nid, {}).values())
+
+    def load(self, nid):
+        c = self.cap.get(nid, INF)
+        return 0.0 if c in (0, INF) else self.total(nid) / c
+
+    def required_ratio(self, nid):
+        c = self.cap.get(nid, INF)
+        return 0.0 if c in (0, INF) else self.total(nid, self.required) / c
+
+    def binds(self, nid):
+        """At capacity while more was required through it."""
+        return self.load(nid) >= 1 - 1e-6 and self.required_ratio(nid) > 1 + 1e-6
+
+    def starved(self):
+        """{node: {item: (got, asked)}} of every sink that got less than it asked."""
+        out = {}
+        for nid, items in self.demand.items():
+            for item, want in items.items():
+                if want == INF or want <= EPS:
+                    continue
+                got = self.delivered.get(nid, {}).get(item, 0.0)
+                if got < want - 1e-6:
+                    out.setdefault(nid, {})[item] = (got, want)
+        return out
+
+
+# -- helpers --------------------------------------------------------------------------------------
+def _fill(amount, caps):
+    """Water-fill ``amount`` over ``caps`` with equal levels: -> allocations (sum <= amount)."""
+    n = len(caps)
+    out = [0.0] * n
+    if amount <= EPS or n == 0:
+        return out
+    order = sorted(range(n), key=lambda i: caps[i])
+    left, rest = amount, n
+    for i in order:
+        share = left / rest
+        take = min(caps[i], share)
+        out[i] = take
+        left -= take
+        rest -= 1
+    return out
+
+
+def _admit(take, groups):
+    """``groups``: [(rank, [(key, offer)])]; serve by rank, evenly within one. -> {key: admitted}."""
+    out, left = {}, take
+    for _rank, rows in sorted(groups, key=lambda g: g[0]):
+        offers = [o for _k, o in rows]
+        if sum(offers) <= left + EPS:
+            for k, o in rows:
+                out[k] = o
+            left = max(0.0, left - sum(offers))
+            continue
+        for (k, _o), a in zip(rows, _fill(left, offers)):
+            out[k] = a
+        left = 0.0
+    return out
+
+
+def _share(avail, others):
+    """The most one input can get when it shares ``avail`` evenly with inputs offering ``others``."""
+    if avail <= EPS:
+        return 0.0
+    others = sorted(others)
+    rest, left = len(others) + 1, avail
+    for o in others:
+        level = left / rest
+        if o >= level:
+            return level
+        left -= o
+        rest -= 1
+    return left
+
+
+def _topo(lg):
+    indeg = {v: 0 for v in lg.nodes}
+    for e in lg.edges():
+        indeg[e.dst] += 1
+    todo = sorted((v for v, d in indeg.items() if d == 0), key=str)
+    order, seen = [], set()
+    while todo:
+        v = todo.pop(0)
+        if v in seen:
+            continue
+        seen.add(v)
+        order.append(v)
+        for e in lg.out.get(v, ()):
+            indeg[e.dst] -= 1
+            if indeg[e.dst] == 0:
+                todo.append(e.dst)
+    order += sorted((v for v in lg.nodes if v not in seen), key=str)    # a ring: as it comes
+    return order
+
+
+# -- one item -------------------------------------------------------------------------------------
+def _usable(lg, item, takes, gives):
+    """The edges ``item`` can move along: every belt edge; an inserter's only toward a target
+    that takes the item, and out of a machine only what it gives."""
+    def accepts(v):
+        n = lg.nodes[v]
+        if n.kind == "machine":
+            return item in takes.get(v, ())
+        if n.kind == "inserter":
+            return any(accepts(e.dst) for e in lg.out.get(v, ()))
+        return True
+
+    out = set()
+    for e in lg.edges():
+        src, dst = lg.nodes[e.src], lg.nodes[e.dst]
+        if src.kind == "machine" and item not in gives.get(e.src, ()):
+            continue
+        if not accepts(e.dst) and dst.kind in ("machine", "inserter"):
+            continue
+        out.add((e.src, e.dst))
+    return out
+
+
+def _solve_item(lg, order, usable, sup, dem, cap, rounds, tol):
+    """-> (admitted into each node, flow on each edge, consumed per node, left per node,
+    rounds, residual)."""
+    ins, outs = {}, {}
+    for e in lg.edges():
+        k = (e.src, e.dst)
+        if k in usable:
+            outs.setdefault(e.src, []).append(e)
+            ins.setdefault(e.dst, []).append(e)
+    acc, accept = {}, {}
+    offer = {}
+    residual, done = INF, 0
+    got = eat = left = {}
+    for done in range(1, rounds + 1):
+        new, got, eat, left = {}, {}, {}, {}
+        for v in order:
+            mine_in = ins.get(v, ())
+            s = sup.get(v, 0.0)
+            rows = {}
+            for e in mine_in:
+                o = new.get((e.src, v), offer.get((e.src, v), 0.0))
+                rows.setdefault(e.rank, []).append(((e.src, v), o))
+            total = s + sum(o for r in rows.values() for _k, o in r)
+            limit = min(cap.get(v, INF), accept.get(v, INF))
+            take = min(total, limit)
+            adm = _admit(take, [(-1, [("supply", s)])] + list(rows.items()))
+            g = sum(adm.values())
+            got[v] = g
+            e_ = min(g, dem.get(v, 0.0))
+            eat[v] = e_
+            rest = g - e_
+            mine_out = outs.get(v, ())
+            taps = [e for e in mine_out if e.via == "pickup" and lg.nodes[v].kind != "machine"]
+            onward = [e for e in mine_out if e not in taps]
+            placed = 0.0
+            for group in (taps, onward):
+                caps_ = [acc.get((e.src, e.dst), INF) for e in group]
+                for e, a in zip(group, _fill(rest - placed, caps_)):
+                    new[(e.src, e.dst)] = a
+                    placed += a
+            left[v] = min(adm.get("supply", 0.0), placed)
+        # backward: what each node accepts, and what it admits from each input
+        for v in reversed(order):
+            out_acc = sum(acc.get((e.src, e.dst), INF) for e in outs.get(v, ()))
+            accept[v] = min(cap.get(v, INF), dem.get(v, 0.0) + out_acc)
+            rows = {}
+            for e in ins.get(v, ()):
+                rows.setdefault(e.rank, []).append(e)
+            avail = max(0.0, accept[v] - sup.get(v, 0.0))
+            for rank in sorted(rows):
+                group = rows[rank]
+                offers = [new.get((e.src, v), 0.0) for e in group]
+                for i, e in enumerate(group):
+                    acc[(e.src, v)] = _share(avail, offers[:i] + offers[i + 1:])
+                avail = max(0.0, avail - sum(offers))
+        residual = max((abs(new.get(k, 0.0) - offer.get(k, 0.0)) for k in set(new) | set(offer)),
+                       default=0.0)
+        offer = new
+        if residual < tol:
+            break
+    return got, offer, eat, left, done, residual
+
+
+# -- the solve ------------------------------------------------------------------------------------
+def _solve_all(lg, order, supply, demand, caps_on, shares, rounds, tol, takes, gives):
+    items = sorted({i for t in list(supply.values()) + list(demand.values()) for i in t})
+    flow, edge, ate, left = {}, {}, {}, {}
+    worst, most = 0.0, 0
+    for item in items:
+        usable = _usable(lg, item, takes, gives)
+        sup = {v: t[item] for v, t in supply.items() if item in t}
+        dem = {v: t[item] for v, t in demand.items() if item in t}
+        if caps_on:
+            cap = {v: n.cap * shares.get(v, {}).get(item, 1.0) for v, n in lg.nodes.items()}
+        else:
+            cap = {}
+        got, off, eat, lft, n, res = _solve_item(lg, order, usable, sup, dem, cap, rounds, tol)
+        for v, x in got.items():
+            if x > EPS:
+                flow.setdefault(v, {})[item] = x
+        for k, x in off.items():
+            if x > EPS:
+                edge.setdefault(k, {})[item] = x
+        for v, x in eat.items():
+            if x > EPS:
+                ate.setdefault(v, {})[item] = x
+        for v, x in lft.items():
+            if x > EPS:
+                left.setdefault(v, {})[item] = x
+        worst, most = max(worst, res), max(most, n)
+    return flow, edge, ate, left, most, worst
+
+
+def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, outer=30):
+    """Flows over ``lg`` (``fkcore.lanes.LaneGraph``). ``supply`` / ``demand``: {node id: {item:
+    items/s}} (a demand of INF takes everything); ``machines``: {node id: Machine}, whose needs
+    and products join the demand and supply at their utilization. -> Result."""
+    supply = {v: dict(t) for v, t in (supply or {}).items()}
+    demand = {v: dict(t) for v, t in (demand or {}).items()}
+    machines = dict(machines or {})
+    order = _topo(lg)
+    takes = {v: set(t) for v, t in demand.items()}
+    gives = {v: set(t) for v, t in supply.items()}
+    for m, mach in machines.items():
+        takes.setdefault(m, set()).update(mach.needs)
+        gives.setdefault(m, set()).update(mach.makes)
+    # each side of a machine is judged against the other side's potential (V1's rate model): it
+    # asks for its inputs as fast as its outputs let it run, and offers its products as fast as
+    # its inputs let it run; a side that gets all it asked (or gets rid of all it offered) does
+    # not limit the machine. From everything at full speed, damped.
+    pin = {m: 1.0 for m in machines}                # what its inputs allow
+    pout = {m: 1.0 for m in machines}               # what its outputs allow
+    for done in range(1, outer + 1):
+        sup = {v: dict(t) for v, t in supply.items()}
+        dem = {v: dict(t) for v, t in demand.items()}
+        for m, mach in machines.items():
+            for item, r in mach.needs.items():
+                dem.setdefault(m, {})[item] = dem.get(m, {}).get(item, 0.0) + r * pout[m]
+            for item, r in mach.makes.items():
+                sup.setdefault(m, {})[item] = sup.get(m, {}).get(item, 0.0) + r * pin[m]
+        req, req_edge, _a, _l, _n, _r = _solve_all(lg, order, sup, dem, False, {}, rounds, tol,
+                                                   takes, gives)
+        shares = _shares(lg, order, req, req_edge, sup, dem)
+        flow, edge, ate, left, n, res = _solve_all(lg, order, sup, dem, True, shares, rounds, tol,
+                                                   takes, gives)
+        moved = 0.0
+        for m, mach in machines.items():
+            new_in, new_out = 1.0, 1.0
+            for item, r in mach.needs.items():
+                asked = r * pout[m]
+                got = ate.get(m, {}).get(item, 0.0)
+                if r > EPS and got < asked - 1e-9:
+                    new_in = min(new_in, got / r)
+            for item, r in mach.makes.items():
+                offered = r * pin[m]
+                gone = left.get(m, {}).get(item, 0.0)
+                if r > EPS and gone < offered - 1e-9:
+                    new_out = min(new_out, gone / r)
+            k = 1.0 if done <= 2 else 0.5
+            nin, nout = pin[m] + (new_in - pin[m]) * k, pout[m] + (new_out - pout[m]) * k
+            moved = max(moved, abs(nin - pin[m]), abs(nout - pout[m]))
+            pin[m], pout[m] = nin, nout
+        if moved < 1e-6:
+            break
+    util = {m: max(0.0, min(pin[m], pout[m])) for m in machines}
+    caps = {v: node.cap for v, node in lg.nodes.items()}
+    return Result(flow, edge, req, ate, left, dem, sup, util, caps, n, res)
+
+
+def _shares(lg, order, req, req_edge, sup, dem):
+    """{node: {item: share of its capacity}} where several items cross a node. Where they meet (a
+    node with several inputs, or a source of its own), each gets what the node would admit of the
+    required flows by rank (a source first, what flows on, then side-loads in the order they enter,
+    then drops; evenly within a rank) within what the node can pass on: its capacity, or less when
+    what lies after it carries less. Down a lane, a node fed by one input keeps the shares of the
+    node before it. A limit of this first version: the joint solve of several items is next."""
+    can = {}
+    for v in reversed(order):
+        d = sum(dem.get(v, {}).values())
+        can[v] = min(lg.nodes[v].cap, d + sum(can.get(e.dst, INF) for e in lg.out.get(v, ())))
+    out = {}
+    for v in order:
+        items = req.get(v, {})
+        if len(items) < 2:
+            continue
+        ins = [e for e in lg.inn.get(v, ()) if req_edge.get((e.src, v))]
+        up = out.get(ins[0].src) if len(ins) == 1 and not sup.get(v) else None
+        if up:
+            got = {i: up.get(i, 0.0) for i in items}
+        else:
+            groups = {-1: [(("supply", i), x) for i, x in sup.get(v, {}).items() if x > EPS]}
+            for e in ins:
+                for i, x in req_edge.get((e.src, v), {}).items():
+                    groups.setdefault(e.rank, []).append(((e.src, i), x))
+            offered = sum(x for rows in groups.values() for _k, x in rows)
+            adm = _admit(min(can[v], offered), list(groups.items()))
+            got = {}
+            for (_src, item), x in adm.items():
+                got[item] = got.get(item, 0.0) + x
+        total = sum(got.values())
+        if total > EPS:
+            out[v] = {i: got.get(i, 0.0) / total for i in items}
+    return out
+
+
+# -- report ---------------------------------------------------------------------------------------
+def _name(nid):
+    key, lane = nid
+    return f"{key}{'.' + lane if lane else ''}"
+
+
+def report(res, lg, top=8):
+    """Report lines: the starved sinks, the blocked sources and the binding connectors."""
+    lines = []
+    starved = res.starved()
+    for nid in sorted(starved, key=str):
+        for item, (got, want) in sorted(starved[nid].items()):
+            lines.append(f"STARVED {_name(nid)}: {item} {got:.3f}/s of {want:.3f}/s")
+    for nid in sorted(res.supply, key=str):
+        for item, want in sorted(res.supply[nid].items()):
+            if want == INF or want <= EPS:
+                continue
+            gone = res.supplied.get(nid, {}).get(item, 0.0)
+            if gone < want - 1e-6:
+                lines.append(f"BLOCKED {_name(nid)}: {item} {gone:.3f}/s of {want:.3f}/s left")
+    binding = sorted((v for v in lg.nodes if res.binds(v)),
+                     key=lambda v: (-res.required_ratio(v), str(v)))
+    for v in binding[:top]:
+        lines.append(f"BINDS   {_name(v)} ({lg.nodes[v].name}): {res.total(v):.3f}/s at capacity "
+                     f"{res.cap[v]:.3f}/s, {res.total(v, res.required):.3f}/s required "
+                     f"(ratio {res.required_ratio(v):.2f})")
+    if len(binding) > top:
+        lines.append(f"BINDS   ... {len(binding) - top} more")
+    return lines

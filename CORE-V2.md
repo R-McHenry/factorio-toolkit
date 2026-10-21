@@ -87,7 +87,7 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
 - 2.x: side-loads as merges (the smelter stack's side-loader) and lane separation (a splitter,
   then each branch side-loads an underground that passes only its own net).
 
-## Flow [proposed: Rory's approach, written out]
+## Flow [built, first slice: `fkcore/lanes.py`, `fkcore/throughput.py`, `tests/test_throughput.py`]
 
 The flow model works per net on the **lane graph** of a layout: one node per connector (each lane
 of each belt, underground and splitter half, each inserter, each pump), and the machines at the
@@ -104,9 +104,10 @@ nominal). The solver finds the flow f_i on every connector that the game would s
    in belt order, each taking min(what is left, its demand, its rate).
 4. **Splitters** split each lane evenly between their outputs; when one output can't take its half,
    the other takes the rest. When both outputs are full, they take evenly from the two inputs.
-5. **Merges.** Where a lane is offered more than it carries (a side-load, two branches joining), the
-   inputs are served evenly: an input offering less than its share keeps all of it, and the others
-   share the rest. [lab: whether items already on the lane go ahead of a side-load]
+5. **Merges.** Where a lane is offered more than it carries, it serves its inputs by rank: what
+   already flows on it from behind first, then side-loaded lanes in the order they enter it (the one
+   entering further upstream first: measured, 14 to 2), then drops; evenly within a rank (a
+   splitter's two inputs, an inserter's two lanes).
 6. **Back-pressure.** What a connector is offered but can't pass backs up: everything above it
    carries less, a splitter above it sends more to its other output, and a driver whose output
    backs up slows down.
@@ -117,8 +118,9 @@ consumer asks its demand, no capacities), then repeat until the flows stop chang
 - backward, from the consumers up: each connector's acceptance a_i = min(c_i, what its own
   inserters want + the acceptance of what it feeds); a consumer accepts its demand;
 - forward, from the drivers down in topological order: each connector passes min(its inflow, a_i),
-  split among its outputs evenly but never above an output's acceptance (water-filling); a merge
-  admits its inputs evenly up to its acceptance;
+  serving the inserters that pick from it first, then splitting among its outputs evenly but never
+  above an output's acceptance (water-filling); a merge admits its inputs by rank up to its
+  acceptance;
 - what an input offered but was not admitted lowers its acceptance for the next round, so the
   splitter above it sends that part the other way.
 
@@ -135,10 +137,18 @@ belts.
   the first pass, with no capacities): how much faster its critical connector would have to be.
 - for the whole factory: the same over every net.
 
-**With the rate model.** The delivered rates cap the machines (a starved consumer and a blocked
-driver run slower), the rate model solves again, and the two alternate until they agree: V1's
-damped fixed point, one level up. Belt order also closes V1's known gap: V1 shares a short net by
-appetite, while the game serves the first machines along the belt (agent `TOOLKIT.md`).
+**Machines.** The solver couples items through machines (a furnace takes ore and coal and makes
+plates) the way V1's rate model couples nets: each side of a machine is judged against the other
+side's potential (it asks for inputs as fast as its outputs let it run and offers products as fast
+as its inputs let it run), from everything at full speed, damped, until both hold. Belt order also
+closes V1's known gap: V1 shares a short net by appetite, while the game serves the first machines
+along the belt (agent `TOOLKIT.md`). [next slice: the netlist's machines and nets into the solver,
+and `report_rates` after `route` in the flow script]
+
+**Several items on one lane** share its capacity: where they meet, by the rank of their inputs
+(within what the lane can pass on), and down the lane in the shares they met with. A tighter spot
+further down cuts them in those shares, where the game would hold back the later one first: a
+limit of this first version, until a joint solve of all items.
 
 **Later: Rory's "giga brain option".** The full matrix of driver-to-consumer paths, with a flow per
 path: for nets that share lanes toward different sinks, and for the router. A linear-algebra or
@@ -224,8 +234,19 @@ east, `U` an underground entrance and `u` an exit, `S` a splitter half, each wit
 What V2 has to get right on it: the 2-to-1 side-loads (a required ratio of exactly 1 at 24
 furnaces per column, so a 25th starves), the coal chain of splitters (an even split first, then
 each unit takes its fuel and passes the rest on), the underground pass-throughs, and two nets
-through one inserter. [lab: measure a few tiled units, with ore and coal from loaders and the
-plates into a chest, as the solver's ground truth]
+through one inserter.
+
+Rory's second benchmark is a 4-to-4 balancer (`games/v2-bench/balancer-4x4-ghosts.json`): three
+layers of two splitters flowing north, the outer belts jogging in at the middle layer and the inner
+ones crossing under it by undergrounds.
+
+Both were built on a laptop test server and measured against the solver
+(`docs/LAB-LANES-20261020.md`): the balancer in 7 setups (any 3 inputs into any 3 outputs, 1 into
+4, 4 into 1 ...) and the stack in 3 (2 units at 24 furnaces per column, 1 unit at 26, 3 units on
+one coal inserter) all match, within 2%: the balancer is throughput-unlimited, a unit makes 15
+plates/s, 26 per column still make 15, and one coal inserter (2.5/s) gives the east unit its full
+1.08 coal/s and shares the rest between the other two (9.86 plates/s each solved, 9.69 measured
+once settled, which takes the game about 3000 s).
 
 ## Lab tests (a laptop test server, never the live game)
 
@@ -241,8 +262,11 @@ and up; a splitter with one output blocked; a machine's fluid port.
 
 ## Open
 
-1. How the nets on one shared lane split its capacity (in proportion to what each offers?).
-2. A route that is not a tree, and a ring of belts.
+1. The joint solve of several items on one lane (now: shares fixed where they meet).
+2. A ring of belts (the solver caps its rounds; not tested).
 3. The `.fkp` lane notation and the `LANE` check (my proposals above).
 4. V2.1: steer to whole belts, or let an agent plan odd lane counts?
 5. The path matrix (the "giga brain option"): when it is worth building.
+6. The next slices: the netlist into the solver and `report_rates` after `route` (`CAPACITY`
+   lines); the catalog's inserter speeds; the router's tier per connector (the miner line case is
+   a solver test already: red in the middle carries 9/s, red at the ends 7.5).
