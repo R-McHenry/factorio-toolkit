@@ -70,9 +70,9 @@ out by hand:
   the counts and what each serves)
 - what to research → `fk research`, then `fk research TECH`
 - a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
-- old items left on a rebuilt belt or in an inserter's hand jam it → `fk fresh X0,Y0,X1,Y1` takes
-  those up, and the next `fk build` lays them fresh (a belt or pipe the build lays under another
-  net is renewed by the build itself)
+- old items left on a rebuilt belt, in an inserter's hand, or in a crafter or its chest after a
+  recipe switch jam it → `fk fresh X0,Y0,X1,Y1` takes those up, and the next `fk build` lays them
+  fresh (a belt or pipe the build lays under another net is renewed by the build itself)
 - a factory makes less than its numbers on paper → after `fk build`, `out\report_rates.txt` has
   the routed rates: a `CAPACITY` line names the belt lane or inserter that is too thin; `tier
   minimize --allow yellow,red` in the build script lays red belts where yellow is too thin

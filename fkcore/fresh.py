@@ -8,9 +8,14 @@ longer takes; both jam the new machines. A scripted fix is fine when it goes thr
 breaks the connectors with stale items and replaces them. ``run`` looks at the area as ``fk look``
 does and orders deconstruction of every carrier with a ``WRONG_ITEM`` (an item its net doesn't
 carry) and, 1.1.1, of every inserter holding an item the assembling machine it feeds doesn't use
-(``link.lua_stuck_hands``). Robots carry them and what they hold to storage, nothing is moved or
-created by script, and the next ``fk build`` lays them again (they are ``MISSING`` by then). They
-are found by name and position, in batches that fit one RCON command.
+(``link.lua_stuck_hands``). 1.7 (Rory, 2026-10-21: ``fk fresh`` also deals with a one-off crafter
+whose output slot is full of the old product): an assembling machine whose output holds what its
+recipe no longer makes, and a chest its machines' inserters fill that holds what none of them
+makes now (``link.lua_stale_crafters``). Robots carry them and what they hold to storage, nothing
+is moved or created by script, and the next ``fk build`` lays them again (they are ``MISSING`` by
+then). They are found by name and position, in batches that fit one RCON command. Keeping the
+wrong items out in the first place is the game's job (an inserter's filter or condition), not
+this one's.
 """
 from __future__ import annotations
 
@@ -43,21 +48,36 @@ def run(r, game, cat, area):
     except ValueError:
         hands = []
     hands = hands if isinstance(hands, list) else []
+    try:
+        left = json.loads(r.lua(link.lua_stale_crafters(sf.name, area)).strip() or "[]")
+    except ValueError:
+        left = []
+    left = left if isinstance(left, list) else []
     a = ",".join(str(int(v)) for v in area)
-    if not stale and not hands:
-        return [f"fresh {sf.name} area {a}: no belt or inserter here holds an item it shouldn't"]
-    things = [(v.name, v.x, v.y) for v in stale] + [(h[0], h[1], h[2]) for h in hands]
+    if not stale and not hands and not left:
+        return [f"fresh {sf.name} area {a}: no belt, inserter, crafter or chest here holds an item "
+                "it shouldn't"]
+    things = ([(v.name, v.x, v.y) for v in stale] + [(h[0], h[1], h[2]) for h in hands]
+              + [(c[0], c[1], c[2]) for c in left])
     ordered = 0
     for i in range(0, len(things), BATCH):
         got = r.lua(link.lua_decon_list(sf.name, force, things[i:i + BATCH])).strip()
         ordered += int(got) if got.isdigit() else 0
-    items = sorted({i for v in stale for i in v.wrong_items} | {h[3] for h in hands})
+    items = sorted({i for v in stale for i in v.wrong_items} | {h[3] for h in hands}
+                   | {i for c in left for i in c[4]})
+    crafters = sum(1 for c in left if c[3] == "crafter")
     out = [f"fresh {sf.name} area {a}: {ordered} of {len(things)} ordered up "
-           f"({_n(len(stale), 'belt')}, {_n(len(hands), 'inserter')}; {', '.join(items)}). Robots "
-           "carry them and what they hold to storage; the next fk build lays them fresh"]
+           f"({_n(len(stale), 'belt')}, {_n(len(hands), 'inserter')}, "
+           f"{_n(crafters, 'crafter')}, {_n(len(left) - crafters, 'chest')}; {', '.join(items)}). "
+           "Robots carry them and what they hold to storage; the next fk build lays them fresh"]
     out += [f"  {v}" for v in stale[:SHOWN]]
     out += [f"  {h[0]} {h[1]},{h[2]} holds {h[3]}, which its machine doesn't use"
             for h in hands[:SHOWN]]
-    if len(things) > len(stale[:SHOWN]) + len(hands[:SHOWN]):
-        out.append(f"  ... and {len(things) - len(stale[:SHOWN]) - len(hands[:SHOWN])} more")
+    out += [(f"  {c[0]} {c[1]},{c[2]} holds {', '.join(c[4])}, which its recipe no longer makes"
+             if c[3] == "crafter" else
+             f"  {c[0]} {c[1]},{c[2]} holds {', '.join(c[4])}, which none of its machines makes now")
+            for c in left[:SHOWN]]
+    shown = len(stale[:SHOWN]) + len(hands[:SHOWN]) + len(left[:SHOWN])
+    if len(things) > shown:
+        out.append(f"  ... and {len(things) - shown} more")
     return out

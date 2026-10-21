@@ -300,6 +300,60 @@ rcon.print(#out > 0 and helpers.table_to_json(out) or "[]")
 """
 
 
+def lua_stale_crafters(surface, area):
+    """A recipe switch's leftovers in ``area`` (1.7, Rory 2026-10-21: ``fk fresh`` also deals with
+    a one-off crafter whose output slot is full of the old product): an assembling machine whose
+    output holds an item its recipe doesn't make, and a chest that holds an item none of the
+    machines whose inserters drop into it makes now (the 2005 player's shop: a 1-slot provider
+    full of stone furnaces after its crafter went on to labs). [[name, x, y, kind, items]] as JSON,
+    kind ``crafter`` or ``chest`` (a free read)."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local function makes(m)
+  local ok, r = pcall(m.get_recipe)
+  local out = {{}}
+  if ok and r then for _, p in pairs(r.products) do out[p.name] = true end end
+  return out, ok and r ~= nil
+end
+local out, feeds, other = {{}}, {{}}, {{}}
+for _, m in pairs(s.find_entities_filtered{{area = {_area(area)}, type = "assembling-machine"}}) do
+  local made, has = makes(m)
+  local inv = m.get_output_inventory()
+  if has and inv then
+    local odd = {{}}
+    for _, c in pairs(inv.get_contents()) do
+      if not made[c.name] then odd[#odd + 1] = c.name end
+    end
+    if #odd > 0 then out[#out + 1] = {{m.name, m.position.x, m.position.y, "crafter", odd}} end
+  end
+end
+for _, i in pairs(s.find_entities_filtered{{area = {_area(area)}, type = "inserter"}}) do
+  local src, dst = i.pickup_target, i.drop_target
+  if dst and dst.valid and (dst.type == "container" or dst.type == "logistic-container") then
+    local key = dst.unit_number
+    if src and src.valid and src.type == "assembling-machine" then
+      feeds[key] = feeds[key] or {{chest = dst, made = {{}}}}
+      for name in pairs((makes(src))) do feeds[key].made[name] = true end
+    else
+      other[key] = true          -- fed from a belt or a chest too: what belongs there is unknown
+    end
+  end
+end
+for key, f in pairs(feeds) do
+  local c = f.chest
+  local inv = not other[key] and c.get_inventory(defines.inventory.chest)
+  local odd = {{}}
+  if inv then
+    for _, it in pairs(inv.get_contents()) do
+      if not f.made[it.name] then odd[#odd + 1] = it.name end
+    end
+  end
+  if #odd > 0 then out[#out + 1] = {{c.name, c.position.x, c.position.y, "chest", odd}} end
+end
+rcon.print(#out > 0 and helpers.table_to_json(out) or "[]")
+"""
+
+
 def lua_rip_load(surface, force, points):
     """What taking up the entities at ``points`` [(x, y)] costs the robots (1.1, a free read): how
     many there are and the items they hold (inventories, belt lines, inserter hands), the

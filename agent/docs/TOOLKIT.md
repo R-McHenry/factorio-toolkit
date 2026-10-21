@@ -184,9 +184,11 @@ fk build --to size               the counts of your n=auto rows and what each on
                                  (out\size.txt), nothing laid out
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
-fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them, and
-                                 inserters stuck holding an item their machine doesn't use, are
-                                 taken up; the next build lays them fresh
+fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them,
+                                 inserters stuck holding an item their machine doesn't use, a
+                                 crafter whose output holds what its recipe no longer makes, and
+                                 a chest its crafters fill holding what none of them makes now,
+                                 are taken up; the next build lays them fresh
 fk merge . A,B --into C          two factories become one, both kept where they stand
 fk chests-to-net . C PROV REQ    a robot link (provider chest to requester chest) becomes a belt
 fk net-to-chests . C NET --provider P --requester R

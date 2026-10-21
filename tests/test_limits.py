@@ -199,12 +199,14 @@ class RipEstimateTest(unittest.TestCase):
 
 
 class FakeLink:
-    def __init__(self, hands="[]", ordered="2"):
-        self.sent, self.hands, self.ordered = [], hands, ordered
+    def __init__(self, hands="[]", ordered="2", left="[]"):
+        self.sent, self.hands, self.ordered, self.left = [], hands, ordered, left
 
     def lua(self, text):
         if "held_stack" in text:                    # the stuck-hands read
             return self.hands
+        if "get_output_inventory" in text:          # the stale-crafters read (1.7)
+            return self.left
         self.sent.append(text)
         return self.ordered
 
@@ -230,15 +232,40 @@ class FreshTest(unittest.TestCase):
         self.assertIn('transport-belt\\", 1.5, 1.5]', r.sent[0])     # JSON inside a Lua string
         self.assertIn('underground-belt\\", 3.5, 1.5]', r.sent[0])
         self.assertNotIn("2.5", r.sent[0])
-        self.assertIn("2 of 2 ordered up (2 belts, 0 inserters; pipe, steel-plate)", lines[0])
+        self.assertIn("2 of 2 ordered up (2 belts, 0 inserters, 0 crafters, 0 chests; pipe, "
+                      "steel-plate)", lines[0])
 
     def test_an_inserter_stuck_with_an_unused_item_goes_too(self):
         r = FakeLink(hands='[["inserter", 5.5, 1.5, "iron-gear-wheel"]]', ordered="3")
         lines = self.fresh(r)
         self.assertIn('inserter\\", 5.5, 1.5]', r.sent[0])
-        self.assertIn("3 of 3 ordered up (2 belts, 1 inserter; iron-gear-wheel, pipe, steel-plate)",
-                      lines[0])
+        self.assertIn("3 of 3 ordered up (2 belts, 1 inserter, 0 crafters, 0 chests; "
+                      "iron-gear-wheel, pipe, steel-plate)", lines[0])
         self.assertIn("inserter 5.5,1.5 holds iron-gear-wheel", "\n".join(lines))
+
+    def test_a_crafters_old_product_goes_too(self):
+        # 1.7 (Rory, 2026-10-21): the 2005 player's shop, switched from stone furnaces to labs:
+        # the crafter's output and its 1-slot provider still held stone furnaces
+        r = FakeLink(ordered="4", left='[["assembling-machine-2", 7.5, 4.5, "crafter", '
+                                      '["stone-furnace"]], ["passive-provider-chest", 9.5, '
+                                      '4.5, "chest", ["stone-furnace"]]]')
+        lines = self.fresh(r)
+        self.assertIn('assembling-machine-2\\", 7.5, 4.5]', r.sent[0])
+        self.assertIn('passive-provider-chest\\", 9.5, 4.5]', r.sent[0])
+        self.assertIn("4 of 4 ordered up (2 belts, 0 inserters, 1 crafter, 1 chest; pipe, "
+                      "steel-plate, stone-furnace)", lines[0])
+        text = "\n".join(lines)
+        self.assertIn("assembling-machine-2 7.5,4.5 holds stone-furnace, which its recipe no "
+                      "longer makes", text)
+        self.assertIn("passive-provider-chest 9.5,4.5 holds stone-furnace, which none of its "
+                      "machines makes now", text)
+
+    def test_the_stale_crafter_read_skips_a_chest_fed_from_belts(self):
+        from fkcore import link
+        lua = link.lua_stale_crafters("nauvis", (0, 0, 10, 10))
+        self.assertIn("other[key] = true", lua)      # fed by anything but a machine: unknown
+        self.assertIn("get_output_inventory", lua)
+        link.assert_safe("/sc " + lua)
 
 
 if __name__ == "__main__":
