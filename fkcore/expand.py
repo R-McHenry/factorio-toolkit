@@ -33,7 +33,7 @@ __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attac
            "frame_of", "planned_frame"]
 
 _SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump",
-           "Boiler", "SteamEngine", "InfinityPipe")
+           "Boiler", "SteamEngine", "InfinityPipe", "Lab")
 _NO_DIRECTION = ("infinity-pipe",)          # fluid prototypes the game never turns
 _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)

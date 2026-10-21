@@ -132,7 +132,10 @@ fixing in the source.
 - `CLOG`: a mixed belt that machines feed, or an unlimited chest fed two or more items by
   separate nets: an item that comes faster than it is used can fill it and stop the others.
   Mixed belts and chests are fine where nothing comes faster than it is used (a one-off crafter
-  on a requester chest is)
+  on a requester chest is), and a mixed belt into chests that take any item never draws it (a
+  products belt into one provider chest: when the chest is full everything stops, which is a
+  limit, not a clog). Labs on a mixed belt still can clog: a lab full of one pack lets the next
+  wait behind it; one inserter from a multi-item chest into a lab can't (`Lab` beside the chest)
 - `UNLIMITED`: provider or storage chests without `limit=`: what reaches them goes into the
   network without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops when it
   is full

@@ -454,7 +454,10 @@ def _clog_checks(flat, in_hold, fed):
     - ``CLOG``: a sushi net that machines drive (requester chests only ask for what they are set
       to, so a net they alone drive is limited), or an unlimited chest fed two or more items by
       separate nets: an item that comes faster than it is used can fill the belt or the chest and
-      stop the others.
+      stop the others. 1.7 (Rory, 2026-10-21: one inserter into an all-accepting multi-sink
+      raises no CLOG): a sushi net whose every consumer is a chest that takes any item (a
+      products belt into one provider chest) takes whatever reaches it, so nothing waits behind
+      another item; when the chest is full everything stops, which is limited production.
     - ``UNLIMITED``: provider or storage chests without ``limit=`` (one line per factory): what
       reaches them goes into the logistic network without end (the 0534 run's network held 4800
       iron and 5300 copper plates).
@@ -464,7 +467,11 @@ def _clog_checks(flat, in_hold, fed):
     """
     for name, net in flat.nets.items():
         made = any(flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
-        if net.sushi and made:
+        takes_all = bool(net.consumers) and all(
+            flat.machines[k].sink and flat.machines[k].takes is None
+            and flat.machines[k].extra.get("role") in ("provider", "storage", "buffer")
+            for k, _i in net.consumers)
+        if net.sushi and made and not takes_all:
             flat.checks.append(Check(
                 "CLOG", f"net {name}",
                 f"{', '.join(net.items)} share one belt: one that comes faster than it is used can "

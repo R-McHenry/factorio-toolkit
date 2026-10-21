@@ -99,11 +99,21 @@ class LimitedProductionChecksTest(unittest.TestCase):
         limited = src.replace("spare = Chest<provider>", "spare = Chest<provider, limit=1>")
         self.assertEqual(advice(limited), [])
 
-    def test_a_mixed_belt_that_machines_feed_can_clog(self):
+    def test_a_mixed_belt_that_machines_feed_into_one_chest_is_limited(self):
+        # 1.7 (Rory, 2026-10-21): one inserter into an all-accepting multi-sink raises no CLOG; a
+        # chest takes whatever reaches it, so no item waits behind another (1.1 raised it here)
         src = BASE.format(inbox="", box=", limit=4").replace(
             "net plates_in: inbox -> gears", "pipes = AsmRow<n=1, recipe=pipe> @(6, 20)\n"
                                              "net plates_in: inbox -> gears, pipes").replace(
             "net gear:      gears -> box", "net out: gears, pipes -> box")
+        self.assertEqual(advice(src), [])
+
+    def test_a_mixed_belt_that_machines_feed_into_machines_can_clog(self):
+        src = BASE.format(inbox="", box=", limit=4").replace(
+            "net plates_in: inbox -> gears", "pipes = AsmRow<n=1, recipe=pipe> @(6, 20)\n"
+                                             "net plates_in: inbox -> gears, pipes").replace(
+            "net gear:      gears -> box",
+            "eng = Assembler<recipe=engine-unit> @(20, 2)\nnet out: gears, pipes -> eng")
         self.assertEqual(advice(src), [("CLOG", "net out")])
 
     def test_a_mixed_belt_a_requester_feeds_is_limited(self):
