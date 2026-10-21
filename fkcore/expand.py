@@ -61,6 +61,8 @@ def belts(flat, key, side):
 def fragment_of(flat, path, cat):
     """(Fragment, {role: net}) for template instance ``path``."""
     inst = flat.insts[path]
+    if inst.kind == "Bus":
+        return _bus_fragment(flat, path)
     keys = inst.machines
     ins, outs = belts(flat, keys[0], "in"), belts(flat, keys[0], "out")
     for k in keys[1:]:
@@ -85,6 +87,38 @@ def fragment_of(flat, path, cat):
     for name, (net, _items) in zip(names_out, outs):
         binding[name] = net
     return frag, binding
+
+
+def _bus_fragment(flat, path):
+    """A Bus: its ports' sides turned by its own rot (they are compass sides of the frame its
+    hint is written in: the factory's, or its module's, which turns them with everything in it),
+    a stub for each port a net names, bound to that net; its belts and splitters on its own net
+    (``elaborate._bus_nets``)."""
+    inst = flat.insts[path]
+    item = inst.params.get("item")
+    binding, used = {"pool": path}, set()
+    for key in inst.machines:
+        port = flat.machines[key].extra["port"]
+        hold = flat._in_hold if port == "load" else flat._out_hold
+        nets = [n for n in hold.get((key, item), ()) if n != path]
+        if nets:
+            local = key.rsplit("/", 1)[1]
+            binding[local] = nets[0]
+            used.add(local)
+    params = {k: v for k, v in inst.params.items() if k != "duty"}
+    params.update(_rot=int((inst.hints.get("at") or (0, 0, 0))[2]), _used=used)
+    return fragment("Bus", params, [], []), binding
+
+
+def _rot_of(flat, path):
+    """An instance's absolute rot: its own and every enclosing module's (0 where unplaced)."""
+    parts = path.split("/")
+    rot = 0
+    for i in range(len(parts), 0, -1):
+        hint = flat.insts["/".join(parts[:i])].hints.get("at")
+        if hint is not None:
+            rot += int(hint[2])
+    return rot % 4
 
 
 def _single(flat, keys, cat, ins, outs):
@@ -485,6 +519,8 @@ def explain(flat, lay, path, cat) -> str:
         lines.append(f"  nets      {', '.join(nets) or '-'}")
         return "\n".join(lines)
     frag, binding = fragment_of(flat, path, cat)
+    if inst.kind == "Bus":
+        return "\n".join(lines[:1] + _explain_bus(flat, lay, path, frag, binding))
     for name, role in frag.roles.items():
         net = binding.get(name, "?")
         carriers = [k for k in mine if lay.entities[k].net == net
@@ -500,9 +536,46 @@ def explain(flat, lay, path, cat) -> str:
     return "\n".join(lines)
 
 
+def _explain_bus(flat, lay, path, frag, binding):
+    """A Bus's lines for ``explain``: its own net, then each port: its side and tile as written,
+    its net, where the router meets it (the stub's tile and the way items cross it) and its
+    staircase."""
+    inst, rec = flat.insts[path], lay.insts[path]
+    item = inst.params.get("item")
+    mine = [k for k, e in lay.entities.items() if e.owner == path]
+    belts = sum(1 for k in mine if lay.entities[k].name.endswith("transport-belt")
+                and k.rsplit("/", 1)[1].startswith("b"))
+    splitters = sum(1 for k in mine if lay.entities[k].name.endswith("splitter"))
+    w, h = frag.size
+    runs = ("east", "south", "west", "north")[_rot_of(flat, path)]
+    out = [f"  bus       {item} on {h - 2} belts, {w} tiles, running {runs}: net {path} "
+           f"(its own: {belts} belts, {splitters} splitters)"]
+    for key in inst.machines:
+        m = flat.machines[key]
+        local = key.rsplit("/", 1)[1]
+        side = "in" if m.extra["port"] == "load" else "out"
+        stair = [k for k in mine if k.rsplit("/", 1)[1].startswith(local + "s")]
+        role = frag.roles.get(local)
+        if role is None:
+            out.append(f"  {side:<4} {local:<5} {m.extra['at']:<4} no net names it: its staircase "
+                       f"{_span(sorted(stair, key=fkpmod.natural_key))} only")
+            continue
+        (ax, ay, ad), = role.attach
+        x, y, d = turn(ax, ay, ad, rec.rot, frag.size)
+        where = f"{fkpmod.fmt(x + rec.x)},{fkpmod.fmt(y + rec.y)} {fkpmod.DIRS[d]}"
+        out.append(f"  {side:<4} {local:<5} {m.extra['at']:<4} net {binding[local]:<14} attach "
+                   f"{where:<11} carriers {path}/{local}, staircase "
+                   f"{_span(sorted(stair, key=fkpmod.natural_key))}")
+    out.append(f"  size      {w}x{h} (its own frame: the belts are its rows 1..{h - 2}, the ports "
+               "come in and go out at rows 0 and " + str(h - 1) + ")")
+    return out
+
+
 def unfold(fk_text, flat, lay, path):
     """-> (new .fk text, new layout): ``path`` becomes a Literal; every .fkp line stays."""
     inst = flat.insts[path]
+    if inst.kind == "Bus":
+        raise ValueError(f"{path} is a Bus: its ports are what nets name, and a Literal has none")
     if "/" in path:
         raise ValueError(f"{path} is inside a sub-module; unfold the module's instance instead")
     lines = fk_text.split("\n")

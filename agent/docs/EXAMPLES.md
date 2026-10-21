@@ -175,14 +175,29 @@ sushi, so the build says `CLOG`: it runs while each product is taken about as fa
 one that piles up fills the chest and the belt and stops the others, so limit production there.
 More products: another pair of rows below, the same way.
 
-## bus4.fk: Rory's 4-belt bus, a river of iron (54x18)
+## bus4.fk: Rory's 4-belt bus, a river of iron (54x25)
 
-Four belts run east. A feeder from the south merges into all four by a staircase of four splitters
-(input priority on the feeder's side, so it fills one belt after another), and two taps pull out by
-staircases of four splitters each, one going north, one south. Rory: "a river of iron, that you keep
-adding more iron inputs to, and pull iron out of when you need it". `bus4.json` is his demo exactly
-as he placed it; `bus = Literal<file="bus4.json"> @(x, y)` pastes it. A smelter row whose product
-belt ends at a feeder loads the bus, and a row whose input belt starts at a tap takes from it.
+Rory: "a river of iron, that you keep adding more iron inputs to, and pull iron out when you need
+it". Four belts run east. A load from the south merges into all four by a staircase of four
+splitters (input priority on its feeder's side, output priority toward the far belt, so it fills
+one belt after another), and two taps pull out by staircases of four splitters each, one going
+north, one south, each taking from the far belt first.
+
+```
+bus   = Bus<belts=4, length=54, item=iron-plate, load=s11, tap=n26|s33> @(0, 10)
+net iron1: smelt -> bus.load1             # the smelters' plates onto the bus
+net fe:    bus.tap1 -> gears              # the gears take what they need first
+net spare: bus.tap2 -> box                # the rest into the logistic network
+```
+
+The file adds a row of 8 stone furnaces south of the bus (its ore and coal from requesters), a
+gear assembler north of it and a chest south of it. On paper: the furnaces bring 2.5 plates/s,
+the gears take 2 and the chest the other 0.5; as routed, the same. At these parameters the
+template is Rory's demo where he put it, 210 of its 227 entities: the other 17 are his feeder's and
+taps' belts beyond the bus, which here are routes the router lays to and from the ports (40 belts
+and 6 underground ends in all). `bus4.json` is his demo exactly as he placed it in the lead world
+(`Literal<file="bus4.json">` pastes it as it is). To grow it: make it longer, add loads and taps
+(`load=s11|s40`), and a net for each.
 
 ## steam.fk: a steam power plant, 3.6 MW (16x26)
 

@@ -9,13 +9,15 @@ Endpoints come from the recipe (ingredients in, products out), plus the fuel of 
 the resource of a drill and every science pack for a lab. The steam chain has its own kinds: a
 ``Boiler`` (water and fuel in, steam out) and a ``SteamEngine`` (steam in; electricity is not an
 item, so it makes nothing the netlist carries). ``InfinityPipe`` is a lab-only fluid source (the
-lab's free materials; no recipe makes one). Pure, stdlib only.
+lab's free materials; no recipe makes one). A ``Bus`` has no machines: its loads and taps are
+ports, endpoints that pass on what reaches them (``extra["port"]``). Pure, stdlib only.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from .catalog import FUEL_USE_W, FUEL_VALUE_J, MINING_TIME, STEAM_PER_S
+from .fragments import FragmentError, bus_check, bus_ports
 
 __all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "machines", "science_packs",
            "literal_machines"]
@@ -308,6 +310,31 @@ def turret_row(params, cat):
             for k in range(_int(params, "n"))]
 
 
+def bus(params, cat):
+    """``Bus<belts=4, length, item, load=s11|..., tap=n26|...>``: Rory's bus (2026-10-21, "a river
+    of iron, that you keep adding more iron inputs to, and pull iron out when you need it"). Its
+    ports are its endpoints, ``load1``.. then ``tap1``.., in the order written: a net into
+    ``bus.load1`` puts ``item`` on the bus, a net from ``bus.tap1`` takes it off. A port passes on
+    what reaches it (no rate of its own; a tap's 0 makes it a driver of the item), so the rate
+    model joins every net through the bus into one pool (``fkcore.rates``). The geometry is
+    ``fragments.bus``; a port that doesn't fit is a bad parameter here, before any placement."""
+    _only(params, ("belts", "length", "item", "load", "tap"))
+    try:
+        belts, length, item, loads, taps = bus_ports(params)
+        bus_check(belts, length, loads, taps)
+    except FragmentError as exc:
+        raise TemplateError(str(exc)) from None
+    if cat.is_fluid(item):
+        raise TemplateError(f"{item} is a fluid: a bus is belts")
+    out = [MSpec(f"load{k}", "transport-belt", None, {}, {}, frozenset([item]),
+                 extra={"port": "load", "item": item, "at": f"{s}{x}"})
+           for k, (s, x) in enumerate(loads, 1)]
+    out += [MSpec(f"tap{k}", "transport-belt", None, {}, {item: 0.0}, frozenset(),
+                  extra={"port": "tap", "item": item, "at": f"{s}{x}"})
+            for k, (s, x) in enumerate(taps, 1)]
+    return out
+
+
 TEMPLATES = {
     "AsmRow": asm_row,
     "Assembler": assembler,
@@ -324,6 +351,7 @@ TEMPLATES = {
     "LabRow": lab_row,
     "Chest": chest,
     "TurretRow": turret_row,
+    "Bus": bus,
 }
 
 

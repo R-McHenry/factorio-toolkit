@@ -36,10 +36,28 @@ half the trunk, the others a quarter each (Rory's join case, below), and every c
 mix the trunk happens to carry. A k-to-m balancer in place of the trunk fixes both, and is where
 the bus templates and the hub meet.
 
-[open, for V2.1: how a net says it goes through a bus instance (a balancer has no machines, so it
-is no endpoint today: its roles would be on the net, and the router would route drivers to the
-bus's inputs and its outputs to the consumers); which bus templates come first; whether the bus
-router is needed once the templates exist; a balancer per k-to-m hub, and which sizes]
+**The bus** [built, 2026-10-21: `Bus<belts, length, item, load=, tap=>`, `fkcore/fragments.py`
+`bus`, `tests/test_bus.py`]: Rory's 4-belt bus demo (`agent/docs/examples/bus4.json`, read from
+the lead world) as the first main-bus template, the second way above. At his parameters the
+template lays his demo's bus entity for entity, splitter priorities included. A net goes through a
+bus instance by naming its **ports**: each load and tap is an endpoint (`net iron1: smelt ->
+bus.load1`, `net fe: bus.tap1 -> gears`) whose role is one belt beside the bus with one attach
+point, so the general router lays single-belt nets to and from it and never the bus; its frame is
+no ground of its own for the router (its belts and splitters are entities), so a net crosses a
+4-belt bus by a yellow underground between its two outer rows. The bus is a net of its own, named
+as the instance: its loads drive it, its taps consume it, its belts and splitters carry it.
+`connect` reads a port as a **joint** (a consumer of one net and a driver of the next: no LEAK),
+and the bus's net is OPEN where a load sits after a tap. V1's rate model solves every net through
+a bus as one pool (what the loads bring, the taps share); V2 sees the bus as laid: its lanes (a
+yellow belt 15/s, 7.5 a lane) and its splitters' priorities (the lane graph ranks a preferred
+input first and fills a preferred output first; the required flows, without capacities, split
+evenly, so a staircase's far belt doesn't read as binding while the others stand empty), and
+`CAPACITY` names the victims beyond the bus.
+
+[open, for V2.1: which bus templates come next (the balancer); whether the bus router is needed
+now the bus template exists; a balancer per k-to-m hub, and which sizes; several items on one bus
+(today a second item is a second bus beside it); the lab: the staircases' priorities as measured
+in the game (the solver has the game's documented behaviour, not a measurement yet)]
 
 ## Words
 

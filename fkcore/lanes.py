@@ -21,6 +21,11 @@ docs/LAB-LANES-20261020.md (2.0.77):
   every side, though V1's connect gives it no drop edge (v4 B-120), so this module adds them.
 - ``mine``: a drill drops onto the near lane (in line: the right lane, by the inserter rule;
   not measured).
+- a splitter's **priorities** (its game settings, ``config``; Rory's bus staircases): with an
+  input priority, the edges into its preferred half rank before the other half's (it takes
+  what comes there first); with an output priority, the edges out of its preferred half are
+  ``first`` (what it passes on goes there first, the rest to the other half). Lane by lane, as
+  every splitter edge.
 
 Capacities, in items/s: a belt or underground lane carries ``belt_speed x 60 x 4`` (yellow 7.5); a
 splitter's lane node stands for both halves (twice that); an inserter moves one hand per swing,
@@ -93,6 +98,7 @@ class Edge:
     via: str                       # straight turn tunnel side ug_side pickup drop mine
     rank: int = 0                  # priority at dst: lower is served first
     cap: float = INF               # items/s the edge carries: one half of a splitter's lane
+    first: bool = False            # a splitter's preferred output: served before its other one
 
 
 @dataclass
@@ -107,13 +113,13 @@ class LaneGraph:
         for v in self.nodes:
             yield from self.out.get(v, ())
 
-    def add(self, src, dst, via, rank=0):
+    def add(self, src, dst, via, rank=0, first=False):
         if src not in self.nodes or dst not in self.nodes or src == dst:
             return
         for e in self.out.get(src, ()):
             if e.dst == dst:
                 return
-        e = Edge(src, dst, via, rank)
+        e = Edge(src, dst, via, rank, first=first)
         # a splitter's lane node stands for both halves; what goes in or out of one half is one
         # lane of its tier (a yellow splitter passes 7.5/s a lane per side, whatever feeds it)
         for end in (src, dst):
@@ -143,6 +149,41 @@ def _near(src_dir, dst_dir):
     if src_dir == _left(dst_dir):
         return "R"
     return None
+
+
+def _halves(n):
+    """{"left": tile, "right": tile} of a splitter node, looking along its flow."""
+    lx, ly = _STEP[_left(n.dir)]
+    return {"left": (math.floor(n.x + 0.5 * lx), math.floor(n.y + 0.5 * ly)),
+            "right": (math.floor(n.x - 0.5 * lx), math.floor(n.y - 0.5 * ly))}
+
+
+def _half(g, s, other, out):
+    """The half of splitter node ``s`` ("left" or "right") that an edge to (``out``) or from
+    node ``other`` uses; None where both do (two splitters side by side)."""
+    ns, no = g.nodes[s], g.nodes[other]
+    if out:
+        sx, sy = _STEP[ns.dir]
+        hit = [h for h, t in _halves(ns).items() if (t[0] + sx, t[1] + sy) in no.tiles]
+    else:
+        step = _STEP.get(no.dir)
+        if step is None:
+            return None
+        land = {(t[0] + step[0], t[1] + step[1]) for t in no.tiles}
+        hit = [h for h, t in _halves(ns).items() if t in land]
+    return hit[0] if len(hit) == 1 else None
+
+
+def _priorities(g, a, b):
+    """(rank at b, first out of a) of a belt edge a -> b, by the splitters' priorities."""
+    rank, first = 0, False
+    nb, na = g.nodes[b], g.nodes[a]
+    if nb.kind == "splitter" and nb.prio and nb.prio[0]:
+        half = _half(g, b, a, False)
+        rank = 1 if half is not None and half != nb.prio[0] else 0
+    if na.kind == "splitter" and na.prio and na.prio[1]:
+        first = _half(g, a, b, True) == na.prio[1]
+    return rank, first
 
 
 def _drop_lane(drop_dir, belt_dir):
@@ -183,8 +224,10 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
         na, nb = g.nodes[a], g.nodes[b]
         if via in ("belt", "curve"):
             if a in belts and b in belts:
+                rank, first = _priorities(g, a, b)
                 for lane in ("L", "R"):
-                    lg.add((a, lane), (b, lane), "straight" if via == "belt" else "turn", 0)
+                    lg.add((a, lane), (b, lane), "straight" if via == "belt" else "turn", rank,
+                           first)
         elif via == "ug":
             for lane in ("L", "R"):
                 lg.add((a, lane), (b, lane), "tunnel", 0)

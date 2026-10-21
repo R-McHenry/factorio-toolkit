@@ -7,6 +7,8 @@ measured (docs/LAB-LANES-20261020.md):
 - **belt order**: a lane serves the inserters picking from it before what flows on, so along a
   lane the first machines are served first;
 - **splitters** split evenly, and an output that can't take its half leaves the rest to the other;
+  one with an output priority fills its preferred output first, and one with an input priority
+  takes from its preferred input first (``fkcore.lanes``: Rory's bus staircases);
 - **admission**: a node offered more than it can take serves its inputs by rank: a source at the
   node first, then what flows on from behind, then side-loads in the order they enter the lane,
   then drops; evenly within a rank;
@@ -219,7 +221,7 @@ def _usable(lg, item, takes, gives):
 def _prepare(lg, order, item, takes, gives, sources, sinks):
     """An item's part of the graph, once per solve: its nodes in topological order (only what
     lies between its sources and the sinks that take it), and per node its inputs and its outputs
-    (the inserters picking from it first, then the rest)."""
+    (the inserters picking from it first, then a splitter's preferred output, then the rest)."""
     usable = _usable(lg, item, takes, gives)
     keep = _reach(usable, sources) & _reach(usable, sinks, forward=False) | set(sources) | \
         set(sinks)
@@ -231,14 +233,20 @@ def _prepare(lg, order, item, takes, gives, sources, sinks):
     split = {}
     for v, rows in outs.items():
         taps = [e for e in rows if e.via == "pickup" and lg.nodes[v].kind != "machine"]
-        split[v] = (taps, [e for e in rows if e not in taps])
+        first = [e for e in rows if e.first and e not in taps]
+        split[v] = (taps, first, [e for e in rows if e not in taps and e not in first])
     return [v for v in order if v in keep], ins, outs, split
 
 
-def _solve_item(prep, sup, dem, cap, ecap, rounds, tol):
+def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True):
     """-> (admitted into each node, flow on each edge, consumed per node, left per node,
-    rounds, residual)."""
+    rounds, residual). Without ``prio`` a splitter's preferred output is one of its two again:
+    the required flows (no capacities) spread evenly, since a priority only decides where items
+    go when the preferred side is full (Rory's bus staircases would heap a whole load on its far
+    belt, and that belt would read as binding while the others stand empty)."""
     order, ins, outs, split = prep
+    if not prio:
+        split = {v: (g[0], list(g[1]) + list(g[2])) for v, g in split.items()}
     acc, accept = {}, {}
     offer = {}
     residual, done = INF, 0
@@ -332,7 +340,8 @@ def _solve_all(lg, preps, supply, demand, caps_on, shares, rounds, tol, memo=Non
         if memo is not None and key in memo and memo[key][0] == inputs:
             got, off, eat, lft, n, res = memo[key][1]
         else:
-            got, off, eat, lft, n, res = _solve_item(prep, sup, dem, cap, ecap, rounds, tol)
+            got, off, eat, lft, n, res = _solve_item(prep, sup, dem, cap, ecap, rounds, tol,
+                                                     prio=caps_on)
             if memo is not None:
                 memo[key] = (inputs, (got, off, eat, lft, n, res))
         for v, x in got.items():

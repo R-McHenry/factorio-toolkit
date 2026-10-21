@@ -31,6 +31,15 @@ sides by the current state (as flow.py does) has a fixed point at every S = D, s
 its producer can each blame the other and stay low. The grants are a damped fixed point from
 "everything at full speed": deterministic, stdlib only. The result names, per machine, the
 endpoint that bound it, and per net and item the supply, demand, what sinks took and the surplus.
+
+**A bus is a pool** (Rory's bus, ``Bus<...>``): what the loads bring is what the taps share. Its
+ports pass on what reaches them, so the nets into its loads, its own net and the nets out of its
+taps are solved as one net of its item, named as the bus (two buses a net joins are one pool):
+every machine that drives one of them drives the pool, every one that takes from one takes from
+the pool, shared by appetite like any net. The bus's row is the pool's; each net it absorbed gets
+a row of its own from the same utilizations, its ports passing the balance on (a load's net
+delivers what its drivers make, a tap's net what its consumers take). No capacity, as everywhere
+in V1: the routed rates know what the bus's belts carry.
 """
 from __future__ import annotations
 
@@ -69,14 +78,28 @@ class Model:
     residual: float
     asserts: list = field(default_factory=list)   # [(text, ok, value, target, unit)]
     sink_share: dict = field(default_factory=dict)  # (sink key, net, item) -> its cap there
+    pools: dict = field(default_factory=dict)     # (net, item) -> its bus pool's (net, item)
+    ends: dict = field(default_factory=dict)      # (net, item) as solved -> drivers, consumers
 
     def rate(self, key, item):
-        """Items/s machine ``key`` makes of ``item``."""
+        """Items/s machine ``key`` makes of ``item``; for a bus port, what passes through it."""
         m = self.flat.machines[key]
+        if m.extra.get("port"):
+            return self.port_rate(key)
         return m.makes.get(item, 0.0) * self.util[key]
+
+    def port_rate(self, key):
+        """Items/s through a bus port: what its net delivers into a load, or out of a tap."""
+        m = self.flat.machines[key]
+        item = m.extra["item"]
+        hold = self.flat._in_hold if m.extra["port"] == "load" else self.flat._out_hold
+        nets = [n for n in hold.get((key, item), ()) if n != m.inst]
+        return self.nets[(nets[0], item)].delivered if nets else 0.0
 
     def inst_rate(self, path, item=None):
         inst = self.flat.insts[path]
+        if inst.kind == "Bus":                # what passes through the pool
+            return self.nets[(path, inst.params.get("item"))].delivered
         item = item or primary(self.flat, inst.machines)
         return sum(self.rate(k, item) for k in inst.machines)
 
@@ -89,18 +112,65 @@ def primary(flat, keys):
     return None
 
 
-def _structure(flat):
+def _pools(flat):
+    """{(net, item): (pool net, item)} for every net a bus joins. A port passes on what reaches
+    it, so its nets are one: the nets into a bus's loads, the bus's own net, the nets out of its
+    taps, and any bus a net joins to them. The pool is named as its first bus."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    holds = (getattr(flat, "_in_hold", {}), getattr(flat, "_out_hold", {}))
+    for key, m in flat.machines.items():
+        if not m.extra.get("port"):
+            continue
+        item = m.extra["item"]
+        nets = [n for hold in holds for n in hold.get((key, item), ())]
+        for n in nets:
+            parent[find((n, item))] = find((nets[0], item))
+    groups = {}
+    for ni in list(parent):
+        groups.setdefault(find(ni), []).append(ni)
+    out = {}
+    for members in groups.values():
+        buses = sorted(n for n, _i in members if _is_bus(flat, n))
+        name = buses[0] if buses else min(n for n, _i in members)
+        for ni in members:
+            out[ni] = (name, ni[1])
+    return out
+
+
+def _is_bus(flat, net):
+    """A Bus's own net (it is named as the instance)."""
+    inst = flat.insts.get(net)
+    return inst is not None and inst.kind == "Bus"
+
+
+def _structure(flat, pools=None):
+    """(ends, feeds, outs) as the model solves them: the nets a bus joins are one pool, its
+    ports left out (``_pools``)."""
+    pools = pools or {}
     ends = {}                          # (net, item) -> {"drivers": [k], "consumers": [k]}
     feeds, outs = {}, {}
     for name, net in flat.nets.items():
         for item in net.items:
-            ends[(name, item)] = {"drivers": [], "consumers": []}
-        for key, item in net.drivers:
-            ends[(name, item)]["drivers"].append(key)
-            outs.setdefault((key, item), []).append(name)
-        for key, item in net.consumers:
-            ends[(name, item)]["consumers"].append(key)
-            feeds.setdefault((key, item), []).append(name)
+            ends.setdefault(pools.get((name, item), (name, item)),
+                            {"drivers": [], "consumers": []})
+        for side, rows, table in (("drivers", net.drivers, outs),
+                                  ("consumers", net.consumers, feeds)):
+            for key, item in rows:
+                if flat.machines[key].extra.get("port"):
+                    continue
+                ni = pools.get((name, item), (name, item))
+                if ni != (name, item) and key in ends[ni][side]:
+                    continue                # on two nets of one pool: in it once
+                ends[ni][side].append(key)
+                table.setdefault((key, item), []).append(ni[0])
     return ends, feeds, outs
 
 
@@ -146,7 +216,9 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
     unknown = sorted(set(unbounded) - set(flat.nets))
     if unknown:
         raise ValueError("unbounded names no net: " + ", ".join(unknown))
-    ends, feeds, outs = _structure(flat)
+    pools = _pools(flat)
+    unbounded = set(unbounded) | {pk[0] for ni, pk in pools.items() if ni[0] in unbounded}
+    ends, feeds, outs = _structure(flat, pools)
     machines = flat.machines
 
     # A sink's rate cap, split over the (net, item) endpoints it sits on by full-speed supply.
@@ -301,9 +373,86 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                 v, why = grants[g], (g[1], g[3], g[2])
         util[k], binding[k] = v, (why if v < 1.0 - 1e-9 else None)
     measure()
-    model = Model(flat, util, binding, stats, done, residual, sink_share=sink_share)
+    nets = {}
+    for name, net in flat.nets.items():
+        for item in net.items:
+            ni = (name, item)
+            pk = pools.get(ni, ni)
+            if pk == ni:
+                nets[ni] = stats[ni]
+            elif _is_bus(flat, name):          # a bus another bus's pool took in: the pool's
+                nets[ni] = NetItem(**dict(vars(stats[pk]), net=name))
+            else:
+                nets[ni] = _absorbed(flat, ni, stats[pk], ends[pk], util, feeds, outs,
+                                     sink_share, potential, name in unbounded)
+    model = Model(flat, util, binding, nets, done, residual, sink_share=sink_share,
+                  pools=pools, ends=ends)
     model.asserts = _asserts(model)
     return model
+
+
+def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, unbounded):
+    """The row of a net a bus pool absorbed: what its own drivers make and its own consumers take
+    at the pool's utilizations, its ports passing the balance on. A load's net delivers all its
+    drivers make (the pool took it, or they slowed); an unbounded one what the pool delivers
+    beyond the other loads; a tap's net what its consumers take. Its sinks get their share of
+    what the pool's sinks took, by their caps (evenly among sinks without a rate, if any)."""
+    name, item = ni
+    net = flat.nets[name]
+    pk = (pool.net, item)
+    st = NetItem(name, item)
+
+    def made(key):
+        return flat.machines[key].makes.get(item, 0.0) / len(outs[(key, item)]) * util[key]
+
+    s = d = would = 0.0
+    unb, into, caps, own = unbounded, False, [], set()
+    for key, it in net.drivers:
+        m = flat.machines[key]
+        if it != item or m.extra.get("port"):
+            continue
+        own.add(key)
+        if m.source:
+            unb = True
+            continue
+        s += made(key)
+    for key, it in net.consumers:
+        m = flat.machines[key]
+        if it != item:
+            continue
+        if m.extra.get("port"):
+            into = into or m.extra["port"] == "load"
+            continue
+        need = m.needs.get(item, 0.0)
+        if need > 0:
+            share = need / len(feeds[(key, item)])
+            d += share * util[key]
+            would += share * potential(key, (key, "in", pk[0], item))
+        elif m.sink:
+            caps.append(sink_share.get((key,) + pk, 0.0))
+    every = [c for k, c in sink_share.items() if k[1:] == pk]
+    if not caps or pool.to_sinks <= 0:
+        take = 0.0
+    elif INF in every:
+        take = pool.to_sinks * caps.count(INF) / every.count(INF)
+    else:
+        take = pool.to_sinks * sum(caps) / sum(every) if sum(every) > 0 else 0.0
+    st.unbounded, st.to_sinks, st.sink_cap = unb, take, sum(caps)
+    if into:
+        st.supply = INF if unb else s
+        flow = s
+        if unb and pool.delivered != INF:            # what the others don't bring
+            others = sum(made(k) for k in ends["drivers"] if k not in own
+                         and not flat.machines[k].source)
+            flow = s + max(0.0, pool.delivered - others - s)
+        elif unb:
+            flow = INF
+        st.demand = st.would_take = max(0.0, flow - take)
+    else:
+        st.supply = INF if unb else max(s, d + take)
+        st.demand, st.would_take = d, would
+    st.delivered = st.demand + take
+    return st
 
 
 def _asserts(model):
@@ -312,7 +461,9 @@ def _asserts(model):
     for a, scope in flat.asserts:
         node, keys = flat.resolve_ref(a.ref, scope)
         net_name = "/".join(p for p in (scope, ".".join(a.ref.parts)) if p)
-        if keys:
+        if node is not None and node.kind == "Bus":
+            value = model.inst_rate(node.path)
+        elif keys:
             item = primary(flat, keys)
             value = sum(model.rate(k, item) for k in keys)
         elif net_name in flat.nets:
@@ -368,7 +519,7 @@ def chain(model, path, depth=8):
         if not b or b[0] != "in" or b[2] is None:
             break
         st = model.nets[(b[2], b[1])]
-        drivers = [flat.machines[k].inst for k, it in flat.nets[b[2]].drivers if it == b[1]]
+        drivers = [flat.machines[k].inst for k in model.ends[(b[2], b[1])]["drivers"]]
         nxt = None
         for d in drivers:
             dk = flat.insts[d].machines[0]
@@ -381,6 +532,17 @@ def chain(model, path, depth=8):
     return out
 
 
+def _bus_row(model, path):
+    """A Bus's instance line: what passes through it, and what its pool's loads bring against
+    what its taps would take (the pool's own row, ``fkcore.elaborate._bus_nets``)."""
+    inst = model.flat.insts[path]
+    item = inst.params.get("item")
+    st = model.nets[(path, item)]
+    made = f"{item} " + ("unbounded" if st.delivered == INF else f"{st.delivered * 60:.2f}")
+    return (f"  {path:<18} {'Bus':<12} {len(inst.machines):>3} {'-':>6}  {made:<38} pool: loads "
+            f"bring {_f(st.supply)}/s, taps would take {_f(st.would_take)}/s")
+
+
 def report(model, title=None) -> str:
     flat = model.flat
     lines = [f"rates {title or flat.name} (nominal V1 model: logical nets, no capacity)",
@@ -391,6 +553,9 @@ def report(model, title=None) -> str:
             continue
         keys = inst.machines
         if not keys:
+            continue
+        if inst.kind == "Bus":
+            lines.append(_bus_row(model, path))
             continue
         us = [model.util[k] for k in keys]
         item = primary(flat, keys)

@@ -15,6 +15,11 @@ An ``n=auto`` row (1.6, ``AUTO_KINDS``) is elaborated with the count ``sizes`` g
 build's ``size`` step, ``fkcore.size``), else the count the factory's .fkp laid out last, else its
 low bound; its Inst keeps the bounds (``auto``) and its params the count, so everything after
 elaboration sees a plain row. The netlist's structure (nets, endpoints) is the same at any count.
+
+A ``Bus`` instance is a net of its own, named as the instance (its belts and splitters carry it):
+the loads that nets feed drive it, the taps that nets draw from consume it (``_bus_nets``). So a
+net ends at a load (``net iron1: smelt -> bus.load1``) or starts at a tap (``net fe: bus.tap1 ->
+gears``), and the bus joins them. A port no net names is in none, and no check line names it.
 Pure, stdlib only.
 """
 from __future__ import annotations
@@ -170,6 +175,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._sizes = dict(sizes or {})
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     _resolve_nets(flat)
+    _bus_nets(flat)
     _endpoint_checks(flat)
     return flat
 
@@ -226,6 +232,10 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         full = _join(prefix, net.name)
         if full in flat.nets:
             raise ElabError(src, net.line, f"net {net.name} is defined twice")
+        if full in flat.insts and flat.insts[full].kind == "Bus":
+            raise ElabError(src, net.line, f"net {net.name}: {net.name} is a Bus, which is a net "
+                                           "of its own (its belts carry it); name this net "
+                                           "otherwise")
         flat.nets[full] = _Pending(net, prefix, src)
     for a in mod.asserts:
         flat.asserts.append((a, prefix))
@@ -392,6 +402,26 @@ def _resolve_nets(flat):
     flat._out_hold, flat._in_hold = out_hold, in_hold
 
 
+def _bus_nets(flat):
+    """Each Bus instance's own net, named as the instance: its item, driven by every load a net
+    feeds, consumed by every tap a net draws from (Rory's bus: what the loads bring, the taps
+    share). The bus's belts and splitters carry it (``fkcore.fragments.bus``)."""
+    for path, inst in flat.insts.items():
+        if inst.kind != "Bus":
+            continue
+        item = inst.params.get("item")
+        drivers, consumers = [], []
+        for key in inst.machines:
+            port = flat.machines[key].extra.get("port")
+            if port == "load" and (key, item) in flat._in_hold:
+                drivers.append((key, item))
+                flat._out_hold.setdefault((key, item), []).append(path)
+            elif port == "tap" and (key, item) in flat._out_hold:
+                consumers.append((key, item))
+                flat._in_hold.setdefault((key, item), []).append(path)
+        flat.nets[path] = FlatNet(path, [item], drivers, consumers, True, inst.line)
+
+
 def _items_text(items):
     if items is None:
         return "item"
@@ -485,6 +515,8 @@ def _endpoint_checks(flat):
     fed = {key for key, _item in in_hold}
     unfed, unconsumed = [], []
     for key, m in flat.machines.items():
+        if m.extra.get("port"):
+            continue                    # a bus port: one no net names is a spare, not a fault
         for item in m.needs:
             if (key, item) not in in_hold:
                 unfed.append((m.inst, item, key))

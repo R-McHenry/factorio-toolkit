@@ -48,7 +48,10 @@ Per net the ground is: every entity tile, every placed instance's whole frame (t
 inside a row are kept for poles), every other net's start and end tiles, every tile another
 net's belt points into (any belt tier; an underground of unknown type counts as an exit), every
 tile another net's inserter picks from or drops onto and every tile a drill drops onto,
-``blocked`` (terrain: water, cliffs) and everything outside ``bounds``.
+``blocked`` (terrain: water, cliffs) and everything outside ``bounds``. A Bus's frame is not
+ground of its own: its belts and splitters are entities, and the empty tiles of its two outer
+rows (where its ports meet it) let a route cross it by an underground, as one crosses a main
+bus (four belts and those two rows: a yellow tunnel spans the belts).
 
 **The underground guard.** The game pairs an underground entrance with the nearest end of the same
 name facing the same way within its reach (``fkcore.connect`` has the same rule). So no new
@@ -782,7 +785,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
     frames = set()
     for path, rec in lay.insts.items():
-        if rec.kind == "Literal" or path not in flat.insts:
+        if rec.kind in ("Literal", "Bus") or path not in flat.insts:
             continue
         x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
         frames |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}

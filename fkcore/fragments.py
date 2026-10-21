@@ -18,8 +18,13 @@ SmelterRow is new geometry in AsmRow's pattern: ore by fast inserter from the ne
 long-handed inserter from the far one, at the furnaces' pitch 2.
 
 Machine entities carry what a Literal needs to rebuild them (recipe, resource, fuel, role, rate),
-so ``unfold`` can turn any instance into a Literal with the same keys and the same netlist.
-Pure, stdlib only.
+so ``unfold`` can turn any row into a Literal with the same keys and the same netlist.
+
+The ``Bus`` (Rory's 4-belt bus, 2026-10-21) is no row: its belts and splitters are the bus's own
+net (role ``pool``), and each load and tap is a port, one belt beside the bus (its stub) whose
+role is the net a ``.fk`` net binds to it, with one attach point where the router meets it. Its
+staircases are Rory's exactly: at his parameters the template is his demo's 210 bus entities, the
+splitters' priorities in ``config`` (the codec writes them into the paste). Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -27,7 +32,8 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-__all__ = ["FragmentError", "FEnt", "Role", "Fragment", "fragment", "FRAGMENTS"]
+__all__ = ["FragmentError", "FEnt", "Role", "Fragment", "fragment", "FRAGMENTS", "bus",
+           "bus_ports", "bus_check", "bus_side"]
 
 E, S, W, N = 4, 8, 12, 0
 _INSERTER = "fast-inserter"
@@ -207,6 +213,163 @@ def lab_row(n, inputs):
     return ents, roles, (3 * n, h)
 
 
+# -- the bus (Rory's 4-belt bus, 2026-10-21: agent/docs/examples/bus4.json) ----------------------
+#: a port's staircase climbs across the bus from the side its stream comes from to the side it goes
+#: to: input priority on the first, output priority toward the second (the game's splitter fields)
+_STAIR = {"s": {"input_priority": "right", "output_priority": "left"},     # climbs north
+          "n": {"input_priority": "left", "output_priority": "right"}}     # climbs south
+_SIDES = "nesw"
+
+
+def bus_ports(params):
+    """(belts, length, item, loads, taps) of ``Bus<belts=4, length, item, load=, tap=>``; a port
+    is (side, position): the side a compass letter as written, the position the tile along the bus
+    (from its head, x at rot 0) where its belt meets the bus. Raises FragmentError."""
+    sizes = []
+    for key, v in (("belts", params.get("belts", 4)), ("length", params.get("length"))):
+        if isinstance(v, float) and v.is_integer():
+            v = int(v)
+        if not isinstance(v, int) or isinstance(v, bool) or v < 1:
+            raise FragmentError(f"needs {key}= a positive whole number, got {v!r}")
+        sizes.append(v)
+    belts, length = sizes
+    item = params.get("item")
+    if not isinstance(item, str):
+        raise FragmentError(f"needs item= one item, got {item!r}")
+    out = []
+    for kind in ("load", "tap"):
+        raw = params.get(kind, [])
+        ports = []
+        for word in raw if isinstance(raw, list) else [raw]:
+            text = str(word)
+            if not isinstance(word, str) or len(text) < 2 or text[0] not in _SIDES \
+                    or not text[1:].isdigit():
+                raise FragmentError(f"{kind}={text}: a port is a side (n, e, s or w) and its tile "
+                                    "along the bus, e.g. s11")
+            ports.append((text[0], int(text[1:])))
+        out.append(ports)
+    loads, taps = out
+    if len({_SIDES.index(s) % 2 for s, _x in loads + taps}) > 1:
+        raise FragmentError("a bus has two sides: n and s where it runs east or west, e and w "
+                            "where it runs south or north")
+    return belts, length, item, loads, taps
+
+
+def _port_tiles(belts, kind, side, x):
+    """(the staircase's rows per splitter, its tiles, the stub's tile, the tile it keeps empty) of
+    a port in the bus's own frame (it runs east; side n is row 0, s is row belts + 1, the belts are
+    rows 1..belts). A load keeps one tile empty: its first splitter's dead end, so all it takes
+    goes up the staircase."""
+    b = belts
+    if kind == "load":
+        rows = [(b - j, b + 1 - j) if side == "s" else (j, j + 1) for j in range(b)]
+        first, edge = x + 1, (b + 1 if side == "s" else 0)
+        stub, empty = (x, edge), (x + 2, edge)
+    else:
+        rows = [(b - 1 - j, b - j) if side == "n" else (1 + j, 2 + j) for j in range(b)]
+        first = x - b
+        stub, empty = (x, 0 if side == "n" else b + 1), None
+    cells = [(first + j, r) for j, pair in enumerate(rows) for r in pair]
+    return rows, cells, stub, empty
+
+
+def bus_check(belts, length, loads, taps):
+    """Every port's staircase inside the bus and clear of every other port's. Sides as written,
+    n or e read as the bus's own north: turned, everything mirrors alike, so the rot can't make
+    two ports collide or part. Raises FragmentError."""
+    owner = {}
+    for kind, ports in (("load", loads), ("tap", taps)):
+        for side, x in ports:
+            local = "n" if side in "ne" else "s"
+            _rows, cells, stub, empty = _port_tiles(belts, kind, local, x)
+            name = f"{kind} {side}{x}"
+            mine = cells + [stub] + ([empty] if empty else [])
+            span = sorted({t[0] for t in mine})
+            if span[0] < 0 or span[-1] >= length:
+                raise FragmentError(f"{name}: its staircase of {belts} splitter"
+                                    f"{'s' if belts > 1 else ''} takes the tiles {span[0]}.."
+                                    f"{span[-1]} along the bus, which runs 0..{length - 1}")
+            for t in mine:
+                if owner.get(t, name) != name:
+                    raise FragmentError(f"{owner[t]} and {name} overlap: {name} takes the tiles "
+                                        f"{span[0]}..{span[-1]} along the bus (its belt and its "
+                                        "staircase), and no two ports share a tile")
+                owner[t] = name
+
+
+def bus(belts, length, item, loads, taps, used=None):
+    """Rory's bus (agent/docs/examples/bus4.json), in its own frame: ``belts`` belts of ``item``
+    run east (rows 1..belts) for ``length`` tiles; row 0 (north) and row belts + 1 (south) are
+    where its loads come in and its taps go out. ``loads``/``taps``: [(side, x)], side n or s in
+    this frame.
+
+    A load at x: its belt (the stub, beside the bus at x) turns east into a staircase of one
+    splitter per belt at x + 1 .. x + belts, climbing from its side to the far one with input
+    priority on the feeder's side and output priority toward the far side, so it fills the far
+    belt first, then the next. A tap at x: a staircase at x - belts .. x - 1 climbing toward its
+    side, its last splitter putting out onto the stub at x first, so the tap takes from the far
+    belt first. Each used port is a role with one attach point beside the bus, where the router
+    meets its stub; ``used`` (port names, None for all) leaves the other stubs out and keeps their
+    staircases. The belts and splitters are role ``pool``, the bus's own net.
+    -> (entities, roles, size)."""
+    bus_check(belts, length, loads, taps)
+    b = belts
+    ents, taken = [], set()
+    roles = {"pool": Role("pool", "pool", [item], [], [])}
+    for kind, ports in (("load", loads), ("tap", taps)):
+        for k, (side, x) in enumerate(ports, 1):
+            name = f"{kind}{k}"
+            rows, cells, stub, _empty = _port_tiles(b, kind, side, x)
+            climb = side if kind == "load" else ("s" if side == "n" else "n")
+            for j, (r0, _r1) in enumerate(rows):
+                ents.append(FEnt(f"{name}s{j}", "splitter", cells[2 * j][0] + 0.5, r0 + 1, E,
+                                 "pool", {"config": _config_text(_STAIR[climb])}))
+            taken |= set(cells)
+            if used is not None and name not in used:
+                continue
+            sx, sy = stub
+            d = E if kind == "load" else (N if side == "n" else S)
+            into = (N if side == "s" else S) if kind == "load" else d
+            ents.append(FEnt(name, "transport-belt", sx + 0.5, sy + 0.5, d, name))
+            roles[name] = Role(name, "in" if kind == "load" else "out", [item], [name],
+                               [(sx + 0.5, sy + 0.5, into)])
+    for c in range(length):
+        for r in range(1, b + 1):
+            if (c, r) not in taken:
+                ents.append(FEnt(f"b{r}_{c}", "transport-belt", c + 0.5, r + 0.5, E, "pool"))
+    return ents, roles, (length, b + 2)
+
+
+def _config_text(fields):
+    """Game fields as the ``config`` attr the codec writes (``codec.config_text``'s form)."""
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+_RUNS = ("east", "south", "west", "north")
+
+
+def bus_side(side, rot):
+    """A port's side as written (a compass letter, in the frame the bus is placed in) -> n or s
+    in the bus's own frame, for a bus turned ``rot`` quarter turns (rot 0 runs east). Raises
+    FragmentError for a side along the bus."""
+    rot %= 4
+    local = (_SIDES.index(side) - rot) % 4
+    if local % 2:
+        raise FragmentError(f"the bus runs {_RUNS[rot]} (rot {rot}): its ports go on its "
+                            f"{_SIDES[rot]} and {_SIDES[(rot + 2) % 4]} sides, not {side}")
+    return "n" if local == 0 else "s"
+
+
+def _bus(params):
+    """``fragment("Bus", ...)``: the sides turned by ``_rot`` (the instance's own), the stubs of
+    the ports in ``_used`` only (None: all)."""
+    belts, length, item, loads, taps = bus_ports(params)
+    rot = int(params.get("_rot", 0))
+    loads = [(bus_side(s, rot), x) for s, x in loads]
+    taps = [(bus_side(s, rot), x) for s, x in taps]
+    return bus(belts, length, item, loads, taps, params.get("_used"))
+
+
 #: kind -> how to call the geometry from (params, inputs, outputs)
 FRAGMENTS = {
     "AsmRow": lambda p, i, o: asm_row(int(p["n"]), p["recipe"], i, o,
@@ -216,6 +379,7 @@ FRAGMENTS = {
     "MinerRow": lambda p, i, o: miner_row(int(p["n"]), p["resource"], o,
                                           p.get("drill", "electric-mining-drill")),
     "LabRow": lambda p, i, o: lab_row(int(p["n"]), i),
+    "Bus": lambda p, i, o: _bus(p),
 }
 
 
