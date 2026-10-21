@@ -118,6 +118,7 @@ fixing in the source.
   robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
   the chest out). Grow outward: the next factory within reach of the last.
 - `ON_TERRAIN`: something designed stands on water or a cliff
+- `OFF_WATER`: an offshore pump whose water side is dry ground (it gives no water)
 - `MISPLACED` / `UNPLACED`: the paste did not land where the design says
 - `LOW_STOCK`: the network holds fewer of an item than the build still needs
 - `LOCKED`: an item to build, or a machine's recipe, isn't researched (the technology and its

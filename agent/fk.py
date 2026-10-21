@@ -10,7 +10,10 @@ toolkit (also pinned: files a running session uses never change under it). Each 
    runs on the host, where RCON is: diff, apply, a live look, measure, alerts, stats, chart,
    terrain, chat.
 2. keeps the two copies of ``game\\`` in step: what changed here is pushed before a host step, and
-   what the host wrote is pulled after it.
+   what the host wrote is pulled after it. Changed means content (``out\\.synced`` keeps each
+   file's hash at the last sync), a pull keeps a file edited here since (the next push sends
+   it), and the syncs of two fk commands take turns (1.4.2: a player's background ``fk look``
+   loop pulled the host's copy over fresh edits, which the next push then skipped by mtime).
 3. ends with the footer, ``fkcore poll``: chat lines that are new since the last command, and the
    game's new alerts and reminders.
 
@@ -28,6 +31,8 @@ link settings in ``run.json``'s ``env`` (FK_RCON_PORT, FK_RCON_PW_FILE, FK_SCRIP
 """
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import io
 import json
 import os
@@ -71,43 +76,128 @@ def _host_made(rel):
     return any(rel == h or rel.startswith(h.rstrip("/") + "/") for h in HOST_MADE)
 
 
+def _sync_file(rel):
+    """The sync's own files (the manifest, its lock): never sent, never taken."""
+    return rel == "out/.synced" or rel.startswith("out/.synced.")
+
+
+def _sha(path):
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 16), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _synced():
+    """{file: sha1} as the last sync left game\\, or None: no sync yet, or an older fk's plain
+    stamp (that push goes by mtime once, then by content)."""
+    try:
+        with open(STAMP, encoding="utf-8") as fh:
+            files = json.load(fh)["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return files if isinstance(files, dict) else None
+
+
+def _save_synced(cfg, files):
+    os.makedirs(os.path.dirname(STAMP), exist_ok=True)
+    tmp = f"{STAMP}.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"with": f"{cfg['host']}:{cfg['host_game']}", "at": time.ctime(),
+                   "files": files}, fh)
+    os.replace(tmp, STAMP)
+
+
+@contextlib.contextmanager
+def _turn():
+    """One sync at a time in a run: a second fk (a background loop of the player's) waits here,
+    so its pull never lands between another command's edit and that edit's push."""
+    os.makedirs(os.path.dirname(STAMP), exist_ok=True)
+    with open(STAMP + ".lock", "a+b") as fh:
+        if os.name == "nt":
+            import msvcrt
+            while True:
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:                # LK_LOCK gives up after 10 s: wait on
+                    pass
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def push(cfg):
-    """Send the files of game\\ changed here since the last sync (host-made files excepted)."""
+    """Send the files of game\\ whose content changed here since the last sync (host-made files
+    excepted)."""
     if cfg["host"] == "local":
         return 0
-    since = os.path.getmtime(STAMP) if os.path.exists(STAMP) else 0
-    buf, n = io.BytesIO(), 0
-    with tarfile.open(fileobj=buf, mode="w") as tar:
-        for root, _dirs, files in os.walk(GAME):
-            for name in files:
-                full = os.path.join(root, name)
-                rel = os.path.relpath(full, GAME).replace("\\", "/")
-                if not _host_made(rel) and os.path.getmtime(full) > since:
-                    tar.add(full, arcname=rel)
-                    n += 1
-    if n:
-        r = _ssh(cfg, f"mkdir -p {shlex.quote(cfg['host_game'])} && "
-                      f"tar -xf - -C {shlex.quote(cfg['host_game'])}", data=buf.getvalue())
-        if r.returncode:
-            sys.exit(f"fk: push to {cfg['host']} failed")
+    with _turn():
+        synced = _synced()
+        since = os.path.getmtime(STAMP) if synced is None and os.path.exists(STAMP) else 0
+        now, buf, n = {}, io.BytesIO(), 0
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for root, _dirs, files in os.walk(GAME):
+                for name in files:
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, GAME).replace("\\", "/")
+                    if _host_made(rel) or _sync_file(rel):
+                        continue
+                    now[rel] = sha = _sha(full)
+                    if (synced.get(rel) != sha if synced is not None
+                            else os.path.getmtime(full) > since):
+                        tar.add(full, arcname=rel)
+                        n += 1
+        if n:
+            r = _ssh(cfg, f"mkdir -p {shlex.quote(cfg['host_game'])} && "
+                          f"tar -xf - -C {shlex.quote(cfg['host_game'])}", data=buf.getvalue())
+            if r.returncode:
+                sys.exit(f"fk: push to {cfg['host']} failed")
+        _save_synced(cfg, {**(synced or {}), **now})
     return n
 
 
 def pull(cfg):
-    """Bring the host's copy of game\\ back here (what the host steps wrote)."""
+    """Bring what the host wrote in its copy of game\\ back here. A file whose content changed
+    here since the last sync keeps the change (the next push sends it)."""
     if cfg["host"] == "local":
         return
-    r = _ssh(cfg, f"tar -cf - -C {shlex.quote(cfg['host_game'])} .", capture=True)
-    if r.returncode:
-        sys.exit(f"fk: pull from {cfg['host']} failed")
-    with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tar:
-        safe = [m for m in tar.getmembers() if (m.isfile() or m.isdir())
-                and not (m.name.startswith("/") or ".." in m.name.split("/"))]
-        tar.extractall(GAME, members=safe, filter="data")
-    os.makedirs(os.path.dirname(STAMP), exist_ok=True)
-    with open(STAMP, "w", encoding="utf-8") as fh:
-        fh.write(f"last sync with {cfg['host']}:{cfg['host_game']} at {time.ctime()}\n")
-    # the sync stamp is newer than everything pulled, so the next push sends only real edits
+    with _turn():
+        r = _ssh(cfg, f"tar -cf - -C {shlex.quote(cfg['host_game'])} .", capture=True)
+        if r.returncode:
+            sys.exit(f"fk: pull from {cfg['host']} failed")
+        synced = _synced()
+        files, take = dict(synced or {}), []
+        with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tar:
+            for m in tar.getmembers():
+                if not (m.isfile() or m.isdir()) or m.name.startswith("/") \
+                        or ".." in m.name.split("/"):
+                    continue
+                rel = m.name
+                while rel.startswith("./"):
+                    rel = rel[2:]
+                full = os.path.join(GAME, rel)
+                if m.isfile() and (_sync_file(rel) or (
+                        synced is not None and not _host_made(rel) and os.path.isfile(full)
+                        and _sha(full) != synced.get(rel))):
+                    continue                   # the sync's own, or edited here since the sync
+                take.append((m, rel))
+            tar.extractall(GAME, members=[m for m, _rel in take], filter="data")
+        for m, rel in take:
+            if m.isfile():
+                files[rel] = _sha(os.path.join(GAME, rel))
+        _save_synced(cfg, files)
 
 
 def local(cfg, args):

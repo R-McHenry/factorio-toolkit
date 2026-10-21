@@ -140,6 +140,22 @@ class TerrainFlowTest(unittest.TestCase):
         self.assertEqual(sum(c.where.startswith("nauvis:iron/smelt/") for c in on), 20)
         self.assertIn("ON_TERRAIN", self.read("report_checks.txt"))
 
+    def test_off_water_fires_for_a_pump_on_dry_ground(self):
+        # 1.4.2: the lead world's plant pump stood where world 3 had a lake
+        for at, dry in (("@(45, 40, rot 3)", False), ("@(50, 40, rot 3)", True)):
+            with open(os.path.join(self.dir, "iron.fk"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(IRON + f"pump = OffshorePump<rate=1200/s> {at}\n")
+            code, ctx = self.build()
+            self.assertEqual(code, 0, ctx.log)
+            off = [c.msg for _s, c in ctx.checks if c.code == "OFF_WATER"]
+            on = [c.msg for _s, c in ctx.checks if c.code == "ON_TERRAIN"]
+            self.assertEqual(on, [])
+            if dry:
+                self.assertEqual(off, ["offshore-pump at 50.5,40.5: 6 of the 6 tiles it pumps "
+                                       "from are not water (first 48,39): it gives no water"])
+            else:
+                self.assertEqual(off, [])
+
     def test_off_ore_fires_for_a_pinned_drill_away_from_the_ore(self):
         src = IRON.replace("@patch(iron-ore)", "@(4, 50)")
         with open(os.path.join(self.dir, "iron.fk"), "w", encoding="utf-8", newline="\n") as fh:

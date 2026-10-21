@@ -148,5 +148,90 @@ class LuaTransportTest(unittest.TestCase):
         self.assertIn("ok 400", out.getvalue())
 
 
+class SyncTest(unittest.TestCase):
+    """1.4.2: the two copies of game\\ go by content. The 2005 player's background ``fk look``
+    loop pulled the host's copy over fresh edits to base.fk; the stamp it wrote then made the next
+    push skip them (older mtime), so the edits were silently undone."""
+
+    def setUp(self):
+        self.run_dir = tempfile.mkdtemp(prefix="fksync-")
+        self.addCleanup(shutil.rmtree, self.run_dir, True)
+        self.game = os.path.join(self.run_dir, "game")
+        os.makedirs(os.path.join(self.game, "out"))
+        self.cfg = {"host": "gamehost", "host_game": "/srv/run/game", "host_toolkit": "/srv/tk"}
+        self.host = {}                                # the host's copy: rel -> bytes
+        self.sent = []                                # what each push sent
+        for name, value in (("RUN", self.run_dir), ("GAME", self.game),
+                            ("STAMP", os.path.join(self.game, "out", ".synced"))):
+            patcher = mock.patch.object(fk_agent, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(fk_agent, "_ssh", self.fake_ssh)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fake_ssh(self, cfg, command, data=None, capture=False):
+        if "tar -xf" in command:
+            with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+                got = {m.name: tar.extractfile(m).read() for m in tar.getmembers() if m.isfile()}
+            self.host.update(got)
+            self.sent.append(sorted(got))
+            return mock.Mock(returncode=0)
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for rel, body in self.host.items():
+                info = tarfile.TarInfo("./" + rel)
+                info.size = len(body)
+                tar.addfile(info, io.BytesIO(body))
+        return mock.Mock(returncode=0, stdout=buf.getvalue())
+
+    def write(self, rel, text):
+        with open(os.path.join(self.game, rel), "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def text(self, rel):
+        with open(os.path.join(self.game, rel), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_a_pull_keeps_an_edit_made_since_the_last_sync(self):
+        self.write("base.fk", "v1")
+        fk_agent.push(self.cfg)
+        fk_agent.pull(self.cfg)
+        self.write("base.fk", "v2")                   # the player's edit, after a look's push
+        self.host["out/look.txt"] = b"looked"         # ...and that look's host step
+        fk_agent.pull(self.cfg)                       # the look's pull
+        self.assertEqual(self.text("base.fk"), "v2")
+        self.assertEqual(self.text("out/look.txt"), "looked")
+        fk_agent.push(self.cfg)                       # the next command sends the edit
+        self.assertEqual(self.sent[-1], ["base.fk"])
+        self.assertEqual(self.host["base.fk"], b"v2")
+
+    def test_a_pull_takes_what_the_host_wrote(self):
+        self.write("base.fk", "v1")
+        self.write("out/diff.txt", "old")
+        fk_agent.push(self.cfg)
+        self.host["out/diff.txt"] = b"new"
+        self.host["out/alerts.json"] = b"[]"
+        fk_agent.pull(self.cfg)
+        self.assertEqual(self.text("out/diff.txt"), "new")
+        self.assertEqual(self.text("out/alerts.json"), "[]")
+        self.assertEqual(fk_agent.push(self.cfg), 0)  # nothing changed here: nothing to send
+
+    def test_an_older_fks_stamp_pushes_by_mtime_once(self):
+        self.write("old.fk", "synced long ago")
+        os.utime(os.path.join(self.game, "old.fk"), (1, 1))
+        self.write("out/.synced", "last sync with gamehost at some time\n")
+        os.utime(os.path.join(self.game, "out", ".synced"), (100, 100))
+        self.write("new.fk", "edited since")
+        self.assertEqual(fk_agent.push(self.cfg), 1)
+        self.assertEqual(self.sent, [["new.fk"]])
+        self.write("old.fk", "edited now")            # by content from now on: its mtime is
+        os.utime(os.path.join(self.game, "old.fk"), (1, 1))     # older than any stamp
+        self.assertEqual(fk_agent.push(self.cfg), 1)
+        self.assertEqual(self.sent[-1], ["old.fk"])
+        self.assertNotIn("out/.synced", self.host)
+        self.assertFalse([r for r in self.host if r.startswith("out/.synced")])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -65,6 +65,13 @@ class ChestLimitTest(unittest.TestCase):
         (section,) = e["request_filters"]["sections"]
         self.assertEqual(section["filters"][0]["name"], "iron-plate")
 
+    def test_trash_sends_back_what_a_requester_no_longer_asks_for(self):
+        # 1.4.2: the 2005 player's stone requester kept 101 copper plates from its old list
+        got = entities(BASE.format(inbox=", trash", box=", limit=4"))
+        self.assertIs(got["inbox/c0"]["request_filters"]["trash_not_requested"], True)
+        plain = entities(BASE.format(inbox="", box=", limit=4"))
+        self.assertNotIn("trash_not_requested", plain["inbox/c0"]["request_filters"])
+
     def test_a_limit_is_a_positive_number_of_slots(self):
         with self.assertRaises(Exception):
             flat_of(BASE.format(inbox="", box=", limit=0"))

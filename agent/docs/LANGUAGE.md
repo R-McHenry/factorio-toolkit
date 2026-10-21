@@ -33,12 +33,12 @@ The templates:
 | `LabRow<n>` | n labs, 3 tiles each | 1 to 3 science belts in (the third by long-handed inserters) |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
-| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"` | |
+| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for | |
 | `OffshorePump<rate=1200/s>` | water from the lake: it stands on the shore, open to the water (rot 3 faces west, water west of it) | pipes |
 | `Boiler<fuel=coal>` | one boiler, 3x2: water in and out at its short ends, steam out of its long north side (rot 0), coal by an inserter beside it; 60 steam/s on 0.45 coal/s | pipes |
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
 | `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines | pipes |
-| `Literal<file="x.json">` | entities exactly as given (the plant is one) | |
+| `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. Its frame is its entities' box, so a lone roboport needs a pole of its own beside it | |
 
 Rows are **counterflow**: every belt of a row attaches at its head, the west end at rot 0. Leave
 a few free tiles at a row's head and between rows: the router lays the belts there. `fk explain

@@ -131,6 +131,8 @@ def _machine_attrs(m):
         item = next(iter(m.makes))
         attrs["item"] = item
         fields.update(_request_fields(list(m.makes), m.extra.get("request"), m.makes[item]))
+        if m.extra.get("trash"):
+            fields["request_filters"]["trash_not_requested"] = True
     if m.extra.get("limit") is not None:
         fields["bar"] = int(m.extra["limit"])    # the chest's inventory bar: its usable slots
     if fields:

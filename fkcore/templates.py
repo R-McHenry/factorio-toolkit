@@ -263,12 +263,14 @@ def chest(params, cat):
     each at ``rate``, and feeds them all onto its net (a one-off crafter's single chest).
     ``limit`` (1.1): the chest's slots, its inventory bar in the game. A limited chest stops taking
     when full, so what feeds it stops too: limited production (no UNLIMITED or SHARED_SINK line).
+    ``trash`` (1.4.2, a requester): the game's "trash unrequested", so items it no longer asks
+    for go back to the network (the 2005 player's stone requester kept 101 copper plates).
     """
     roles = [r for r in _CHEST if params.get(r) is True]
     if len(roles) > 1:
         raise TemplateError("one role only: " + ", ".join(roles))
     role = roles[0] if roles else "provider"
-    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "limit"))
+    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "limit", "trash"))
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
     limit = _int(params, "limit") if params.get("limit") is not None else None
@@ -281,6 +283,8 @@ def chest(params, cat):
             extra["limit"] = limit
         if params.get("request") is not None:
             extra["request"] = int(float(params["request"]))
+        if params.get("trash") not in (None, False, "no", "false", "0"):
+            extra["trash"] = True
         return [MSpec("c0", proto, None, {}, {it: INF if rate is None else rate for it in items},
                       frozenset(), source=rate is None, extra=extra)]
     takes = None if "item" not in params else frozenset([_word(params, "item")])

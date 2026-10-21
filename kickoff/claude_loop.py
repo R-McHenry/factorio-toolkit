@@ -24,7 +24,8 @@ What the player must not miss reaches it after its next shell command, whatever 
 output kept (the 0534 player cut fk's footer off 199 of 245 times and never saw Rory's chat): a
 watcher reads the game every 30 s and notes game chat and <run>\\INBOX.md (a message for the
 player: the file is taken and moved into .loop), each once; and it keeps the world line in
-.loop\\world.txt (the ghosts that wait and what the network lacks, idle robots, the research),
+.loop\\world.txt (the ghosts that wait and what the network lacks, ghosts no powered roboport
+reaches, idle robots, the research),
 rewritten when what blocks changes (at most every 2 minutes) or every 10 minutes while something
 does. claude_hook.py, a PostToolUse hook, hands over the notes and the world line when it is new;
 each round's message starts with them too.
@@ -54,18 +55,34 @@ REMIND = 600                  # seconds: the world line again while something st
 SETTLE = 120                  # seconds: the world line changes at most this often
 
 #: one free read of the game: the ghosts per item (with the network's stock and whether the
-#: recipe is locked), the construction robots, the research, and the game chat after CURSOR
+#: recipe is locked), the ghosts outside every powered roboport's construction area (the 2005
+#: player's silent deadlock: a re-laid grid left the poles that would join it out of reach), the
+#: construction robots, the research, and the game chat after CURSOR
 STATUS_LUA = r"""
 local s, f = game.surfaces.nauvis, game.forces.player
 local net
-for _, r in pairs(s.find_entities_filtered{name = "roboport", force = f}) do
-  if r.logistic_network then net = r.logistic_network break end
+local boxes = {}
+for _, r in pairs(s.find_entities_filtered{type = "roboport", force = f}) do
+  if r.logistic_network and not net then net = r.logistic_network end
+  local c = r.logistic_cell
+  if c and c.transmitting and c.construction_radius > 0 then
+    local p, d = r.position, c.construction_radius
+    boxes[#boxes + 1] = {p.x - d, p.y - d, p.x + d, p.y + d}
+  end
 end
-local count = {}
+local count, far, at = {}, 0, nil
 for _, e in pairs(s.find_entities_filtered{type = "entity-ghost", force = f}) do
   local it = e.ghost_prototype.items_to_place_this
   local n = (it and it[1] and it[1].name) or e.ghost_name
   count[n] = (count[n] or 0) + 1
+  local p, ok = e.position, false
+  for _, b in pairs(boxes) do
+    if p.x >= b[1] and p.x <= b[3] and p.y >= b[2] and p.y <= b[4] then ok = true break end
+  end
+  if not ok then
+    far = far + 1
+    at = at or {item = n, x = math.floor(p.x), y = math.floor(p.y)}
+  end
 end
 local ghosts = {}
 for n, c in pairs(count) do
@@ -79,6 +96,7 @@ for _, m in pairs(storage.fk_chat or {}) do
 end
 local res = f.current_research
 rcon.print(helpers.table_to_json{tick = game.tick, ghosts = ghosts, chat = chat,
+  unreached = far > 0 and {n = far, first = at} or nil,
   robots = net and {idle = net.available_construction_robots, all = net.all_construction_robots},
   research = res and {name = res.name, pct = math.floor(f.research_progress * 100)}})
 """
@@ -247,7 +265,8 @@ def host_status(cfg, cursor, folder=None):
 
 
 def status_line(st):
-    """-> (the world line, the key of what blocks: SHORT and LOCKED ghost items, no research)."""
+    """-> (the world line, the key of what blocks: SHORT and LOCKED ghost items, ghosts no
+    powered roboport reaches, no research)."""
     gh = sorted(st.get("ghosts") or [], key=lambda g: -g["ghosts"])
     total = sum(g["ghosts"] for g in gh)
     blocked, parts = [], []
@@ -265,6 +284,13 @@ def status_line(st):
             items.append(f"{g['ghosts']} {g['item']} ({why})")
         more = f", and {len(gh) - 8} more kinds" if len(gh) > 8 else ""
         parts.append(f"{total} ghosts wait for the robots: " + ", ".join(items) + more)
+        far = st.get("unreached")
+        if far:
+            at = far.get("first") or {}
+            parts.append(f"UNREACHED: {far['n']} of them stand outside every powered roboport's "
+                         f"construction area, so no robot will build them (first: "
+                         f"{at.get('item')} at {at.get('x')},{at.get('y')})")
+            blocked.append("unreached")
     else:
         parts.append("no ghosts wait")
     rb = st.get("robots")

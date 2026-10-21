@@ -43,6 +43,21 @@ class LiteralImportTest(unittest.TestCase):
             lay.add(e)
         self.assertEqual(fkp.invariants(lay, CAT), [])
 
+    def test_a_bare_entity_list(self):
+        # 1.4.2: the 2005 player's [{name, x, y}] file read as a blueprint string
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "rp.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump([{"name": "roboport", "x": 2, "y": 2, "direction": 0},
+                       {"name": "medium-electric-pole", "x": 4.5, "y": 0.5}], fh)
+        rows, wires = literal.read_entities(path)
+        self.assertEqual([(r[0], r[1], r[2]) for r in rows],
+                         [("roboport", 2.0, 2.0), ("medium-electric-pole", 4.5, 0.5)])
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"blueprint": {}}, fh)
+        with self.assertRaisesRegex(literal.LiteralError, "a Literal file is a blueprint string"):
+            literal.read_entities(path)
+
     def test_the_plants_game_settings(self):
         # the file's blueprint, matched to its entity list by name and position
         rows, wires = literal.read_entities(PLANT)

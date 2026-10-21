@@ -153,7 +153,10 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.4.1 is in. The routed rates in out\\report_rates.txt settle now (its first line says
+  Toolkit 1.4.2 is in: fk syncs by content (a background fk no longer undoes an edit), the world
+  line names ghosts no powered roboport reaches (UNREACHED), OFF_WATER flags a dry offshore pump,
+  a Literal reads a bare entity list, and `trash` on a requester sends back what it no longer
+  asks for. It has 1.4.1: The routed rates in out\\report_rates.txt settle now (its first line says
   so), CAPACITY names only what runs short of a net's item, and `tier` never lowers a belt's tier
   (unless --downgrade) and allows only yellow unless you add --allow.
   It has 1.4: Machines that stand within 3 tiles of each other are now joined by an

@@ -11,6 +11,9 @@ hand somewhere else, here a file in the game codebase. Two file shapes are read:
 - a blueprint string (a ``.txt`` holding one, or a JSON ``{"bp": "0e..."}`` without an entity
   list), read with ``fkcore.codec``.
 
+A bare JSON list of entities is the entity list too (1.4.2: the 2005 player's ``[{name, x, y}]``
+file read as a blueprint string, "a blueprint string starts with a version digit").
+
 The game settings travel verbatim (``fkcore.codec``): ``recipe``, an underground's ``ug``, every
 other game field as ``config`` JSON (a requester's request, an inserter's circuit condition, a
 reactor's temperature read), and each circuit wire between two entities inside the box as
@@ -62,7 +65,13 @@ def read_entities(path):
             data = json.loads(text)
         except ValueError as exc:
             raise LiteralError(f"{path}: not JSON ({exc})") from None
+    if isinstance(data, list):
+        data = {"entities": data}
     listed = isinstance(data, dict) and isinstance(data.get("entities"), list)
+    if isinstance(data, dict) and not listed and not data.get("bp"):
+        raise LiteralError(f'{path}: a Literal file is a blueprint string (.txt), JSON {{"bp": '
+                           f'"0e..."}}, or an entity list: [{{"name", "x", "y", "direction"}}, '
+                           f'...] (or {{"entities": [...]}})')
     bp = data.get("bp") if isinstance(data, dict) else text.strip()
     got, wires = [], []
     if bp or not listed:

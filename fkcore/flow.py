@@ -695,7 +695,9 @@ def s_floorplan(ctx, args):
 
 def _on_terrain(t, s, cat):
     """``ON_TERRAIN``: a composed entity on blocked ground (water, cliff); ``OFF_ORE``: a drill
-    with no ore of its resource in its mining area (the game would not place it). -> (report
+    with no ore of its resource in its mining area (the game would not place it); ``OFF_WATER``
+    (1.4.2): an offshore pump whose water tiles are dry ground (the lead world's kickoff plant
+    stood where world 3 had a lake: no water, no power, and every look said OK). -> (report
     lines, checks); checks, never gates."""
     lines, checks, hits = [], [], 0
     for key in sorted(s.entities, key=fkp.natural_key):
@@ -712,6 +714,19 @@ def _on_terrain(t, s, cat):
                             f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)} stands on {what} "
                             f"tile{'s' if sum(n for n, _k in parts) != 1 else ''} (first "
                             f"{first[0]},{first[1]})"))
+    x0, y0, x1, y1 = t.area
+    unknown = {tuple(c) for c in t.ungenerated}
+    for key in sorted(s.entities, key=fkp.natural_key):
+        e = s.entities[key]
+        wet = cat.water_tiles(e.name, e.x, e.y, e.dir) if cat.has_entity(e.name) else set()
+        seen = {q for q in wet if x0 <= q[0] < x1 and y0 <= q[1] < y1
+                and (q[0] // 32, q[1] // 32) not in unknown}
+        dry = sorted(seen - t.water, key=lambda q: (q[1], q[0]))
+        if dry:
+            checks.append(Check("OFF_WATER", key,
+                                f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)}: {len(dry)} of the "
+                                f"{len(wet)} tiles it pumps from are not water (first "
+                                f"{dry[0][0]},{dry[0][1]}): it gives no water"))
     drills = sorted((e for e in s.entities.values() if e.attrs.get("resource")
                      and cat.has_entity(e.name) and cat.kind(e.name) == "mining-drill"),
                     key=lambda e: fkp.natural_key(e.key))
