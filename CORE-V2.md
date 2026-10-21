@@ -29,10 +29,17 @@ with the general router. Two ways to support them:
    part. Rory's 4-to-4 balancer (`games/v2-bench`) is the first one, and it is already measured
    (throughput-unlimited in 7 setups).
 
+**Proper distribution (Rory, 2026-10-20):** in a k-to-m hub every input should reach every
+output through a splitter network (a balancer), so each driver feeds each consumer evenly. Today
+the hub is a merge tree into one trunk and a split tree out of it: the last driver to join gets
+half the trunk, the others a quarter each (Rory's join case, below), and every consumer draws the
+mix the trunk happens to carry. A k-to-m balancer in place of the trunk fixes both, and is where
+the bus templates and the hub meet.
+
 [open, for V2.1: how a net says it goes through a bus instance (a balancer has no machines, so it
 is no endpoint today: its roles would be on the net, and the router would route drivers to the
 bus's inputs and its outputs to the consumers); which bus templates come first; whether the bus
-router is needed once the templates exist]
+router is needed once the templates exist; a balancer per k-to-m hub, and which sizes]
 
 ## Words
 
