@@ -27,7 +27,7 @@ from . import rates as ratesmod
 from . import throughput as tp
 from .elaborate import Check
 
-__all__ = ["Routed", "solve", "required", "report", "TIER_WORD"]
+__all__ = ["Routed", "solve", "required", "report", "critical", "word", "TIER_WORD"]
 
 INF = float("inf")
 #: what a belt tier is called in a report line
@@ -110,7 +110,8 @@ def _ends(flat, lay, cat, model, lg):
         if m.sink:
             items = sorted(i for i in fed.get(key, ()) if not cat.is_fluid(i))
             if items:
-                each = INF if m.drain is None else m.drain / len(items)
+                each = INF if m.drain is None else (
+                    m.drain if m.extra.get("each") else m.drain / len(items))
                 demand[nid] = {i: each for i in items}
             continue
         if m.source:
@@ -215,7 +216,8 @@ def required(flat, lay, cat, model=None, hand=1, bulk_hand=1, lg=None):
 
 
 # -- report ---------------------------------------------------------------------------------------
-def _word(lg, nid):
+def word(lg, nid):
+    """What a connector is called in a report line: ``yellow lanes``, ``fast-inserters``."""
     n = lg.nodes[nid]
     if n.kind == "inserter":
         return f"{n.name}s"
@@ -298,17 +300,26 @@ def report(r: Routed, factory=None):
     return lines, checks
 
 
-def _critical(r, mine):
-    res, lg = r.res, r.lg
-    finite = [nid for nid in mine if res.cap.get(nid, INF) not in (0, INF)]
+def critical(r, nids):
+    """The critical connector among ``nids`` (a net's), the one asked the most of what it
+    carries: -> (node id, required, carries, ratio), None when none of them has a capacity."""
+    finite = [nid for nid in nids if r.res.cap.get(nid, INF) not in (0, INF)]
     if not finite:
-        return "-"
+        return None
     nid = max(finite, key=lambda v: (r.ratio(v), str(v)))
     req, cap = r.at(nid)
+    return nid, req, cap, r.ratio(nid)
+
+
+def _critical(r, mine):
+    found = critical(r, mine)
+    if found is None:
+        return "-"
+    nid, req, cap, ratio = found
     if req >= tp.BIG / 2:
-        return f"{nid[0]} ({_word(lg, nid)}): unbounded"
-    return (f"{nid[0]}{'.' + nid[1] if nid[1] else ''} ({_word(lg, nid)}): "
-            f"{req:.3f}/s required of {cap:.3f}/s, ratio {r.ratio(nid):.2f}")
+        return f"{nid[0]} ({word(r.lg, nid)}): unbounded"
+    return (f"{nid[0]}{'.' + nid[1] if nid[1] else ''} ({word(r.lg, nid)}): "
+            f"{req:.3f}/s required of {cap:.3f}/s, ratio {ratio:.2f}")
 
 
 def _short(r, net):
@@ -365,13 +376,13 @@ def _capacity(r, net, mine, where):
     binding = [nid for nid in mine if r.binds(nid) and r.asked(nid) < tp.BIG / 2]
     groups = {}
     for nid in binding:
-        groups.setdefault(_word(lg, nid), []).append(nid)
+        groups.setdefault(word(lg, nid), []).append(nid)
     out = []
-    for word, nids in sorted(groups.items()):
+    for what, nids in sorted(groups.items()):
         nids.sort(key=lambda v: (-r.ratio(v), str(v)))
         top = nids[0]
         req, cap = r.at(top)
-        msg = (f"{req:.2f}/s required where its {word} carry "
+        msg = (f"{req:.2f}/s required where its {what} carry "
                f"{cap:.2f}/s (ratio {r.ratio(top):.2f}): {_keys(nids)}; "
                + "; ".join(short[:_SHOW + 1])
                + (f" and {len(short) - _SHOW - 1} more" if len(short) > _SHOW + 1 else ""))

@@ -68,6 +68,32 @@ On paper: 18 red science/min (three assemblers at full speed), the assert passes
 belts (gears and copper); every row's head is at x = 8, so the router has the columns 0..7 for
 its belts. To grow it: more `red` (n=5), and a second `gears` row feeding the same `gear` net.
 
+## sized.fk: the same red science, counted by the build (42x32)
+
+```
+iron   = Chest<requester, item=iron-plate, rate=2/s>    @(2, 2)
+copper = Chest<requester, item=copper-plate, rate=1/s>  @(2, 12)
+gears  = AsmRow<n=auto, recipe=iron-gear-wheel>         @(8, 2)
+red    = AsmRow<n=auto, recipe=automation-science-pack> @(8, 12)
+labs   = LabRow<n=auto, rate=6/min>                     @(8, 23)
+
+net plates: iron -> gears
+net copp:   copper -> red
+net gear:   gears -> red
+net packs:  red -> labs
+
+assert red.rate >= 60/min
+```
+
+`fk build --to size` (`out\size.txt`): `sized: gears n=1 (auto), red n=10 (auto), labs n=10
+(auto)`. Ten red assemblers make the asserted 1 pack/s, one gear assembler makes the 1 gear/s
+they take, and ten labs at 6 packs a minute each (a 10 s research unit) take what the red rows
+make. A higher assert, or a `target automation-science-pack 1.5/s` line in the surface file,
+grows them as far as the plates allow: the requesters' rates are what 1 pack/s takes (2 iron for
+its gear, 1 copper), and `SIZE` names the requester that stops it until the `rate=` go up. The
+rows grow east: the 42x32 plot holds 11 of each, and `FIT` says when one runs past it. On paper:
+4 nets, all routed and connected.
+
 ## mall.fk: a mall of single machines (34x44)
 
 A mall doesn't need rows: `Assembler<recipe>` stands anywhere, rows and single machines mix, and

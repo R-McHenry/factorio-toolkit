@@ -52,7 +52,12 @@ research line (`RESEARCH: NONE` when nothing researches).
 
 ## How many machines and drills for a rate
 
-`fk rates` checks a factory you have written; `fk plan` sizes one before you write it, from an
+In a factory you write, `n=auto` on a row lets the build count it: the fewest machines that meet
+the surface's `target` lines, your asserts and what the row's consumers take (LANGUAGE.md, "Counts
+the build chooses"). `fk build --to size` shows the counts and what each serves in
+`out\size.txt`; `fk rates FILE.fk` shows the rates at them.
+
+`fk rates` checks a factory you have written; `fk plan` answers before you write one, from an
 item and a rate or from the machines you want on that item:
 
 ```
@@ -73,8 +78,9 @@ iron and 7.03 copper plates a second: 36 + 23 stone furnaces and 15 more for ste
 15 copper and 7 coal drills.
 
 The plan runs every machine at full speed, without modules or beacons: assembling-machine-2 for
-crafting, stone furnaces burning coal for smelting, chemical plants, oil refineries, and electric
-drills at 0.5 ore/s. These change it:
+crafting (a row's default is assembling-machine-1, two thirds as fast: `--asm
+assembling-machine-1` gives a row's numbers), stone furnaces burning coal for smelting, chemical
+plants, oil refineries, and electric drills at 0.5 ore/s. These change it:
 
 - `--asm assembling-machine-1` or `--asm assembling-machine-3`
 - `--furnace steel-furnace` or `--furnace electric-furnace` (no coal)
@@ -137,6 +143,12 @@ fixing in the source.
 - `DOUBLE`: one machine input or output on two nets
 - `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper (or,
   after a build, as routed)
+- `SIZE`: an `n=auto` row can't meet a target, an assert or what its consumers ask (the line says
+  what stops it: the row is at the top of its bounds, a requester chest gives its rate, a row with
+  a written count runs at full speed); after the routing, a net of a sized row that asks more
+  than its belts or inserters carry
+- `FIT`: a sized row runs past its plot or into another instance's frame at the count it got;
+  the build stops at `place` when their entities would overlap
 - `CAPACITY`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
   and some of the net's belt lanes or inserters run full: the line says what is required there,
   what they carry, and who runs short. A chest without a rate beside machines on a net takes what
@@ -166,6 +178,8 @@ fixing in the source.
 ```
 fk plan ITEM RATE                the machines, furnaces and drills a rate takes, every step down to
                                  the ore (fk plan ITEM --machines N: what N machines take)
+fk build --to size               the counts of your n=auto rows and what each one serves
+                                 (out\size.txt), nothing laid out
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
 fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them, and
@@ -244,7 +258,8 @@ its poles, and `floorplan --bridge-power` lays the bridge again around the plots
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design, or add
-`stop_on UNFED` before a big paste so a check stops the build. `fk build --from route --to
+`stop_on UNFED` before a big paste so a check stops the build. `size`, after `elaborate`, counts
+the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --to
 report_checks` runs part of it (`report_rates:2` names the second `report_rates`). `tier minimize
 --allow yellow,red` lays red belts where a yellow lane is too thin for what the design asks
 (`--red 20` caps how many; `tier maximize` uses the fastest allowed everywhere; the default

@@ -9,13 +9,20 @@ report line, never a gate.
 
 ``run(script, frm=None, to=None)`` runs the whole script or the lines from ``frm`` to ``to``.
 Steps before ``frm`` that only read source (``read_surface``, ``read_terrain``, ``run_models``,
-``elaborate``) are re-run quietly: source is cheap and pure. Layouts come from the checkpoint of
-the last layout step before ``frm``, and a ``floorplan`` before ``frm`` is replayed on them (it is
-pure too), so ``--from diff`` on the game host applies what a laptop build laid out.
+``elaborate``, ``size``) are re-run quietly: source is cheap and pure. Layouts come from the
+checkpoint of the last layout step before ``frm``, and a ``floorplan`` before ``frm`` is replayed
+on them (it is pure too), so ``--from diff`` on the game host applies what a laptop build laid out.
 
-Steps: read_surface, read_terrain, run_models, elaborate, report_rates, place, route, tier,
+Steps: read_surface, read_terrain, run_models, elaborate, size, report_rates, place, route, tier,
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
 stop_on.
+
+``size`` (1.6, ``fkcore.size``) gives every ``n=auto`` row its count: the fewest machines that
+meet the surface's targets, the factories' asserts and what each row's consumers ask, all the
+factories together, before anything is placed. Its report says what each count serves; ``FIT``
+says when a row grown that way runs past its plot or into another instance (rows grow, the
+player arranges them), and report_rates after route says (``SIZE``) when a net of a sized row
+asks more of its belts than they carry.
 
 The terrain (``read_terrain <name>``: ``<name>.terrain.json``, ``fkcore.terrain``) is the bare
 world every layout step designs against: ``place`` puts each ``@patch`` MinerRow on its ore inside
@@ -85,6 +92,8 @@ class Ctx:
     last_diff: object = None                         # the last diff's SenseReport this run
     hands: tuple | None = None                       # the force's (hand, bulk hand, note), read once
     rates_runs: int = 0                              # report_rates steps run so far
+    sized: object = None                             # the size step's fkcore.size.Sizing
+    steps: list = field(default_factory=list)        # the script's step names, in order
 
 
 def parse(text, path="<fkb>") -> list:
@@ -295,10 +304,47 @@ def s_elaborate(ctx, args):
             return lines, [Check("INVARIANT", p.factory, f"no netlist: {exc}")]
         ctx.flats[p.factory] = flat
         sushi = sum(n.sushi for n in flat.nets.values())
+        autos = [path for path, inst in flat.insts.items() if inst.auto]
         lines.append(f"{p.factory}: {len(flat.insts)} instances, {len(flat.machines)} machines, "
-                     f"{len(flat.nets)} nets ({sushi} sushi), {len(flat.checks)} check lines")
+                     f"{len(flat.nets)} nets ({sushi} sushi), {len(flat.checks)} check lines"
+                     + (f"; {len(autos)} n=auto rows (at the count their .fkp laid out, or their "
+                        "low bound, until the size step counts them)" if autos else ""))
         checks += [Check(c.code, f"{p.factory} {c.where}", c.msg, c.line) for c in flat.checks]
+        if autos and "size" not in ctx.steps:
+            checks.append(Check("SIZE", p.factory, f"n=auto rows ({', '.join(autos)}) and no size "
+                                "step in the build script: each keeps the count its .fkp laid "
+                                "out last, else its low bound"))
     return lines, checks
+
+
+def s_size(ctx, args):
+    """The counts of the ``n=auto`` rows (``fkcore.size``): the fewest machines that meet the
+    surface's targets, the factories' asserts and what each row's consumers ask, every factory
+    together. The report says what each count serves; a constraint no count can meet is a
+    ``SIZE`` line, a sized row that runs past its plot or into another instance a ``FIT`` line.
+    Rows grow; where they stand is the player's (and ``place`` stops on two entities on a
+    tile)."""
+    from . import size as sizemod
+    makers, previous = {}, {}
+    for p in _factories(ctx):
+        if p.factory not in ctx.flats:
+            continue
+        path = os.path.join(ctx.root, f"{p.module}.fk")
+        makers[p.factory] = sizemod.maker(path, ctx.cat, p.module, ctx.previous.get(p.factory))
+        if p.factory in ctx.previous:
+            previous[p.factory] = ctx.previous[p.factory]
+    sz = sizemod.size(makers, ctx.surface.targets if ctx.surface is not None else None, previous)
+    lines, checks = sizemod.report(sz, ctx.cat)
+    if not sz.rows:
+        return lines, checks
+    ctx.flats.update(sz.flats)
+    ctx.sized = sz
+    patch = [r for r in sz.rows if "patch" in sz.flats[r.factory].insts[r.path].hints
+             and "at" not in sz.flats[r.factory].insts[r.path].hints]
+    if patch:
+        lines += ["", "  on their ore by place (@patch): " + ", ".join(
+            f"{r.path} n={r.n}" for r in patch) + "; place says when that many drills don't fit"]
+    return lines, checks + sizemod.fit(sz, ctx.surface.places if ctx.surface else {}, ctx.cat)
 
 
 def s_report_rates(ctx, args):
@@ -335,6 +381,9 @@ def s_report_rates(ctx, args):
             rlines, rchecks = routed.report(r_, factory)
             lines += rlines + [""]
             checks += rchecks
+            if ctx.sized is not None:
+                from . import size as sizemod
+                checks += sizemod.belts(ctx.sized, factory, r_)
             routed_made = routed_made if routed_made is not None else {}
             for key, m in flat.machines.items():
                 u = r_.util(key)
@@ -969,13 +1018,13 @@ def s_stop_on(ctx, args):
 
 STEPS = {
     "read_surface": s_read_surface, "read_terrain": s_read_terrain, "run_models": s_run_models,
-    "elaborate": s_elaborate, "report_rates": s_report_rates, "place": s_place, "route": s_route,
-    "tier": s_tier,
+    "elaborate": s_elaborate, "size": s_size, "report_rates": s_report_rates, "place": s_place,
+    "route": s_route, "tier": s_tier,
     "cover_power": s_cover_power, "cover_robots": s_cover_robots, "floorplan": s_floorplan,
     "report_checks": s_report_checks, "report_bom": s_report_bom, "write_layout": s_write_layout,
     "diff": s_diff, "apply": s_apply, "stop_on": s_stop_on,
 }
-_SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "stop_on")
+_SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "size", "stop_on")
 _LAYOUT = ("place", "route", "tier", "cover_power", "cover_robots")
 
 
@@ -1008,6 +1057,7 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
     with open(script, encoding="utf-8") as fh:
         lines = parse(fh.read(), script)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
+    ctx.steps = [ln.cmd for ln in lines]
     for ln in lines:
         if ln.cmd == "stop_on":
             ctx.stop_on |= {a.upper() for a in ln.args}

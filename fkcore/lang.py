@@ -10,12 +10,13 @@
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
     param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
-    value   := number ('/' unit)? | word ('|' word)* | STRING
+    value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word ')'
 
 The tokenizer is the one in C:\\fk-lead\\repo\\fkc\\lang.py (d6018d3), with ``*`` added for ``X.*``.
 Words may contain dashes (item names); instance, module and net names may not. Every node keeps its
-source line. Pure, stdlib only.
+source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
+an :class:`Auto`, ``auto LO..HI`` within those bounds. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import re
 from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Assert", "Cover", "Module",
-           "File"]
+           "File", "Auto", "AUTO_TOP"]
 
 
 class FkSyntaxError(Exception):
@@ -43,6 +44,8 @@ _TOKEN = re.compile(r"""
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _UNITS = {"s": 1.0, "min": 60.0, "h": 3600.0}
 _COVER_KINDS = ("power", "robots")
+#: the top of a plain ``n=auto``: a bound that never stops a real design, only a runaway one
+AUTO_TOP = 100
 
 
 @dataclass
@@ -69,6 +72,21 @@ def tokenize(text, path="<fk>"):
 
 
 # -- AST ------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Auto:
+    """``n=auto`` or ``n=auto LO..HI``: a count the build's ``size`` step chooses, the fewest
+    machines that meet the targets, the asserts and what the row's consumers ask."""
+    lo: int = 1
+    hi: int | None = None          # None: AUTO_TOP
+
+    @property
+    def top(self):
+        return AUTO_TOP if self.hi is None else self.hi
+
+    def __str__(self):
+        return "auto" if self.hi is None and self.lo == 1 else f"auto {self.lo}..{self.top}"
+
+
 @dataclass
 class Ref:
     parts: list          # ["mall", "belts"]
@@ -343,9 +361,24 @@ class _P:
             self.next()
             return key, tok.text[1:-1]
         words = [self.word("value").text]
+        if words[0] == "auto" and self.peek().text != "|":
+            return key, self.auto()
         while self.accept("|"):
             words.append(self.word("value").text)
         return key, words[0] if len(words) == 1 else words
+
+    def auto(self):
+        """What follows ``auto``: nothing, or the bounds ``LO..HI``."""
+        tok = self.peek()
+        if tok.kind != "num":
+            return Auto()
+        lo = self.number()
+        if not (self.accept(".") and self.accept(".")) or self.peek().kind != "num":
+            self.err("a count's bounds are written auto LO..HI, like auto 1..30", tok)
+        hi = self.number()
+        if not (isinstance(lo, int) and isinstance(hi, int) and 1 <= lo <= hi):
+            self.err(f"auto {lo}..{hi}: the bounds are whole numbers, 1 <= LO <= HI", tok)
+        return Auto(lo, hi)
 
 
 def parse(text, path="<fk>") -> File:

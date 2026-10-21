@@ -19,6 +19,9 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
 - 1.2: nothing in the run's game files changes. The record of the toolkit's own entities
   (`game\\out\\own\\<surface>.json`) starts at the next build, from the .fkp files last written.
   The host's toolkit must be 1.2 too: bin\\fk.py sends `fk lua` chunks to `fkcore lua --file -`.
+- 1.6: the build script gets the template's `size` line after `elaborate` (the build counts the
+  `n=auto` rows); a script without one says so when a factory has such a row. The host's
+  toolkit must be 1.6 too: it replays the size step for `--from diff`.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -64,6 +67,24 @@ def _script(text):
     return "".join(lines)
 
 
+#: the template's size line (1.6): the build counts the n=auto rows
+SIZE_LINE = ("size                                      # n=auto rows: the fewest machines for the "
+             "targets, asserts and consumers (out/size.txt)\n")
+
+
+def _size(text):
+    """The build script with the size step after elaborate (None: nothing to change)."""
+    lines = text.splitlines(True)
+    steps = [line.split("#")[0].split()[:1] for line in lines]
+    if ["size"] in steps or ["elaborate"] not in steps:
+        return None
+    i = steps.index(["elaborate"])
+    if not lines[i].endswith("\n"):
+        lines[i] += "\n"
+    lines.insert(i + 1, SIZE_LINE)
+    return "".join(lines)
+
+
 def _hand(text):
     """The build script with ``--hand inserter`` on its route line (None: nothing to change)."""
     lines = text.splitlines(True)
@@ -93,19 +114,26 @@ def upgrade(run, sha, dry=False):
     old = cfg.get("toolkit_sha", "unknown")
     plan = [f"run {run}: toolkit {old} -> {sha}"]
     script = os.path.join(run, "game", "nauvis.build.fkb")
-    new_script, hand = None, False
+    new_script, changes = None, []
     if os.path.exists(script):
         with open(script, encoding="utf-8") as fh:
             text = fh.read()
         new_script = _script(text)
+        if new_script:
+            changes.append("report_bom --stock live after the diff")
+        sized = _size(new_script or text)
+        if sized:
+            new_script = sized
+            changes.append("size after elaborate (the build counts the n=auto rows)")
         if _plain_hands(run):
             hand = _hand(new_script or text)
-            new_script = hand or new_script
+            if hand:
+                new_script = hand
+                changes.append("route --hand inserter (its own route.py used plain inserters)")
     plan += [f"  replace {p} (old kept in .upgrade-{old}/)" for p in REPLACED
              if os.path.exists(os.path.join(run, p)) or p in (".toolkit", "bin", "docs")]
     if new_script:
-        plan.append("  game/nauvis.build.fkb: " + ("route --hand inserter (its own route.py "
-                    "used plain inserters)" if hand else "report_bom --stock live after the diff")
+        plan.append("  game/nauvis.build.fkb: " + "; ".join(changes)
                     + f" (old kept as nauvis.build.fkb.before-{sha})")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:

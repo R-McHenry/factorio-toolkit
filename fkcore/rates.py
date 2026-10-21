@@ -19,8 +19,9 @@ its nets, one grant per endpoint. Per net and item:
   machine drawing one item from k nets asks 1/k of its need from each.
 - **Producer side, the mirror.** The consumers can take A = sum of full-speed need x their
   potential, plus what the sinks take (a chest, lab or turret takes what is left, up to its
-  ``rate``; a sushi sink's rate is split over its items by full-speed supply). If A < S, the
-  drivers are slowed the same way: the same fraction of their duty, water-filled.
+  ``rate``; a sushi sink's rate is split over its items by full-speed supply, except a lab's,
+  which caps each pack it is fed). If A < S, the drivers are slowed the same way: the same
+  fraction of their duty, water-filled.
 - What-if: ``unbounded=[net, ...]`` treats those nets' supply as unlimited (their drivers then run
   at what the consumers take), which is how a hand calc isolates one part of a factory.
 - An input with no net, or an output with no net, stops the machine (UNFED / UNCONSUMED say so).
@@ -67,6 +68,7 @@ class Model:
     passes: int
     residual: float
     asserts: list = field(default_factory=list)   # [(text, ok, value, target, unit)]
+    sink_share: dict = field(default_factory=dict)  # (sink key, net, item) -> its cap there
 
     def rate(self, key, item):
         """Items/s machine ``key`` makes of ``item``."""
@@ -159,9 +161,9 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
         if not m.sink:
             continue
         mine = [(n, item) for (kk, item), ns in feeds.items() if kk == k for n in ns]
-        if m.drain is None:
+        if m.drain is None or m.extra.get("each"):
             for ni in mine:
-                sink_share[(k,) + ni] = INF
+                sink_share[(k,) + ni] = INF if m.drain is None else m.drain
             continue
         weights = [full_make.get(ni, 0.0) for ni in mine]
         finite = [w for w in weights if w != INF]
@@ -299,7 +301,7 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                 v, why = grants[g], (g[1], g[3], g[2])
         util[k], binding[k] = v, (why if v < 1.0 - 1e-9 else None)
     measure()
-    model = Model(flat, util, binding, stats, done, residual)
+    model = Model(flat, util, binding, stats, done, residual, sink_share=sink_share)
     model.asserts = _asserts(model)
     return model
 

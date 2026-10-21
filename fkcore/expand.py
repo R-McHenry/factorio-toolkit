@@ -30,7 +30,7 @@ from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
 from .terrain import fmt_amount
 
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
-           "frame_of"]
+           "frame_of", "planned_frame"]
 
 _SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump",
            "Boiler", "SteamEngine", "InfinityPipe")
@@ -423,6 +423,23 @@ def attach_points(flat, lay, path, cat):
     return out
 
 
+def planned_frame(flat, path, cat, frames=None):
+    """(x0, y0, x1, y1): where instance ``path``'s turned frame lands in the factory frame by its
+    ``@(x, y)`` hint, before anything is placed (the size step's FIT); None without a hint (an
+    ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
+    fails. ``frames`` caches the module frames, as for ``_origin``."""
+    inst = flat.insts[path]
+    if inst.module is not None or "at" not in inst.hints:
+        return None
+    own = _own_frame(flat, path, cat, frames)
+    if own is None:
+        return None
+    size = (own[2] - own[0], own[3] - own[1])
+    x0, y0, rot = _origin(flat, path, cat, size, frames)
+    w, h = size if rot % 2 == 0 else size[::-1]
+    return x0, y0, x0 + w, y0 + h
+
+
 def frame_of(flat, lay, path, cat):
     """(x0, y0, x1, y1): the tiles of a placed instance's turned frame."""
     rec = lay.insts[path]
@@ -454,6 +471,8 @@ def explain(flat, lay, path, cat) -> str:
     head = f"{path} = {inst.kind}<{params}>"
     if rec is not None:
         head += f" at {fkpmod.fmt(rec.x)},{fkpmod.fmt(rec.y)} rot {rec.rot} sig {rec.sig}"
+    if getattr(inst, "auto", None):
+        head += f"   (n=auto {inst.auto[0]}..{inst.auto[1]}: the size step's count)"
     lines = [head]
     mine = sorted((k for k, e in lay.entities.items() if e.owner == path), key=fkpmod.natural_key)
     machines = [k for k in mine if lay.entities[k].net is None]

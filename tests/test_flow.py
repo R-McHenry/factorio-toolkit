@@ -35,7 +35,7 @@ class FlowTest(unittest.TestCase):
     def test_the_default_script_builds_redgreen(self):
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual(len(ctx.log), 18)
+        self.assertEqual(len(ctx.log), 19)
         # the one check line of the run: this surface has no power plant (games/nauvis has one)
         self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks if c.code not in ADVICE],
                          [("floorplan", "NO_POWER", "nauvis main")])
@@ -94,7 +94,7 @@ class FlowTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.dir, "main.fkp")))
         code, ctx = self.build(frm="cover_power", to="report_checks")
         self.assertEqual(code, 0)
-        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[10/18", "[11/18", "[12/18", "[13/18"])
+        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[11/19", "[12/19", "[13/19", "[14/19"])
         self.assertIn("12 connected", self.read("out/report_checks.txt"))
 
     def test_a_step_run_twice_reports_its_checks_once(self):
@@ -110,7 +110,7 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(self.read("out/report_rates.txt").count("NOT met"), 2)
         code, ctx = self.build(frm="report_rates:2", to="report_rates:2")
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[ 9/18"])     # the second one
+        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[10/19"])     # the second one
         self.assertEqual(self.read("out/report_rates.txt").count("# report_rates"), 1)
 
     def test_a_bad_number_is_a_script_error(self):
@@ -148,7 +148,7 @@ class FlowTest(unittest.TestCase):
             fh.write("stop_on UNFED\n")
         code, ctx = self.build()
         self.assertEqual(code, 1)
-        self.assertTrue(ctx.log[-1].startswith("[ 4/19] elaborate"))
+        self.assertTrue(ctx.log[-1].startswith("[ 4/20] elaborate"))
 
     def test_the_kickoff_template_runs_through_the_routed_rates(self):
         # every new run's script (tier, then report_rates again) on its plant, a Literal with
