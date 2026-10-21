@@ -6,7 +6,7 @@
 One conversation per run: its id is kept in <run>\\claude-session.txt, so starting the loop again
 continues it. Round 1 sends launch.json's first message (plus --note); every later round sends
 GOAL.md, as the brief promises ("Whenever you finish a turn, its text comes back to you as the
-next message"). The loop stops when <run>\\STOP exists (a running turn is stopped too), when
+next message"). The loop stops when <run>\\STOP exists (a running turn is stopped too)
 or after --rounds rounds or --hours hours; while GOAL.md is empty or missing it pauses
 (2026-10-21) and resumes when GOAL.md has text again. A turn past --turn-cap
 minutes is stopped and the next round says so. A failed round (usage limit, network) waits and
