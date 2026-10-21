@@ -30,6 +30,29 @@ class WorldLineTest(unittest.TestCase):
         self.assertIn("medium-electric-pole at 85,101", line)
         self.assertEqual(key, "unreached")
 
+    def test_labs_that_wait_for_packs(self):
+        # the lead world, 10:34: every lab had red and green, none blue
+        line, key = claude_loop.status_line({
+            "ghosts": [], "research": {"name": "advanced-material-processing-2", "pct": 11},
+            "labs": {"n": 6, "short": 6, "lack": {"chemical-science-pack": 6},
+                     "makers": {"chemical-science-pack": {"n": 1, "short": 1}}}})
+        self.assertIn("RESEARCH STALLED: all 6 labs wait for packs (chemical-science-pack missing "
+                      "in 6); 1 of 1 chemical-science-pack makers short of ingredients", line)
+        self.assertEqual(key, "labs:stalled")
+        # the 2005 run: 8 of 11 wait, research still moves (a fact, not a block)
+        line, key = claude_loop.status_line({
+            "ghosts": [], "research": {"name": "mining-productivity-2", "pct": 33},
+            "labs": {"n": 11, "short": 8, "lack": {"logistic-science-pack": 8},
+                     "makers": {"logistic-science-pack": {"n": 4, "short": 4}}}})
+        self.assertIn("8 of 11 labs wait for packs (logistic-science-pack missing in 8); 4 of 4 "
+                      "logistic-science-pack makers short of ingredients", line)
+        self.assertEqual(key, "")
+        # every lab busy: nothing to say; Lua's empty tables come back as lists
+        line, key = claude_loop.status_line({
+            "ghosts": [], "research": {"name": "x", "pct": 1},
+            "labs": {"n": 3, "short": 0, "lack": [], "makers": []}})
+        self.assertNotIn("labs", line)
+
     def test_all_reached_says_nothing_more(self):
         line, key = claude_loop.status_line({
             "ghosts": [{"item": "transport-belt", "ghosts": 2, "stock": 10}],

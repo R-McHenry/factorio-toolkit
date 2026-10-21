@@ -57,7 +57,9 @@ SETTLE = 120                  # seconds: the world line changes at most this oft
 #: one free read of the game: the ghosts per item (with the network's stock and whether the
 #: recipe is locked), the ghosts outside every powered roboport's construction area (the 2005
 #: player's silent deadlock: a re-laid grid left the poles that would join it out of reach), the
-#: construction robots, the research, and the game chat after CURSOR
+#: construction robots, the research, the labs that wait for packs and what their packs' makers
+#: lack (2026-10-21: both players' research stood on one starved pack while the line said 11%),
+#: and the game chat after CURSOR
 STATUS_LUA = r"""
 local s, f = game.surfaces.nauvis, game.forces.player
 local net
@@ -95,10 +97,35 @@ for _, m in pairs(storage.fk_chat or {}) do
   if (m.tick or 0) > CURSOR then chat[#chat + 1] = m end
 end
 local res = f.current_research
+local labs = {n = 0, short = 0, lack = {}, makers = {}}
+for _, l in pairs(s.find_entities_filtered{type = "lab", force = f}) do
+  labs.n = labs.n + 1
+  if res and l.status == defines.entity_status.missing_science_packs then
+    labs.short = labs.short + 1
+    local inv = l.get_inventory(defines.inventory.lab_input)
+    for _, ing in pairs(res.research_unit_ingredients) do
+      if inv and inv.get_item_count(ing.name) == 0 then
+        labs.lack[ing.name] = (labs.lack[ing.name] or 0) + 1
+      end
+    end
+  end
+end
+if labs.short > 0 then
+  for _, a in pairs(s.find_entities_filtered{type = "assembling-machine", force = f}) do
+    local r = a.get_recipe()
+    if r and labs.lack[r.name] then
+      local m = labs.makers[r.name] or {n = 0, short = 0}
+      m.n = m.n + 1
+      if a.status == defines.entity_status.item_ingredient_shortage then m.short = m.short + 1 end
+      labs.makers[r.name] = m
+    end
+  end
+end
 rcon.print(helpers.table_to_json{tick = game.tick, ghosts = ghosts, chat = chat,
   unreached = far > 0 and {n = far, first = at} or nil,
   robots = net and {idle = net.available_construction_robots, all = net.all_construction_robots},
-  research = res and {name = res.name, pct = math.floor(f.research_progress * 100)}})
+  research = res and {name = res.name, pct = math.floor(f.research_progress * 100)},
+  labs = labs})
 """
 
 
@@ -266,7 +293,7 @@ def host_status(cfg, cursor, folder=None):
 
 def status_line(st):
     """-> (the world line, the key of what blocks: SHORT and LOCKED ghost items, ghosts no
-    powered roboport reaches, no research)."""
+    powered roboport reaches, no research, research stalled with every lab waiting for packs)."""
     gh = sorted(st.get("ghosts") or [], key=lambda g: -g["ghosts"])
     total = sum(g["ghosts"] for g in gh)
     blocked, parts = [], []
@@ -299,6 +326,24 @@ def status_line(st):
     r = st.get("research")
     if r:
         parts.append(f"research: {r['name']} {r['pct']}%")
+        lab = st.get("labs") or {}
+        if lab.get("short"):
+            # Lua's empty table comes back as a JSON list
+            lack = lab.get("lack") if isinstance(lab.get("lack"), dict) else {}
+            makers = lab.get("makers") if isinstance(lab.get("makers"), dict) else {}
+            stalled = lab["short"] >= lab.get("n", 0)
+            text = (f"RESEARCH STALLED: all {lab['n']} labs wait for packs" if stalled else
+                    f"{lab['short']} of {lab.get('n')} labs wait for packs")
+            if lack:
+                text += " (" + ", ".join(f"{p} missing in {k}" for p, k in
+                                          sorted(lack.items(), key=lambda kv: -kv[1])) + ")"
+            short = [f"{m['short']} of {m['n']} {p} makers short of ingredients"
+                     for p, m in sorted(makers.items()) if m.get("short")]
+            if short:
+                text += "; " + ", ".join(short)
+            parts.append(text)
+            if stalled:
+                blocked.append("labs:stalled")
     else:
         parts.append("RESEARCH: NONE, nothing researches")
         blocked.append("research:none")
