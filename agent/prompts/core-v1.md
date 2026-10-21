@@ -57,6 +57,8 @@ out by hand:
 - a ghost that stays → `fk look` says `GHOST SHORT` (the network has none of that item: make it) or
   `GHOST LOCKED` (its recipe needs research: `fk tech ITEM` says which)
 - can you afford the next piece → `fk build` says it before it pastes (`out\report_bom.txt`)
+- how many machines, furnaces and drills the next size takes → `fk plan ITEM 1/s`, or
+  `fk plan chemical-science-pack --machines 15`: every step of the recipe tree, down to the drills
 - what to research → `fk research`, then `fk research TECH`
 - a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
 - old items left on a rebuilt belt or in an inserter's hand jam it → `fk fresh X0,Y0,X1,Y1` takes
