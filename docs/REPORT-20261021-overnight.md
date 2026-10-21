@@ -130,6 +130,35 @@ Kept current through the night; the last check-in is the last line of the timeli
   `9125139`. Proposed as sessions: `fk plan` (machines and drills for a target rate; started) and
   a Bus template that nets load into and tap out of.
 
+## Afternoon: the 2005 run loses its power
+
+- About 13:05 biters destroyed the 2005 run's nuclear reactor (with its fuel chest and
+  roboport). A reactor can't be crafted there (no nuclear research), so the base is left with the
+  kit's 6 solar panels. The player cut two poles to test the grid, and the spawn grid lost its
+  roboports. At 13:20 the base made nothing at all.
+- The player stopped at "nothing in the game can fix this" and asked you for a reactor, solar
+  panels, or leave to switch the oil plot off by script.
+- What the game says (free reads):
+  - The solar grid is in deficit even at midday. 6 panels average about 250 kW over a day. They
+    feed 5 roboports at 50 kW each, the shop's piercing-ammo assembler and idle drains.
+  - So every roboport on it runs down. The two east ones went from 85 to 78 MJ, and the three at
+    spawn hover near 1 MJ in "recharging_after_power_outage".
+  - The base grid has no generation at all. Its roboports ran empty by 13:50.
+- An in-rules way back, sent to the player at 13:52. It uses only the design and robots:
+  - take the east pole chain out of the design (network 57's one robot, still charged, reaches
+    the pole at 47.5,-11.5)
+  - switch the ammo maker to a recipe without ingredients (a recipe paste)
+  - That leaves about 180 kW of draw against about 250 kW, so the spawn roboports should recharge
+    in about 30 minutes. Then robots can place the 3 boilers and 3 engines that wait in the spawn
+    chests.
+  - The steam plant's offshore-pump ghost (-10.5,-49.5) stands outside every spawn roboport's
+    reach and has to move.
+- The player took it up at 13:58 (relay4 out of the design).
+- It worked. At 14:01 the east chain was off the solar grid and the spawn roboports had jumped
+  from 1.4 to 15.8 MJ. By 14:10 they were back in a robot network (net 59) and the network saw
+  the spawn chests again.
+- No item was added, nothing was changed by script, and no rule was bent.
+
 ## For you
 
 - **Pole and roboport stability: both players hit it.** A changed layout re-lays the poles; the
