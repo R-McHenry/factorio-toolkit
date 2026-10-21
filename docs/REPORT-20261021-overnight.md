@@ -130,6 +130,21 @@ Kept current through the night; the last check-in is the last line of the timeli
   `9125139`. Proposed as sessions: `fk plan` (machines and drills for a target rate; started) and
   a Bus template that nets load into and tap out of.
 
+## 16:48: the lead world launches its first rocket
+
+- The steps after the silo research:
+  - The player placed the silo as a ghost by Lua; the toolkit has no silo template yet, and it
+    noted that in FRICTION.md.
+  - A shop assembler crafted the silo, and 50 rocket parts followed.
+  - Steel was the slow part: it had to be hauled about 150 tiles from the iron outpost.
+- It pressed the silo's button (`launch_rocket()` by `fk lua`), so rockets_launched is 1, and it
+  told you in chat. Your OK for the button came a minute later.
+- The rocket went up empty. For the next one, your note and the numbers reached the player: a
+  space platform starter pack is 20 steel, 20 processing units and 60 foundations. That is about
+  1220 steel and 1200 copper cable, and the network holds 1641 steel and 3942 cable.
+- Launching the pack creates the first space platform, which researches the space-platform
+  technology (its trigger is create-space-platform).
+
 ## Afternoon: the 2005 run loses its power
 
 - About 13:05 biters destroyed the 2005 run's nuclear reactor (with its fuel chest and
@@ -160,6 +175,12 @@ Kept current through the night; the last check-in is the last line of the timeli
 - At 14:27 network 59 had a single working construction robot, which built the first boiler.
   12 more construction robots sat in its chests as items. The note to the player at 14:28 was
   that a requester and an inserter into a spawn roboport put them to work.
+- 16:03 a shorter route went to the player: a boiler in the dead reactor's heat-exchanger spot.
+  It is the same shape, so the standing pump, the steam pipes and the 2 turbines need nothing
+  new. The player did the swap and fed the boiler wood and coal.
+- By 17:05 the boiler was making steam and both turbines were working. The plant and the oil
+  plot's engines share one grid, but the base is still cut off from it. One construction robot
+  carries the rest, two items at a time.
 - No item was added, nothing was changed by script, and no rule was bent.
 - 14:40 toolkit 1.6 (`469416f`, tag `v1.6`) went to both runs, merged from the `size` and `bus`
   branches (529 tests OK). Both runs' designs lay out byte for byte as before (checked on copies).
