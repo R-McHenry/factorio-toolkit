@@ -5,7 +5,7 @@
     module  := 'module' Name '{' stmt* '}'
     stmt    := inst | net | assert | cover
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint*
-    net     := 'net' name ('items' item (',' item)*)? ':' refs '->' refs
+    net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
@@ -16,7 +16,9 @@
 The tokenizer is the one in C:\\fk-lead\\repo\\fkc\\lang.py (d6018d3), with ``*`` added for ``X.*``.
 Words may contain dashes (item names); instance, module and net names may not. Every node keeps its
 source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
-an :class:`Auto`, ``auto LO..HI`` within those bounds. Pure, stdlib only.
+an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7, Rory 2026-10-21)
+says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
+and implements no limit. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -113,6 +115,7 @@ class Net:
     drivers: list        # [Ref]
     consumers: list      # [Ref]
     line: int
+    limited: bool = False  # the source says each maker on it is limited (silences CLOG only)
 
 
 @dataclass
@@ -285,11 +288,12 @@ class _P:
             items = [self.word("item").text]
             while self.accept(","):
                 items.append(self.word("item").text)
+        limited = self.accept("limited") is not None
         self.expect(":")
         drivers = self.refs()
         self.expect("->")
         consumers = self.refs()
-        return Net(name, items, drivers, consumers, line)
+        return Net(name, items, drivers, consumers, line, limited)
 
     def assert_(self):
         line = self.expect("assert").line

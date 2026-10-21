@@ -71,14 +71,18 @@ class LabsFromAChestTest(unittest.TestCase):
                           if k.startswith("~") and e.name == "transport-belt"])
 
     def test_a_products_belt_into_one_chest_draws_no_clog(self):
-        flat, _lay = self.build("""
+        src = """
             a   = Assembler<recipe=pipe>             @(0, 0)
             b   = Assembler<recipe=iron-gear-wheel>  @(4, 0)
             fe  = Chest<requester, item=iron-plate, rate=2/s> @(3, 5)
             box = Chest<provider, limit=16>          @(12, 2)
             net fe: fe -> a, b
             net products: a, b -> box
-        """)
+        """
+        flat, _lay = self.build(src)
+        self.assertEqual([c.code for c in flat.checks], ["SUSHI_LIMIT"])   # no CLOG; the limit
+        flat, _lay = self.build(src.replace(", limit=16", "").replace("products:",
+                                                                      "products limited:"))
         self.assertEqual([c.code for c in flat.checks], [])
 
     def test_a_mixed_belt_into_labs_still_can_clog(self):

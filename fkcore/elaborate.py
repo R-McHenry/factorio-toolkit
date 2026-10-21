@@ -71,6 +71,7 @@ class FlatNet:
     consumers: list            # [(machine key, item)]
     declared: bool
     line: int
+    limited: bool = False      # `net NAME limited:` the source limits its makers (1.7)
 
     @property
     def sushi(self):
@@ -398,7 +399,8 @@ def _resolve_nets(flat):
     for name, p in pending:
         w = work[name]
         flat.nets[name] = FlatNet(name, w["items"], w["drivers"], w["consumers"],
-                                  p.net.items is not None, p.net.line)
+                                  p.net.items is not None, p.net.line,
+                                  getattr(p.net, "limited", False))
     flat._out_hold, flat._in_hold = out_hold, in_hold
 
 
@@ -439,7 +441,9 @@ def _group(rows):
 #: chests that put what reaches them into the logistic network
 _STORES = ("provider", "storage")
 #: the 1.1 check lines about limited production (tests of other things leave them out)
-ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK")
+ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT")
+#: chests that take any item that reaches them
+_TAKE_ALL = ("provider", "storage", "buffer")
 
 
 def _unlimited(m):
@@ -460,23 +464,48 @@ def _clog_checks(flat, in_hold, fed):
       another item; when the chest is full everything stops, which is limited production.
     - ``UNLIMITED``: provider or storage chests without ``limit=`` (one line per factory): what
       reaches them goes into the logistic network without end (the 0534 run's network held 4800
-      iron and 5300 copper plates).
+      iron and 5300 copper plates). 1.7 (Rory, 2026-10-21: a multi-item sink chest should
+      generally have no limit; the limiting happens at the makers): a chest a mixed belt of
+      makers feeds gets its own line, which says so, and none when its nets are ``limited``.
     - ``SHARED_SINK``: such a chest on a net with machines: whoever stands first on the belt gets
       its fill, so the machines after it can starve (the 0534 run's red science stood at 0%
       behind a copper chest).
+    - ``SUSHI_LIMIT`` (1.7, Rory 2026-10-21: a chest slot limit doesn't limit a sushi net): a
+      ``limit=`` on a chest that a mixed belt of makers feeds. When the chest holds that much the
+      belt backs up with every item on it, so the limit only brings the stop sooner.
+
+    A net written ``limited`` (1.7) says the source limits each of its makers: no ``CLOG`` and
+    no ``UNLIMITED`` for it. It only silences them; no tool can tell whether a source is limited.
     """
+    sushi_in = {}                          # chest key -> the mixed nets of makers it takes
     for name, net in flat.nets.items():
         made = any(flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
         takes_all = bool(net.consumers) and all(
             flat.machines[k].sink and flat.machines[k].takes is None
-            and flat.machines[k].extra.get("role") in ("provider", "storage", "buffer")
+            and flat.machines[k].extra.get("role") in _TAKE_ALL
             for k, _i in net.consumers)
-        if net.sushi and made and not takes_all:
+        if net.sushi and made and not takes_all and not net.limited:
             flat.checks.append(Check(
                 "CLOG", f"net {name}",
                 f"{', '.join(net.items)} share one belt: one that comes faster than it is used can "
                 "fill it and stop the others. It runs while each comes no faster than it is used",
                 net.line))
+        if not (net.sushi and made):
+            continue
+        for k, _i in net.consumers:
+            m = flat.machines[k]
+            if m.sink and m.extra.get("role") in _TAKE_ALL:
+                sushi_in.setdefault(k, set()).add(name)
+    for key in sorted(sushi_in, key=lambda k: flat.machines[k].inst):
+        m = flat.machines[key]
+        if m.extra.get("limit") is not None:
+            nets = sorted(sushi_in[key])
+            flat.checks.append(Check(
+                "SUSHI_LIMIT", m.inst,
+                f"limit={m.extra['limit']} on the mixed belt of net {', '.join(nets)}: when the "
+                "chest holds that much, the belt backs up with every item on it. A chest of many "
+                "items works best unlimited, with the limit at each maker",
+                flat.nets[nets[0]].line))
     items = {}
     for (key, item), nets in in_hold.items():
         items.setdefault(key, {})[item] = nets
@@ -492,7 +521,17 @@ def _clog_checks(flat, in_hold, fed):
                 "whichever comes faster can fill it and stop the others. A limit= keeps what feeds "
                 "it to what is used"))
     open_ = sorted({m.inst for key, m in flat.machines.items()
-                    if _unlimited(m) and key in fed and key not in mixed})
+                    if _unlimited(m) and key in fed and key not in mixed and key not in sushi_in})
+    sushi_open = sorted({flat.machines[key].inst for key, nets in sushi_in.items()
+                         if _unlimited(flat.machines[key]) and key not in mixed
+                         and not all(flat.nets[n].limited for n in nets)})
+    if sushi_open:
+        flat.checks.append(Check(
+            "UNLIMITED", ", ".join(sushi_open),
+            "a mixed belt of makers fills " + ("them" if len(sushi_open) > 1 else "it") + " without "
+            "end, unless each maker is limited: what one makes faster than it is taken fills the "
+            "chest, and then the belt stops for the others too. A slot limit only brings that sooner "
+            "(SUSHI_LIMIT); `net NAME limited:` says the source limits the makers"))
     if open_:
         flat.checks.append(Check(
             "UNLIMITED", ", ".join(open_),

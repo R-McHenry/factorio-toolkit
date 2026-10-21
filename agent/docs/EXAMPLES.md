@@ -161,7 +161,7 @@ one copper net and one products net.
   maker and what takes its output: that gap holds the one inserter that links them
 - chains stand shoulder to shoulder with no gap
 - two rows face one 4-tile corridor: the iron comes in at its middle, and every product goes out
-  along it into one chest (`Chest<provider, limit=16>`) at its west end
+  along it into one chest (`Chest<provider>`, no limit) at its west end
 - each circuit maker stands between its cable maker and the machine it feeds; one copper net
   reaches every cable maker
 - a maker whose product also feeds a neighbour stays on that link (one net per item and
@@ -171,9 +171,11 @@ On paper: 20 nets, all routed, 17 of them single inserters; 152 belts, 18 underg
 splitters bring the iron and copper in and the products out. It uses 1 provider chest where one
 chest per product took 8: with the two plate requesters, 3 logistic chests instead of 11, and in a
 base whose plates come by belt from a smelter row or a bus tap, only the 1. The products belt is
-sushi, so the build says `CLOG`: it runs while each product is taken about as fast as it is made;
-one that piles up fills the chest and the belt and stops the others, so limit production there.
-More products: another pair of rows below, the same way.
+sushi and ends in one chest that takes every item, so nothing on it waits behind another item (no
+`CLOG`). The chest has no limit: when a mixed belt's chest is full the whole belt stops, so a slot
+limit only brings that sooner (`SUSHI_LIMIT`). What keeps it from filling is a limit at each
+maker, and the build's `UNLIMITED` line says so until the design has one. More products: another
+pair of rows below, the same way.
 
 ## bus4.fk: Rory's 4-belt bus, a river of iron (54x25)
 

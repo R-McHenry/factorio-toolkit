@@ -37,6 +37,15 @@ class ParseTest(unittest.TestCase):
         self.assertEqual((str(a.ref), a.op), ("red", ">="))
         self.assertAlmostEqual(a.rate, 10 / 60)
 
+    def test_a_net_written_limited(self):
+        # 1.7 (Rory, 2026-10-21): the source says each maker on a mixed net is limited
+        f = lang.parse("net out limited: a, b -> box\n"
+                       "net mix items iron-plate, pipe limited: a, b -> box\n"
+                       "net plain: a -> box\n", "t.fk")
+        self.assertEqual([(n.name, n.limited) for n in f.body.nets],
+                         [("out", True), ("mix", True), ("plain", False)])
+        self.assertEqual(f.body.nets[1].items, ["iron-plate", "pipe"])
+
     def test_errors_carry_the_line(self):
         with self.assertRaises(lang.FkSyntaxError) as cm:
             lang.parse("gears = AsmRow<n=3>\nnet gear: gears ->\n", "t.fk")

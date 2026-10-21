@@ -150,7 +150,11 @@ fixing in the source.
   wait behind it; one inserter from a multi-item chest into a lab can't (`Lab` beside the chest)
 - `UNLIMITED`: provider or storage chests without `limit=`: what reaches them goes into the
   network without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops when it
-  is full
+  is full. A chest a mixed belt of makers feeds gets a line of its own: it fills unless each maker
+  is limited (`net NAME limited:` says your design limits them)
+- `SUSHI_LIMIT`: a `limit=` on a chest a mixed belt of makers feeds: when the chest holds that
+  much the belt backs up with every item on it, so the limit only brings the stop sooner. A chest
+  of many items works best unlimited, with the limit at each maker
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
 - `RIP`: the build takes up a lot, and the robots need minutes for it (the structures, the items

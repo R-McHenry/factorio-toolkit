@@ -99,14 +99,25 @@ class LimitedProductionChecksTest(unittest.TestCase):
         limited = src.replace("spare = Chest<provider>", "spare = Chest<provider, limit=1>")
         self.assertEqual(advice(limited), [])
 
-    def test_a_mixed_belt_that_machines_feed_into_one_chest_is_limited(self):
+    def test_a_mixed_belt_that_machines_feed_into_one_chest(self):
         # 1.7 (Rory, 2026-10-21): one inserter into an all-accepting multi-sink raises no CLOG; a
-        # chest takes whatever reaches it, so no item waits behind another (1.1 raised it here)
-        src = BASE.format(inbox="", box=", limit=4").replace(
+        # chest takes whatever reaches it, so no item waits behind another (1.1 raised it here).
+        # A chest of many items goes unlimited, the limits belong at the makers: a slot limit
+        # only stops the whole belt sooner (SUSHI_LIMIT), and `limited` says the makers are
+        src = BASE.format(inbox="", box="").replace(
             "net plates_in: inbox -> gears", "pipes = AsmRow<n=1, recipe=pipe> @(6, 20)\n"
                                              "net plates_in: inbox -> gears, pipes").replace(
             "net gear:      gears -> box", "net out: gears, pipes -> box")
-        self.assertEqual(advice(src), [])
+        self.assertEqual(advice(src), [("UNLIMITED", "box")])
+        (line,) = [c for c in flat_of(src).checks if c.code == "UNLIMITED"]
+        self.assertIn("a mixed belt of makers fills it without end, unless each maker is limited",
+                      line.msg)
+        self.assertEqual(advice(src.replace("net out:", "net out limited:")), [])
+        capped = src.replace("box   = Chest<provider>", "box   = Chest<provider, limit=4>")
+        self.assertEqual(advice(capped), [("SUSHI_LIMIT", "box")])
+        (line,) = [c for c in flat_of(capped).checks if c.code == "SUSHI_LIMIT"]
+        self.assertIn("limit=4 on the mixed belt of net out: when the chest holds that much, the "
+                      "belt backs up with every item on it", line.msg)
 
     def test_a_mixed_belt_that_machines_feed_into_machines_can_clog(self):
         src = BASE.format(inbox="", box=", limit=4").replace(
@@ -115,6 +126,7 @@ class LimitedProductionChecksTest(unittest.TestCase):
             "net gear:      gears -> box",
             "eng = Assembler<recipe=engine-unit> @(20, 2)\nnet out: gears, pipes -> eng")
         self.assertEqual(advice(src), [("CLOG", "net out")])
+        self.assertEqual(advice(src.replace("net out:", "net out limited:")), [])
 
     def test_a_mixed_belt_a_requester_feeds_is_limited(self):
         src = ('kit = Chest<requester, item="iron-plate,copper-plate", rate=1/s> @(2, 2)\n'
