@@ -142,8 +142,28 @@ plates) the way V1's rate model couples nets: each side of a machine is judged a
 side's potential (it asks for inputs as fast as its outputs let it run and offers products as fast
 as its inputs let it run), from everything at full speed, damped, until both hold. Belt order also
 closes V1's known gap: V1 shares a short net by appetite, while the game serves the first machines
-along the belt (agent `TOOLKIT.md`). [next slice: the netlist's machines and nets into the solver,
-and `report_rates` after `route` in the flow script]
+along the belt (agent `TOOLKIT.md`).
+
+**The netlist on its layout** [built: `fkcore/routed.py`, `tests/test_routed.py`]. Every netlist
+machine the layout holds goes on the lane graph: a crafter or drill as a `Machine` (needs and
+products times its duty, or its nominal utilization where V1 has it bound by a fluid; fluids left
+out, pipes being tanks), a requester chest as a source at its rate (without one, unbounded: the
+carriers decide), a sink as a demand for the items of the nets feeding it (its rate split over
+them, or without end). `report_rates` runs again after `route` in the default flow (Rory): the
+nominal model as before, then the routed section (per instance the nominal and routed
+utilization and the lowest machine, per net and item what its consumers asked and got and its
+critical connector), and the routed rate of each surface target. `--hand N` / `--bulk-hand N` give
+the force's inserter hand sizes (1 on paper).
+
+**`CAPACITY`** (a warning): one line per net and kind of connector (a belt tier's lanes, an
+inserter type) that binds, when the net delivers less to its consumers than V1's nominal rates.
+The line says what is required there, what the connector carries, the ratio, the connectors, what
+the net delivers against nominal and which machines run below their nominal utilization. A
+connector that binds while another machine takes up the slack (belt order) costs nothing and gives
+no line: redgreen's circuit row has a long-handed cable inserter at 1.2/s binding one assembler,
+the other makes up for it, and the build has no `CAPACITY` line. Four green-circuit assemblers fed
+from one requester chest get two: the chest's one fast inserter (2.5 cables/s of 12 required) and
+the assemblers' long-handed ones (1.2 of 3).
 
 **Several items on one lane** share its capacity: where they meet, by the rank of their inputs
 (within what the lane can pass on), and down the lane in the shares they met with. A tighter spot
@@ -267,6 +287,7 @@ and up; a splitter with one output blocked; a machine's fluid port.
 3. The `.fkp` lane notation and the `LANE` check (my proposals above).
 4. V2.1: steer to whole belts, or let an agent plan odd lane counts?
 5. The path matrix (the "giga brain option"): when it is worth building.
-6. The next slices: the netlist into the solver and `report_rates` after `route` (`CAPACITY`
-   lines); the catalog's inserter speeds; the router's tier per connector (the miner line case is
-   a solver test already: red in the middle carries 9/s, red at the ends 7.5).
+6. The next slices: the catalog's inserter speeds (now a table in `fkcore/lanes.py`); the
+   force's hand sizes read from the game when the link is up; the router's tier per connector (the
+   miner line case is a solver test already: red in the middle carries 9/s, red at the ends 7.5);
+   `fk rates` (the agent's command) showing the routed section too.

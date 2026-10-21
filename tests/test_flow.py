@@ -35,7 +35,7 @@ class FlowTest(unittest.TestCase):
     def test_the_default_script_builds_redgreen(self):
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual(len(ctx.log), 16)
+        self.assertEqual(len(ctx.log), 17)
         # the one check line of the run: this surface has no power plant (games/nauvis has one)
         self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks if c.code not in ADVICE],
                          [("floorplan", "NO_POWER", "nauvis main")])
@@ -53,7 +53,10 @@ class FlowTest(unittest.TestCase):
         surface = fkp.load(os.path.join(self.dir, "nauvis.fkp"))
         s = compose.compose(surface, {"main": lay}, CAT)
         self.assertEqual(s.problems, [])
-        self.assertIn("target automation-science-pack 10/min: met", self.read("out/report_rates.txt"))
+        rates_txt = self.read("out/report_rates.txt")      # the second one: after route
+        self.assertIn("target automation-science-pack 10/min: met", rates_txt)
+        self.assertIn("routed main (V2: the lanes and inserters as laid)", rates_txt)
+        self.assertIn("/min routed", rates_txt)
 
     def test_a_second_build_pins_everything(self):
         self.build()
@@ -86,7 +89,7 @@ class FlowTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.dir, "main.fkp")))
         code, ctx = self.build(frm="cover_power", to="report_checks")
         self.assertEqual(code, 0)
-        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[ 8/16", "[ 9/16", "[10/16", "[11/16"])
+        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[ 9/17", "[10/17", "[11/17", "[12/17"])
         self.assertIn("12 connected", self.read("out/report_checks.txt"))
 
     def test_from_diff_replays_the_floorplan(self):
@@ -110,7 +113,7 @@ class FlowTest(unittest.TestCase):
             fh.write("stop_on UNFED\n")
         code, ctx = self.build()
         self.assertEqual(code, 1)
-        self.assertTrue(ctx.log[-1].startswith("[ 4/17] elaborate"))
+        self.assertTrue(ctx.log[-1].startswith("[ 4/18] elaborate"))
 
     def test_a_moved_chest_routes_its_net_again(self):
         # 1.2 (the 0534 run): a chest moved one tile changes no belt end, only the tiles its

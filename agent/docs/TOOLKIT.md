@@ -22,6 +22,11 @@ one side of a splitter) takes its fill, and the ones further on get what is left
 net that is short on paper starves its far machines rather than slowing them all a little: give it
 more supply than demand, and give a chest on it a `limit=` (`SHARED_SINK` says where).
 
+After `fk build`, `out\report_rates.txt` also has the **routed** rates: what the belts and
+inserters as laid let through, with the first machines along a belt served first, as in the game.
+A belt lane carries 7.5 items/s (yellow; red 15, blue 22.5, turbo 30), a fast inserter 2.5/s, a
+long-handed one 1.2/s, a plain one about 0.85/s, more with the inserter capacity research.
+
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step. Each
 step writes its report to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
@@ -90,7 +95,10 @@ fixing in the source.
   it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a
   factory moved: `fk merge` joins factories where they stand
 - `DOUBLE`: one machine input or output on two nets
-- `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper
+- `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper (or,
+  after a build, as routed)
+- `CAPACITY`: a net delivers less as laid than on paper, and some of its belt lanes or inserters
+  run full: the line says what is required there, what they carry, and which machines run short
 - `UNROUTED`: no belt route was found for a net (the reason follows: often a row is boxed in;
   leave a few tiles free around a row's head, where its belts attach)
 - `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net

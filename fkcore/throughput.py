@@ -37,9 +37,12 @@ from dataclasses import dataclass, field
 
 from .lanes import INF
 
-__all__ = ["Machine", "Result", "solve", "report"]
+__all__ = ["Machine", "Result", "solve", "report", "BIG"]
 
 EPS = 1e-9
+#: an unbounded source (supply INF) puts this much on, so the carriers decide; a required flow of
+#: half of it or more is reported as unbounded
+BIG = 1e6
 
 
 @dataclass
@@ -182,15 +185,29 @@ def _usable(lg, item, takes, gives):
     return out
 
 
-def _solve_item(lg, order, usable, sup, dem, cap, rounds, tol):
-    """-> (admitted into each node, flow on each edge, consumed per node, left per node,
-    rounds, residual)."""
+def _prepare(lg, order, item, takes, gives, sources, sinks):
+    """An item's part of the graph, once per solve: its nodes in topological order (only what
+    lies between its sources and the sinks that take it), and per node its inputs and its outputs
+    (the inserters picking from it first, then the rest)."""
+    usable = _usable(lg, item, takes, gives)
+    keep = _reach(usable, sources) & _reach(usable, sinks, forward=False) | set(sources) | \
+        set(sinks)
     ins, outs = {}, {}
     for e in lg.edges():
-        k = (e.src, e.dst)
-        if k in usable:
+        if (e.src, e.dst) in usable and e.src in keep and e.dst in keep:
             outs.setdefault(e.src, []).append(e)
             ins.setdefault(e.dst, []).append(e)
+    split = {}
+    for v, rows in outs.items():
+        taps = [e for e in rows if e.via == "pickup" and lg.nodes[v].kind != "machine"]
+        split[v] = (taps, [e for e in rows if e not in taps])
+    return [v for v in order if v in keep], ins, outs, split
+
+
+def _solve_item(prep, sup, dem, cap, rounds, tol):
+    """-> (admitted into each node, flow on each edge, consumed per node, left per node,
+    rounds, residual)."""
+    order, ins, outs, split = prep
     acc, accept = {}, {}
     offer = {}
     residual, done = INF, 0
@@ -213,11 +230,8 @@ def _solve_item(lg, order, usable, sup, dem, cap, rounds, tol):
             e_ = min(g, dem.get(v, 0.0))
             eat[v] = e_
             rest = g - e_
-            mine_out = outs.get(v, ())
-            taps = [e for e in mine_out if e.via == "pickup" and lg.nodes[v].kind != "machine"]
-            onward = [e for e in mine_out if e not in taps]
             placed = 0.0
-            for group in (taps, onward):
+            for group in split.get(v, ((), ())):
                 caps_ = [acc.get((e.src, e.dst), INF) for e in group]
                 for e, a in zip(group, _fill(rest - placed, caps_)):
                     new[(e.src, e.dst)] = a
@@ -246,19 +260,35 @@ def _solve_item(lg, order, usable, sup, dem, cap, rounds, tol):
 
 
 # -- the solve ------------------------------------------------------------------------------------
-def _solve_all(lg, order, supply, demand, caps_on, shares, rounds, tol, takes, gives):
-    items = sorted({i for t in list(supply.values()) + list(demand.values()) for i in t})
+def _reach(edges, starts, forward=True):
+    adj = {}
+    for a, b in edges:
+        if forward:
+            adj.setdefault(a, []).append(b)
+        else:
+            adj.setdefault(b, []).append(a)
+    seen, todo = set(starts), list(starts)
+    while todo:
+        for w in adj.get(todo.pop(), ()):
+            if w not in seen:
+                seen.add(w)
+                todo.append(w)
+    return seen
+
+
+def _solve_all(lg, preps, supply, demand, caps_on, shares, rounds, tol):
     flow, edge, ate, left = {}, {}, {}, {}
     worst, most = 0.0, 0
-    for item in items:
-        usable = _usable(lg, item, takes, gives)
-        sup = {v: t[item] for v, t in supply.items() if item in t}
-        dem = {v: t[item] for v, t in demand.items() if item in t}
+    for item, prep in preps.items():
+        sup = {v: min(t[item], BIG) for v, t in supply.items() if item in t and t[item] > EPS}
+        dem = {v: t[item] for v, t in demand.items() if item in t and t[item] > EPS}
+        if not sup:
+            continue
         if caps_on:
-            cap = {v: n.cap * shares.get(v, {}).get(item, 1.0) for v, n in lg.nodes.items()}
+            cap = {v: lg.nodes[v].cap * shares.get(v, {}).get(item, 1.0) for v in prep[0]}
         else:
             cap = {}
-        got, off, eat, lft, n, res = _solve_item(lg, order, usable, sup, dem, cap, rounds, tol)
+        got, off, eat, lft, n, res = _solve_item(prep, sup, dem, cap, rounds, tol)
         for v, x in got.items():
             if x > EPS:
                 flow.setdefault(v, {})[item] = x
@@ -275,7 +305,8 @@ def _solve_all(lg, order, supply, demand, caps_on, shares, rounds, tol, takes, g
     return flow, edge, ate, left, most, worst
 
 
-def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, outer=30):
+def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, outer=40,
+          outer_tol=1e-4):
     """Flows over ``lg`` (``fkcore.lanes.LaneGraph``). ``supply`` / ``demand``: {node id: {item:
     items/s}} (a demand of INF takes everything); ``machines``: {node id: Machine}, whose needs
     and products join the demand and supply at their utilization. -> Result."""
@@ -288,45 +319,62 @@ def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, out
     for m, mach in machines.items():
         takes.setdefault(m, set()).update(mach.needs)
         gives.setdefault(m, set()).update(mach.makes)
-    # each side of a machine is judged against the other side's potential (V1's rate model): it
-    # asks for its inputs as fast as its outputs let it run, and offers its products as fast as
-    # its inputs let it run; a side that gets all it asked (or gets rid of all it offered) does
-    # not limit the machine. From everything at full speed, damped.
-    pin = {m: 1.0 for m in machines}                # what its inputs allow
-    pout = {m: 1.0 for m in machines}               # what its outputs allow
+    sources, sinks = {}, {}
+    for v, items in gives.items():
+        for item in items:
+            sources.setdefault(item, []).append(v)
+    for v, items in takes.items():
+        for item in items:
+            sinks.setdefault(item, []).append(v)
+    preps = {item: _prepare(lg, order, item, takes, gives, sources[item], sinks.get(item, []))
+             for item in sorted(sources)}
+    # One grant per endpoint of a machine, as in V1's rate model: it asks for an input as fast as
+    # everything else (its other inputs, its outputs) lets it run, and offers a product as fast
+    # as everything else lets it; an endpoint that gets all it asked (or rids all it offered)
+    # does not limit the machine. From everything at full speed, damped.
+    grant = {(m, side, item): 1.0 for m, mach in machines.items()
+             for side, rows in (("in", mach.needs), ("out", mach.makes)) for item in rows}
+
+    def potential(m, skip):
+        mach = machines[m]
+        v = 1.0
+        for side, rows in (("in", mach.needs), ("out", mach.makes)):
+            for item in rows:
+                if (m, side, item) != skip:
+                    v = min(v, grant[(m, side, item)])
+        return v
+
     for done in range(1, outer + 1):
         sup = {v: dict(t) for v, t in supply.items()}
         dem = {v: dict(t) for v, t in demand.items()}
+        asked, offered = {}, {}
         for m, mach in machines.items():
             for item, r in mach.needs.items():
-                dem.setdefault(m, {})[item] = dem.get(m, {}).get(item, 0.0) + r * pout[m]
+                asked[(m, item)] = r * potential(m, (m, "in", item))
+                dem.setdefault(m, {})[item] = dem.get(m, {}).get(item, 0.0) + asked[(m, item)]
             for item, r in mach.makes.items():
-                sup.setdefault(m, {})[item] = sup.get(m, {}).get(item, 0.0) + r * pin[m]
-        req, req_edge, _a, _l, _n, _r = _solve_all(lg, order, sup, dem, False, {}, rounds, tol,
-                                                   takes, gives)
+                offered[(m, item)] = r * potential(m, (m, "out", item))
+                sup.setdefault(m, {})[item] = sup.get(m, {}).get(item, 0.0) + offered[(m, item)]
+        req, req_edge, _a, _l, _n, _r = _solve_all(lg, preps, sup, dem, False, {}, rounds, tol)
         shares = _shares(lg, order, req, req_edge, sup, dem)
-        flow, edge, ate, left, n, res = _solve_all(lg, order, sup, dem, True, shares, rounds, tol,
-                                                   takes, gives)
+        flow, edge, ate, left, n, res = _solve_all(lg, preps, sup, dem, True, shares, rounds, tol)
         moved = 0.0
+        k = 1.0 if done <= 2 else 0.5
         for m, mach in machines.items():
-            new_in, new_out = 1.0, 1.0
-            for item, r in mach.needs.items():
-                asked = r * pout[m]
-                got = ate.get(m, {}).get(item, 0.0)
-                if r > EPS and got < asked - 1e-9:
-                    new_in = min(new_in, got / r)
-            for item, r in mach.makes.items():
-                offered = r * pin[m]
-                gone = left.get(m, {}).get(item, 0.0)
-                if r > EPS and gone < offered - 1e-9:
-                    new_out = min(new_out, gone / r)
-            k = 1.0 if done <= 2 else 0.5
-            nin, nout = pin[m] + (new_in - pin[m]) * k, pout[m] + (new_out - pout[m]) * k
-            moved = max(moved, abs(nin - pin[m]), abs(nout - pout[m]))
-            pin[m], pout[m] = nin, nout
-        if moved < 1e-6:
+            for side, rows, table, want in (("in", mach.needs, ate, asked),
+                                            ("out", mach.makes, left, offered)):
+                for item, r in rows.items():
+                    got = table.get(m, {}).get(item, 0.0)
+                    new = 1.0 if r <= EPS or got >= want[(m, item)] - 1e-9 else got / r
+                    g = (m, side, item)
+                    step = grant[g] + (new - grant[g]) * k
+                    moved = max(moved, abs(step - grant[g]))
+                    grant[g] = step
+        if moved < outer_tol:
             break
-    util = {m: max(0.0, min(pin[m], pout[m])) for m in machines}
+    util = {m: max(0.0, min([1.0] + [grant[(m, s, i)] for s, rows in
+                                     (("in", mach.needs), ("out", mach.makes)) for i in rows]))
+            for m, mach in machines.items()}
     caps = {v: node.cap for v, node in lg.nodes.items()}
     return Result(flow, edge, req, ate, left, dem, sup, util, caps, n, res)
 

@@ -228,7 +228,12 @@ def s_elaborate(ctx, args):
 
 
 def s_report_rates(ctx, args):
-    lines, checks, made = [], [], {}
+    """The nominal rate model per factory (V1); once a factory is laid out (after ``place`` and
+    ``route``), also its routed rates (V2, ``fkcore.routed``: the lanes and inserters as laid,
+    ``CAPACITY`` where a carrier binds). ``--hand N`` / ``--bulk-hand N``: the force's inserter
+    hand sizes (1 + its research bonus; default 1)."""
+    o = _opts(args, hand="1", bulk_hand="1")
+    lines, checks, made, routed_made = [], [], {}, None
     for factory, flat in ctx.flats.items():
         model = rates.solve(flat)
         lines += rates.report(model, factory).splitlines() + [""]
@@ -238,15 +243,32 @@ def s_report_rates(ctx, args):
         for key, m in flat.machines.items():
             for item, r in m.makes.items():
                 made[item] = made.get(item, 0.0) + r * model.util[key]
+        lay = ctx.layouts.get(factory)
+        if lay is not None:
+            from . import routed
+            r_ = routed.solve(flat, lay, ctx.cat, model, hand=int(o["hand"]),
+                              bulk_hand=int(o["bulk_hand"]))
+            rlines, rchecks = routed.report(r_, factory)
+            lines += rlines + [""]
+            checks += rchecks
+            routed_made = routed_made if routed_made is not None else {}
+            for key, m in flat.machines.items():
+                u = r_.util(key)
+                for item, rate in m.makes.items():
+                    if u is not None and rate != float("inf"):
+                        routed_made[item] = routed_made.get(item, 0.0) + rate * u
     if ctx.surface is not None:
         for item, want in ctx.surface.targets.items():
             got = made.get(item, 0.0)
             ok = got >= want - 1e-9
-            lines.append(f"target {item} {want * 60:g}/min: {'met' if ok else 'NOT met'}, "
-                         f"{got * 60:.3f}/min nominal")
+            text = f"{got * 60:.3f}/min nominal"
+            if routed_made is not None:
+                rgot = routed_made.get(item, 0.0)
+                ok = ok and rgot >= want - 1e-9
+                text += f", {rgot * 60:.3f}/min routed"
+            lines.append(f"target {item} {want * 60:g}/min: {'met' if ok else 'NOT met'}, {text}")
             if not ok:
-                checks.append(Check("TARGET", item, f"{got * 60:.3f}/min nominal, target "
-                                                    f"{want * 60:g}/min"))
+                checks.append(Check("TARGET", item, f"{text}, target {want * 60:g}/min"))
     return lines, checks
 
 

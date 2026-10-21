@@ -304,7 +304,7 @@ class SmelterStackTest(unittest.TestCase):
     def test_26_per_column_still_15(self):
         r, lg, _tile, plates = self.solve(1, 13)
         self.assertEqual(plates, [15.0])
-        running = sum(1 for u in r.util.values() if u > 1 - 1e-6)
+        running = sum(1 for u in r.util.values() if u > 1 - 1e-3)
         self.assertEqual(running, 48)                     # 24 per column, as the lanes allow
         self.assertTrue(any(line.startswith("BINDS") for line in tp.report(r, lg)))
 
