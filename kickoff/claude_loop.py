@@ -221,15 +221,24 @@ def ensure_login(run, log):
     log("Claude Code is signed in")
 
 
-def host_status(cfg, cursor):
+def host_status(cfg, cursor, folder=None):
     """The STATUS_LUA read through the run's own toolkit on the game host (no footer: the
-    player's alert and chat cursors stay where they are), or None."""
+    player's alert and chat cursors stay where they are), or None. A local run (a laptop server:
+    run.json host "local") reads it here, with the run's link settings."""
     lua = STATUS_LUA.replace("CURSOR", str(int(cursor)))
-    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
-           f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} timeout 15 python3 -m fkcore lua . "
-           + shlex.quote(lua))
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", cfg["host"], cmd], capture_output=True,
-                       text=True, encoding="utf-8", errors="replace", timeout=30)
+    if cfg.get("host") == "local":
+        env = dict(os.environ, FK_LINK="on", PYTHONDONTWRITEBYTECODE="1",
+                   PYTHONPATH=os.path.join(folder, ".toolkit"),
+                   **{k: v for k, v in (cfg.get("env") or {}).items() if v})
+        r = subprocess.run([sys.executable, "-m", "fkcore", "lua", ".", lua],
+                           cwd=os.path.join(folder, "game"), env=env, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30)
+    else:
+        cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
+               f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} timeout 15 python3 -m fkcore lua . "
+               + shlex.quote(lua))
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", cfg["host"], cmd], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30)
     for line in reversed(r.stdout.splitlines()):
         if line.startswith("{"):
             return json.loads(line)
@@ -280,7 +289,7 @@ class Watch(threading.Thread):
         os.makedirs(self.dir, exist_ok=True)
         with open(os.path.join(folder, "run.json"), encoding="utf-8") as f:
             cfg = json.load(f)
-        self.cfg = None if cfg.get("host", "computah-ct") == "local" else cfg
+        self.cfg = cfg
         self.cursor_file = os.path.join(self.dir, "chat-cursor")
         # no cursor yet: the chat so far is not news, the first read only sets the cursor
         self.cursor = int(open(self.cursor_file).read()) if os.path.exists(self.cursor_file) else None
@@ -324,7 +333,7 @@ class Watch(threading.Thread):
                     self.log("inbox: " + short(text, 300))
             if not self.cfg:
                 return
-            st = host_status(self.cfg, self.cursor or 0)
+            st = host_status(self.cfg, self.cursor or 0, self.folder)
             if not st:
                 return
             if self.cursor is None:
