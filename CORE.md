@@ -131,7 +131,9 @@ is shared in proportion to appetite; a net with surplus lets consumers rise to f
 (chest, lab) takes what is left, up to its `rate`. A producer slows when its nets can't absorb its
 output. Damped fixed point; reports per machine utilization + the binding endpoint, per net per item
 supply / demand / delivered, the binding chain, and every `assert`. No capacity in V1: routed
-throughput is V2.
+throughput is V2. 1.3 [built]: `report_rates` again after `route` gives the routed rates and
+`CAPACITY`, and the `tier` step lays a belt tier per connector (`CORE-V2.md`,
+docs/RELEASE-1.3.md).
 
 ## Flow script `build.fkb` [built; `diff` and `apply` live with the game link (FK_LINK=on); `run_models` reports and skips]
 

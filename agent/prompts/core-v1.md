@@ -62,6 +62,9 @@ out by hand:
 - old items left on a rebuilt belt or in an inserter's hand jam it → `fk fresh X0,Y0,X1,Y1` takes
   those up, and the next `fk build` lays them fresh (a belt or pipe the build lays under another
   net is renewed by the build itself)
+- a factory makes less than its numbers on paper → after `fk build`, `out\report_rates.txt` has
+  the routed rates: a `CAPACITY` line names the belt lane or inserter that is too thin; `tier
+  minimize --allow yellow,red` in the build script lays red belts where yellow is too thin
 - what is the factory really making → `fk stats`
 - anything else → `fk lua` reads the game for you
 

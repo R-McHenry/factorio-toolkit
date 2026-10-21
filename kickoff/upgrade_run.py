@@ -153,15 +153,13 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.2 is in, from your FRICTION.md. A build now takes back what it built before and your
-  design no longer has, whatever watch says: a row you replaced, the old ground of a moved or
-  shrunk plot, an emptied factory with its ghosts (empty spare plots aren't needed for that any
-  more). A belt or pipe laid again under another net, still holding the old net's items or fluid,
-  is taken up and laid fresh in the same build. A net is routed again when one of its ends moves.
-  cover robots adds a roboport only where the network doesn't reach a factory's chests yet, with a
-  storage chest beside it: on your base today it would add none, so you can put it back in your
-  build script if you like. A new plot over the power bridge re-lays the bridge around it. fk lua
-  takes long chunks with quotes and comments, from a file too. Details in docs\\TOOLKIT.md."""
+  Toolkit 1.3 is in. The build can now say what your belts and inserters as laid let through: add
+  a line `report_rates` after `route` in game\\nauvis.build.fkb, and out\\report_rates.txt gets
+  the routed rates; a CAPACITY line names a belt lane, splitter or inserter that is too thin for
+  what your design asks (a yellow lane carries 7.5/s, a fast inserter 2.5/s). To lay red belts
+  where yellow is too thin, add `tier minimize --allow yellow,red` after `route` (`--red 20` caps
+  how many). A module placed with rot now turns its whole contents. Details in
+  docs\\TOOLKIT.md."""
 
 
 def main(argv=None):
