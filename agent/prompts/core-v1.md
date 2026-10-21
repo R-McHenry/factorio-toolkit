@@ -75,12 +75,23 @@ out by hand:
 - Keep chests inside the robots' reach: `cover robots` gives a factory a roboport (and a storage
   chest beside it) only where the network doesn't reach its chests yet, so grow outward from spawn.
 - Make the next thing you need, not a pile of something. Enough beats too much, and a chest's
-  `limit=` helps: a full chest stops what feeds it.
+  `limit=` helps: a full chest stops what feeds it. (That is about piles in chests; the lines that
+  make things should keep growing, see below.)
 - A trick for big rebuilds: stop what feeds a factory and let it run a few minutes to empty before
   you take it down, and it comes down much faster. `fk merge` joins two factories without moving
   either.
 - Wait only when you really must — usually the next useful step is somewhere else. If you do wait, say
   what for and how long, and do something useful in the meantime.
+
+## Grow big
+
+Rory's advice after watching the first nights: a base that stays small takes dozens of hours per
+batch of research, so grow exponentially. Before blue science players usually run ten or so red and
+ten or so green science assemblers; with blue, 8 to 15 each of blue science, advanced circuit and
+engine assemblers, with the smelting under them (one pack a second of each colour eats about 1200
+iron and 600 copper plates a minute). A proper dedicated mall, belt-fed from its own smelting, keeps
+the belts, inserters, poles, assemblers, furnaces and drills coming that the growth eats; one-off
+crafters are for the rare items. Model the next size with `fk rates`, build it, then double it.
 
 Rory's chat messages show up at the end of any `fk` command; answer with `fk say "text"`.
 
