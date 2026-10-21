@@ -7,7 +7,8 @@ One conversation per run: its id is kept in <run>\\claude-session.txt, so starti
 continues it. Round 1 sends launch.json's first message (plus --note); every later round sends
 GOAL.md, as the brief promises ("Whenever you finish a turn, its text comes back to you as the
 next message"). The loop stops when <run>\\STOP exists (a running turn is stopped too), when
-GOAL.md is empty or missing, or after --rounds rounds or --hours hours. A turn past --turn-cap
+or after --rounds rounds or --hours hours; while GOAL.md is empty or missing it pauses
+(2026-10-21) and resumes when GOAL.md has text again. A turn past --turn-cap
 minutes is stopped and the next round says so. A failed round (usage limit, network) waits and
 retries: 2, 5, 10, 20, then every 30 minutes; it does not count as a round.
 
@@ -409,16 +410,28 @@ def main():
     n, fails, cut = 0, 0, None
     restarted = bool(sid)  # a loop started again on a conversation: its last turn was cut
     log(f"loop start: {run}, {a.model}, conversation {sid or 'new'}; it stops on a STOP file, "
-        f"an empty GOAL.md, {a.rounds} rounds or {a.hours:g} h")
+        f"{a.rounds} rounds or {a.hours:g} h, and pauses while GOAL.md is empty")
+    paused = False
     while True:
         goal = open(goal_path, encoding="utf-8").read().strip() if os.path.exists(goal_path) else ""
         why = ("STOP file" if os.path.exists(stop_path) else
-               "GOAL.md is empty" if sid and not goal else
                f"{a.rounds} rounds" if n >= a.rounds else
                f"{a.hours:g} h" if time.time() > end else None)
         if why:
             log(f"stopped: {why}")
             break
+        if sid and not goal:
+            # an empty GOAL.md pauses the loop, it no longer ends it (2026-10-21: a player that
+            # believed it was stuck emptied it at 01:41 and the night's run stopped): whoever
+            # looks in (the lead, Rory) writes a goal again and play resumes on its own
+            if not paused:
+                log("paused: GOAL.md is empty; play resumes when it has text again (STOP ends it)")
+                paused = True
+            time.sleep(60)
+            continue
+        if paused:
+            log("resumed: GOAL.md has text again")
+            paused = False
         if sid:
             text = (f"[GOAL.md, round {n + 1}. This message is the text of GOAL.md in your folder: "
                     f"edit that file to change what it says next time, or empty it to stop "
