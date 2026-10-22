@@ -117,6 +117,60 @@ cracking, and the heavy and light oil nothing takes show as `surplus` (a refiner
 of its outputs is full). Pumpjacks are counted at 100% yield, 10 crude oil a second each: a well's
 yield is in its tooltip.
 
+## Planning ahead: `fk stage`
+
+`fk stage` keeps a plan of stages in git beside `game\`. `main` is what is built; the plan is one
+commit per stage on top of it, and each commit's message is the stage's spec: its goal, what it
+needs first, the rates it should reach, and the test that says it's done. A stage holds source only
+(`.fk` files, the surface file, the build script), and its layout is computed when it is checked. A
+stage keeps its number however the plan changes.
+
+```
+fk stage list                    the stages in order, each one's plates per minute and state, and
+                                 the horizon: the planned base against the built one
+fk stage insert "oil plant" --goal "..." --needs "..." --rates "plastic-bar 30/min" --test "..."
+                                 a new stage at the end (--after K, --first), with its folder
+                                 stages\N: game\ as the stages before it leave it
+fk stage edit N [--goal ...]     stages\N's .fk, surface and build script (and the spec given) into
+                                 the plan; the stages after it replay onto it
+fk stage check N [--render [X0,Y0,X1,Y1]]
+                                 stage N built in stages\N through report_checks: its check lines,
+                                 its rates against the stage before it and against its spec, and
+                                 what it builds, with what the base before it makes of each item
+                                 and the stock game\'s last build saw; nothing touches the world.
+                                 --render draws the design it laid out (the plots it changes, or
+                                 the area); stages\N\out\render.txt keeps it
+fk stage next [--apply]          the next stage's spec and its diff; --apply puts it into game\
+fk stage done [N]                game\ as it stands becomes main, with stage N done; the rest of
+                                 the plan replays onto it
+fk stage rebase [-m "why"]       game\ as it stands becomes main (a hand fix adopted); the plan
+                                 replays onto it
+fk stage drop N                  stage N leaves the plan
+fk stage reorder N --after K     stage N moves (--first: to the front)
+```
+
+A stage folder is a scratch copy of the whole game folder, built layouts and terrain included:
+design in it with normal file tools, `fk stage check N` it as often as you like, and `fk stage edit
+N` takes its source into the plan. Until then its edits are its own ("unsaved edits" in the list),
+so a worker can try a change there while another builds in `game\`.
+
+Replaying is the key operation. When main moves (a stage done, a hand fix adopted), the plan is
+replayed onto it, stage by stage. A stage whose files reality didn't touch replays cleanly; one
+whose lines reality changed comes back with conflict markers in its files (`<<<<<<< what is built`
+... `=======` ... `>>>>>>> stage 5`) and a CONFLICT in the list: settle them in its folder, then
+`fk stage edit N`. Every rewrite keeps the plan before it as a tag (`plan/rev-N`), so you can see
+how the plan changed. A stage finished out of order is fine: `fk stage done N` says which stages
+before it stay planned.
+
+The horizon is in plates per minute, iron plus copper, as the rate model's furnaces make them:
+plates grow from the first drill on, and every part of the base is made of them. Science per
+minute is shown beside it. A plan that reaches 1.5 to 2 times the built base stays about the same
+span of play ahead at any size of base: nearer 2 while builds take long, nearer 1.5 while the base
+is young and changes fast.
+
+The plan's repository is `.stage\` and its folders are `stages\`, both in the run folder, outside
+`game\`. `fk stage` changes `game\` only with `next --apply`.
+
 ## What `fk look` says
 
 Every designed entity in the area gets a verdict:
@@ -215,6 +269,9 @@ fk plan ITEM RATE                the machines, furnaces and drills a rate takes,
                                  the ore (fk plan ITEM --machines N: what N machines take)
 fk build --to size               the counts of your n=auto rows and what each one serves
                                  (out\size.txt), nothing laid out
+fk stage list                    the plan: the stages after what is built, and how far it reaches
+                                 ("Planning ahead")
+fk stage check N                 a planned stage built on paper in its own folder, stages\N
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
                                  (a dry run: nothing written, nothing pasted)

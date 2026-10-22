@@ -15,6 +15,7 @@ gate, and the briefs stay short.
 | side-loading smelter arrays | the same session |
 | circuits and inserter limits in the source | its session waits to be started |
 | the lead and worker player harness, Claude workers | in |
+| the lead plans ahead: `fk stage`, the horizon, Rory's 5-minute wait | in |
 | `CLOG` goes in two ways only | in |
 | route patching: a net with a new end keeps its route | in |
 
@@ -71,6 +72,56 @@ conversations had grown to 500-800k tokens of context, so a round was slow and c
   a `task_notification` and wakes the lead in the same process. Tests: `tests\test_workers.py`.
 - DeepSeek workers wait (Rory, 2026-10-21). The seam is run.json `workers.backend`; a Claude
   lead would only ever see a DeepSeek worker's final output.
+
+## The lead plans ahead: `fk stage`
+
+Rory (2026-10-21/22, `assessment-20261021\PLAN-AHEAD.md`): the lead should not stay in the present
+the way workers do. Rather than wait for a worker or a process to finish, it designs and plans the
+later stages straight away, and adjusts the plan as workers report back; adjusting the plan is the
+key use case. The first lead run's lead waited about 35 minutes on each of two builders, a mall
+design took 40 minutes in a crowded plot, and research ran dry four times. Rory: "in the next run
+I don't want the lead waiting so much", with an absolute maximum wait of 5 minutes.
+
+- **The plan in git, through `fk stage`** (Rory's decisions 1-3: a line of stages first, a stage is
+  one buildable and testable piece, git with a wrapper). `main` is what is built; `plan` is one
+  commit per stage on top of it, the message the stage's spec (goal, needs, rates, test, an
+  optional milestone) with a `Stage: N` trailer, so numbers survive reorders. Commands: `list`,
+  `check N`, `next [--apply]`, `done [N]`, `rebase`, `edit N`, `insert`, `drop N`, `reorder N`,
+  and `horizon` (one line, for the loop). Each rewrite tags the old plan `plan/rev-N`.
+- **Where it lives.** A run's `game\` was no git repository: `fk` keeps it in step with the host's
+  copy by content. The repository is `<run>\.stage`, a bare one whose work tree is `game\`, so the
+  sync never sees it. Main holds all of `game\` but `out\` (the built layouts too); a stage holds
+  `.fk`, `.surface` and `.fkb` files only.
+- **Replaying onto reality** is `git merge-tree` per stage, with no work tree and no half-done
+  rebase left behind: a stage reality didn't touch replays cleanly; one it did keeps conflict
+  markers labeled `what is built` / `stage N`, and `list` names it.
+- **Stage folders, the scratch copies.** `<run>\stages\N` is `game\` as stage N leaves it, layouts
+  and terrain included (the run's design workers had copied all of `game\` to try a change).
+  `check N` builds it through `report_checks` with no game link, and reports the check lines,
+  plates and science per minute against the stage before it, the spec's expected rates on paper,
+  and the bill: what the stage builds beyond the stage before it (its last check, else the built
+  base), each item with the rate the base before it makes it at ("made at 15/min before it (27 min
+  of it)", or "no maker before it") and the network's stock as game\'s last build read it
+  (`out\report_bom.txt`; a check reads no game). `--render` draws the design the check laid out,
+  the plots the stage changes or an area, and `stages\N\out\render.txt` keeps it (`fk look
+  --design` draws the committed layouts; the run's design worker wrote a script to read
+  `out\floorplan` instead). A folder's own edits survive plan changes (a three-way merge) until
+  `edit N` takes them in.
+- **The horizon is multiplicative** (Rory's decision 4): `fk stage list` shows the planned base
+  against the built one in plates per minute, iron plus copper, the rate model's furnaces at their
+  utilization (requester chests aside). Plates rather than science per minute: plates grow from the
+  first drill on, while science is 0 until the first lab line and a mall or oil stage adds none,
+  and everything the base grows by is made of plates. Below 1.5x the line says planning is the
+  next job. A stage with no rates (a conflict, a syntax error) is named, and the reach is the
+  stages' before it.
+- **The lead brief** gains "Plan ahead while workers build": design the later stages while workers
+  build, a worker builds the next stage and reports how it differs, `done` replays the plan, the
+  horizon, and Rory's longest wait, 5 minutes. TOOLKIT.md has "Planning ahead: `fk stage`".
+- **The loop**: a lead that has waited 5 minutes (`WAIT`) while its workers run gets one note per
+  wait, with each worker's minutes, tool calls and last command, and `fk stage horizon` when the
+  run has a plan. `<run>\.loop\workers.txt` keeps those lines current (the run's RETRO: no way to see
+  a long builder's progress without its transcript). It sits beside the no-research note.
+- Tests: `tests\test_stage.py`, and the wait note in `tests\test_workers.py`.
 
 ## CLOG goes in two ways only
 

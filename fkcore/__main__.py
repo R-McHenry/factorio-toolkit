@@ -45,6 +45,9 @@ use the game link, and only with FK_LINK=on)
                                           a robot link (two chests) becomes one net
     net-to-chests GAME_DIR FACTORY NET --provider P --requester R
                                           a net becomes a robot link (a full decouple)
+    stage GAME_DIR list|horizon|check [N]|next [--apply]|done [N]|rebase|edit N|insert TITLE
+                   |drop N|reorder N      the staged plan (2.0): main is what is built, the
+                                          plan one commit per stage ahead of it (fkcore.stage)
 
   with the game link (FK_LINK=on, on the game host):
     measure GAME_DIR --area X0,Y0,X1,Y1 [--seconds 30]
@@ -594,7 +597,13 @@ def main(argv=None):
     rt.add_argument("--surface", required=True)
     rt.add_argument("--area", required=True)
     rt.add_argument("--name", default="map")
+    sg = sub.add_parser("stage", add_help=False)
+    sg.add_argument("game")
+    sg.add_argument("rest", nargs=argparse.REMAINDER)
     a = ap.parse_args(_glue(sys.argv[1:] if argv is None else list(argv)))
+    if a.cmd == "stage":
+        from . import stage
+        return stage.main(a.game, a.rest)
     if a.cmd in ("chat", "say", "poll"):
         return _talk(a)
     if a.cmd in ("research", "tech", "recipes"):

@@ -64,6 +64,25 @@ How workers run here:
   you hear it the same way: who placed what and where, and what the build did to it. Adopt it
   into the design, leave it out, or come back to it later: the choice is yours.
 
+## Plan ahead while workers build
+
+Workers live in the present: each builds or finds out one thing. You don't have to. While they
+build, design the stages after theirs, and adjust the plan as their reports come in.
+
+- `fk stage` keeps the plan (`docs\TOOLKIT.md`, "Planning ahead"): what is built, then one stage
+  after another, each with its goal, what it needs, its rates and its test. `fk stage check N`
+  builds a stage on paper in its own folder, `stages\N`, without touching the world: its check
+  lines, rates and bill of materials before anyone builds it.
+- A worker builds the next stage: "Build stage 5 (`fk stage next --apply`, then `fk build`). Report
+  what stands and how it differs from the plan." When it reports, `fk stage done 5` records it
+  and replays the plan onto what stands; a stage that reality changed comes back as a conflict to
+  settle.
+- `fk stage list` shows the horizon: the planned base against the built one, in plates per minute.
+  About 1.5 to 2 times reaches far enough; below that, planning is your next job.
+- Rory's longest wait is 5 minutes: don't wait on a worker or the game longer than that without
+  designing, planning or measuring something. The loop tells you when 5 minutes have passed, with
+  each worker's progress (`.loop\workers.txt` has it any time).
+
 ## How building works here
 
 The fk toolkit builds like an engineer rather than tile by tile. A factory is a short file,

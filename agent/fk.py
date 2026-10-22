@@ -27,6 +27,9 @@ folder (default: the folder above this file's).
 the command line (1.2): Git for Windows' ssh, an MSYS program, gets at most about 8 kB of one
 argument, so a 13 kB chunk arrived cut, and its open single quote stopped the host's shell.
 
+``fk stage`` (2.0) is the staged plan, all of it here: its repository is ``<run>\\.stage`` (game\\
+is its work tree, so no sync carries it) and its stage folders ``<run>\\stages\\N``.
+
 A run whose ``run.json`` says ``"host": "local"`` plays a game on this machine (a laptop test
 server, ``tools/laptop_server.py``): nothing is copied, and the game steps run here with the
 link settings in ``run.json``'s ``env`` (FK_RCON_PORT, FK_RCON_PW_FILE, FK_SCRIPT_OUTPUT).
@@ -354,6 +357,10 @@ def main(argv):
         push(cfg)
         code = remote(cfg, ["look", ".", "--source", "world"] + _area(rest))
         pull(cfg)
+        return code
+    if cmd == "stage":
+        code = local(cfg, ["stage", "."] + rest)
+        footer(cfg)
         return code
     if cmd in LOCAL:
         code = local(cfg, [cmd] + rest)

@@ -41,6 +41,13 @@ The conversation still grows over the hours, so when its context passes --fresh-
 never) the next round asks the player to bring NOTES.md and GOAL.md up to date, and the round
 after starts a fresh conversation from them (the old ids are kept in claude-sessions.txt). The
 rounds that ran on 500-800k tokens of context were slow and cost a few dollars each.
+
+The lead plans ahead (Rory, 2026-10-22: "in the next run I don't want the lead waiting so much";
+his longest wait is 5 minutes). A lead that has waited WAIT seconds while its workers run gets one
+note saying so, with each worker's progress and, when the run has a staged plan (``fk stage``),
+how far the plan reaches. <run>\\.loop\\workers.txt keeps each running worker's line current (its
+minutes, tool calls and last command): the first lead run's lead could not see a long builder's
+progress without reading its transcript.
 """
 import argparse
 import atexit
@@ -69,11 +76,18 @@ FRESH_AT = 200000             # tokens of context: then a hand-over round and a 
 FRESH_MIN = 3                 # rounds a conversation runs at least before it is handed over
 QUIET = 15                    # seconds the player is idle, nothing of its running: the round ends
 GRACE = 60                    # minutes a round past --turn-cap runs on while its workers finish
+WAIT = 300                    # seconds a lead waits on its workers before the loop says so (Rory)
 
 #: to a lead whose round passed the cap while something of its still runs (2.0)
 CAPPED = ("[From the loop] This round has run {cap:g} minutes, the loop's cap on a round. It ends "
           "when what runs now is done, and the next round starts from GOAL.md. A worker started "
           "from now on is stopped with the round at {hard} at the latest.")
+
+#: to a lead that has waited WAIT seconds while its workers run (2.0, Rory 2026-10-22: the first
+#: lead run's lead waited about 35 minutes on each of two builders, doing nothing else)
+WAITED = ("[From the loop] You have waited {mins:g} minutes while your workers run, Rory's longest "
+          "wait. {workers}Meanwhile you can design or check the next stage, adjust the plan to "
+          "what the workers found, or measure something. {plan}")
 
 #: the round that hands one conversation over to the next (2.0)
 HANDOVER = ("[From the loop] This conversation has grown to about {k}k tokens of context, which "
@@ -245,6 +259,7 @@ def feed(ev, log, state):
     if t == "system" and ev.get("subtype") == "task_started":
         running.add(ev.get("task_id"))
     theirs = state.setdefault("theirs", set())
+    progress = state.setdefault("progress", {})
     if t == "system" and ev.get("subtype") == "task_notification":
         running.discard(ev.get("task_id"))
         if ev.get("tool_use_id") in theirs:
@@ -263,6 +278,7 @@ def feed(ev, log, state):
             log(f"{pad}background task {ev.get('status', 'done')}: {short(rep, 200)}")
             return
         what = agents.pop(ev.get("tool_use_id"))
+        progress.pop(ev.get("tool_use_id"), None)
         use = ev.get("usage") or {}
         log(f"worker {ev.get('status', 'done')} ({short(what, 80)}; "
             f"{int(use.get('total_tokens') or 0) // 1000}k tokens, {use.get('tool_uses', 0)} tool "
@@ -278,11 +294,17 @@ def feed(ev, log, state):
                 log(pad + "> " + short(c["text"], 500))
             elif c.get("type") == "tool_use":
                 state["tools"] += 1
+                line = tool_line(c.get("name", "?"), c.get("input") or {})
                 if pad:
                     theirs.add(c.get("id"))
-                log(pad + tool_line(c.get("name", "?"), c.get("input") or {}))
+                    # a worker's progress, for the lead without its transcript (2.0)
+                    w = progress.setdefault(ev["parent_tool_use_id"], {"calls": 0})
+                    w["calls"] += 1
+                    w["last"] = line
+                log(pad + line)
                 if not pad and c.get("name") in ("Agent", "Task"):
                     agents[c.get("id")] = (c.get("input") or {}).get("description", "")
+                    progress[c.get("id")] = {"calls": 0, "since": time.time()}
     elif t == "user":
         content = ev.get("message", {}).get("content", [])
         for c in content if isinstance(content, list) else []:
@@ -293,6 +315,7 @@ def feed(ev, log, state):
                     and not body.startswith("Async agent launched"):
                 # a worker the lead waited for (run_in_background false): its report is here
                 what = agents.pop(c["tool_use_id"])
+                state.setdefault("progress", {}).pop(c["tool_use_id"], None)
                 log(f"worker done ({short(what, 80)}): " + short(body, 800))
             elif c.get("is_error"):
                 log(pad + "  ! " + short(body, 200))
@@ -304,13 +327,53 @@ def feed(ev, log, state):
             state.setdefault("reports", []).append(ev["result"])
 
 
+def workers_now(state, now=None):
+    """One line per running worker: its task, minutes, tool calls and last command."""
+    now = time.time() if now is None else now
+    progress = state.get("progress") or {}
+    lines = []
+    for tid, what in (state.get("agents") or {}).items():
+        w = progress.get(tid) or {}
+        mins = f"{(now - w['since']) / 60:.0f} min, " if w.get("since") else ""
+        lines.append(f"{short(what, 80) or 'a worker'}: {mins}{w.get('calls', 0)} tool calls"
+                     + (f", last: {short(w['last'], 120)}" if w.get("last") else ""))
+    return lines
+
+
+def waited_note(state, plan=""):
+    """WAITED, with the workers' progress and the plan's horizon (fk stage horizon)."""
+    lines = workers_now(state)
+    workers = ("Your workers now:\n" + "\n".join(f"- {ln}" for ln in lines) + "\n" if lines
+               else "")
+    plan = (plan[:1].upper() + plan[1:] if plan else "No staged plan yet: fk stage insert starts "
+            "one (docs\\TOOLKIT.md, \"Planning ahead\").")
+    return WAITED.format(mins=WAIT / 60, workers=workers, plan=plan)
+
+
+def plan_horizon(folder):
+    """``fk stage horizon`` through the run's own toolkit, or "" (no plan, or it failed). Pure: it
+    reads the run's plan repository and computes rates on paper, no game call."""
+    if not os.path.isdir(os.path.join(folder, ".stage")):
+        return ""
+    env = dict(os.environ, PYTHONPATH=os.path.join(folder, ".toolkit"), PYTHONDONTWRITEBYTECODE="1")
+    env.pop("FK_LINK", None)
+    try:
+        r = subprocess.run([sys.executable, "-m", "fkcore", "stage", ".", "horizon"],
+                           cwd=os.path.join(folder, "game"), env=env, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=90)
+    except (OSError, subprocess.SubprocessError):
+        r = None
+    lines = (r.stdout or "").strip().splitlines() if r and r.returncode == 0 else []
+    return lines[-1] if lines else "The plan's horizon could not be read now: fk stage list."
+
+
 def user_message(text):
     """One line of Claude Code's streaming input (``--input-format stream-json``)."""
     return (json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
             ).encode("utf-8")
 
 
-def turn(run, sid, text, model, cap_min, log, events, take=None):
+def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None):
     """One claude -p round on the run's conversation -> (state, exit code, why it was cut short).
 
     2.0 (Rory, 2026-10-21: chat goes to the lead player at once): the round runs on streaming
@@ -321,7 +384,10 @@ def turn(run, sid, text, model, cap_min, log, events, take=None):
     tool call. The round ends when the player is idle and nothing of its runs: stdin closes and
     the process exits. The first lead run (2026-10-21 21:05-21:09) showed both: Rory's chat sat
     in notes-pending.txt while the lead waited on a worker, and with stdin closed Claude Code
-    ended the round 10 minutes after the lead's last turn, stopping that worker mid-build."""
+    ended the round 10 minutes after the lead's last turn, stopping that worker mid-build.
+
+    A player that has waited WAIT seconds while something of its runs hears so once per wait,
+    with ``horizon()`` (the plan's reach) in the note (2.0, Rory 2026-10-22: 5 minutes at most)."""
     cmd = [claude_bin(), "-p", "--input-format", "stream-json", "--output-format", "stream-json",
            "--verbose", "--model", model, "--permission-mode", "auto", "--strict-mcp-config",
            "--settings", settings(run)]
@@ -357,6 +423,7 @@ def turn(run, sid, text, model, cap_min, log, events, take=None):
     t0 = time.time()
     deadline, hard = t0 + cap_min * 60, t0 + (cap_min + GRACE) * 60
     cut, open_, capped, told = None, True, False, False
+    waited, shown = None, None        # the wait the player heard about; workers.txt as written
     while p.poll() is None:
         if os.path.exists(os.path.join(run, "STOP")):
             cut = "STOP"
@@ -377,6 +444,12 @@ def turn(run, sid, text, model, cap_min, log, events, take=None):
                 told = True
                 cap = CAPPED.format(cap=cap_min, hard=f"{datetime.fromtimestamp(hard):%H:%M}")
                 notes = cap + (f"\n\n{notes}" if notes else "")
+            since = state.get("idle_at")
+            if state["running"] and since and since != waited and time.time() - since > WAIT:
+                # Rory's longest wait (2026-10-22): once per wait, a new one starts at its next turn
+                waited = since
+                wait = waited_note(state, horizon() if horizon else "")
+                notes = wait + (f"\n\n{notes}" if notes else "")
             try:
                 if notes:
                     # the player waits on its workers: it hears now, not at the next round
@@ -389,10 +462,26 @@ def turn(run, sid, text, model, cap_min, log, events, take=None):
                     open_ = False
             except OSError:
                 open_ = False                  # it exited meanwhile
+        now = workers_now(state)
+        if now != shown:
+            shown = now
+            _write_workers(run, now)
         time.sleep(2)
     th.join(timeout=10)
     err.close()
     return state, p.returncode, cut
+
+
+def _write_workers(run, lines):
+    """<run>\\.loop\\workers.txt: each running worker's line (the lead reads it when it likes)."""
+    path = os.path.join(run, ".loop", "workers.txt")
+    try:
+        with open(path + ".new", "w", encoding="utf-8") as f:
+            f.write(f"[Workers, {datetime.now():%H:%M}]\n"
+                    + ("\n".join(lines) if lines else "no worker runs") + "\n")
+        os.replace(path + ".new", path)
+    except OSError:
+        pass
 
 
 def ensure_login(run, log):
@@ -736,7 +825,8 @@ def main():
         n += 1
         log(f"=== round {n} ({'conversation ' + sid[:8] if sid else 'new conversation'})")
         t0 = time.time()
-        state, rc, cut = turn(run, sid, text, a.model, a.turn_cap, log, events, watch.take_notes)
+        state, rc, cut = turn(run, sid, text, a.model, a.turn_cap, log, events, watch.take_notes,
+                              lambda: plan_horizon(run))
         if state["sid"] and state["sid"] != sid:
             sid = state["sid"]
             with open(sid_file, "w") as f:
