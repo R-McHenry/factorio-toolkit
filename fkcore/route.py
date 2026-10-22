@@ -36,6 +36,10 @@ reached by direct insertion: a fast (or long-handed) inserter beside the belt pi
 (``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver works the same way on a
 reversed tree, so its inserter turns round to pick from the machine.
 
+Two nets that share a belt (``lanes A | B``, 2.0) are one job, ``A|B``: each net from its drivers
+to its side of a join, and one route of both lanes from the join to every consumer
+(``fkcore.pairs``, which lays it through ``_route_one`` part by part; ``NetJob.parts``).
+
 A **fluid net** (every item a fluid) is not a belt job: it goes to the fluid plug-in,
 ``fkcore.fluid_route.route(flat, lay, cat, nets, blocked, box, limit) -> (added, how, failed)``
 (``{net: [Entity]}``, ``{net: report text}``, ``{net: reason}``), called after the belt nets
@@ -122,6 +126,7 @@ class NetJob:
     fluid: bool = False                            # a fluid net: the fluid plug-in routes it
     reserved: list = field(default_factory=list)   # tiles a fluid net's connections need
     anchors: dict = field(default_factory=dict)    # "<inst>.<role>" -> what the route is laid to
+    parts: tuple = ()                              # two nets on one belt: (A, B, both) jobs
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
@@ -255,6 +260,9 @@ def jobs(flat, lay, cat) -> dict:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
                 mine.append((side, job.goals[-1]))
             job.owners.append(f"{path}.{role}")
+    if getattr(flat, "pairs", None):
+        from . import pairs
+        pairs.merge(flat, out)
     for net, job in out.items():
         if job.skip is not None or job.fluid:
             continue
@@ -711,6 +719,9 @@ def _settle_leaves(cat, laid, ents, also=frozenset()):
 
 
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None):
+    if job.parts:
+        from . import pairs
+        return pairs.route(cat, job, ents, frames, js, box, limit, terrain, avoid, spans)
     net = job.net
     blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
     spans = _ug_spans(cat, ents) if spans is None else spans
@@ -752,8 +763,8 @@ def _judge(flat, lay, cat, mine, js):
     out = {}
 
     def route_net(key):
-        n = g.nodes.get(key)
-        return n.net if n is not None and n.net in mine and key.startswith(f"~{n.net}/") else None
+        owner = key.rsplit("/", 1)[0] if key in g.nodes else ""
+        return owner[1:] if owner.startswith("~") and owner[1:] in mine else None
 
     for lk in rep.leaks:
         a, b = route_net(lk.src), route_net(lk.dst)
@@ -764,14 +775,15 @@ def _judge(flat, lay, cat, mine, js):
         _reason, tiles = out.setdefault(blame, (f"its route would LEAK: {lk.text}", set()))
         tiles |= set(g.nodes[key].tiles)
     for name in mine:
-        r = rep.nets.get(name)
-        if r is None or name in out:
+        rs = [rep.nets[n] for n in fkpmod.net_names(name) if n in rep.nets]   # a pair: both
+        if not rs or name in out:
             continue
         placed = set()
         for owner in js[name].owners:
             placed |= set(flat.insts[owner.rsplit(".", 1)[0]].machines)
-        apart = [(d, c) for d, c in r.unreached if d in placed and c in placed]
-        alone = [k for k in r.unpaired if k.startswith(f"~{name}/")]
+        apart = [(d, c) for r in rs for d, c in r.unreached if d in placed and c in placed]
+        alone = sorted({k for r in rs for k in r.unpaired if k.startswith(f"~{name}/")},
+                       key=fkpmod.natural_key)
         if not apart and not alone:
             continue
         reason = f"its route does not connect {len(apart)} driver->consumer pairs"
@@ -796,11 +808,12 @@ def _placed(flat, job):
     return out
 
 
-def _ends_of(flat, table, job, g, routed=True):
+def _ends_of(flat, table, job, g, routed=True, net=None):
     """(drivers, consumers): the net's endpoint keys that stand in graph ``g``; ``routed``: only
-    those of the instances the router lays the net to (a Literal's are laid by hand)."""
+    those of the instances the router lays the net to (a Literal's are laid by hand); ``net``: one
+    member of a lane pair's job (its ends are the member's, the pair's name has none)."""
     placed = _placed(flat, job) if routed else None
-    drivers, consumers = table.get(job.net, ((), ()))
+    drivers, consumers = table.get(net or job.net, ((), ()))
     pick = lambda ends: sorted({k for k, _i in ends if k in g.nodes
                                 and (placed is None or k in placed)}, key=fkpmod.natural_key)
     return pick(drivers), pick(consumers)
@@ -1249,13 +1262,18 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
     for net in sorted(patch):
         keys = {e.key for e in patch[net]}
         leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
-        drivers, consumers = _ends_of(flat, table, js[net], g)
-        r = rep.nets.get(net)
-        apart = [(d, c) for d, c in (r.unreached if r else ())
-                 if d in drivers and c in consumers]
-        idle = [] if js[net].fluid else sorted(
-            keys - _serving(g, net, *_ends_of(flat, table, js[net], g, routed=False), keys),
-            key=fkpmod.natural_key)
+        # a lane pair (``A|B``, merged with route patching 2026-10-22) is judged by its two nets:
+        # the ends and the connect report are theirs, its own name has none
+        apart, served = [], set()
+        for m in fkpmod.net_names(net):
+            drivers, consumers = _ends_of(flat, table, js[net], g, net=m)
+            r = rep.nets.get(m)
+            apart += [(d, c) for d, c in (r.unreached if r else ())
+                      if d in drivers and c in consumers]
+            if not js[net].fluid:
+                served |= _serving(g, m, *_ends_of(flat, table, js[net], g, routed=False, net=m),
+                                   keys)
+        idle = [] if js[net].fluid else sorted(keys - served, key=fkpmod.natural_key)
         if leak is not None:
             faulty[net] = f"its committed route would LEAK: {leak.text}"
         elif apart:
@@ -1275,8 +1293,8 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
     pending = {n: patch[n] for n in faulty}
     for net in sorted(faulty):
         old = pending.pop(net)
-        if js[net].fluid or js[net].skip:
-            again[net] = faulty[net]
+        if js[net].fluid or js[net].skip or len(fkpmod.net_names(net)) > 1:
+            again[net] = faulty[net]           # a pair isn't patched yet: routed again as one
             continue
         # the routes still waiting for their patch stand in the way, as their carriers may stay
         ground = list(new.entities.values()) + [e for ents in pending.values() for e in ents]

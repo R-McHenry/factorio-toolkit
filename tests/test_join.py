@@ -86,8 +86,8 @@ class JoinBigTest(_Joined, unittest.TestCase):
     def test_the_plates_ride_one_lane(self):
         # joined rows put everything on one lane, so the trunk is one lane
         flow = self.r.res.flow
-        carrying = {nid[1] for nid, net in self.r.net_of.items()
-                    if net == "iron" and nid[1] and flow.get(nid, {}).get("iron-plate", 0) > 1e-9}
+        carrying = {nid[1] for nid in self.r.nodes_of("iron")
+                    if nid[1] and flow.get(nid, {}).get("iron-plate", 0) > 1e-9}
         self.assertEqual(carrying, {"L"})
 
 

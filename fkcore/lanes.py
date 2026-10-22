@@ -14,7 +14,8 @@ docs/LAB-LANES-20261020.md (2.0.77):
   target's near lane. The lane that enters the target further upstream is served first.
 - ``ug_side``: a belt into the side of an underground (either end): only its lane on the open
   side goes through (an entrance is open upstream, an exit downstream), onto the near lane; the
-  lane on the closed side is blocked, so it has no edge.
+  lane on the closed side is blocked, so it has no edge (``LaneGraph.closed`` lists it, for the
+  routed rates' ``LANE`` line).
 - ``pickup``: an inserter picks from both lanes of a belt tile, or from a machine.
 - ``drop``: an inserter across a belt fills the far lane; along it (in line), always the right
   lane. Onto a turn, a splitter half and both underground ends alike: an exit takes drops from
@@ -30,8 +31,12 @@ docs/LAB-LANES-20261020.md (2.0.77):
 Capacities, in items/s: a belt or underground lane carries ``belt_speed x 60 x 4`` (yellow 7.5); a
 splitter's lane node stands for both halves (twice that); an inserter moves one hand per swing,
 a swing taking ``2 x floor(0.5 / rotation speed)`` ticks (measured: the fast inserter makes 2.5 a
-hand, not the 2.4 of the rule of thumb), less when it drops onto a belt at hand 3 and up. A
-machine has no capacity of its own. Pure, stdlib only.
+hand, not the 2.4 of the rule of thumb), less when it drops onto a belt at hand 3 and up. The
+inserter's prototype values are the catalog's (``rotation_speed``, ``bulk``, ``stack_size_bonus``:
+the stack inserter's own +4 hand; read from the game, 2.0.77, ``docs/LAB-LANES-20261020.md``), so
+a modded or new inserter in the catalog is rated like the others; ``ROTATION`` is what the catalog
+says for the six of 2.0, for a catalog without them. A machine has no capacity of its own. Pure,
+stdlib only.
 """
 from __future__ import annotations
 
@@ -47,10 +52,11 @@ INF = float("inf")
 _BELTS = frozenset({"transport-belt", "underground-belt", "splitter"})
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 
-#: Turns per tick, read from the game (2.0.77, tools/lab_lanes.py protos): the catalog has none.
+#: Turns per tick, read from the game (2.0.77, tools/lab_lanes.py protos), as the catalog has them
+#: (``rotation_speed``): for a catalog without them.
 ROTATION = {"burner-inserter": 0.013, "inserter": 0.014, "long-handed-inserter": 0.02,
             "fast-inserter": 0.04, "bulk-inserter": 0.04, "stack-inserter": 0.04}
-#: A hand's own bonus over the force's (the stack inserter's +4, read from the game).
+#: A hand's own bonus over the force's (the stack inserter's +4: ``stack_size_bonus``).
 _OWN_HAND = {"stack-inserter": 4}
 _BULK = frozenset({"bulk-inserter", "stack-inserter"})
 #: Dropping onto a moving belt, the share of the chest rate a hand of n reaches (measured onto
@@ -65,14 +71,25 @@ def lane_rate(cat, name):
     return float(cat.entity(name)["belt_speed"]) * 60 * 4
 
 
-def inserter_rate(name, hand=1, bulk_hand=1, onto_belt=False):
+def _proto(cat, name):
+    """(rotation speed, bulk, own hand bonus) of an inserter: the catalog's, else ROTATION's."""
+    row = {}
+    if cat is not None and cat.has_entity(name):
+        row = cat.entity(name)
+    rot = row.get("rotation_speed", ROTATION.get(name))
+    bulk = row.get("bulk", name in _BULK)
+    return rot, bool(bulk), int(row.get("stack_size_bonus", _OWN_HAND.get(name, 0)) or 0)
+
+
+def inserter_rate(name, hand=1, bulk_hand=1, onto_belt=False, cat=None):
     """Items/s an inserter moves: one hand per swing. ``hand`` is the non-bulk hand size (1 + the
     force's inserter bonus), ``bulk_hand`` the bulk one (1 + the bulk bonus); a stack inserter
-    adds its own 4. None for an inserter whose rotation speed is unknown."""
-    rot = ROTATION.get(name)
+    adds its own 4. The prototype from ``cat`` (the catalog), else ``ROTATION``. None for an
+    inserter whose rotation speed is unknown."""
+    rot, bulk, own = _proto(cat, name)
     if rot is None:
         return None
-    n = (bulk_hand if name in _BULK else hand) + _OWN_HAND.get(name, 0)
+    n = (bulk_hand if bulk else hand) + own
     swing = 2 * math.floor(0.5 / rot + 1e-9)            # ticks per pick-and-drop
     rate = 60.0 / swing * n
     if onto_belt:
@@ -108,6 +125,9 @@ class LaneGraph:
     inn: dict = field(default_factory=dict)       # id -> [Edge]
     graph: object = None                          # the connect.Graph under it
     problems: list = field(default_factory=list)
+    closed: list = field(default_factory=list)    # [(lane node, underground key)]: the lane of a
+                                                  # belt that side-loads an underground from its
+                                                  # closed side (blocked: no edge)
 
     def edges(self):
         for v in self.nodes:
@@ -212,7 +232,7 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
             belts[key] = n
         elif n.kind == "inserter":
             onto = any(g.nodes[b].kind in _BELTS for b, via in g.succ.get(key, ()) if via == "drop")
-            rate = inserter_rate(n.name, hand, bulk_hand, onto_belt=onto)
+            rate = inserter_rate(n.name, hand, bulk_hand, onto_belt=onto, cat=cat)
             if rate is None:
                 lg.problems.append(f"{key}: {n.name} has no known rotation speed")
                 rate = INF
@@ -245,6 +265,8 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
             open_dir = (nb.dir + 8) % 16 if nb.ug == "in" else nb.dir
             lane = "L" if _left(na.dir) == open_dir else "R"
             lg.add((a, lane), (b, near), "ug_side", 1)
+            if (a, "R" if lane == "L" else "L") in lg.nodes:
+                lg.closed.append(((a, "R" if lane == "L" else "L"), b))
         elif via == "pickup":
             if a in belts:
                 for lane in ("L", "R"):

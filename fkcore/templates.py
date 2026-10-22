@@ -154,6 +154,24 @@ def smelter_row(params, cat):
     return [_crafter(cat, f"m{k}", machine, recipe, fuel) for k in range(n)]
 
 
+def smelter_array(params, cat):
+    """``SmelterArray<n, recipe | ore, fuel=coal, machine=stone-furnace, units=>`` (2.0): Rory's
+    smelter stack, n burner furnaces fed by side-loading, ore and fuel on the two lanes of each
+    column's belt (``fkcore.fragments.smelter_array``). ``units``: the 11-wide units it tiles
+    to; by default the fewest that keep each column within one yellow lane of ore."""
+    _only(params, ("n", "recipe", "ore", "fuel", "machine", "units"))
+    n = _int(params, "n")
+    if "units" in params and _int(params, "units") > n:
+        raise TemplateError(f"units={params['units']} is more units than n={n} furnaces")
+    recipe = _smelt_recipe(params, cat)
+    machine = _word(params, "machine", "stone-furnace")
+    if machine not in FUEL_USE_W or not cat.has_entity(machine) or cat.size(machine) != (2, 2):
+        raise TemplateError(f"machine={machine}: a SmelterArray's furnaces are 2x2 burners "
+                            "(stone-furnace, steel-furnace), fed ore and fuel from one belt")
+    fuel = _word(params, "fuel", "coal")
+    return [_crafter(cat, f"m{k}", machine, recipe, fuel) for k in range(n)]
+
+
 def furnace(params, cat):
     """``Furnace<recipe | ore, fuel=coal, machine=stone-furnace>``: one furnace."""
     _only(params, ("recipe", "ore", "fuel", "machine"))
@@ -402,6 +420,7 @@ TEMPLATES = {
     "AsmRow": asm_row,
     "Assembler": assembler,
     "SmelterRow": smelter_row,
+    "SmelterArray": smelter_array,
     "Furnace": furnace,
     "MinerRow": miner_row,
     "Pumpjack": pumpjack,

@@ -9,9 +9,10 @@ Every entity is a node; an edge is one way items move from one entity into anoth
   behind, a splitter only from behind.
 - ``curve`` / ``sideload``: the same into the side of a belt. A curve when it is that belt's only
   input (nothing from behind), else a side-load.
-- ``ug_sideload``: the same into the side of an underground (either end). Whether items get
-  through depends on the lane, and V1 tracks no lanes: the edge counts, and ``UG_SIDELOAD``
-  warns on every one (Rory, 2026-10-19).
+- ``ug_sideload``: the same into the side of an underground (either end). Only the incoming lane
+  on the open side gets through (Rory); this graph has no lanes, so the edge counts, and the lane
+  graph (``fkcore.lanes``, the routed rates' ``LANE`` line) says when a net's items are on the
+  closed side. 1.x warned ``UG_SIDELOAD`` on every one; 2.0 tracks lanes, and that line went.
 - ``ug``: an underground input to the output the game pairs it with. Both ends face the flow. The
   input looks ahead, up to the prototype's ``max_distance`` (catalog), through any other entity;
   the first underground of the same name facing the same way decides: an output pairs, anything
@@ -41,21 +42,25 @@ passes water on to the next boiler). A fluid net's endpoint is the box of its ma
 the net's fluid.
 
 A **carrier** (belt, underground, splitter, inserter, pipe ..., or anything with ``net=``) belongs
-to one net; a **machine** (assembler, furnace, drill, lab, chest ...) is an endpoint, reached but
-never passed through (a fluid box of an endpoint passes its fluid on). On a surface a carrier's net
-is ``<factory>/<net>``: nets never leave their factory.
+to the nets its ``net=`` names (``Node.nets``): one, or in 2.0 a belt's two lanes (``ore|fuel``)
+or an inserter's several nets (``ore+fuel``, ``fkcore.fkp``); a **machine** (assembler, furnace,
+drill, lab, chest ...) is an endpoint, reached but never passed through (a fluid box of an
+endpoint passes its fluid on). On a surface a carrier's net is ``<factory>/<net>``: nets never
+leave their factory.
 
 :func:`connect` checks every net (CORE-V1.md §4.5). Its drivers and consumers are the netlist's
 endpoints (:func:`endpoints`) or, without a netlist, the machines its carriers pick from and drop
 into. A net is **connected** when every driver reaches every consumer through the net's own
 carriers. Report lines (``elaborate.Check``), never raised: ``UNROUTED`` (no driver reaches a
-consumer), ``OPEN`` (some pairs connect, not all), ``UG_SIDELOAD`` (above; a connected net can
-depend on one), ``LEAK`` (an edge from one net's carrier into another net's: a belt or side-load
-feeding another net's belt, an inserter picking from another net's belt, an underground the game
-pairs with another net's; with a netlist also a carrier moving items into a machine that is not
-its net's consumer, or out of one that is not its driver). A fluid LEAK is any join between two
-nets: a pipe or pipe-to-ground of one fluid net joined to another's, and with a netlist also to a
-machine box that is not its endpoint, or two machines' boxes of different nets joined directly.
+consumer), ``OPEN`` (some pairs connect, not all), ``LEAK`` (an edge from one net's carrier into a
+carrier that does not carry that net: a belt or side-load feeding another net's belt, an inserter
+picking from another net's belt, an underground the game pairs with another net's; with a netlist
+also a carrier moving items into a machine that is not a consumer of any of its nets, or out of
+one that drives none of them). A net's belt side-loaded onto a belt of two nets that carries it
+(``ore`` onto ``ore|fuel``) is no LEAK: that is how two nets come to share a belt. A fluid LEAK
+is any join between two nets: a pipe or pipe-to-ground of one fluid net joined to another's, and
+with a netlist also to a machine box that is not its endpoint, or two machines' boxes of
+different nets joined directly.
 
 A **joint** is where one net hands its items to another on purpose: a bus port (Rory's bus,
 ``fkcore.fragments.bus``), a belt that is a consumer of one net and a driver of the next. A load's
@@ -76,7 +81,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from .elaborate import Check
-from .fkp import CARRIER_TYPES, natural_key
+from .fkp import CARRIER_TYPES, map_nets, natural_key, net_names
 from .templates import CONTACT
 
 __all__ = ["Node", "Graph", "Leak", "NetReport", "Report", "graph", "connect", "endpoints",
@@ -105,7 +110,7 @@ class Node:
     key: str
     name: str
     kind: str                      # the prototype's entity type
-    net: str | None                # on a surface: <factory>/<net>
+    net: str | None                # its net= as written; on a surface: <factory>/<net>
     x: float
     y: float
     dir: int                       # 0..15, N = 0; no direction counts as north
@@ -117,6 +122,11 @@ class Node:
     @property
     def carrier(self):
         return self.kind in CARRIER_TYPES or self.net is not None
+
+    @property
+    def nets(self):
+        """The nets it carries: ``ore|fuel`` -> (ore, fuel)."""
+        return tuple(net_names(self.net))
 
 
 @dataclass
@@ -149,7 +159,7 @@ class Graph:
                     continue
                 seen.add(nid)
                 n = self.nodes[nid[0]]
-                if (n.net == net) if n.carrier else owners.get(nid) == net:
+                if (net in n.nets) if n.carrier else owners.get(nid) == net:
                     todo.append(nid)
         return seen
 
@@ -174,7 +184,7 @@ class Graph:
                 if k in ends:
                     seen.add(k)
                     continue
-                if n.carrier and n.net != net:
+                if n.carrier and net not in n.nets:
                     continue
                 seen.add(k)
                 if n.carrier:
@@ -225,7 +235,7 @@ class Report:
     graph: Graph
     nets: dict                     # name -> NetReport
     leaks: list                    # [Leak]
-    checks: list                   # [Check]: per net UNROUTED/OPEN, its LEAKs, its UG_SIDELOADs
+    checks: list                   # [Check]: per net UNROUTED/OPEN and its LEAKs
 
     def lines(self):
         return [str(c) for c in self.checks]
@@ -290,7 +300,7 @@ def _add_node(g, e, cat):
         return
     net, plot = e.attrs.get("net"), getattr(e, "plot", None)
     if net is not None and plot:
-        net = f"{plot}/{net}"
+        net = map_nets(net, lambda n: f"{plot}/{n}")
     ug = None
     if kind == "underground-belt":
         ug = e.attrs.get("ug")
@@ -635,29 +645,44 @@ def _net_word(n):
 def _joint(a, b, na, nb, table):
     """An edge from one net's carrier into another's that is a bus port's: one of its ends is a
     consumer of the net the items leave and a driver of the one they enter."""
-    if table is None or na.net not in table or nb.net not in table:
+    if table is None:
         return False
-    return any(k in table[na.net][1] and k in table[nb.net][0] for k in (a, b))
+    return any(k in table[x][1] and k in table[y][0] for x in na.nets if x in table
+               for y in nb.nets if y in table for k in (a, b))
 
 
 def _leak(g, a, b, via, table):
-    """The Leak an edge makes, or None."""
+    """The Leak an edge makes, or None. Between two carriers, the items of a net the second one
+    does not carry escape (``ore|fuel`` into a belt of ``ore``: the fuel)."""
     na, nb = g.nodes[a], g.nodes[b]
     if na.carrier and nb.carrier:
-        if na.net == nb.net or _joint(a, b, na, nb, table):
+        if na.nets:
+            out = [x for x in na.nets if x not in nb.nets]
+        else:
+            out = [None] if nb.nets else []
+        if not out or _joint(a, b, na, nb, table):
             return None
         if via == "pickup":
-            return Leak(na.net, a, b, via, f"{b} ({_net_word(nb)}) picks from {a}")
-        return Leak(na.net, a, b, via, f"{a} {_VERB[via]} {b} ({_net_word(nb)})")
+            return Leak(out[0], a, b, via, f"{b} ({_net_word(nb)}) picks from {a}")
+        return Leak(out[0], a, b, via, f"{a} {_VERB[via]} {b} ({_net_word(nb)})")
     if table is None:
         return None
-    if na.carrier and na.net in table and b not in table[na.net][1]:
-        return Leak(na.net, a, b, via, f"{a} drops into {b}, which is not a consumer of {na.net}")
-    if nb.carrier and nb.net in table and a not in table[nb.net][0]:
+    mine = [x for x in na.nets if x in table] if na.carrier else []
+    if mine and not any(b in table[x][1] for x in mine):
+        return Leak(mine[0], a, b, via, f"{a} drops into {b}, which is not a consumer of "
+                                        f"{_either(mine)}")
+    mine = [x for x in nb.nets if x in table] if nb.carrier else []
+    if mine and not any(a in table[x][0] for x in mine):
         if via == "mine":
-            return Leak(nb.net, a, b, via, f"{a} drops onto {b}, but does not drive {nb.net}")
-        return Leak(nb.net, a, b, via, f"{b} picks from {a}, which does not drive {nb.net}")
+            return Leak(mine[0], a, b, via, f"{a} drops onto {b}, but does not drive "
+                                            f"{_either(mine)}")
+        return Leak(mine[0], a, b, via, f"{b} picks from {a}, which does not drive "
+                                        f"{_either(mine)}")
     return None
+
+
+def _either(nets):
+    return nets[0] if len(nets) == 1 else " or ".join(nets)
 
 
 def _status_line(r):
@@ -690,8 +715,9 @@ def one_inserter(ents, cat, nets):
     g = ents if isinstance(ents, Graph) else graph(ents, cat)
     carried = {}
     for key, n in g.nodes.items():
-        if n.carrier and n.net is not None:
-            carried.setdefault(n.net, []).append(key)
+        if n.carrier:
+            for net in n.nets:
+                carried.setdefault(net, []).append(key)
     out = set()
     for net, (drivers, consumers) in nets.items():
         drivers, consumers = set(_keys(drivers)), set(_keys(consumers))
@@ -722,8 +748,9 @@ def connect(ents, cat, nets=None) -> Report:
         nets = endpoints(nets)
     carried = {}
     for key, n in g.nodes.items():
-        if n.carrier and n.net is not None:
-            carried.setdefault(n.net, []).append(key)
+        if n.carrier:
+            for net in n.nets:
+                carried.setdefault(net, []).append(key)
     items = {}
     if nets is None:
         table = _inferred(g, carried)
@@ -772,15 +799,13 @@ def connect(ents, cat, nets=None) -> Report:
                        or (g.nodes[k].kind == "pipe-to-ground" and k not in g.fluid_pairs)],
                       name in fluid,
                       [lk for lk in leaks if lk.net == name],
-                      [(a, b) for a, b in ug_sides if g.nodes[a].net == name])
+                      [(a, b) for a, b in ug_sides if name in g.nodes[a].nets])
         reports[name] = r
         if not r.connected:
             checks.append(_status_line(r))
         checks += [Check("LEAK", f"net {name}", lk.text) for lk in r.leaks]
-        checks += [_ug_sideload_line(g, a, b) for a, b in r.ug_sideloads]
     checks += [Check("LEAK", f"net {lk.net}" if lk.net else "no net", lk.text)
                for lk in leaks if lk.net not in reports]
-    checks += [_ug_sideload_line(g, a, b) for a, b in ug_sides if g.nodes[a].net not in reports]
     return Report(g, reports, leaks, checks)
 
 
@@ -790,9 +815,3 @@ def _touch(a, b):
     return any((x + dx, y + dy) in tiles for x, y in a.tiles
                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
 
-
-def _ug_sideload_line(g, a, b):
-    net = g.nodes[a].net
-    return Check("UG_SIDELOAD", f"net {net}" if net else "no net",
-                 f"{a} side-loads onto underground {b}: whether items get through depends on "
-                 "the lane, and V1 tracks no lanes")

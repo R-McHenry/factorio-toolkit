@@ -5,7 +5,10 @@ Copied from C:\\fk-lead\\repo\\fk\\catalog.py (d6018d3) with its measured fixtur
 ``kind`` (the entity type), ``recipe_rates`` (per-second ingredients and products, fluids included)
 and the few base-game facts the fixture does not carry (``FUEL_USE_W``, ``FUEL_VALUE_J``,
 ``MINING_TIME``, ``STEAM_PER_S``, ``MINING_RADIUS``). Every other module takes a Catalog
-instance instead of opening the fixture itself.
+instance instead of opening the fixture itself. 2.0 added to the six inserters' rows the values
+read from the game (2.0.77, docs/LAB-LANES-20261020.md "Prototype values"): ``rotation_speed``,
+``extension_speed``, ``bulk``, ``stack_size_bonus`` (the stack inserter's own +4 hand) and
+``filter_count``, which the lane graph rates them by.
 
 Fluid boxes (``fluidboxes.json``, read from the game over RCON, 2.0.77, see its ``source``):
 every fluid prototype's boxes and pipe connections per direction, and per crafting machine and

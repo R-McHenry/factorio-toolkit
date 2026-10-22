@@ -12,6 +12,12 @@ Unplaced instances are listed, never guessed; the routes between attach points a
 (the next step), so a factory expanded here has its template segments and none of the nets' own
 carriers yet.
 
+Two nets that share a belt (``lanes A | B``, 2.0) are one input belt: a consumer on either of them
+gets one role bound to the pair's ``A|B``, so its belt carries both lanes (and its inserters
+``A+B``: each takes from both lanes what its machine accepts). A template's own belt of two nets is
+a role written ``in1|in2``: its carriers carry the two roles' nets, in1's on the left lane
+(``SmelterArray``'s feed belts, where the template side-loads ore and fuel).
+
 ``explain`` prints one instance both ways: the template line and the plain entities, nets and
 attach points it stands for. ``unfold`` replaces the template line with ``Literal`` and keeps every
 .fkp key and line, so the world does not change; the Literal's machines are read back from its
@@ -45,11 +51,13 @@ _DY = (-1, 0, 1, 0)
 def belts(flat, key, side):
     """[(net, [items])] for machine ``key``: one entry per distinct net, recipe order first. A
     net of contact items (2.0: heat, ``templates.CONTACT``) is left out: it has no route, so no
-    role and no attach point."""
+    role and no attach point. An input on a net that shares a belt (``lanes``) is on the pair's
+    ``A|B``: one belt."""
     hold = flat._in_hold if side == "in" else flat._out_hold
     m = flat.machines[key]
     order = list(m.needs if side == "in" else m.makes)
-    pairs = [(item, nets[0]) for (k, item), nets in hold.items()
+    lane_of = getattr(flat, "lane_of", {}) if side == "in" else {}
+    pairs = [(item, lane_of.get(nets[0], nets[0])) for (k, item), nets in hold.items()
              if k == key and item not in CONTACT]
     pairs.sort(key=lambda p: order.index(p[0]) if p[0] in order else len(order))
     out = []
@@ -79,10 +87,12 @@ def fragment_of(flat, path, cat):
         frag = _single(flat, keys, cat, ins, outs)
     else:
         params = {k: v for k, v in inst.params.items() if k not in ("duty",)}
-        if inst.kind == "SmelterRow":
+        if inst.kind in ("SmelterRow", "SmelterArray"):
             params["_recipe"] = m0.recipe
             fuel = [i for i in m0.needs if i not in cat.recipe_rates(m0.recipe, 1)[0]]
             params["_fuel"] = fuel[0] if fuel else None
+        if inst.kind == "SmelterArray":
+            params["_per"] = _array_column(cat, m0)
         frag = fragment(inst.kind, params, [b[1] for b in ins], [b[1] for b in outs])
     binding = {}
     names_in = [r for r in frag.roles if frag.roles[r].side == "in"]
@@ -92,6 +102,16 @@ def fragment_of(flat, path, cat):
     for name, (net, _items) in zip(names_out, outs):
         binding[name] = net
     return frag, binding
+
+
+def _array_column(cat, m):
+    """How many of machine ``m`` one SmelterArray column holds: as many as one yellow lane of
+    their main ingredient feeds (24 stone furnaces on ore: 7.5/s at 0.3125 each, Rory's stack)."""
+    from .lanes import lane_rate
+    main = [r for i, r in m.needs.items() if i in cat.recipe_rates(m.recipe, 1)[0]]
+    if not main or max(main) <= 0:
+        return 24
+    return max(1, int(lane_rate(cat, "transport-belt") / max(main) + 1e-9))
 
 
 def _bus_fragment(flat, path):
@@ -340,7 +360,7 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
             notes.append(str(exc) if str(exc).startswith(path) else f"{path}: {exc}")
             continue
         at = _origin(flat, path, cat, frag.size, frames)
-        for e in _put(lay, path, inst, frag, binding, at, notes):
+        for e in _put(lay, path, inst, frag, binding, at, notes, cat):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     for path in on_patch:
         at, line, frag, binding = _on_patch(flat, lay, path, cat, ground)
@@ -349,14 +369,24 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
             continue
         if log is not None:
             log.append(line)
-        for e in _put(lay, path, flat.insts[path], frag, binding, at, notes):
+        for e in _put(lay, path, flat.insts[path], frag, binding, at, notes, cat):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     lay.size = (xmax, ymax)
     return lay, notes
 
 
-def _put(lay, path, inst, frag, binding, at, notes):
-    """Write one placed fragment into ``lay`` under its keys; -> the entities added."""
+def role_net(binding, role):
+    """The ``net=`` of a carrier that works ``role``: its net, or for a template's belt of two
+    nets (``in1|in2``) both, in1's on the left lane; None when a role has none."""
+    if "|" not in role:
+        return binding.get(role)
+    nets = [binding.get(r) for r in role.split("|")]
+    return None if None in nets else fkpmod.pair_net(*nets)
+
+
+def _put(lay, path, inst, frag, binding, at, notes, cat=None):
+    """Write one placed fragment into ``lay`` under its keys; -> the entities added. A carrier
+    without lanes (an inserter) on a belt of two nets carries both (``ore+fuel``)."""
     x0, y0, rot = at
     params = {k: _param_text(v) for k, v in inst.params.items()}
     lay.insts[path] = fkpmod.Inst(path, inst.kind, params, x0, y0, rot, frag.sig)
@@ -365,10 +395,13 @@ def _put(lay, path, inst, frag, binding, at, notes):
         x, y, d = turn(float(fe.x), float(fe.y), fe.dir, rot, frag.size)
         attrs = dict(fe.attrs)
         if fe.role is not None:
-            net = binding.get(fe.role)
+            net = role_net(binding, fe.role)
             if net is None:
                 notes.append(f"{path}/{fe.local}: role {fe.role} has no net (UNFED/UNCONSUMED)")
                 continue
+            if "|" in net and cat is not None and cat.has_entity(fe.name) \
+                    and cat.kind(fe.name) not in fkpmod.LANE_TYPES:
+                net = fkpmod.hand_net(net)
             attrs["net"] = net
         e = fkpmod.Entity(f"{path}/{fe.local}", fe.name, _clean(x + x0), _clean(y + y0), d, attrs)
         lay.add(e)

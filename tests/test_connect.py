@@ -236,7 +236,9 @@ class NetTest(unittest.TestCase):
                           "8 carriers; not in the layout: ins/m0",
                           "LEAK        net p: r/f0 drops into m/b, which is not a consumer of p"])
 
-    def test_a_connected_net_still_warns_on_an_underground_side_load(self):
+    def test_an_underground_side_load_connects_and_draws_no_line(self):
+        # 2.0: whether its items get through is the lane graph's to say (the routed LANE line);
+        # V1 warned UG_SIDELOAD on every one
         rep = connect(L("""
             e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel
             e r/o0 fast-inserter 1.5,3.5 N net=p
@@ -250,9 +252,7 @@ class NetTest(unittest.TestCase):
         net = rep.nets["p"]
         self.assertTrue(net.connected)
         self.assertEqual(net.ug_sideloads, [("r/b0", "r/u0")])
-        self.assertEqual([str(c) for c in rep.checks],
-                         ["UG_SIDELOAD net p: r/b0 side-loads onto underground r/u0: whether items "
-                          "get through depends on the lane, and V1 tracks no lanes"])
+        self.assertEqual([str(c) for c in rep.checks], [])
 
     def test_endpoints_inferred_without_a_netlist(self):
         rep = connect(L(self.BELT_ROUTE), CAT)
@@ -294,9 +294,7 @@ class LeakTest(unittest.TestCase):
             e a/s0 transport-belt 0.5,0.5 E net=a
             e b/u0 underground-belt 1.5,0.5 S net=b ug=in"""), CAT)
         self.assertEqual([str(c) for c in rep.checks if c.code != "UNROUTED"],
-                         ["LEAK        net a: a/s0 side-loads onto b/u0 (net b)",
-                          "UG_SIDELOAD net a: a/s0 side-loads onto underground b/u0: whether items "
-                          "get through depends on the lane, and V1 tracks no lanes"])
+                         ["LEAK        net a: a/s0 side-loads onto b/u0 (net b)"])
 
     def test_a_splitter_feeds_another_nets_belt(self):
         rep = connect(L("""

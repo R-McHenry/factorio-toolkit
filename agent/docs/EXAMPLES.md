@@ -33,6 +33,52 @@ the furnaces run at 80%, short of ore. The miner rows are turned (`rot 2`) so th
 west, where the router has room. It needs ore and coal under its drills: put its plot on the
 patches.
 
+## shared-belt.fk: ore and coal on one belt (26x23)
+
+The same smelting with one input belt: `lanes ore_ | fuel` puts the ore on the belt's left lane
+and the coal on its right.
+
+```
+ore   = MinerRow<n=4, resource=iron-ore>   @(10, 2, rot 2)
+coal  = MinerRow<n=2, resource=coal>       @(18, 2, rot 2)
+smelt = SmelterRow<n=8, recipe=iron-plate> @(10, 12)
+box   = Chest<provider, limit=4>           @(4, 22)
+
+net ore_:   ore -> smelt
+net fuel:   coal -> smelt
+net plates: smelt -> box
+lanes ore_ | fuel
+```
+
+The router joins the two nets once, side-loading each onto its lane (`out\route.txt`: `routed
+ore_|fuel: ... join 8,8 E (ore_ on the left lane, fuel on the right)`), and lays one belt on to
+the row; each furnace's one inserter takes both. Two nets, not one sushi net: a lane that backs
+up holds only its own item, so there is no `CLOG`. The routed rates show the ore's lane at 2 of
+its 7.5/s, and that the furnaces are served in belt order: the first 6 run at full speed, the
+7th at 40% and the last gets no ore.
+
+## smelter-array.fk: Rory's smelter stack (33x50)
+
+```
+ore   = MinerRow<n=16, resource=iron-ore>     @(2, 0, rot 2)
+coal  = MinerRow<n=2, resource=coal>          @(30, 0, rot 2)
+smelt = SmelterArray<n=24, recipe=iron-plate> @(6, 12)
+box1  = Chest<provider, limit=8>              @(4, 48)
+box2  = Chest<provider, limit=8>              @(8, 48)
+box3  = Chest<provider, limit=8>              @(12, 48)
+
+net ore_:   ore -> smelt
+net fuel:   coal -> smelt
+net plates: smelt -> box1, box2, box3
+```
+
+7.5 plates/s from 24 stone furnaces on plain inserters, every furnace at full speed. Its ore and
+plates attach at the foot of the array (the south side at rot 0) and its coal at the east end.
+Three chests because one chest's inserter takes 2.5/s: the routed rates name the chests'
+inserters as the critical connectors, at exactly their rate. At 48 furnaces it eats a full yellow
+belt of ore (15/s); more than that, and it grows a second unit east, with its own ore and plate
+belts.
+
 ## gears.fk: plates in, gears out, robots at both ends (16x16)
 
 ```

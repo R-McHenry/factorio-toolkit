@@ -32,7 +32,16 @@ A belt lane carries 7.5 items/s (yellow; red 15, blue 22.5, turbo 30), a fast in
 long-handed one 1.2/s, a plain one about 0.85/s, more with the inserter capacity research (the
 build uses your force's, as the last build saw it; the report's last line says which). Each
 routed section's first line says whether its machines settled; where they did not, its numbers
-are approximate.
+are approximate. `fk rates main.fk` shows the same routed section after its nominal one, on
+`main.fkp` as the last build laid it out (`--hand N` for other inserter hands).
+
+A net is one lane. A row's inserters drop its products on one lane of its belt, so a net from one
+row carries at most 7.5/s on yellow, and the routed rates count it so: each net's critical
+connector is its own lane. Two nets can share a belt, one on each lane (`lanes ore_ | fuel`,
+LANGUAGE.md): one belt to lay instead of two, and the two never stop each other, since a full
+lane holds only its own items. A net on both lanes (a two-sided MinerRow's ore) gets one lane
+when it is side-loaded onto a shared belt: 7.5/s there, and `CAPACITY` says so where it brings
+more.
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report
@@ -193,9 +202,9 @@ Every designed entity in the area gets a verdict:
 - `WRONG`: something else stands on its tiles
 - `DRIFT`: there but turned, or with another recipe
 - `WRONG_ITEM`: a belt or pipe holds an item or fluid its net doesn't (old items from a
-  rebuild). One the build laid under another net says so, and the next build renews it by
-  itself; for the others, `fk fresh X0,Y0,X1,Y1` takes those belts up, and the next build lays
-  them fresh
+  rebuild); on a belt two nets share, lane by lane (copper on the iron lane is wrong there). One
+  the build laid under another net says so, and the next build renews it by itself; for the
+  others, `fk fresh X0,Y0,X1,Y1` takes those belts up, and the next build lays them fresh
 
 Anything in the area that the design doesn't explain is:
 
@@ -253,8 +262,15 @@ fixing in the source.
   the build stops at `place` when their entities would overlap
 - `CAPACITY`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
   and some of the net's belt lanes or inserters run full: the line says what is required there,
-  what they carry, and who runs short. A chest without a rate beside machines on a net takes what
-  they leave, so it is never short and asks nothing of the belts
+  what they carry, and who runs short. Lanes count one at a time (7.5/s yellow); on a belt two
+  nets share, each net has its own. A chest without a rate beside machines on a net takes what
+  they leave, so it is never short and asks nothing of the belts. The ways past one: `tier
+  minimize --allow yellow,red` in the build script (red lanes carry 15/s), a second row, or a
+  second belt
+- `LANE`: items on a lane the layout gives other nets (a belt of two nets with its lanes the
+  wrong way round), nets on one lane that go to different sinks, or items on the closed side of a
+  belt side-loaded onto an underground: only the lane on its open side gets through, and the other
+  stops there
 - `UNROUTED`: no belt route was found for a net (the reason follows: often a row is boxed in;
   leave a few tiles free around a row's head, where its belts attach)
 - `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net

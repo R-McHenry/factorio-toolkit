@@ -18,6 +18,15 @@ consumers asked and got, and its critical connector (the largest required ratio)
 through it): the required flow, what the connector carries, the ratio and the consumers it starves.
 Checks warn, never gate. Pure, stdlib only.
 
+A net is one lane (2.0): a belt written ``net=A|B`` gives its left lane to A and its right to B
+(``fkcore.fkp``), so each net's critical connector and ``CAPACITY`` line count only its own lane,
+7.5/s on yellow; a V1 ``net=A`` gives A both lanes, and an inserter ``A+B`` counts for both nets
+(they share its one hand). ``LANE`` (a warning) is the lane-level ``LEAK``: what the design asks of
+a lane carries an item none of its nets carries (a pair's lanes swapped), a lane holds nets that go
+to different sinks, or a net's items reach the closed side of a side-loaded underground, where they
+stop (only the lane on its open side gets through: Rory; ``connect``'s 1.x ``UG_SIDELOAD`` line is
+gone for this one).
+
 A bus (``Bus<...>``) is its belts and splitters here, as laid: no pool, the lanes carry what they
 carry (a yellow belt 15/s across its two lanes, 7.5 a lane), and its staircases' splitters keep
 their priorities. A bus port is no machine: a net's row counts what crosses its belt, and the
@@ -27,6 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import fkp as fkpmod
 from . import lanes as lanesmod
 from . import rates as ratesmod
 from . import throughput as tp
@@ -53,9 +63,14 @@ class Routed:
     model: object                 # V1's nominal rates.Model
     machines: dict                # node id -> throughput.Machine
     base: dict                    # machine key -> the share of full speed it was given (duty, fluid)
-    net_of: dict                  # node id -> net name (from the layout's net=)
+    net_of: dict                  # node id -> (net, ...) it carries (the layout's net=, by lane)
     need: dict = None             # node id -> {item: items/s} the design asks (``required``)
     need_edge: dict = None        # (src, dst) -> {item: items/s} the design asks of an edge
+
+    def nodes_of(self, net):
+        """The connectors that carry ``net``: its lanes (one of a pair's belts, both of a V1
+        one), its inserters."""
+        return [nid for nid, nets in self.net_of.items() if net in nets]
 
     def util(self, key):
         """A machine's routed utilization (absolute, duty included)."""
@@ -144,14 +159,26 @@ def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
     lg = lanesmod.build(lay, cat, hand=hand, bulk_hand=bulk_hand)
     machines, supply, demand, base = _ends(flat, lay, cat, model, lg)
     res = tp.solve(lg, supply=supply, demand=demand, machines=machines)
-    net_of = {}
+    _lg, need = required(flat, lay, cat, model, lg=lg)
+    return Routed(flat, lay, lg, res, model, machines, base, lane_nets(lay, lg), need.required,
+                  need.required_edge)
+
+
+def lane_nets(lay, lg):
+    """{node id: (net, ...)} of every connector the layout gives a net: a belt's lane the nets
+    its ``net=`` puts there (``A|B``: A the left lane), both lanes for a V1 ``net=A``; an
+    inserter every net it names."""
+    out = {}
     for nid in lg.nodes:
         e = lay.entities.get(nid[0])
-        if e is not None and e.attrs.get("net"):
-            net_of[nid] = e.attrs["net"]
-    _lg, need = required(flat, lay, cat, model, lg=lg)
-    return Routed(flat, lay, lg, res, model, machines, base, net_of, need.required,
-                  need.required_edge)
+        net = e.attrs.get("net") if e is not None else None
+        if not net:
+            continue
+        lanes = fkpmod.net_lanes(net)
+        nets = lanes[nid[1]] if lanes is not None and nid[1] in lanes else fkpmod.net_names(net)
+        if nets:
+            out[nid] = tuple(nets)
+    return out
 
 
 def overflow(flat, net, item):
@@ -291,7 +318,7 @@ def report(r: Routed, factory=None):
     lines += ["", f"  {'net':<16} {'item':<26} {'asked/s':>8} {'got/s':>8}  critical connector"]
     checks = []
     for net in flat.nets:
-        mine = [nid for nid, n in r.net_of.items() if n == net]
+        mine = r.nodes_of(net)
         if not mine:
             continue
         cons = _consumers(flat, net)
@@ -302,6 +329,7 @@ def report(r: Routed, factory=None):
             lines.append(f"  {net:<16} {item:<26} {ask:>8} {got:>8.3f}  "
                          + _critical(r, mine))
         checks += _capacity(r, net, mine, where)
+    checks += lane_checks(r, where)
     return lines, checks
 
 
@@ -427,3 +455,77 @@ def _capacity(r, net, mine, where):
                + (f" and {len(short) - _SHOW - 1} more" if len(short) > _SHOW + 1 else ""))
         out.append(Check("CAPACITY", f"{where}net {net}", msg))
     return out
+
+
+_SIDE = {"L": "left", "R": "right"}
+
+
+def lane_checks(r, where=""):
+    """``LANE`` lines (a warning, the lane-level LEAK): per item and lane what the design asks of a
+    lane that none of its nets carries; a lane given to nets that go to different sinks; the items
+    that reach the closed side of a side-loaded underground."""
+    flat, lg, lay, need = r.flat, r.lg, r.lay, r.need or {}
+    items_of = {n: set(net.items) for n, net in flat.nets.items()}
+    sinks_of = {n: {k for k, _i in net.consumers} for n, net in flat.nets.items()}
+    wrong, mixed = {}, {}
+    for nid, node in lg.nodes.items():
+        if node.kind not in ("lane", "splitter"):
+            continue
+        e = lay.entities.get(nid[0])
+        lanes = fkpmod.net_lanes(e.attrs.get("net")) if e is not None else None
+        if lanes is None:
+            continue                                     # V1: the net has both lanes
+        nets = tuple(lanes[nid[1]])
+        allowed = set().union(*(items_of.get(n, set()) for n in nets)) if nets else set()
+        for item, x in need.get(nid, {}).items():
+            if x > 1e-6 and item not in allowed:
+                whose = [n for n in fkpmod.net_names(e.attrs["net"]) if item in items_of.get(n, ())]
+                wrong.setdefault((whose[0] if whose else None, item, nid[1], nets), []).append(nid)
+        known = [n for n in nets if n in sinks_of]
+        if len(known) > 1 and len({frozenset(sinks_of[n]) for n in known}) > 1:
+            mixed.setdefault((nets, nid[1]), []).append(nid)
+    out = []
+    for (net, item, lane, nets), nids in sorted(wrong.items(), key=str):
+        there = f"which the layout gives net {' and '.join(nets)}" if nets else \
+            "which the layout gives no net"
+        who = net or (nets[0] if nets else "-")
+        out.append(Check("LANE", f"{where}net {who}",
+                         f"its {item} reaches the {_SIDE[lane]} lane of {_keys(nids)}, {there}: "
+                         "a lane carries its own nets' items only"))
+    for (nets, lane), nids in sorted(mixed.items(), key=str):
+        out.append(Check("LANE", f"{where}net {nets[0]}",
+                         f"nets {' and '.join(nets)} share the {_SIDE[lane]} lane of "
+                         f"{_keys(nids)} but go to different sinks: one lane reaches the same "
+                         "sinks for every net on it"))
+    for lane_nid, ug in getattr(lg, "closed", ()):
+        items = sorted(_reaching(r, lane_nid))
+        if not items:
+            continue
+        e = lay.entities.get(lane_nid[0])
+        net = (e.attrs.get("net") if e is not None else None) or "no net"
+        other = "R" if lane_nid[1] == "L" else "L"
+        out.append(Check("LANE", f"{where}net {net}",
+                         f"{', '.join(items)} on the {_SIDE[lane_nid[1]]} lane of {lane_nid[0]} "
+                         f"reach underground {ug} from its closed side and stop there: only the "
+                         f"{_SIDE[other]} lane of a belt side-loaded onto an underground gets "
+                         "through"))
+    return out
+
+
+def _reaching(r, nid):
+    """The items the machines and sources upstream of node ``nid`` put on (a machine is an end:
+    what goes into it is not what comes out)."""
+    lg, res = r.lg, r.res
+    seen, todo, items = {nid}, [nid], set()
+    while todo:
+        v = todo.pop()
+        for e in lg.inn.get(v, ()):
+            u = e.src
+            if u in seen:
+                continue
+            seen.add(u)
+            if lg.nodes[u].kind == "machine":
+                items |= set(res.supply.get(u, {})) | set(getattr(r.machines.get(u), "makes", {}))
+                continue
+            todo.append(u)
+    return items

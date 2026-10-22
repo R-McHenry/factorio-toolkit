@@ -10,9 +10,9 @@ gate, and the briefs stay short.
 
 | named feature in 2.0 | state |
 |---|---|
-| lanes: a net is one lane, so two nets can share a belt | its session runs |
-| throughput players lean on (`CAPACITY`) | the same session |
-| side-loading smelter arrays | the same session |
+| lanes: a net is one lane, so two nets can share a belt | in |
+| throughput players lean on (`CAPACITY`) | in |
+| side-loading smelter arrays | in |
 | circuits and inserter limits in the source | in |
 | the lead and worker player harness, Claude workers | in |
 | the lead plans ahead: `fk stage`, the horizon, Rory's 5-minute wait | in |
@@ -22,6 +22,51 @@ gate, and the briefs stay short.
 Buses (thick buses, the main bus, multi-lane nets) are a core feature of their own: release 2.1
 (Rory, 2026-10-21). What of them already landed stays, the Bus template of 1.6 as it is; no new
 bus work goes into 2.0.
+
+## Lanes, throughput and side-loading smelter arrays
+
+Rory (2026-10-21): "a net is one lane, so two nets can share a belt". `CORE-V2.md` has the
+design and its marks; the player docs say it in LANGUAGE.md ("Two nets on one belt", the
+`SmelterArray` row), TOOLKIT.md (the routed rates, `CAPACITY`, `LANE`) and EXAMPLES.md
+(`shared-belt.fk`, `smelter-array.fk`).
+
+- **Lanes in the language.** `lanes ore_ | fuel` puts two nets on one belt, the first on its left
+  lane. Every consumer on either net gets one input belt of both (a SmelterRow fed ore and coal
+  that way has one belt, its inserters picking both lanes). Two single-item nets on the two
+  lanes of a belt are no sushi net and draw no `CLOG`: a lane that backs up holds only its own
+  item. A net shares a belt with one other at most; fluids and buses have no lanes to share.
+- **The router lays a pair as one job** (`fkcore/pairs.py`): each net from its drivers to its
+  side of a join, both side-loaded into it (2-to-1 merges: each net onto its own lane, as at the
+  head of each column of Rory's stack), then one route of both lanes to every consumer.
+  `out\route.txt` says where the join is: `routed ore_|fuel: 2 -> 1, join 8,8 E (ore_ on the left
+  lane, fuel on the right); ...`. The three parts are pinned or routed again together.
+- **The record.** `net=ore_|fuel` on a belt (left|right), `ore_+fuel` on an inserter, `ore_|` for
+  one lane only; a V1 `net=iron` means both lanes as before, so every layout stays valid.
+  `connect` reads a carrier's nets from it (a net side-loaded onto its pair is no LEAK).
+- **The rate model per lane.** The routed rates give each net of a shared belt its own lane, 7.5/s
+  on yellow, its own critical connector and its own `CAPACITY` line.
+- **`LANE`** (a warning, the lane-level LEAK, in the routed rates): items on a lane the layout gives
+  other nets, nets on one lane that go to different sinks, items on the closed side of a belt
+  side-loaded onto an underground. It replaces 1.x's `UG_SIDELOAD`, which warned on every such
+  belt because V1 tracked no lanes. `fk look` says `WRONG_ITEM` lane by lane on a shared belt.
+- **`SmelterArray<n, recipe>`**: Rory's smelter stack (his ghost, `games/v2-bench`) as a template
+  that tiles to any count, `n=auto` included. Units 11 tiles wide, two columns of furnaces each,
+  fed by one belt with ore on one lane and coal on the other, side-loaded at its foot; up to 24
+  furnaces a column (a yellow lane of ore; 12 steel furnaces), then a unit more to the east, the
+  coal shared down the chain of splitters. Plain inserters, as in his ghost. At his size it is his
+  ghost entity for entity, but for the westmost unit's dead-end coal pass-through and a coal port
+  at the east end. Routed, the benchmark holds: 48 furnaces make 15 plates/s with every furnace
+  at full speed and every side-load joint at a required ratio of exactly 1.00; at 25 a column
+  (`units=1`) `CAPACITY` names the ore and plate lanes at 7.81 of 7.5.
+- **Throughput settled** (CORE-V2 "Open"): the inserter speeds are the catalog's
+  (`rotation_speed`, `bulk`, `stack_size_bonus`: the game's 2.0.77 values), so the lane graph
+  rates any inserter the catalog has; `fk rates FILE.fk` shows the routed section after the
+  nominal one, on `FILE.fkp` as the last build laid it out (`--hand N`); the joint solve of
+  several items on one lane waits for a design that needs it (2.0's put one item on a lane).
+- **`fk merge`** names a merged factory's shared belts per net (`south/ore_|south/fuel`);
+  `chests-to-net` and `net-to-chests` refuse a net that shares a belt, with what to do.
+- Tests: `tests/test_lanes_pairs.py`, `tests/test_smelter_array.py` (36 in all); the full suite
+  619.
 
 ## The lead and worker players (Claude workers)
 
@@ -261,8 +306,9 @@ a signal is declared (pinned or left to the build), checks warn and never gate. 
 
 ## Not in 2.0 yet
 
-- Lanes, throughput and side-loading smelter arrays (their session runs).
 - From circuits: combinators beyond the constant one (fnet modules, a named feature), wires
   routed through poles, `behave` states in `fk look` (EXPECTED), a gated net's cycle in the rate
   model, a storage chest's filter, a first load of fuel for self-fuelling burner drills.
+- Side-load-aware routing, a name: side-loads as merges anywhere and lane separation (a splitter,
+  then an underground side-load per net). 2.0's router side-loads only at a pair's join.
 - DeepSeek workers; daisy-chained labs and turrets.
