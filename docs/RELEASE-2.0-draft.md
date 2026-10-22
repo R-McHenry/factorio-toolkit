@@ -97,6 +97,23 @@ beside it as in 1.7.
   "side-load-aware routing" a name; `SHARED_BELT` (an earlier spec's lane-pair check, never
   built) is superseded by V2 lanes, in CORE.md too.
 
+## From the first lead run's FRICTION.md and RETRO.md
+
+- **`fk merge` keeps a module file other plots still place.** Merging `relay` into `south` took
+  `relays.fk` away from `relay2` and `relay3`, twice, and the next build stopped with INVARIANT.
+  Merging into a factory of the same name again names the new module apart (`CoalFactory2`)
+  instead of wrapping `CoalFactory` in another `CoalFactory`.
+- **`fk research` queues prerequisites.** Each technology goes after its unfinished prerequisites,
+  queued with it in order (a queued one counts as on its way); a trigger technology in the way is
+  named with what fires it. `--first` puts them at the front of the queue. Checked on a laptop
+  test server (Factorio 2.0.77).
+- **`fk fresh` names what waiting ghosts compete for.** It takes up stale carriers through the
+  robots, which bring them back to storage; when more ghosts of a kind wait than the network
+  holds, those ghosts may get them first, and the lines say so (the shop's two fast inserters went
+  to the mall's ghosts, and the shop stood GHOST SHORT, unable to make inserters).
+- **Docs:** a requester drives a net, a provider or storage chest only ends one; a product's chest
+  is best a provider, since robots put any leftovers into the nearest storage chest.
+
 ## Not in 2.0 yet
 
 - Lanes, throughput and side-loading smelter arrays; circuits in the source (their sessions wait

@@ -146,7 +146,7 @@ fixing in the source.
   separate nets: an item that comes faster than it is used can fill it and stop the others. No
   tool can tell whether what feeds a mixed net is limited, so its line goes in two ways only. One:
   the route is one inserter from the source straight into each sink, which takes only what that
-  sink accepts (a requester beside a one-off crafter, `Lab`s around a chest of packs); the route
+  sink accepts (a requester beside a one-off crafter, `Lab`s around a requester of packs); the route
   step says so. A belt in between, or a second inserter, and it can clog again. Two: your design
   says it limits what goes on the net (`net NAME limited:`), which limits nothing itself
 - `UNLIMITED`: provider or storage chests without `limit=`: what reaches them goes into the
@@ -232,7 +232,8 @@ fk lua "CODE"                    run a Lua chunk in the game: its rcon.print com
                                  investigate; see "Reading the game yourself")
 fk lua --file probe.lua          the same with a file of yours
 fk research                      what can be researched now, cheapest first, and what is running
-fk research TECH [TECH...]       queue research (labs and science packs do the rest)
+fk research TECH [TECH...]       queue research, each after its unfinished prerequisites (labs
+                                 and science packs do the rest); --first puts them at the front
 fk tech NAME                     a technology, or what opens an item or recipe: cost (or what to
                                  craft or build for it), what to research first
 fk recipes [NAME...] [--enabled] the locked recipes (or the enabled ones) and what opens each

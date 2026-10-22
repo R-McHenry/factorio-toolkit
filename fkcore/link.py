@@ -276,6 +276,24 @@ rcon.print(n)
 """
 
 
+def lua_stock_and_ghosts(surface, force, names):
+    """For each entity name: the items of it in the force's logistic networks on ``surface`` and
+    its ghosts waiting there. {name: [stock, ghosts]} as JSON (a free read; ``fk fresh`` warns
+    when what it takes up may not come back to the same spot)."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local f = game.forces[{_q(force)}]
+local out = {{}}
+for _, n in pairs(helpers.json_to_table({_q(json.dumps(sorted(set(names))))})) do
+  local stock = 0
+  for _, net in pairs((f.logistic_networks or {{}})[s.name] or {{}}) do stock = stock + net.get_item_count(n) end
+  local ghosts = s.count_entities_filtered{{type = 'entity-ghost', ghost_name = n, force = f}}
+  out[n] = {{stock, ghosts}}
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
 def lua_stuck_hands(surface, area):
     """The inserters in ``area`` that hold an item the assembling machine they feed doesn't use
     (left in the hand by a recipe switch): [[name, x, y, item]] as JSON (1.1.1, a free read)."""

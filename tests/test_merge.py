@@ -1,5 +1,6 @@
 """CORE-V1 step 7, on paper: merge two factories linked by robots, chests-to-net, net-to-chests."""
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -156,6 +157,33 @@ class MergeTest(unittest.TestCase):
         status, leaks = self.connected(more, "gears")
         self.assertEqual(set(status.values()), {"connected"})
         self.assertEqual(leaks, [])
+
+    def add_place(self, line):
+        with open(os.path.join(self.dir, "nauvis.surface"), "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+
+    def test_a_module_another_plot_places_stays(self):
+        # the first lead run (2026-10-21): merging relay into south took relays.fk away from
+        # relay2 and relay3, and the next build stopped with INVARIANT
+        self.add_place("place gears2 = gears plot 40,0 16x16")
+        ch = merge.merge(self.dir, ["iron", "gears"], "works")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "gears.fk")))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "iron.fk")))
+        self.assertIn("kept gears.fk: other plots still place it", ch.lines)
+        self.build()
+
+    def test_merging_into_a_merged_factory_names_its_modules_apart(self):
+        # the stone designer (2026-10-21): coal,relay3 into coal, then coal,stone into coal wrote
+        # a second module CoalFactory around the first one
+        self.add_place("place gears2 = gears plot 40,0 16x16")
+        merge.merge(self.dir, ["iron", "gears"], "iron")
+        merge.merge(self.dir, ["iron", "gears2"], "iron")
+        with open(os.path.join(self.dir, "iron.fk"), encoding="utf-8") as fh:
+            names = re.findall(r"^module (\w+)", fh.read(), re.M)
+        self.assertEqual(len(names), len(set(names)), names)
+        self.assertIn("IronFactory2", names)              # the second wrapper, named apart
+        elaborate_file(os.path.join(self.dir, "iron.fk"), CAT)
+        self.build()
 
     def test_refusals(self):
         self.build()

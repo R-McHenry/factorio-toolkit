@@ -230,28 +230,63 @@ rcon.print(#rows)
 """
 
 
-def lua_add_research(force, surface, names):
+def lua_add_research(force, surface, names, first=False):
+    """Queue ``names``, each after its prerequisites that aren't researched yet (queued ones count
+    as on their way, and the missing ones are queued with it, in order); ``first``: the named
+    technologies and their prerequisites go to the front of the queue. The first lead run
+    (2026-10-21): `fk research A B` refused B while A was only queued, and putting plastics
+    first took a Lua ``research_queue = {...}``."""
     return f"""
 local f = game.forces[{_q(force)}]
 local s = game.get_surface({_q(surface)})
 if not f or not s then rcon.print('no force or surface') return end
-local added, failed = {{}}, {{}}
+local added, failed, front, inq, taken = {{}}, {{}}, {{}}, {{}}, {{}}
+for _, t in pairs(f.research_queue or {{}}) do inq[t.name] = true end
+local function what(v) if type(v) == 'table' then return v.name or '?' end return tostring(v or '') end
+local function trigger(tr) return tr.type .. ' ' .. what(tr.entity or tr.item or tr.fluid) end
+local function close(t, order, seen)
+  if t.researched or seen[t.name] or taken[t.name] then return nil end
+  seen[t.name] = true
+  for _, p in pairs(t.prerequisites or {{}}) do
+    local e = close(p, order, seen)
+    if e then return e end
+  end
+  local tr = t.prototype.research_trigger
+  if tr then return t.name .. ' first, a trigger technology: ' .. trigger(tr) end
+  order[#order + 1] = t.name
+  return nil
+end
 for _, n in pairs(helpers.json_to_table({_J(_J(list(names)))})) do
   local t = f.technologies[n]
   if not t then failed[#failed + 1] = n .. ' (no such technology)'
   elseif t.researched then failed[#failed + 1] = n .. ' (already researched)'
   else
-    local first = {{}}
-    for _, p in pairs(t.prerequisites or {{}}) do if not p.researched then first[#first + 1] = p.name end end
-    if #first > 0 then failed[#failed + 1] = n .. ' (research first: ' .. table.concat(first, ', ') .. ')'
+    local order = {{}}
+    local e = close(t, order, {{}})
+    if e then failed[#failed + 1] = n .. ' (' .. e .. ')'
     else
-      local ok, res = pcall(function() return f.add_research(n) end)
-      if ok and res then added[#added + 1] = n else failed[#failed + 1] = n .. ' (the game refused it: the queue is full, or it is a trigger technology: craft or build what it names)' end
+      for _, m in pairs(order) do
+        taken[m] = true
+        front[#front + 1] = m
+        if not inq[m] then
+          local ok, res = pcall(function() return f.add_research(m) end)
+          if ok and res then added[#added + 1] = m; inq[m] = true
+          else failed[#failed + 1] = m .. ' (the game refused it: the queue is full)' end
+        end
+      end
     end
   end
 end
+local moved = 0
+if {"true" if first else "false"} and #front > 0 then
+  local q = {{}}
+  for _, m in pairs(front) do if inq[m] then q[#q + 1] = m end end
+  for _, t in pairs(f.research_queue or {{}}) do if not taken[t.name] then q[#q + 1] = t.name end end
+  local ok = pcall(function() f.research_queue = q end)
+  if ok then moved = #front else failed[#failed + 1] = 'the queue could not be reordered' end
+end
 {_STATE_LUA}
-rcon.print(helpers.table_to_json({{added = added, failed = failed, research = research}}))
+rcon.print(helpers.table_to_json({{added = added, failed = failed, moved = moved, front = front, research = research}}))
 """
 
 
@@ -306,8 +341,8 @@ def available(r, force, surface, tag="research"):
     return link.read_output(r, lua_available(force, surface, tag), tag, "research read", keep=False)
 
 
-def add_research(r, force, surface, names):
-    text = r.lua(lua_add_research(force, surface, names))
+def add_research(r, force, surface, names, first=False):
+    text = r.lua(lua_add_research(force, surface, names, first))
     try:
         return json.loads(text)
     except ValueError:

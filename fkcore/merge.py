@@ -89,8 +89,20 @@ def _split_fk(text):
     return imports, modules, body
 
 
-def _module_name(factory):
-    return "".join(p.capitalize() for p in re.split(r"[_\-]", factory)) + "Factory"
+def _module_name(factory, taken=()):
+    """``iron`` -> ``IronFactory``; ``IronFactory2`` and so on when the name is taken (a factory
+    merged again under its own name already holds its first ``CoalFactory``: the stone designer's
+    second merge of 2026-10-21 wrapped that module in a new one of the same name)."""
+    base = "".join(p.capitalize() for p in re.split(r"[_\-]", factory)) + "Factory"
+    name, n = base, 1
+    while name in taken:
+        n += 1
+        name = f"{base}{n}"
+    return name
+
+
+def _module_names(blocks):
+    return {m.group(1) for b in blocks if (m := re.match(r"^\s*module\s+(\w+)", b))}
 
 
 def _read(path):
@@ -132,7 +144,7 @@ def _fold(game, sources, into, plot, change, existing=None):
         imp, mods, body = _split_fk(text)
         imports += [i for i in imp if i not in imports]
         modules += mods
-        mod = _module_name(name)
+        mod = _module_name(name, _module_names(modules + bodies))
         bodies.append(f"module {mod} {{\n" + "\n".join(("    " + l) if l.strip() else ""
                                                      for l in body) + "\n}")
         insts.append(f"{name} = {mod} @({dx}, {dy})")
@@ -187,11 +199,17 @@ def merge(game, names, into) -> Change:
     text, lay = _fold(game, sources, into, plot, change)
     _write(os.path.join(game, f"{into}.fk"), text)
     _write(os.path.join(game, f"{into}.fkp"), fkpmod.dumps(lay))
+    # a module another plot still places stays (2026-10-21: merging relay into south took
+    # relays.fk away from relay2 and relay3, and the next build stopped with INVARIANT)
+    still = {p.module for other, p in sf.places.items() if other not in names}
     for n, p in zip(names, ps):
         for ext in (".fk", ".fkp"):
             path = os.path.join(game, p.module + ext)
-            if os.path.exists(path) and p.module != into:
+            if os.path.exists(path) and p.module != into and p.module not in still:
                 os.remove(path)
+    kept = sorted({p.module for p in ps if p.module in still})
+    if kept:
+        change.add("kept " + ", ".join(f"{m}.fk" for m in kept) + ": other plots still place it")
     _rewrite_surface(sfile, names, plot)
     change.add(f"surface: {', '.join(names)} -> {into} plot {x0},{y0} {x1 - x0}x{y1 - y0}; "
                f"robot covers renamed; the old .fk/.fkp files are folded into {into}")
@@ -213,10 +231,10 @@ def insert(game, component_dir, name, into, at) -> Change:
     lay_path = os.path.join(game, f"{into}.fkp")
     lay = fkpmod.load(lay_path) if os.path.exists(lay_path) else None
     imp, mods, body = _split_fk(comp)
-    mod = _module_name(name)
+    imports_t, modules_t, body_t = _split_fk(target)
+    mod = _module_name(name, _module_names(modules_t + mods))
     block = (f"module {mod} {{\n" + "\n".join(("    " + l) if l.strip() else "" for l in body)
              + "\n}")
-    imports_t, modules_t, body_t = _split_fk(target)
     text = "\n".join(imports_t + [i for i in imp if i not in imports_t] + [""] + modules_t + mods
                      + [block, ""] + body_t + [f"{name} = {mod} @({at[0]}, {at[1]})"]) + "\n"
     _write(fk, text)

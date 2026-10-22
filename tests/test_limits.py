@@ -223,12 +223,15 @@ class RipEstimateTest(unittest.TestCase):
 
 
 class FakeLink:
-    def __init__(self, hands="[]", ordered="2", left="[]"):
+    def __init__(self, hands="[]", ordered="2", left="[]", stock="{}"):
         self.sent, self.hands, self.ordered, self.left = [], hands, ordered, left
+        self.stock = stock
 
     def lua(self, text):
         if "held_stack" in text:                    # the stuck-hands read
             return self.hands
+        if "count_entities_filtered" in text:       # stock and waiting ghosts (2.0)
+            return self.stock
         if "get_output_inventory" in text:          # the stale-crafters read (1.7)
             return self.left
         self.sent.append(text)
@@ -283,6 +286,19 @@ class FreshTest(unittest.TestCase):
                       "longer makes", text)
         self.assertIn("passive-provider-chest 9.5,4.5 holds stone-furnace, which none of its "
                       "machines makes now", text)
+
+    def test_what_ghosts_elsewhere_wait_for_is_named(self):
+        # the first lead run (2026-10-21): fresh took up the shop's two fast inserters, the mall's
+        # ghosts got them, and the shop stood GHOST SHORT, unable to make inserters
+        r = FakeLink(hands='[["fast-inserter", 5.5, 1.5, "iron-gear-wheel"], '
+                           '["fast-inserter", 6.5, 1.5, "copper-cable"]]', ordered="4",
+                     stock='{"fast-inserter": [0, 3], "transport-belt": [400, 2], '
+                           '"underground-belt": [0, 0]}')
+        text = "\n".join(self.fresh(r))
+        self.assertIn("fast-inserter: 2 taken up here, 0 in the network, 3 ghosts of it wait", text)
+        self.assertNotIn("transport-belt: ", text)              # plenty in the network
+        self.assertNotIn("underground-belt: ", text)            # nothing waits for it
+        self.assertEqual(len(r.sent), 1)                         # the order; the reads are free
 
     def test_the_stale_crafter_read_skips_a_chest_fed_from_belts(self):
         from fkcore import link

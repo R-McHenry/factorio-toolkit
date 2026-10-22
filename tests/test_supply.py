@@ -123,7 +123,8 @@ class SupplyTest(unittest.TestCase):
                     supply.lua_tech("player", ["automation"], "t"),
                     supply.lua_recipes("player", [], "t"),
                     supply.lua_available("player", "nauvis", "t"),
-                    supply.lua_add_research("player", "nauvis", ["automation"])):
+                    supply.lua_add_research("player", "nauvis", ["automation"]),
+                    supply.lua_add_research("player", "nauvis", ["automation-2"], first=True)):
             link.assert_safe(lua)
             for line in lua.splitlines():
                 self.assertFalse("--" in line and not line.strip().startswith("--"), line)

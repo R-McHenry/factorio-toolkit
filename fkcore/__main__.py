@@ -61,8 +61,9 @@ use the game link, and only with FK_LINK=on)
     lua GAME_DIR CODE | --file F          run a Lua chunk in the game (RCON); its rcon.print is the
                                           reply. For reading and investigating; the link refuses
                                           Lua that registers handlers or commands (unjoinable saves)
-    research GAME_DIR [TECH...]           queue research; without a name, what can be researched
-                                          now and its cost (a free read)
+    research GAME_DIR [TECH...] [--first] queue research, each after its unfinished prerequisites;
+                                          --first: at the front of the queue; without a name, what
+                                          can be researched now and its cost (a free read)
     tech GAME_DIR NAME...                 a technology, or what unlocks a recipe or item: cost or
                                           trigger, prerequisites (a free read)
     recipes GAME_DIR [NAME...] [--enabled]
@@ -293,16 +294,15 @@ def _research(a):
     force, surface = _force_surface(a.game)
     with r:
         if a.cmd == "research" and a.techs:
-            got = supply.add_research(r, force, surface, a.techs)
-            added = list(got.get("added") or [])
-            failed = list(got.get("failed") or [])
-            if isinstance(got.get("added"), dict):
-                added = list(got["added"].values())
-            if isinstance(got.get("failed"), dict):
-                failed = list(got["failed"].values())
-            lines = [f"research: queued {', '.join(added) or 'nothing'}"]
+            got = supply.add_research(r, force, surface, a.techs, a.first)
+            added, failed, front = (supply._list(got.get(k)) for k in ("added", "failed", "front"))
+            pre = [t for t in added if t not in a.techs]
+            lines = [f"research: queued {', '.join(added) or 'nothing new'}"
+                     + (f" ({', '.join(pre)} first: prerequisites)" if pre else "")]
+            if got.get("moved"):
+                lines.append(f"  at the front of the queue now: {', '.join(front)}")
             lines += [f"  not queued: {f}" for f in failed]
-            if added:
+            if added or got.get("moved"):
                 lines.append(supply.research_line(got.get("research")))
         elif a.cmd == "research":
             lines = supply.available_lines(supply.available(r, force, surface))
@@ -580,6 +580,8 @@ def main(argv=None):
     rs = sub.add_parser("research")
     rs.add_argument("game")
     rs.add_argument("techs", nargs="*")
+    rs.add_argument("--first", action="store_true",
+                    help="put them (and their prerequisites) at the front of the queue")
     th = sub.add_parser("tech")
     th.add_argument("game")
     th.add_argument("names", nargs="+")

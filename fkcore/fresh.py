@@ -80,4 +80,29 @@ def run(r, game, cat, area):
     shown = len(stale[:SHOWN]) + len(hands[:SHOWN]) + len(left[:SHOWN])
     if len(things) > shown:
         out.append(f"  ... and {len(things) - shown} more")
+    out += _contested(r, sf.name, force, things)
+    return out
+
+
+def _contested(r, surface, force, things):
+    """A line per kind taken up that ghosts elsewhere wait for, more of them than the network
+    holds: robots carry the taken-up ones to storage, and those ghosts may get them first (the
+    first lead run, 2026-10-21: the shop's two fast inserters went to the mall's ghosts, and the
+    shop stood GHOST SHORT, unable to make inserters)."""
+    taken = {}
+    for name, _x, _y in things:
+        taken[name] = taken.get(name, 0) + 1
+    try:
+        got = json.loads(r.lua(link.lua_stock_and_ghosts(surface, force, taken)).strip() or "{}")
+    except ValueError:
+        return []
+    if not isinstance(got, dict):
+        return []
+    out = []
+    for name, k in sorted(taken.items()):
+        stock, ghosts = (list(got.get(name) or [0, 0]) + [0, 0])[:2]
+        if ghosts > stock:
+            out.append(f"  {name}: {k} taken up here, {int(stock)} in the network, {int(ghosts)} "
+                       "ghosts of it wait: robots may build those with the ones taken up, and the "
+                       "next build's here stay GHOST SHORT until more are made")
     return out
