@@ -256,7 +256,7 @@ def lab_row(params, cat):
 
 
 def lab(params, cat):
-    """``Lab<rate=>``: one lab, its inserters laid by the router like an Assembler's (2.0, Rory
+    """``Lab<rate=>``: one lab, its inserters laid by the router like an Assembler's (1.7, Rory
     2026-10-21: a lab fed from a multi-item chest by one inserter is valid: the inserter only takes
     what the lab accepts). Several Labs around one requester chest each get their own inserter
     from it; the 2005 player laid that by hand (purple.json) for want of it."""

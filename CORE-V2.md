@@ -8,25 +8,28 @@ test server (`tools/laptop_server.py`, Factorio 2.0.77) before code relies on it
 ## The versions
 
 Releases are the only version numbers (Rory, 2026-10-21). The major is the design generation:
-1.x was the V1 core, and the round that completes V2 (lanes, throughput, buses, side-loading
-smelter arrays, circuits in the source, the lead and worker player harness) ships as 2.0. A
-feature goes by its name until a release ships it, and each release note says which named
-features it delivers. The repo name `v5`, the deploy folders `fk-v5-<sha>` and the `.fkp` format
-version are not release numbers.
+1.x was the V1 core (the last, 1.7, shipped the round's first pieces), and the round that
+completes V2 ships as 2.0: lanes (a net is one lane, so two nets can share a belt), throughput,
+side-loading smelter arrays, circuits and inserter limits in the source, and the lead and worker
+player harness. Buses (thick buses, the main bus, multi-lane nets) are a core feature of their
+own: release 2.1; what of them already landed stays (the Bus template of 1.6). A feature goes by
+its name until a release ships it, and each release note says which named features it delivers.
+The repo name `v5`, the deploy folders `fk-v5-<sha>` and the `.fkp` format version are not
+release numbers.
 
 | release | a net is | the router | the model |
 |---|---|---|---|
 | 1.x (V1) | connected or not; one net per belt, both lanes | trees of belts, splitters and undergrounds; no side-loads | nominal, no capacity |
 | 2.0 (V2) | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; tier per connector; lays no side-loads; two nets that share a belt somewhere share it everywhere | the flow solver: flow, load, starved and blocked machines, routed rates |
 | side-load-aware routing (a name, no release yet) | as 2.0 | knows side-loads: 2-to-1 merges, and lane separation (a splitter, then an underground side-load per net) | as 2.0 |
-| 2.1: multi-lane nets | k lanes in one step (2, 3, ...): the bus | lays k-lane nets | as 2.0 |
+| 2.1: buses | k lanes in one step (2, 3, ...): thick buses and the main bus | lays k-lane nets, through the bus templates | as 2.0 |
 
 Multi-lane nets go from one lane straight to k lanes, not "a full belt, then several" (Rory). It
 is unconventional: an agent may plan a bus of 5 iron lanes and 3 copper lanes, where a person
 never plans odd lane counts. [open, 2.1: steer to whole belts, or let it be]
 
-**Multi-lane nets (2.1) next, and how (Rory, 2026-10-20):** go straight to multi-lane nets, but
-do not route them with the general router. Two ways to support them:
+**Multi-lane nets (2.1, buses) next, and how (Rory, 2026-10-20):** go straight to multi-lane
+nets, but do not route them with the general router. Two ways to support them:
 
 1. **A bus router**: lays a net as a parallel bus of k belts, with undergrounds and splitters
    where needed, as one unit.

@@ -16,7 +16,7 @@
 The tokenizer is the one in C:\\fk-lead\\repo\\fkc\\lang.py (d6018d3), with ``*`` added for ``X.*``.
 Words may contain dashes (item names); instance, module and net names may not. Every node keeps its
 source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
-an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (2.0, Rory 2026-10-21)
+an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7, Rory 2026-10-21)
 says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
 and implements no limit. Pure, stdlib only.
 """

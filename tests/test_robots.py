@@ -70,7 +70,7 @@ FAR = ("fkp 1 factory t\nsize 80x12\ninst m Literal at 0,0 rot 0 sig -\n"
 
 
 class PinnedRoboportsTest(unittest.TestCase):
-    """2.0 (Rory, 2026-10-21: pin and patch): a rebuild keeps the roboports that stand, so the
+    """1.7 (Rory, 2026-10-21: pin and patch): a rebuild keeps the roboports that stand, so the
     robot network doesn't move under a factory that only grew."""
 
     def own(self, lay):

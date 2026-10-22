@@ -58,10 +58,10 @@ net sci: sci -> l1, l2, l3
 
 
 class LabsFromAChestTest(unittest.TestCase):
-    """2.0 (Rory, 2026-10-21): a lab fed from a multi-item chest by one inserter is valid: the
+    """1.7 (Rory, 2026-10-21): a lab fed from a multi-item chest by one inserter is valid: the
     inserter only takes what the lab accepts, but only when the source and the sink both touch it.
-    A mixed net's CLOG goes in exactly two ways: that route, or the net written ``limited``. The
-    2005 player laid its purple lab corner by hand for want of it."""
+    The 2005 player laid its purple lab corner by hand for want of it. 2.0: a mixed net's CLOG
+    goes in exactly two ways, that route or the net written ``limited``."""
 
     def build(self, src):
         f = lang.parse(src, "t.fk")

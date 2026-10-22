@@ -301,7 +301,7 @@ rcon.print(#out > 0 and helpers.table_to_json(out) or "[]")
 
 
 def lua_stale_crafters(surface, area):
-    """A recipe switch's leftovers in ``area`` (2.0, Rory 2026-10-21: ``fk fresh`` also deals with
+    """A recipe switch's leftovers in ``area`` (1.7, Rory 2026-10-21: ``fk fresh`` also deals with
     a one-off crafter whose output slot is full of the old product): an assembling machine whose
     output holds an item its recipe doesn't make, and a chest that holds an item none of the
     machines whose inserters drop into it makes now (the 2005 player's shop: a 1-slot provider

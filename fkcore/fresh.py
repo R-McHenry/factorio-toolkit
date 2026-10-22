@@ -8,7 +8,7 @@ longer takes; both jam the new machines. A scripted fix is fine when it goes thr
 breaks the connectors with stale items and replaces them. ``run`` looks at the area as ``fk look``
 does and orders deconstruction of every carrier with a ``WRONG_ITEM`` (an item its net doesn't
 carry) and, 1.1.1, of every inserter holding an item the assembling machine it feeds doesn't use
-(``link.lua_stuck_hands``). 2.0 (Rory, 2026-10-21: ``fk fresh`` also deals with a one-off crafter
+(``link.lua_stuck_hands``). 1.7 (Rory, 2026-10-21: ``fk fresh`` also deals with a one-off crafter
 whose output slot is full of the old product): an assembling machine whose output holds what its
 recipe no longer makes, and a chest its machines' inserters fill that holds what none of them
 makes now (``link.lua_stale_crafters``). Robots carry them and what they hold to storage, nothing

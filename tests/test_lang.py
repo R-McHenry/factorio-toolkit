@@ -38,7 +38,7 @@ class ParseTest(unittest.TestCase):
         self.assertAlmostEqual(a.rate, 10 / 60)
 
     def test_a_net_written_limited(self):
-        # 2.0 (Rory, 2026-10-21): the source says each maker on a mixed net is limited
+        # 1.7 (Rory, 2026-10-21): the source says each maker on a mixed net is limited
         f = lang.parse("net out limited: a, b -> box\n"
                        "net mix items iron-plate, pipe limited: a, b -> box\n"
                        "net plain: a -> box\n", "t.fk")

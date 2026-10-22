@@ -67,7 +67,7 @@ class Verdict:
     action: str | None = None         # mark | keep | revert | strict | own, for a foreign change
     wrong_items: list = field(default_factory=list)
     renet: str | None = None          # the net the toolkit pasted this carrier under, if another
-    ghost: bool = False               # NOBODY: an unbuilt ghost, not a built entity (2.0)
+    ghost: bool = False               # NOBODY: an unbuilt ghost, not a built entity (1.7)
 
     def __str__(self):
         where = f"{_fmt(self.x)},{_fmt(self.y)}"

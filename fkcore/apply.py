@@ -9,7 +9,7 @@ marks that for deconstruction). Then, by mode:
   explain and the watch policy leaves to the apply (``NOBODY``) is ordered for deconstruction, an
   unbuilt ghost too (the game removes a ghost ordered out at once); ``MARKED`` and ``CLAIMED``
   ones stay. The paste must land where designed: a shifted paste is reported (``MISPLACED``),
-  never cleaned up. Scaffolding (2.0, :func:`scaffold`): a ``NOBODY`` pole or roboport on no
+  never cleaned up. Scaffolding (1.7, :func:`scaffold`): a ``NOBODY`` pole or roboport on no
   tile of the design stays up while the design's own poles (or roboports) in the area are not
   all built, so a rebuild doesn't cut power or the robot network; the first apply after they
   stand takes it up.
@@ -65,7 +65,7 @@ RIP_WARN_MIN, RIP_WARN_N = 3.0, 100
 RIP_VERDICTS = ("NOBODY", "WRONG")
 #: taken-up structures coming back as new ghosts of the same names: a factory moved
 MOVED_N = 30
-#: kinds an apply leaves standing until the design's own of that kind stand (2.0, scaffolding)
+#: kinds an apply leaves standing until the design's own of that kind stand (1.7, scaffolding)
 SCAFFOLD_KINDS = ("electric-pole", "roboport")
 
 
@@ -83,7 +83,7 @@ class ApplyReport:
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
-    held: int = 0                      # NOBODY poles and roboports left up as scaffolding (2.0)
+    held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
     own: dict | None = None            # the record of what the applies pasted, after this one
     chunks: int = 0
@@ -271,7 +271,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
 
 
 def scaffold(before, s, cat, area):
-    """What an apply leaves standing for now (2.0, Rory 2026-10-21: old poles and roboports stay
+    """What an apply leaves standing for now (1.7, Rory 2026-10-21: old poles and roboports stay
     up until the new grid stands, so a rebuild doesn't cut power or the robot network; both
     overnight players lost power to a re-laid grid): the built ``NOBODY`` poles and roboports on
     no tile of the design, while a pole (or roboport) the design has in ``area`` is not built

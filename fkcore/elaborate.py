@@ -71,7 +71,7 @@ class FlatNet:
     consumers: list            # [(machine key, item)]
     declared: bool
     line: int
-    limited: bool = False      # `net NAME limited:` the source limits its makers (2.0)
+    limited: bool = False      # `net NAME limited:` the source limits its makers (1.7)
 
     @property
     def sushi(self):
@@ -462,22 +462,22 @@ def _clog_checks(flat, in_hold, fed):
       straight into each sink, which takes only what the sink accepts: the route step clears the
       line when it lays one (``connect.one_inserter``); a belt or a second inserter in between
       loses that. (B) The source writes the net ``limited``. Nothing else: 1.1 counted a net that
-      only requester chests drive as limited, and the first 2.0 draft a net into chests that take
+      only requester chests drive as limited, and 1.7 a net into chests that take
       anything; both went, a requester refills what its belt takes and a full chest stops the
       belt.
     - ``UNLIMITED``: provider or storage chests without ``limit=`` (one line per factory): what
       reaches them goes into the logistic network without end (the 0534 run's network held 4800
-      iron and 5300 copper plates). 2.0 (Rory, 2026-10-21: a multi-item sink chest should
+      iron and 5300 copper plates). 1.7 (Rory, 2026-10-21: a multi-item sink chest should
       generally have no limit; the limiting happens at the makers): a chest a mixed belt of
       makers feeds gets its own line, which says so, and none when its nets are ``limited``.
     - ``SHARED_SINK``: such a chest on a net with machines: whoever stands first on the belt gets
       its fill, so the machines after it can starve (the 0534 run's red science stood at 0%
       behind a copper chest).
-    - ``SUSHI_LIMIT`` (2.0, Rory 2026-10-21: a chest slot limit doesn't limit a sushi net): a
+    - ``SUSHI_LIMIT`` (1.7, Rory 2026-10-21: a chest slot limit doesn't limit a sushi net): a
       ``limit=`` on a chest that a mixed belt of makers feeds. When the chest holds that much the
       belt backs up with every item on it, so the limit only brings the stop sooner.
 
-    A net written ``limited`` (2.0) says the source limits each of its makers: no ``CLOG`` and
+    A net written ``limited`` (1.7) says the source limits each of its makers: no ``CLOG`` and
     no ``UNLIMITED`` for it. It only silences them; no tool can tell whether a source is limited.
     """
     sushi_in = {}                          # chest key -> the mixed nets of makers it takes

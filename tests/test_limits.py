@@ -229,7 +229,7 @@ class FakeLink:
     def lua(self, text):
         if "held_stack" in text:                    # the stuck-hands read
             return self.hands
-        if "get_output_inventory" in text:          # the stale-crafters read (2.0)
+        if "get_output_inventory" in text:          # the stale-crafters read (1.7)
             return self.left
         self.sent.append(text)
         return self.ordered
@@ -268,7 +268,7 @@ class FreshTest(unittest.TestCase):
         self.assertIn("inserter 5.5,1.5 holds iron-gear-wheel", "\n".join(lines))
 
     def test_a_crafters_old_product_goes_too(self):
-        # 2.0 (Rory, 2026-10-21): the 2005 player's shop, switched from stone furnaces to labs:
+        # 1.7 (Rory, 2026-10-21): the 2005 player's shop, switched from stone furnaces to labs:
         # the crafter's output and its 1-slot provider still held stone furnaces
         r = FakeLink(ordered="4", left='[["assembling-machine-2", 7.5, 4.5, "crafter", '
                                       '["stone-furnace"]], ["passive-provider-chest", 9.5, '
