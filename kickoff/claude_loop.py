@@ -177,10 +177,13 @@ rcon.print(helpers.table_to_json{tick = game.tick, ghosts = ghosts, chat = chat,
 
 def claude_bin():
     """The newest claude.exe the desktop app keeps (looked up each round: the app updates it). The
-    app is an MSIX package: outside it, its %APPDATA%\\Claude is under %LOCALAPPDATA%\\Packages."""
+    app is an MSIX package: outside it, its %APPDATA%\\Claude is under %LOCALAPPDATA%\\Packages.
+    Since 2026-10-22 the app keeps it in %LOCALAPPDATA%\\Claude-Data\\claude_<package id> (the old
+    folders were empty, and the loop logged "not signed in" hundreds of times a second)."""
     def version(p):
         return [int(x) if x.isdigit() else 0 for x in p.split(os.sep)[-3].split(".")]
-    pats = [r"%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude-code\*\*\claude.exe",
+    pats = [r"%LOCALAPPDATA%\Claude-Data\claude_*\claude-code\*\*\claude.exe",
+            r"%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude-code\*\*\claude.exe",
             r"%APPDATA%\Claude\claude-code\*\*\claude.exe"]
     found = sorted({p for pat in pats for p in glob.glob(os.path.expandvars(pat))}, key=version)
     if found:
@@ -494,7 +497,10 @@ def ensure_login(run, log):
             return False
     while not logged_in():
         log("Claude Code is not signed in on this laptop: sign in through the browser that opens.")
+        t0 = time.time()
         subprocess.run([claude_bin(), "auth", "login"], env=child_env(run))
+        if time.time() - t0 < 10:
+            time.sleep(60)             # a login that fails at once (no binary): don't spin
     log("Claude Code is signed in")
 
 
