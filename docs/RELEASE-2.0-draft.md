@@ -53,7 +53,9 @@ conversations had grown to 500-800k tokens of context, so a round was slow and c
   and the round after starts a fresh conversation from them (old ids in claude-sessions.txt).
   A worker's own background command finishing wakes the worker, not the lead, so a waiting lead
   still gets notes at once (the first lead run: such tasks marked it busy, and INBOX.md waited
-  for the worker's report).
+  for the worker's report). A round past `--turn-cap` (120 min) ends at its next quiet moment
+  instead of being stopped with its workers mid-task; the lead hears once that the round is
+  past its cap, and only a round still busy `GRACE` (60) minutes later is stopped.
 - **The hook** keeps Rory's chat, INBOX.md and the world line for the lead: inside a worker (its
   hook input names an `agent_id`) it takes nothing; the lead gets them at its own next shell
   command or Agent call.

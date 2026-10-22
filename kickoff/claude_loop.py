@@ -8,8 +8,10 @@ continues it. Round 1 sends launch.json's first message (plus --note); every lat
 GOAL.md, as the brief promises ("Whenever you finish a turn, its text comes back to you as the
 next message"). The loop stops when <run>\\STOP exists (a running turn is stopped too)
 or after --rounds rounds or --hours hours; while GOAL.md is empty or missing it pauses
-(2026-10-21) and resumes when GOAL.md has text again. A turn past --turn-cap
-minutes is stopped and the next round says so. A failed round (usage limit, network) waits and
+(2026-10-21) and resumes when GOAL.md has text again. A round past --turn-cap
+minutes ends at its next quiet moment (the player waits and nothing of its runs), and the player
+hears so if workers still run; one still busy GRACE minutes later is stopped, workers too, and the
+next round says so. A failed round (usage limit, network) waits and
 retries: 2, 5, 10, 20, then every 30 minutes; it does not count as a round.
 
 Claude Code must be signed in on its own (the app's sign-in does not carry over to a standalone
@@ -66,6 +68,12 @@ SETTLE = 120                  # seconds: the world line changes at most this oft
 FRESH_AT = 200000             # tokens of context: then a hand-over round and a fresh conversation
 FRESH_MIN = 3                 # rounds a conversation runs at least before it is handed over
 QUIET = 15                    # seconds the player is idle, nothing of its running: the round ends
+GRACE = 60                    # minutes a round past --turn-cap runs on while its workers finish
+
+#: to a lead whose round passed the cap while something of its still runs (2.0)
+CAPPED = ("[From the loop] This round has run {cap:g} minutes, the loop's cap on a round. It ends "
+          "when what runs now is done, and the next round starts from GOAL.md. A worker started "
+          "from now on is stopped with the round at {hard} at the latest.")
 
 #: the round that hands one conversation over to the next (2.0)
 HANDOVER = ("[From the loop] This conversation has grown to about {k}k tokens of context, which "
@@ -343,18 +351,32 @@ def turn(run, sid, text, model, cap_min, log, events, take=None):
     th.start()
     p.stdin.write(user_message(text))
     p.stdin.flush()
-    deadline, cut, open_ = time.time() + cap_min * 60, None, True
+    # the cap (2.0, the first lead run: at 120 minutes the round was stopped with its workers
+    # mid-task): past it the round ends at its next quiet moment, as any round does, and the lead
+    # hears so once; only a round still busy GRACE minutes later is stopped, workers and all
+    t0 = time.time()
+    deadline, hard = t0 + cap_min * 60, t0 + (cap_min + GRACE) * 60
+    cut, open_, capped, told = None, True, False, False
     while p.poll() is None:
         if os.path.exists(os.path.join(run, "STOP")):
             cut = "STOP"
-        elif time.time() > deadline:
+        elif time.time() > hard:
             cut = "cap"
         if cut:
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
             p.wait()
             break
+        if not capped and time.time() > deadline:
+            capped = True
+            log(f"round past its {cap_min:g}-minute cap: it ends when what runs now is done "
+                f"({len(state['running'])} running), at {datetime.fromtimestamp(hard):%H:%M} "
+                f"at the latest")
         if open_ and state["idle"]:
             notes = take() if take else ""
+            if capped and not told and state["running"]:
+                told = True
+                cap = CAPPED.format(cap=cap_min, hard=f"{datetime.fromtimestamp(hard):%H:%M}")
+                notes = cap + (f"\n\n{notes}" if notes else "")
             try:
                 if notes:
                     # the player waits on its workers: it hears now, not at the next round
@@ -680,8 +702,9 @@ def main():
         else:
             text = first
         if cut == "cap":
-            text = (f"Your last turn was stopped after {a.turn_cap:g} minutes (the loop's cap on one "
-                    f"turn). Carry on from where it was cut off.\n\n{text}")
+            text = (f"Your last round was stopped after {a.turn_cap + GRACE:g} minutes (the loop's "
+                    f"cap on a round, with its grace for running workers), workers too. Carry on "
+                    f"from where it was cut off.\n\n{text}")
         try:
             watch.check(world=True)
         except Exception as exc:

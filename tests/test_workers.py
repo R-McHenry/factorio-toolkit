@@ -209,6 +209,108 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(lines[-1], "    background task completed: Poll belts to 200")
         self.assertEqual(state["agents"], {"t1": "w"})            # the worker still runs
 
+    def run_round(self, script, cap_min=1):
+        """turn() on a fake claude process and a fake clock: ``script`` is [(at seconds, event)],
+        each event sent once the clock reaches it. -> (state, cut, the messages written in, log,
+        the commands run, the clock at the end)."""
+        clock, real_sleep, written, lines, ran = [0.0], time.sleep, [], [], []
+
+        class Proc:
+            pid, returncode = 4242, None
+
+            def __init__(self, *a, **kw):
+                self.closed, self.stdin = False, self
+                self.stdout = self.out()
+
+            def write(self, raw):
+                written.append(json.loads(raw.decode("utf-8"))["message"]["content"])
+
+            def flush(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+            def out(self):
+                for at, ev in script:
+                    while clock[0] < at and not self.closed:
+                        real_sleep(0.002)
+                    if self.closed:
+                        return
+                    yield (json.dumps(ev) + "\n").encode("utf-8")
+
+            def poll(self):
+                return 0 if self.closed else None
+
+            def wait(self):
+                self.closed = True
+
+        class Clock:
+            @staticmethod
+            def time():
+                return 1_700_000_000 + clock[0]
+
+            @staticmethod
+            def sleep(s):
+                clock[0] += s
+                real_sleep(0.004)
+
+        def run(cmd, **kw):
+            ran.append(cmd)
+            if cmd[0] == "taskkill":
+                procs[0].closed = True
+
+        procs = []
+        d = tempfile.mkdtemp(prefix="fkcap-")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, ".loop"))
+        with mock.patch.object(claude_loop, "time", Clock), \
+                mock.patch.object(claude_loop, "claude_bin", lambda: "claude"), \
+                mock.patch.object(claude_loop.subprocess, "Popen",
+                                  lambda *a, **kw: procs.append(Proc()) or procs[0]), \
+                mock.patch.object(claude_loop.subprocess, "run", run):
+            state, rc, cut = claude_loop.turn(d, "sid", "go", "m", cap_min, lines.append,
+                                              io.StringIO(), take=lambda: "")
+        return state, cut, written, lines, ran, clock[0]
+
+    LAUNCH = [(0, {"type": "assistant", "message": {"content": [
+                  {"type": "tool_use", "id": "t1", "name": "Agent",
+                   "input": {"description": "build the labs"}}]}}),
+              (0, {"type": "system", "subtype": "task_started", "task_id": "a1",
+                   "tool_use_id": "t1"}),
+              (1, {"type": "result", "result": "waiting for the labs"})]
+
+    def test_past_the_cap_a_round_waits_for_its_workers(self):
+        # the first lead run (2026-10-21): at 120 minutes the round was stopped, workers and all
+        script = self.LAUNCH + [
+            (70, {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}}),
+            (71, {"type": "result", "result": "ok, waiting"}),
+            (100, {"type": "system", "subtype": "task_notification", "task_id": "a1",
+                   "tool_use_id": "t1", "status": "completed", "summary": "labs stand"}),
+            (101, {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}),
+            (102, {"type": "result", "result": "done"})]
+        state, cut, written, lines, ran, end = self.run_round(script)
+        self.assertIsNone(cut)                                        # no stop: it ended quietly
+        self.assertFalse([c for c in ran if c[0] == "taskkill"])
+        self.assertEqual(written[0], "go")
+        self.assertEqual(len(written), 2)                             # the cap note, once
+        self.assertTrue(written[1].startswith("[From the loop] This round has run 1 minutes"))
+        self.assertTrue([l for l in lines if l.startswith("round past its 1-minute cap")])
+        self.assertTrue(102 < end < 102 + claude_loop.QUIET + 10)    # ended at the quiet moment
+
+    def test_a_round_still_busy_after_the_grace_is_stopped(self):
+        state, cut, written, lines, ran, end = self.run_round(list(self.LAUNCH))
+        self.assertEqual(cut, "cap")
+        self.assertTrue([c for c in ran if c[0] == "taskkill"])
+        self.assertGreater(end, (1 + claude_loop.GRACE) * 60)
+
+    def test_past_the_cap_with_nothing_running_the_round_just_ends(self):
+        script = [(0, {"type": "assistant", "message": {"content": [{"type": "text", "text": "hm"}]}}),
+                  (90, {"type": "result", "result": "done"})]
+        state, cut, written, lines, ran, end = self.run_round(script)
+        self.assertIsNone(cut)
+        self.assertEqual(written, ["go"])                             # no note: nothing runs
+
     def test_a_streaming_message(self):
         self.assertEqual(json.loads(claude_loop.user_message("hi").decode("utf-8")),
                          {"type": "user", "message": {"role": "user", "content": "hi"}})
