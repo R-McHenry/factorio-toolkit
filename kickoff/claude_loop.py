@@ -236,8 +236,17 @@ def feed(ev, log, state):
     running = state.setdefault("running", set())
     if t == "system" and ev.get("subtype") == "task_started":
         running.add(ev.get("task_id"))
+    theirs = state.setdefault("theirs", set())
     if t == "system" and ev.get("subtype") == "task_notification":
         running.discard(ev.get("task_id"))
+        if ev.get("tool_use_id") in theirs:
+            # a worker's own background command: it wakes the worker, not the player, so the
+            # player still waits and notes still reach it at once (the first lead run, 21:36-
+            # 21:58 on 2026-10-21: each such task marked the waiting lead busy, and INBOX.md
+            # sat in notes-pending.txt until the worker's report came)
+            log(f"    background task {ev.get('status', 'done')}: "
+                f"{short(ev.get('summary') or '', 200)}")
+            return
         state["idle"] = False                      # its report wakes the player: a turn comes
         rep = (ev.get("handback_report") or {}).get("text") or ev.get("summary") or ""
         if ev.get("tool_use_id") not in agents:
@@ -261,6 +270,8 @@ def feed(ev, log, state):
                 log(pad + "> " + short(c["text"], 500))
             elif c.get("type") == "tool_use":
                 state["tools"] += 1
+                if pad:
+                    theirs.add(c.get("id"))
                 log(pad + tool_line(c.get("name", "?"), c.get("input") or {}))
                 if not pad and c.get("name") in ("Agent", "Task"):
                     agents[c.get("id")] = (c.get("input") or {}).get("description", "")

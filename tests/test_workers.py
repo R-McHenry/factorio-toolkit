@@ -187,6 +187,28 @@ class StreamTest(unittest.TestCase):
         claude_loop.feed({"type": "result", "result": "done"}, log, state)
         self.assertTrue(state["idle"])
 
+    def test_a_workers_own_background_command_leaves_the_player_waiting(self):
+        # the first lead run (2026-10-21 21:36-21:58): a worker's background Bash finished,
+        # the loop took the waiting lead for busy, and INBOX.md waited for the worker's report
+        lines, state = [], {"sid": "", "tools": 0, "result": None, "context": 0, "agents": {}}
+        log = lines.append
+        claude_loop.feed({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Agent", "input": {"description": "w"}}]}},
+            log, state)
+        claude_loop.feed({"type": "result", "result": "waiting"}, log, state)
+        claude_loop.feed({"type": "assistant", "parent_tool_use_id": "t1", "message": {
+            "content": [{"type": "tool_use", "id": "w1", "name": "Bash",
+                         "input": {"command": "sleep 30", "run_in_background": True}}]}},
+            log, state)
+        claude_loop.feed({"type": "system", "subtype": "task_started", "task_id": "b1",
+                          "tool_use_id": "w1"}, log, state)
+        claude_loop.feed({"type": "system", "subtype": "task_notification", "task_id": "b1",
+                          "tool_use_id": "w1", "status": "completed",
+                          "summary": "Poll belts to 200"}, log, state)
+        self.assertTrue(state["idle"])                            # notes still go in at once
+        self.assertEqual(lines[-1], "    background task completed: Poll belts to 200")
+        self.assertEqual(state["agents"], {"t1": "w"})            # the worker still runs
+
     def test_a_streaming_message(self):
         self.assertEqual(json.loads(claude_loop.user_message("hi").decode("utf-8")),
                          {"type": "user", "message": {"role": "user", "content": "hi"}})

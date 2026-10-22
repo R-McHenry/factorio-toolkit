@@ -88,7 +88,7 @@ LEAD_FIRST = ("Lead the Factorio run as your AGENTS.md describes.\n\n"
 #: spawns no workers of its own, and reads no CLAUDE.md: its brief is the file's body
 WORKER = """---
 name: worker
-description: One specific task in this Factorio run - a design to write and build with fk, a change in the game, or something to find out. It works in this folder and reports back briefly. Give it the task, where it happens, what done looks like, and what it needs to know.
+description: One short, well-scoped task in this Factorio run - build a piece with fk, change something in the game, find something out or measure it. It works in this folder and reports back what it learned (numbers, what worked, what didn't, what it saw). Give it the task, where it happens, what done looks like, and what it needs to know.
 model: {model}
 disallowedTools: Agent
 omitClaudeMd: true

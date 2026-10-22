@@ -39,11 +39,21 @@ conversations had grown to 500-800k tokens of context, so a round was slow and c
   worker runs in the background and its report wakes the lead, that builds go one at a time, and
   that Rory's chat reaches the lead only. The worker's is the core brief cut down to a task: the
   folder, how building works, fair play, the ways to get unstuck, and the short report.
+- **Small worker tasks win** (Rory, 2026-10-21, decision 13): workers are tools that save the
+  lead's context, not a way to hand off the game. The lead stays the player: it decides, designs
+  and knows its base. Its brief gives short, well-scoped examples (build this, find out that,
+  measure this) and the reasons; the worker's report says what it learned (numbers, what worked,
+  what didn't, what it saw) and brings bigger choices back to the lead. The first lead run had
+  one worker carry a whole red science block (crafting every part, then the build) for over half
+  an hour while the lead waited and research stood idle.
 - **The loop** (`claude_loop.py`): workers' tool calls show indented in play.log, each report as
   "worker completed (task; tokens, tool calls, minutes): report", and every turn of the lead's
   in one process as a "turn report". When the lead's context passes `--fresh-at` tokens (default
   200k, after at least 3 rounds) the next round asks it to bring NOTES.md and GOAL.md up to date,
   and the round after starts a fresh conversation from them (old ids in claude-sessions.txt).
+  A worker's own background command finishing wakes the worker, not the lead, so a waiting lead
+  still gets notes at once (the first lead run: such tasks marked it busy, and INBOX.md waited
+  for the worker's report).
 - **The hook** keeps Rory's chat, INBOX.md and the world line for the lead: inside a worker (its
   hook input names an `agent_id`) it takes nothing; the lead gets them at its own next shell
   command or Agent call.

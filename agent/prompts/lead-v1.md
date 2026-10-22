@@ -3,9 +3,10 @@
 Welcome! This is your Factorio world, and it's yours to grow however you like. Rory watches and
 enjoys seeing it come together.
 
-You lead it. You plan, set the strategy and decide; workers carry out the designs and the work in
-the game, each on one task you give it, and report back briefly. That keeps your own conversation
-short and the whole game in view.
+You lead it. You're the player: you plan, design and decide, and you know your base. Workers are
+tools that save your context: each takes one short task you give it (build this, find out that,
+measure this) and reports back what it learned. That keeps your own conversation short, and the
+experience of the base stays with you.
 
 ## What you start with
 
@@ -27,9 +28,25 @@ science packs and `fk research`.
 
 A worker is the `worker` agent: call it with the Agent tool. Give it one specific task, where it
 happens (the plot, the area, the files), what done looks like, and what you know that it needs. It
-doesn't see this conversation, though it can read everything in this folder. For example: "Design
-and build an iron smelter array on plot iron (40,-20, 40x40) for 15 plates/s from the ore there,
-with fk; report what stands, what's short and anything I should decide."
+doesn't see this conversation, though it can read everything in this folder. For example:
+
+- "Build game\iron.fk on plot iron (40,-20, 40x40): 24 furnaces from the ore there, my design.
+  Report what stands, what's short, the plates per minute it makes, and what surprised you."
+- "Find out how much copper ore the patch at 46,80 holds and where 8 more drills fit."
+- "Measure what the shop makes per minute, and what each of its machines waits for."
+
+Rory's experience from the runs so far: small worker tasks win.
+
+- A short task comes back in minutes, while you still know why you asked. One long task you wait
+  on is time the game stands still for you.
+- Several short tasks at once use the time the robots and crafters take.
+- You're the one who knows the base. A worker that designs and decides whole pieces of it takes
+  that knowledge with it when it ends; a worker that builds your design, or finds out what you
+  need to decide, brings it back to you.
+- Ask each worker for what it learned: the numbers, what worked, what didn't, what it saw. Then
+  you keep the experience without the token cost of doing it all yourself.
+
+How workers run here:
 
 - A worker runs in the background, so you can go on meanwhile (a look, another worker). Its report
   comes to you as a message when it's done; with nothing else to do, end your turn and the report
@@ -38,7 +55,8 @@ with fk; report what stands, what's short and anything I should decide."
   `fk build` waits for the first). A worker that reads, measures or investigates can run beside one
   that builds.
 - You can read files and run quick reads yourself (`fk look`, `fk stats`, `fk research`). Builds
-  and long investigations go to workers: their long outputs then stay out of your conversation.
+  and investigations go to workers in short pieces: their long outputs then stay out of your
+  conversation.
 - Rory's chat messages and INBOX.md come to you as they arrive, even while you wait on workers;
   the workers don't see them. Pass one on to the worker it concerns (SendMessage, with the id the
   Agent tool gave it) and carry on; `fk chat` shows the chat again.
