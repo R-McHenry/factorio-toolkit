@@ -710,6 +710,17 @@ class _Layer:
                                   f"{'s' if laid != 1 else ''}")
         self.lay.wires = fkpmod.sort_wires(self.lay.wires)
 
+    def unwired(self):
+        """A belt keeps its reading only on a wire (the game keeps no setting on an unwired belt,
+        not even on its ghost: measured on a laptop test server, 2.0.77, 2026-10-22)."""
+        wired = {fkpmod.split_end(end)[0] for w in self.lay.wires for end in (w.a, w.b)}
+        for key in sorted(self.lay.entities, key=fkpmod.natural_key):
+            e = self.lay.entities[key]
+            if e.attrs.get("read") in ("hold", "pulse") and key not in wired \
+                    and self.kind(key) == "transport-belt":
+                self.check("WIRE", key, f"read={e.attrs['read']} on a belt that is on no wire: "
+                           "the game keeps a belt's reading only when it is wired to something")
+
     def leaks(self):
         """``WIRE_LEAK``: two wire nets of one colour on one entity are one network in the game,
         so their signals add; a line when a consumer would see a driver its net doesn't have."""
@@ -755,5 +766,6 @@ def lay(flat, layout, cat):
     L.guards()
     L.explicit()
     L.wire_up()
+    L.unwired()
     L.leaks()
     return out, c.notes + L.lines, L.checks
