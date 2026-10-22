@@ -44,6 +44,22 @@ def verdicts(rep):
     return {(v.verdict, v.key or v.name) for v in rep.verdicts if v.verdict != "OK"}
 
 
+class HandEditsTest(unittest.TestCase):
+    """2.0 (Rory, 2026-10-21: a human's change is reported, not protected)."""
+
+    def test_a_foreign_thing_the_apply_removes(self):
+        s = surface()
+        live = copy.deepcopy(live_as_designed(s))
+        live["things"].append(scene.thing(name="wooden-chest", type="container", x=45.5, y=2.5,
+                                          last_user="Rory_618"))
+        rep = sense.sense(s, live, CAT, AREA, {"plots": "keep", "sanctioned": "revert"})
+        self.assertEqual(sense.hand_edits(rep), [
+            "Rory_618 placed wooden-chest at 45.5,2.5, which the design doesn't have; this build "
+            "removes it"])
+        kept = sense.sense(s, live, CAT, AREA, WATCH)            # mark 2h: it stays, unsaid
+        self.assertEqual(sense.hand_edits(kept), [])
+
+
 class SenseTest(unittest.TestCase):
     def setUp(self):
         self.s = surface()

@@ -996,6 +996,13 @@ def s_diff(ctx, args):
     checks = [Check("DIFF", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
               if k != "OK"]
     lines = rep.lines()
+    # 2.0 (Rory, 2026-10-21): a hand change the build would replace is said before the paste
+    from . import sense
+    hand = sense.hand_edits(rep)
+    if hand:
+        lines.append(f"hand: {len(hand)} placed by hand that the apply would replace or remove:")
+        lines += [f"  {line}" for line in hand]
+        checks += [Check("HAND", ctx.surface.name, line) for line in hand]
     pts = applymod.rip_points(rep)
     if pts and ctx.surface.mode != "lab":
         # 1.1: what the apply will take up, and how long the robots need for it (before it starts)
@@ -1037,6 +1044,11 @@ def s_apply(ctx, args):
     if rep.own is not None:
         ownmod.save(ctx.root, ctx.surface.name, rep.own)
     checks = []
+    if rep.hand:
+        # 2.0: what this build replaced or removed that was placed by hand, for the player (the
+        # Claude loop hands out/hand.txt's new lines to the lead the way it hands it chat)
+        checks += [Check("HAND", ctx.surface.name, line) for line in rep.hand]
+        _hand_file(ctx, rep.hand)
     if rep.misplaced:
         checks.append(Check("MISPLACED", ctx.surface.name, f"{rep.misplaced} ghosts are not where "
                                                            "the design says"))
@@ -1045,6 +1057,16 @@ def s_apply(ctx, args):
                                                           f"{rep.design} designed entities are not "
                                                           "there as ghost or entity"))
     return rep.lines(), checks
+
+
+def _hand_file(ctx, lines):
+    """Append a build's hand edits to ``out/hand.txt`` (never rewritten: the loop reads what is
+    new since its last look)."""
+    import time
+    with open(os.path.join(ctx.out, "hand.txt"), "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(f"# {time.strftime('%Y-%m-%d %H:%M')} fk build ({os.path.basename(ctx.script)}): "
+                 f"{len(lines)} placed by hand, replaced or removed by this build\n")
+        fh.writelines(f"  {line}\n" for line in lines)
 
 
 def s_stop_on(ctx, args):

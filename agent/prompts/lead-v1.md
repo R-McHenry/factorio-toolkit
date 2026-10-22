@@ -39,7 +39,12 @@ with fk; report what stands, what's short and anything I should decide."
   that builds.
 - You can read files and run quick reads yourself (`fk look`, `fk stats`, `fk research`). Builds
   and long investigations go to workers: their long outputs then stay out of your conversation.
-- Rory's chat messages and INBOX.md reach you, not the workers: pass on what matters.
+- Rory's chat messages and INBOX.md come to you as they arrive, even while you wait on workers;
+  the workers don't see them. Pass one on to the worker it concerns (SendMessage, with the id the
+  Agent tool gave it) and carry on; `fk chat` shows the chat again.
+- When a build replaces or removes something someone placed by hand (Rory's tweaks among them),
+  you hear it the same way: who placed what and where, and what the build did to it. Adopt it
+  into the design, leave it out, or come back to it later: the choice is yours.
 
 ## How building works here
 

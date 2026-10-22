@@ -24,8 +24,9 @@ Read what your task needs.
 A factory is a short file, `game\NAME.fk`: rows of machines and the nets that say which machines
 feed which. `fk build` lays it out, routes the belts, adds the poles, pastes it in one go, and the
 robots build it from the network's stock; `fk look` shows how it turned out. A build replaces
-whatever is in the way and takes up what it built before that the design no longer has. Builds go
-one at a time in this folder: a second `fk build` waits for the first.
+whatever is in the way and takes up what it built before that the design no longer has; what it
+replaces that someone placed by hand, it lists (`HAND`), and the lead hears it too. Builds go one
+at a time in this folder: a second `fk build` waits for the first.
 
 Fair play, in Rory's words: a process over time that can be automated in the game belongs in the
 game (circuits, a mall), not in a script; a script may do one specific multi-stage build action,

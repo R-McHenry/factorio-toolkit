@@ -218,6 +218,34 @@ class ApplyTest(unittest.TestCase):
                                              ("small-electric-pole", 16.5, 4.5)])
         self.assertEqual(rep.held, 0)
 
+    def test_a_hand_edit_the_build_replaces_is_reported(self):
+        # 2.0 (Rory, 2026-10-21): the first lead run's build pasted a splitter over his
+        # self-feeding long-handed inserter on coal/~cfuel/s0's tile and said nothing. The game
+        # named no one: on that map no entity carried a last_user, his editor edit among them
+        live = copy.deepcopy(live_as_designed(self.s))
+        live["things"].remove(find(live, "transport-belt", 10.5, 0.5))
+        live["things"].append(scene.thing(name="long-handed-inserter", type="inserter",
+                                          x=10.5, y=0.5))
+        r, rep = self.run_apply(live, record_of(self.s))
+        self.assertEqual(rep.hand, [
+            "Someone placed (the game names no one: the map editor, or a script) "
+            "long-handed-inserter at 10.5,0.5 on mini/~iron/b0's tile; this build replaces it"])
+        self.assertIn("HAND: 1 placed by hand, replaced or removed by this build",
+                      "\n".join(rep.lines()))
+        named = copy.deepcopy(live)
+        find(named, "long-handed-inserter", 10.5, 0.5)["last_user"] = "Rory_618"
+        r, rep = self.run_apply(named, record_of(self.s))
+        self.assertEqual(rep.hand, ["Rory_618 placed long-handed-inserter at 10.5,0.5 on "
+                                    "mini/~iron/b0's tile; this build replaces it"])
+
+    def test_the_toolkits_own_under_a_design_tile_is_no_hand_edit(self):
+        live = copy.deepcopy(live_as_designed(self.s))
+        live["things"].remove(find(live, "transport-belt", 10.5, 0.5))
+        live["things"].append(scene.thing(name="wooden-chest", type="container", x=10.5, y=0.5))
+        mine = own.Row("nauvis:mini/old/c0", "wooden-chest", 10.5, 0.5, None, None)
+        r, rep = self.run_apply(live, record_of(self.s, mine))
+        self.assertEqual(rep.hand, [])
+
     def test_the_decon_list_finds_a_ghost_by_the_entity_it_stands_for(self):
         lua = link.lua_decon_list("nauvis", "player", [("assembling-machine-1", 25.5, 3.5)])
         self.assertIn("ghost_name = t[1]", lua)

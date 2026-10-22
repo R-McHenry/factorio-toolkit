@@ -190,6 +190,10 @@ fixing in the source.
   the chest out). Grow outward: the next factory within reach of the last.
 - `ON_TERRAIN`: something designed stands on water or a cliff
 - `OFF_WATER`: an offshore pump whose water side is dry ground (it gives no water)
+- `HAND`: the build replaces or removes something someone placed by hand: who (when the game
+  names them), what, where, and on which design entity's tile. The design wins, so the build goes
+  on; adopt it into your source, leave it out, or come back to it. A Claude lead hears it like
+  chat (`out\hand.txt` keeps every one)
 - `MISPLACED` / `UNPLACED`: the paste did not land where the design says
 - `LOW_STOCK`: the network holds fewer of an item than the build still needs
 - `LOCKED`: an item to build, or a machine's recipe, isn't researched (the technology and its

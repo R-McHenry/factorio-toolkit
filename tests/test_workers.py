@@ -120,11 +120,76 @@ class HookTest(unittest.TestCase):
                       json.loads(said)["hookSpecificOutput"]["additionalContext"])
         self.assertFalse(os.path.exists(os.path.join(self.run, ".loop", "notes-pending.txt")))
 
-    def test_the_hook_runs_when_a_worker_returns(self):
+    def test_the_hook_runs_after_every_tool_of_the_lead(self):
         path = claude_loop.settings(self.run)
         with open(path, encoding="utf-8") as fh:
             matcher = json.load(fh)["hooks"]["PostToolUse"][0]["matcher"]
-        self.assertEqual(set(matcher.split("|")), {"Bash", "PowerShell", "Agent", "Task"})
+        self.assertEqual(matcher, "*")
+
+
+class WatchTest(unittest.TestCase):
+    """2.0: what the watcher hands a lead that waits on its workers: notes only (chat, INBOX.md,
+    a build's hand edits), never the world line; and out/hand.txt's new lines as a note."""
+
+    def setUp(self):
+        self.run = tempfile.mkdtemp(prefix="fkwatch-")
+        self.addCleanup(shutil.rmtree, self.run, True)
+        os.makedirs(os.path.join(self.run, "game", "out"))
+        with open(os.path.join(self.run, "run.json"), "w") as fh:
+            fh.write("{}")
+        self.watch = claude_loop.Watch(self.run, lambda _text: None)
+
+    def test_hand_edits_become_a_note_once(self):
+        hand = os.path.join(self.run, "game", "out", "hand.txt")
+        with open(hand, "w", encoding="utf-8") as fh:
+            fh.write("# 2026-10-21 21:05 fk build: 1 placed by hand\n  Rory_618 placed long-handed-"
+                     "inserter at 78.5,46 on coal/~cfuel/s0's tile; this build replaces it\n")
+        self.watch.check()
+        notes = self.watch.take_notes()
+        self.assertIn("[A build replaced or removed what someone placed by hand]", notes)
+        self.assertIn("on coal/~cfuel/s0's tile; this build replaces it", notes)
+        self.watch.check()
+        self.assertEqual(self.watch.take_notes(), "")             # each line once
+        with open(hand, "a", encoding="utf-8") as fh:
+            fh.write("# 21:30 fk build: 1 placed by hand\n  Rory_618 placed pipe at 1.5,2.5 on x's "
+                     "tile; this build replaces it\n")
+        self.watch.check()
+        notes = self.watch.take_notes()
+        self.assertIn("pipe at 1.5,2.5", notes)
+        self.assertNotIn("78.5,46", notes)
+
+    def test_a_waiting_lead_gets_notes_not_the_world_line(self):
+        self.watch.world("no ghosts wait")
+        self.watch.note("[Rory_618 in game chat] hi")
+        self.assertEqual(self.watch.take_notes(), "[Rory_618 in game chat] hi")
+        self.assertIn("no ghosts wait", self.watch.take())          # the next round's message
+
+
+class StreamTest(unittest.TestCase):
+    """2.0: the round's process keeps its input open; the loop knows when the player waits and
+    whether anything of its still runs."""
+
+    def test_idle_and_running(self):
+        state = {"sid": "", "tools": 0, "result": None, "context": 0, "agents": {}}
+        log = [].append
+        claude_loop.feed({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Agent", "input": {"description": "w"}}]}},
+            log, state)
+        claude_loop.feed({"type": "system", "subtype": "task_started", "task_id": "a1",
+                          "tool_use_id": "t1"}, log, state)
+        claude_loop.feed({"type": "result", "result": "waiting"}, log, state)
+        self.assertTrue(state["idle"])
+        self.assertEqual(state["running"], {"a1"})                # keep the input open
+        claude_loop.feed({"type": "system", "subtype": "task_notification", "task_id": "a1",
+                          "tool_use_id": "t1", "status": "completed"}, log, state)
+        self.assertEqual(state["running"], set())
+        self.assertFalse(state["idle"])                           # its report wakes the player
+        claude_loop.feed({"type": "result", "result": "done"}, log, state)
+        self.assertTrue(state["idle"])
+
+    def test_a_streaming_message(self):
+        self.assertEqual(json.loads(claude_loop.user_message("hi").decode("utf-8")),
+                         {"type": "user", "message": {"role": "user", "content": "hi"}})
 
 
 class LoopFeedTest(unittest.TestCase):

@@ -65,6 +65,7 @@ REMIND = 600                  # seconds: the world line again while something st
 SETTLE = 120                  # seconds: the world line changes at most this often
 FRESH_AT = 200000             # tokens of context: then a hand-over round and a fresh conversation
 FRESH_MIN = 3                 # rounds a conversation runs at least before it is handed over
+QUIET = 15                    # seconds the player is idle, nothing of its running: the round ends
 
 #: the round that hands one conversation over to the next (2.0)
 HANDOVER = ("[From the loop] This conversation has grown to about {k}k tokens of context, which "
@@ -232,7 +233,12 @@ def feed(ev, log, state):
     pad = "    " if ev.get("parent_tool_use_id") else ""
     t = ev.get("type")
     agents = state.setdefault("agents", {})
+    running = state.setdefault("running", set())
+    if t == "system" and ev.get("subtype") == "task_started":
+        running.add(ev.get("task_id"))
     if t == "system" and ev.get("subtype") == "task_notification":
+        running.discard(ev.get("task_id"))
+        state["idle"] = False                      # its report wakes the player: a turn comes
         rep = (ev.get("handback_report") or {}).get("text") or ev.get("summary") or ""
         if ev.get("tool_use_id") not in agents:
             # a background shell command of the player's, not a worker (the first lead run's
@@ -246,6 +252,8 @@ def feed(ev, log, state):
             f"calls, {(use.get('duration_ms') or 0) / 60000:.0f} min): {short(rep, 800)}")
     elif t == "assistant":
         msg = ev.get("message", {})
+        if not pad:
+            state["idle"] = False                  # the player is on a turn
         if not pad and context_of(msg.get("usage")):
             state["context"] = context_of(msg.get("usage"))
         for c in msg.get("content", []):
@@ -271,17 +279,37 @@ def feed(ev, log, state):
                 log(pad + "  ! " + short(body, 200))
     elif t == "result":
         state["result"] = ev
+        state["idle"] = True                       # its turn is over; workers may still run
+        state["idle_at"] = time.time()
         if str(ev.get("result") or "").strip():
             state.setdefault("reports", []).append(ev["result"])
 
 
-def turn(run, sid, text, model, cap_min, log, events):
-    """One claude -p turn on the run's conversation -> (state, exit code, why it was cut short)."""
-    cmd = [claude_bin(), "-p", "--output-format", "stream-json", "--verbose", "--model", model,
-           "--permission-mode", "auto", "--strict-mcp-config", "--settings", settings(run)]
+def user_message(text):
+    """One line of Claude Code's streaming input (``--input-format stream-json``)."""
+    return (json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
+            ).encode("utf-8")
+
+
+def turn(run, sid, text, model, cap_min, log, events, take=None):
+    """One claude -p round on the run's conversation -> (state, exit code, why it was cut short).
+
+    2.0 (Rory, 2026-10-21: chat goes to the lead player at once): the round runs on streaming
+    input. Its first message goes in as a user message and stdin stays open, so the player's
+    workers run on in the background while it waits for them, and whatever ``take()`` returns
+    (the watcher's notes: Rory's chat, INBOX.md, a build's hand edits) reaches a player that
+    waits as a message of its own, at once; a busy player gets them from the hook after its next
+    tool call. The round ends when the player is idle and nothing of its runs: stdin closes and
+    the process exits. The first lead run (2026-10-21 21:05-21:09) showed both: Rory's chat sat
+    in notes-pending.txt while the lead waited on a worker, and with stdin closed Claude Code
+    ended the round 10 minutes after the lead's last turn, stopping that worker mid-build."""
+    cmd = [claude_bin(), "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+           "--verbose", "--model", model, "--permission-mode", "auto", "--strict-mcp-config",
+           "--settings", settings(run)]
     if sid:
         cmd += ["--resume", sid]
-    state = {"sid": sid, "tools": 0, "result": None, "context": 0, "agents": {}, "reports": []}
+    state = {"sid": sid, "tools": 0, "result": None, "context": 0, "agents": {}, "reports": [],
+             "idle": False, "running": set()}
     err = open(os.path.join(run, "claude-loop-stderr.log"), "a", encoding="utf-8")
     p = subprocess.Popen(cmd, cwd=run, env=child_env(run), stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=err)
@@ -302,9 +330,9 @@ def turn(run, sid, text, model, cap_min, log, events):
 
     th = threading.Thread(target=pump, daemon=True)
     th.start()
-    p.stdin.write(text.encode("utf-8"))
-    p.stdin.close()
-    deadline, cut = time.time() + cap_min * 60, None
+    p.stdin.write(user_message(text))
+    p.stdin.flush()
+    deadline, cut, open_ = time.time() + cap_min * 60, None, True
     while p.poll() is None:
         if os.path.exists(os.path.join(run, "STOP")):
             cut = "STOP"
@@ -314,7 +342,21 @@ def turn(run, sid, text, model, cap_min, log, events):
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
             p.wait()
             break
-        time.sleep(5)
+        if open_ and state["idle"]:
+            notes = take() if take else ""
+            try:
+                if notes:
+                    # the player waits on its workers: it hears now, not at the next round
+                    state["idle"] = False
+                    p.stdin.write(user_message(notes))
+                    p.stdin.flush()
+                    log("handed to the player: " + short(notes, 300))
+                elif not state["running"] and time.time() - state.get("idle_at", 0) > QUIET:
+                    p.stdin.close()            # idle, nothing of its runs: the round ends
+                    open_ = False
+            except OSError:
+                open_ = False                  # it exited meanwhile
+        time.sleep(2)
     th.join(timeout=10)
     err.close()
     return state, p.returncode, cut
@@ -451,6 +493,43 @@ class Watch(threading.Thread):
         with self.mutex:
             return claude_hook.take(self.folder)
 
+    def take_notes(self):
+        """The pending notes alone (Rory's chat, INBOX.md, a build's hand edits), for a player
+        that waits on its workers (2.0): they wake it; the world line waits for its next tool
+        call or round, so it doesn't wake the player every few minutes."""
+        with self.mutex:
+            return claude_hook.notes(self.dir)
+
+    def hand(self):
+        """New lines of game/out/hand.txt (what a build replaced or removed that someone placed
+        by hand, 2.0) as a note for the player: it adopts each into the design, leaves it out,
+        or comes back to it."""
+        path = os.path.join(self.folder, "game", "out", "hand.txt")
+        mark = os.path.join(self.dir, "hand-offset")
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return
+        try:
+            with open(mark) as f:
+                seen = int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            seen = 0
+        if size <= seen:
+            if size < seen:                    # a new file: read it from the start next time
+                with open(mark, "w") as f:
+                    f.write("0")
+            return
+        with open(path, "rb") as f:
+            f.seek(seen)
+            text = f.read().decode("utf-8", "replace").strip()
+        with open(mark, "w") as f:
+            f.write(str(size))
+        if text:
+            self.note("[A build replaced or removed what someone placed by hand]\n" + text +
+                      "\n(Adopt it into the design, leave it out, or come back to it.)")
+            self.log("hand: " + short(text, 300))
+
     def run(self):
         while True:
             try:
@@ -470,6 +549,7 @@ class Watch(threading.Thread):
                 if text:
                     self.note(f"[A message for you, from INBOX.md]\n{text}")
                     self.log("inbox: " + short(text, 300))
+            self.hand()
             if not self.cfg:
                 return
             st = host_status(self.cfg, self.cursor or 0, self.folder)
@@ -497,13 +577,13 @@ class Watch(threading.Thread):
 
 
 def settings(folder):
-    """The --settings file: claude_hook.py after every shell command, and when a worker returns
-    (the Agent tool, Task in older Claude Code)."""
+    """The --settings file: claude_hook.py after every tool call (2.0: any tool, so a busy
+    player hears Rory's chat soon whatever it is doing; inside a worker the hook takes nothing)."""
     hook = os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude_hook.py")
     cmd = f'python "{hook}" "{folder}"'.replace("\\", "/")
     path = os.path.join(folder, ".loop", "settings.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"hooks": {"PostToolUse": [{"matcher": "Bash|PowerShell|Agent|Task", "hooks": [
+        json.dump({"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [
             {"type": "command", "command": cmd, "timeout": 10}]}]}}, f, indent=1)
     return path
 
@@ -604,7 +684,7 @@ def main():
         n += 1
         log(f"=== round {n} ({'conversation ' + sid[:8] if sid else 'new conversation'})")
         t0 = time.time()
-        state, rc, cut = turn(run, sid, text, a.model, a.turn_cap, log, events)
+        state, rc, cut = turn(run, sid, text, a.model, a.turn_cap, log, events, watch.take_notes)
         if state["sid"] and state["sid"] != sid:
             sid = state["sid"]
             with open(sid_file, "w") as f:

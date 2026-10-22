@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
 
-__all__ = ["Verdict", "SenseReport", "sense", "duration_ticks"]
+__all__ = ["Verdict", "SenseReport", "sense", "duration_ticks", "hand_edits"]
 
 TICKS_PER_S = 60
 _CARRIERS = fkpmod.CARRIER_TYPES
@@ -68,6 +68,9 @@ class Verdict:
     wrong_items: list = field(default_factory=list)
     renet: str | None = None          # the net the toolkit pasted this carrier under, if another
     ghost: bool = False               # NOBODY: an unbuilt ghost, not a built entity (1.7)
+    #: WRONG: what stands on the design entity's tiles, [(name, x, y, last_user, ghost, own)];
+    #: ``own``: the toolkit pasted it (the record says so), so it is no hand edit (2.0)
+    under: list = field(default_factory=list)
 
     def __str__(self):
         where = f"{_fmt(self.x)},{_fmt(self.y)}"
@@ -211,7 +214,13 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
         others = sorted({i for tile in e.tiles for i in at_tile.get(tuple(tile), ()) if i not in used})
         if others:
             names = ", ".join(sorted({things[i]["name"] for i in others}))
-            verdicts.append(Verdict("WRONG", e.name, e.x, e.y, e.key, f"{names} stands there"))
+            v = Verdict("WRONG", e.name, e.x, e.y, e.key, f"{names} stands there")
+            for i in others:
+                t = things[i]
+                mine = own.get((t["name"], round(t["x"], 3), round(t["y"], 3))) if own else None
+                v.under.append((t["name"], t["x"], t["y"], t.get("last_user"), bool(t["ghost"]),
+                                mine is not None))
+            verdicts.append(v)
             continue
         verdicts.append(Verdict("MISSING", e.name, e.x, e.y, e.key,
                                 "not built or destroyed; the next apply restores it"))
@@ -297,6 +306,47 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
     push = list(changes) if notify == "all" else []
     return SenseReport(list(area) if area else None, tick, verdicts, marks, changes, expired,
                        push, owners)
+
+
+def hand_edits(rep, held=()):
+    """What a build replaces or removes that someone placed by hand: report lines (2.0, Rory
+    2026-10-21: the source overrules the world by design, so a build may replace a hand change,
+    but the agent is told, and decides: adopt it into the design, leave it out, or come back to
+    it). From a diff (``rep``) taken before the paste:
+
+    - a thing on a design entity's tiles that the toolkit did not paste (the ``own`` record does
+      not have it): the paste goes over it, kept by the watch policy or not;
+    - a foreign ``NOBODY`` (``revert`` / ``strict``) the apply orders out, unless ``held``
+      (scaffolding, {(name, x, y)}).
+
+    Who: the entity's ``last_user``. Entities placed in the map editor carry none (the first lead
+    run's map, 2026-10-21: none of 555 had one, Rory's edit among them), and neither do the
+    toolkit's own, so "the game names no one" is said, not guessed."""
+    out = []
+    for v in rep.verdicts:
+        if v.verdict == "WRONG":
+            for name, x, y, user, ghost, mine in v.under:
+                if mine:
+                    continue
+                out.append(f"{_who(user)} {'a ghost of ' if ghost else ''}{name} at {_fmt(x)},"
+                           f"{_fmt(y)} on {_local(v.key)}'s tile; this build replaces it")
+        elif v.verdict == "NOBODY" and v.action in ("revert", "strict") \
+                and (v.name, v.x, v.y) not in held:
+            out.append(f"{_who(v.actor)} {'a ghost of ' if v.ghost else ''}{v.name} at "
+                       f"{_fmt(v.x)},{_fmt(v.y)}, which the design doesn't have; this build "
+                       "removes it")
+    return out
+
+
+def _who(user):
+    if user and user != "unknown":
+        return f"{user} placed"
+    return "Someone placed (the game names no one: the map editor, or a script)"
+
+
+def _local(key):
+    """A composed key without its surface: ``nauvis:coal/~cfuel/s0`` -> ``coal/~cfuel/s0``."""
+    return (key or "").split(":", 1)[-1]
 
 
 def _net(e):

@@ -84,6 +84,7 @@ class ApplyReport:
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
+    hand: list = field(default_factory=list)   # placed by hand, replaced or removed (2.0)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
     own: dict | None = None            # the record of what the applies pasted, after this one
     chunks: int = 0
@@ -110,6 +111,10 @@ class ApplyReport:
                 out.append(f"  scaffold: {self.held} old poles and roboports stay up until the "
                            "design's own stand here, so power and robots keep running; the "
                            "first apply after that takes them up")
+            if self.hand:
+                out.append(f"  HAND: {len(self.hand)} placed by hand, replaced or removed by "
+                           "this build (adopt into the design, leave out, or come back to it):")
+                out += [f"    {line}" for line in self.hand]
         if self.relaid:
             items = sorted({i for v in self.relaid for i in v.wrong_items})
             out.append(f"  {len(self.relaid)} carriers laid under another net held "
@@ -205,6 +210,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     if mode != "lab" and policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own)
         held = scaffold(before, s, cat, area)
+        rep.hand = sense.hand_edits(before, held)
         gone = [v for v in before.verdicts
                 if v.verdict == "NOBODY" and (v.name, v.x, v.y) not in held]
         # the toolkit's own that still stand stay in the record: ordered out, or held up
