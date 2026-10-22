@@ -12,6 +12,9 @@ Steps before ``frm`` that only read source (``read_surface``, ``read_terrain``, 
 ``elaborate``, ``size``) are re-run quietly: source is cheap and pure. Layouts come from the
 checkpoint of the last layout step before ``frm``, and a ``floorplan`` before ``frm`` is replayed
 on them (it is pure too), so ``--from diff`` on the game host applies what a laptop build laid out.
+A checkpoint says what source it was laid from (``out/<step>/source.json``: the source files and
+the script's lines up to its step). When that is not the source as it is now (2.0.4: a recipe
+changed, and the paste laid the old one), the layout steps before ``frm`` run again instead.
 
 Steps: read_surface, read_terrain, run_models, elaborate, size, report_rates, place, route, tier,
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
@@ -41,6 +44,7 @@ the game codebase and writes ``out/`` and, in write_layout, the ``.fkp`` files.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -55,7 +59,7 @@ from .catalog import Catalog
 from .elaborate import Check, ElabError, elaborate_file
 from .lang import FkSyntaxError
 
-__all__ = ["FlowError", "Ctx", "Line", "parse", "run", "STEPS"]
+__all__ = ["FlowError", "Ctx", "Line", "parse", "run", "STEPS", "layout_source_changes"]
 
 
 class FlowError(ValueError):
@@ -95,6 +99,7 @@ class Ctx:
     rates_runs: int = 0                              # report_rates steps run so far
     sized: object = None                             # the size step's fkcore.size.Sizing
     steps: list = field(default_factory=list)        # the script's step names, in order
+    source: dict = field(default_factory=dict)       # {source file: sha1} as the run began
 
 
 def parse(text, path="<fkb>") -> list:
@@ -173,6 +178,66 @@ def _hands(ctx, o):
 
 _FORCE_FILE = "force.json"                           # in out/: the force's hands, by diff
 _STANDING_FILE = "standing.json"                     # in out/: the poles built, by diff (2.0.1)
+_STAMP_FILE = "source.json"             # in out/<step>/: the source its checkpoint was laid from
+_LAID_FILE = "layout-source.json"       # in out/: the source write_layout's .fkp files came from
+#: the source files of a game codebase (beside the build script): what a layout is laid from.
+#: The build script itself counts by its lines up to each step; the .fkp files are its output.
+_SOURCE_EXT = (".fk", ".surface", ".json", ".model.py")
+
+
+def _source_files(root):
+    """{file: sha1} of the game codebase's source files in ``root``."""
+    out = {}
+    for name in sorted(os.listdir(root)):
+        full = os.path.join(root, name)
+        if name.endswith(_SOURCE_EXT) and os.path.isfile(full):
+            h = hashlib.sha1()
+            with open(full, "rb") as fh:
+                h.update(fh.read())
+            out[name] = h.hexdigest()
+    return out
+
+
+def _changed(was, now):
+    """The source files that differ between two ``_source_files`` reads, sorted, each with how."""
+    out = []
+    for name in sorted(set(was) | set(now)):
+        if was.get(name) != now.get(name):
+            how = "changed" if name in was and name in now else "added" if name in now \
+                else "removed"
+            out.append(f"{name} {how}")
+    return out
+
+
+def _script_sha(lines):
+    return hashlib.sha1("\n".join(ln.text for ln in lines).encode()).hexdigest()
+
+
+def layout_source_changes(game):
+    """What changed in the source of the placed factories (their modules' ``.fk``, the surface
+    file) since write_layout last wrote the ``.fkp`` files, one line each; [] when nothing did or
+    no build has said what it wrote from. 2.0.4: ``fk look`` judges against the ``.fkp`` files,
+    and after a paste from stale checkpoints it said OK while the machine ran the old recipe (the
+    second lead run, 2026-10-22); a look now says when the .fkp is not the source's."""
+    try:
+        with open(os.path.join(game, "out", _LAID_FILE), encoding="utf-8") as fh:
+            was = json.load(fh)["files"]
+        sf = surfacemod.load_game(game)
+    except (OSError, ValueError, KeyError, TypeError, surfacemod.SurfaceError):
+        return []
+    now = _source_files(game)
+    lines = []
+    for name in _changed(was, now):
+        file, how = name.rsplit(" ", 1)
+        mods = sorted({p.module for p in sf.places.values()
+                       if p.lifecycle != "retired" and f"{p.module}.fk" == file})
+        if mods:
+            lines.append(f"{file} {how} since {mods[0]}.fkp was written: this look judges the "
+                         f"design as last written, and the next fk build lays out the change")
+        elif file.endswith(".surface"):
+            lines.append(f"{file} {how} since the .fkp files were written: this look judges the "
+                         f"design as last written, and the next fk build lays out the change")
+    return lines
 
 
 def _force_hands(ctx):
@@ -1049,6 +1114,11 @@ def s_write_layout(ctx, args):
             lines.append(f"wrote {os.path.basename(path)}: {len(ctx.surface_lay.plots)} plots")
         except fkp.InvariantError as exc:
             checks += _invariant_checks(ctx.surface.name, exc.problems)
+    # 2.0.4: the source these .fkp files were laid from, for the look (layout_source_changes)
+    os.makedirs(ctx.out, exist_ok=True)
+    with open(os.path.join(ctx.out, _LAID_FILE), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"files": ctx.source}, fh, indent=0, sort_keys=True)
+        fh.write("\n")
     return lines, checks
 
 
@@ -1259,9 +1329,16 @@ _SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "size", "s
 _LAYOUT = ("place", "route", "tier", "cover_power", "cover_robots")
 
 
-def _write_checkpoint(ctx, step):
+def _write_checkpoint(ctx, step, upto):
+    """``out/<step>/``: each factory's layout as the step left it, and (2.0.4) ``source.json``:
+    the source it was laid from (the files as the run began, and the script's lines ``upto``
+    and including the step), so a later run that starts after it can tell it is stale."""
     folder = os.path.join(ctx.out, step)
     os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, _STAMP_FILE), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"line": upto[-1].n, "script": _script_sha(upto), "files": ctx.source}, fh,
+                  indent=0, sort_keys=True)
+        fh.write("\n")
     for factory, lay in ctx.layouts.items():
         with open(os.path.join(folder, f"{factory}.fkp"), "w", encoding="utf-8",
                   newline="\n") as fh:
@@ -1270,6 +1347,23 @@ def _write_checkpoint(ctx, step):
         with open(os.path.join(folder, f"{ctx.surface.name}.fkp"), "w", encoding="utf-8",
                   newline="\n") as fh:
             fh.write(fkp.dumps(ctx.surface_lay))
+
+
+def _stale_checkpoint(ctx, step, upto):
+    """Why ``out/<step>/`` was not laid from the source as it is now (the script's lines ``upto``
+    and including the step, the source files as this run began): a list of reasons, [] when it
+    was. A checkpoint with no ``source.json`` (an older toolkit's) is stale: nothing says what it
+    was laid from."""
+    try:
+        with open(os.path.join(ctx.out, step, _STAMP_FILE), encoding="utf-8") as fh:
+            stamp = json.load(fh)
+        files, script, line = dict(stamp["files"]), stamp["script"], stamp["line"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ["it does not say what source it was laid from"]
+    why = _changed(files, ctx.source)
+    if line != upto[-1].n or script != _script_sha(upto):
+        why.append(f"{os.path.basename(ctx.script)} changed")
+    return why
 
 
 def _load_checkpoint(ctx, step):
@@ -1299,20 +1393,48 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
     first = _at(names, frm) if frm else 0
     last = _at(names, to) if to else len(lines) - 1
     os.makedirs(ctx.out, exist_ok=True)
+    # the source as the run begins, before any step reads it: a file edited while the run goes
+    # on makes its checkpoints stale, never the other way round
+    ctx.source = _source_files(root)
     for ln in lines[:first]:
         if ln.cmd in _SOURCE:
             STEPS[ln.cmd](ctx, ln.args)
-    before = [ln.cmd for ln in lines[:first] if ln.cmd in _LAYOUT]
+    before = [k for k, ln in enumerate(lines[:first]) if ln.cmd in _LAYOUT]
+    notes = []
     if before:
-        _load_checkpoint(ctx, before[-1])
-    plans = [ln for ln in lines[:first] if ln.cmd == "floorplan"]
-    if plans and ctx.layouts:
-        STEPS["floorplan"](ctx, plans[-1].args)
+        k = before[-1]
+        why = _stale_checkpoint(ctx, lines[k].cmd, lines[:k + 1])
+        if not why:
+            _load_checkpoint(ctx, lines[k].cmd)
+        else:
+            # 2.0.4 (the second lead run, 2026-10-22): a recipe changed in red.fk, the build
+            # resumed on checkpoints laid from the old source, and the paste laid the old
+            # recipe. A stale checkpoint is laid out again from the source, never taken
+            notes.append(f"out/{lines[k].cmd} was laid from other source ({'; '.join(why)}): the "
+                         f"layout steps before {lines[first].cmd} ran again on the source as it is")
+            echo(notes[-1])
+            for j, ln in enumerate(lines[:first]):
+                if ln.cmd not in _LAYOUT and ln.cmd != "floorplan":
+                    continue
+                _report, checks = STEPS[ln.cmd](ctx, ln.args)
+                ctx.checks += [(ln.cmd, c) for c in checks]
+                _write_checkpoint(ctx, ln.cmd, lines[:j + 1])
+                stops = [c for c in checks if c.code.upper() in ctx.stop_on]
+                if stops:
+                    echo(f"stopped at line {ln.n} ({ln.cmd}), laid out again: {len(stops)} "
+                         f"{stops[0].code} line(s), first: {stops[0]}")
+                    _close(ctx)
+                    return 1, ctx
+    plans = [k for k, ln in enumerate(lines[:first]) if ln.cmd == "floorplan"]
+    if plans and ctx.layouts and not notes:
+        STEPS["floorplan"](ctx, lines[plans[-1]].args)
     width = len(lines)
     written = set()
     for i in range(first, last + 1):
         ln = lines[i]
         report, checks = STEPS[ln.cmd](ctx, ln.args)
+        if i == first:
+            report = report + notes
         ctx.checks += [(ln.cmd, c) for c in checks]
         text = [f"# {ln.text}   (line {ln.n} of {os.path.basename(script)})"] + report
         if checks:
@@ -1323,7 +1445,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
             fh.write(("\n" if ln.cmd in written else "") + "\n".join(text) + "\n")
         written.add(ln.cmd)
         if ln.cmd in _LAYOUT or ln.cmd == "floorplan":
-            _write_checkpoint(ctx, ln.cmd)
+            _write_checkpoint(ctx, ln.cmd, lines[:i + 1])
         stops = [c for c in checks if c.code.upper() in ctx.stop_on]
         head = report[0] if report else ""
         summary = (f"[{i + 1:>2}/{width}] {ln.text:<44} {head[:70]}"

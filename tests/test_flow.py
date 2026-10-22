@@ -163,6 +163,42 @@ class FlowTest(unittest.TestCase):
         self.assertIn("skipped, no game link", self.read("out/diff.txt"))
         self.assertIn("skipped, no game link", self.read("out/apply.txt"))
 
+    def test_a_resume_after_a_source_change_lays_out_again(self):
+        # 2.0.4 (the second lead run, 2026-10-22): a recipe changed in red.fk, the build resumed
+        # on checkpoints laid from the old source, and write_layout wrote (and the paste laid)
+        # the old recipe; the look then judged against that .fkp and said OK
+        def recipes():
+            lay = fkp.load(os.path.join(self.dir, "main.fkp"))
+            return sorted(e.attrs.get("recipe") for e in lay.entities.values()
+                          if e.key.startswith("ins/") and e.attrs.get("recipe"))
+
+        code, ctx = self.build(to="report_checks")
+        self.assertEqual(code, 0, ctx.log)
+        src = self.read("main.fk").replace("AsmRow<n=1, recipe=inserter>",
+                                           "AsmRow<n=1, recipe=assembling-machine-1>")
+        with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(src)
+        said = []
+        code, ctx = flow.run(self.script, "report_bom", "write_layout", CAT, echo=said.append)
+        self.assertEqual(code, 0, ctx.log)
+        self.assertEqual(recipes(), ["assembling-machine-1"])
+        self.assertIn("main.fk changed", said[0])
+        self.assertIn("main.fk changed", self.read("out/report_bom.txt"))
+        for step in ("place", "cover_robots", "floorplan"):         # the checkpoints are new too
+            with open(os.path.join(self.dir, "out", step, "main.fkp"), encoding="utf-8") as fh:
+                self.assertIn("recipe=assembling-machine-1", fh.read(), step)
+        # the same source again: the checkpoints are taken as they stand, nothing is laid again
+        said = []
+        code, ctx = flow.run(self.script, "report_bom", "write_layout", CAT, echo=said.append)
+        self.assertEqual(code, 0, ctx.log)
+        self.assertEqual([l.split("]")[0] for l in said], ["[15/19", "[16/19"])
+        self.assertEqual(flow.layout_source_changes(self.dir), [])
+        # a look judges against main.fkp: it says when the source changed since it was written
+        with open(os.path.join(self.dir, "main.fk"), "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("# an edit not built yet\n")
+        self.assertEqual(len(flow.layout_source_changes(self.dir)), 1)
+        self.assertIn("main.fk changed since main.fkp", flow.layout_source_changes(self.dir)[0])
+
     def test_stop_on_stops_on_a_check(self):
         src = self.read("main.fk").replace("net cable:  cable -> circ\n", "")
         with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8") as fh:
