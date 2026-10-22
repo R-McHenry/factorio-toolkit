@@ -334,6 +334,13 @@ def main(argv):
     if not os.path.exists(STAMP) and cfg["host"] != "local":
         pull(cfg)                          # first use: start from the host's copy
     if cmd == "build":
+        if "-h" in rest or "--help" in rest:
+            # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
+            # ran all 19 steps, the paste included)
+            print("fk build [--from STEP] [--to STEP]: the steps of game\\<surface>.build.fkb in "
+                  "order, design here and the game steps on the host; STEP is a step's name, or "
+                  "NAME:K for its K-th time (docs\\TOOLKIT.md, \"The build script\")")
+            return 0
         with _build_lock():
             code = build(cfg, rest)
         footer(cfg)
