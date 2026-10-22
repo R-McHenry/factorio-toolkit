@@ -63,6 +63,9 @@ belt is its net's last carrier and feeds the bus's first splitter; the bus's las
 tap's belt, its net's first. With a netlist, an edge between two nets' carriers is no LEAK where
 one of its ends is such a port of both nets (a consumer of the net the items leave, a driver of
 the one they enter), and a net's consumer that is another net's carrier counts as reached.
+
+A net of contact items (2.0: heat, ``templates.CONTACT``) has no carriers: it is connected when
+each driver's tiles touch each consumer's (a reactor beside its heat exchanger).
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
@@ -74,6 +77,7 @@ from dataclasses import dataclass, field
 
 from .elaborate import Check
 from .fkp import CARRIER_TYPES, natural_key
+from .templates import CONTACT
 
 __all__ = ["Node", "Graph", "Leak", "NetReport", "Report", "graph", "connect", "endpoints",
            "endpoint_box", "one_inserter", "HOLDER_TYPES", "REACH"]
@@ -743,11 +747,16 @@ def connect(ents, cat, nets=None) -> Report:
         drivers, consumers = table[name]
         missing = [k for k in _keys(drivers + consumers) if k not in g.nodes]
         reached, unreached = 0, []
+        contact = bool(items.get(name)) and all(
+            i in CONTACT for _k, i in items[name][0] + items[name][1] if i is not None)
         for d in drivers:
             if name in fluid:
                 starts = [nid for nid in mine_boxes.get(d, ()) if owners.get(nid) == name]
                 got = {nid[0] for nid in g.fluid_reach(starts, name, owners)
                        if owners.get(nid) == name}
+            elif contact:
+                got = {c for c in consumers if d in g.nodes and c in g.nodes
+                       and _touch(g.nodes[d], g.nodes[c])}
             else:
                 got = g.reach({d}, name, ends=set(consumers)) if d in g.nodes else set()
             for c in consumers:
@@ -773,6 +782,13 @@ def connect(ents, cat, nets=None) -> Report:
                for lk in leaks if lk.net not in reports]
     checks += [_ug_sideload_line(g, a, b) for a, b in ug_sides if g.nodes[a].net not in reports]
     return Report(g, reports, leaks, checks)
+
+
+def _touch(a, b):
+    """Two nodes' tiles share an edge (2.0: heat passes by contact)."""
+    tiles = set(b.tiles)
+    return any((x + dx, y + dy) in tiles for x, y in a.tiles
+               for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
 
 
 def _ug_sideload_line(g, a, b):

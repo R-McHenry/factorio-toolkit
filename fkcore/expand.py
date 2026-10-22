@@ -49,7 +49,8 @@ def belts(flat, key, side):
     hold = flat._in_hold if side == "in" else flat._out_hold
     m = flat.machines[key]
     order = list(m.needs if side == "in" else m.makes)
-    pairs = [(item, nets[0]) for (k, item), nets in hold.items() if k == key and item not in CONTACT]
+    pairs = [(item, nets[0]) for (k, item), nets in hold.items()
+             if k == key and item not in CONTACT]
     pairs.sort(key=lambda p: order.index(p[0]) if p[0] in order else len(order))
     out = []
     for item, net in pairs:

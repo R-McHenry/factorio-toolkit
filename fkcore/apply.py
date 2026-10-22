@@ -55,7 +55,8 @@ from . import codec, link, scene, sense
 from . import own as ownmod
 from .fkp import natural_key
 
-__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area", "paste_blueprint",
+__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
+           "paste_blueprint",
            "force_for", "scaffold", "rip_points", "rip_load", "rip_minutes", "moved",
            "rip_report"]
 

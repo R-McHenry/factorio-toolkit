@@ -19,9 +19,10 @@ A ``k=v`` value with whitespace, a quote, a backslash or ``#`` in it (a Literal'
 is written in shell-style single quotes, and a line is read the shell way, so a quoted ``#`` is
 data, not a comment.
 
-Circuits (2.0, drafts\\reactor-1.1\\CIRCUITS-1.1.md §3): a ``wire`` line is a wire net, a ``w`` line
-one physical wire of it between two entities of the layout (``.in`` / ``.out`` name a combinator's
-input or output connectors; without, a red wire takes connector 1 and a green one 2). The entity
+Circuits (2.0, drafts\\reactor-1.1\\CIRCUITS-1.1.md §3): a ``wire`` line is a wire net, a ``w``
+line one physical wire of it between two entities of the layout (``.in`` / ``.out`` name a
+combinator's input or output connectors; without, a red wire takes connector 1 and a green one
+2). The entity
 lines carry the settings (``if=``, ``logistic=``, ``read=``, ``filter=``, ``signals=``: see
 ``fkcore.codec``). Copper wires are not recorded: the codec derives them. The ``w`` lines are
 canonical with their two ends in natural key order, sorted by net and ends.
