@@ -10,10 +10,10 @@ gate, and the briefs stay short.
 
 | named feature in 2.0 | state |
 |---|---|
-| lanes: a net is one lane, so two nets can share a belt | its session waits to be started |
+| lanes: a net is one lane, so two nets can share a belt | its session runs |
 | throughput players lean on (`CAPACITY`) | the same session |
 | side-loading smelter arrays | the same session |
-| circuits and inserter limits in the source | its session waits to be started |
+| circuits and inserter limits in the source | its session runs |
 | the lead and worker player harness, Claude workers | in |
 | the lead plans ahead: `fk stage`, the horizon, Rory's 5-minute wait | in |
 | `CLOG` goes in two ways only | in |
