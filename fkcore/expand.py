@@ -27,13 +27,15 @@ from . import placer
 from .codec import config_text
 from .compose import turn
 from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
+from .templates import CONTACT
 from .terrain import fmt_amount
 
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
            "frame_of", "planned_frame"]
 
 _SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump",
-           "Boiler", "SteamEngine", "InfinityPipe", "Lab")
+           "Boiler", "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger",
+           "SteamTurbine", "Constant")
 _NO_DIRECTION = ("infinity-pipe",)          # fluid prototypes the game never turns
 _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)
@@ -41,11 +43,13 @@ _DY = (-1, 0, 1, 0)
 
 
 def belts(flat, key, side):
-    """[(net, [items])] for machine ``key``: one entry per distinct net, recipe order first."""
+    """[(net, [items])] for machine ``key``: one entry per distinct net, recipe order first. A
+    net of contact items (2.0: heat, ``templates.CONTACT``) is left out: it has no route, so no
+    role and no attach point."""
     hold = flat._in_hold if side == "in" else flat._out_hold
     m = flat.machines[key]
     order = list(m.needs if side == "in" else m.makes)
-    pairs = [(item, nets[0]) for (k, item), nets in hold.items() if k == key]
+    pairs = [(item, nets[0]) for (k, item), nets in hold.items() if k == key and item not in CONTACT]
     pairs.sort(key=lambda p: order.index(p[0]) if p[0] in order else len(order))
     out = []
     for item, net in pairs:
@@ -164,7 +168,8 @@ def _machine_attrs(m):
     if m.extra.get("role") in _REQUESTS and m.makes:
         item = next(iter(m.makes))
         attrs["item"] = item
-        fields.update(_request_fields(list(m.makes), m.extra.get("request"), m.makes[item]))
+        fields.update(_request_fields(list(m.makes), m.extra.get("request"), m.makes[item],
+                                      m.extra.get("max")))
         if m.extra.get("trash"):
             fields["request_filters"]["trash_not_requested"] = True
     if m.extra.get("limit") is not None:
@@ -179,10 +184,10 @@ def _machine_attrs(m):
 _REQUESTS = ("requester", "buffer")
 
 
-def _request_fields(item, request, rate):
+def _request_fields(item, request, rate, most=None):
     """The game's ``request_filters`` for one item, or a list of them (``item="a,b"``): each at
     the same count, ``request=`` if given, else a minute of the chest's ``rate`` (at least 10),
-    else 100."""
+    else 100; ``most`` (2.0, ``max=``) is each filter's upper bound, ``max_count``."""
     if request is not None:
         count = int(request)
     elif rate is not None and not math.isinf(rate):
@@ -190,8 +195,10 @@ def _request_fields(item, request, rate):
     else:
         count = 100
     items = item if isinstance(item, list) else [item]
+    top = {} if most is None else {"max_count": int(most)}
     return {"request_filters": {"sections": [{"index": 1, "filters": [
-        {"index": k + 1, "name": it, "quality": "normal", "comparator": "=", "count": count}
+        dict({"index": k + 1, "name": it, "quality": "normal", "comparator": "=", "count": count},
+             **top)
         for k, it in enumerate(items)]}]}}
 
 

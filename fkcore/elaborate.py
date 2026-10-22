@@ -20,7 +20,11 @@ A ``Bus`` instance is a net of its own, named as the instance (its belts and spl
 the loads that nets feed drive it, the taps that nets draw from consume it (``_bus_nets``). So a
 net ends at a load (``net iron1: smelt -> bus.load1``) or starts at a tap (``net fe: bus.tap1 ->
 gears``), and the bus joins them. A port no net names is in none, and no check line names it.
-Pure, stdlib only.
+
+Circuits (2.0): the ``signal``, ``wire``, ``behave`` and ``expect`` statements of every scope, a
+net's ``when`` and an instance's ``when`` are kept with their scope, and ``fkcore.circuits``
+resolves them into ``Flat.circuit`` after the nets, with its own checks (SIGNAL, WIRE, GATED,
+REQUIRE, LIMIT, GUARD). Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -72,6 +76,7 @@ class FlatNet:
     declared: bool
     line: int
     limited: bool = False      # `net NAME limited:` the source limits its makers (1.7)
+    when: tuple | None = None  # a gated net (2.0): (lang.Cond, its scope)
 
     @property
     def sushi(self):
@@ -101,6 +106,7 @@ class Inst:
     line: int
     literal: tuple | None = None   # Literal<file>: (entities, frame size, file origin, sig)
     auto: tuple | None = None      # n=auto: (lo, hi), the bounds of the count in params["n"]
+    when: tuple | None = None      # its machines' own enable condition (2.0): (lang.Cond, scope)
 
 
 @dataclass
@@ -114,6 +120,8 @@ class Flat:
     covers: list = field(default_factory=list)      # [(lang.Cover, scope path)]
     checks: list = field(default_factory=list)      # [Check]
     scopes: dict = field(default_factory=dict)      # scope path -> {name: Inst}
+    circuit_src: dict = field(default_factory=dict)  # kind -> [(lang node, scope path)] (2.0)
+    circuit: object = None                          # fkcore.circuits.Circuit (2.0)
 
     def resolve_ref(self, ref, scope=""):
         """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine."""
@@ -178,6 +186,8 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _resolve_nets(flat)
     _bus_nets(flat)
     _endpoint_checks(flat)
+    from . import circuits
+    flat.circuit = circuits.resolve(flat, cat)
     return flat
 
 
@@ -227,6 +237,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             if auto is not None:
                 node.params = dict(inst.params, n=auto[2])
                 node.auto = auto[:2]
+        if getattr(inst, "when", None) is not None:
+            node.when = (inst.when, prefix)
         scope[inst.name] = node
         flat.insts[path] = node
     for net in mod.nets:
@@ -242,6 +254,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         flat.asserts.append((a, prefix))
     for c in mod.covers:
         flat.covers.append((c, prefix))
+    for kind in ("signals", "wires", "behaves", "expects"):
+        flat.circuit_src.setdefault(kind, []).extend((node, prefix)
+                                                     for node in getattr(mod, kind, ()))
 
 
 def _auto(flat, path, inst, src):
@@ -398,9 +413,11 @@ def _resolve_nets(flat):
 
     for name, p in pending:
         w = work[name]
+        when = getattr(p.net, "when", None)
         flat.nets[name] = FlatNet(name, w["items"], w["drivers"], w["consumers"],
                                   p.net.items is not None, p.net.line,
-                                  getattr(p.net, "limited", False))
+                                  getattr(p.net, "limited", False),
+                                  None if when is None else (when, p.scope))
     flat._out_hold, flat._in_hold = out_hold, in_hold
 
 
@@ -443,7 +460,7 @@ _STORES = ("provider", "storage")
 #: the 1.1 check lines about limited production (tests of other things leave them out)
 ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT")
 #: chests that take any item that reaches them
-_TAKE_ALL = ("provider", "storage", "buffer")
+_TAKE_ALL = ("provider", "storage", "buffer", "plain")
 
 
 def _unlimited(m):

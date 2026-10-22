@@ -3,22 +3,37 @@
     file    := (import | module | stmt)*        # the file's top level is the factory body
     import  := 'import' Name (',' Name)* 'from' STRING
     module  := 'module' Name '{' stmt* '}'
-    stmt    := inst | net | assert | cover
-    inst    := name '=' Kind ('<' param (',' param)* '>')? hint*
-    net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs
+    stmt    := inst | net | assert | cover | signal | wire | behave | expect
+    inst    := name '=' Kind ('<' param (',' param)* '>')? hint* ('when' cond)?
+    net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs ('when' cond)?
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
     param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
     value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word ')'
+    signal  := 'signal' name ('=' word)?                # pinned to a game signal, or auto
+    wire    := 'wire' name ('red' | 'green') ':' refs ('->' refs)?
+    cond    := operand op (operand | number)       op := '<' | '>' | '<=' | '>=' | '=' | '==' | '!='
+    operand := name ('.' word)+                         # the last word is the signal
+    behave  := 'behave' name 'on' name '{' line* '}'    # state | require | expect | cycle | fails
+    expect  := 'expect' <the rest of the line>
 
 The tokenizer is the one in C:\\fk-lead\\repo\\fkc\\lang.py (d6018d3), with ``*`` added for ``X.*``.
 Words may contain dashes (item names); instance, module and net names may not. Every node keeps its
 source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
 an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7, Rory 2026-10-21)
 says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
-and implements no limit. Pure, stdlib only.
+and implements no limit.
+
+Circuits (2.0, Rory 2026-10-21: "circuit wiring in the source, with all circuit and logic
+conditions in the .fk code"; the draft is drafts\\reactor-1.1\\CIRCUITS-1.1.md): ``signal`` names a
+game signal (``signal temp = signal-T``) or leaves it to the build; ``wire`` is a net of signals,
+one colour; ``when`` gates a net (every inserter of its route) or enables a machine. A condition's
+operand is ``W.S`` (signal S on wire W), ``network.S`` (the logistic network's count) or ``I.S``
+(what instance I puts on a wire). ``behave`` and ``expect`` keep their lines as written, by line:
+the tokenizer drops newlines, so a line is the tokens that share a line number. The circuit
+meaning is ``fkcore.circuits``. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -26,7 +41,8 @@ import re
 from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Assert", "Cover", "Module",
-           "File", "Auto", "AUTO_TOP"]
+           "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand", "Behave", "Expect",
+           "COMPARATORS"]
 
 
 class FkSyntaxError(Exception):
@@ -39,13 +55,17 @@ _TOKEN = re.compile(r"""
     (?P<ws>[ \t\r]+) | (?P<nl>\n) | (?P<comment>\#[^\n]*)
   | (?P<string>"[^"\n]*")
   | (?P<num>-?\d+(?:\.\d+)?(?![A-Za-z_\-]))
-  | (?P<op>->|>=|<=|==|[{}()\[\]<>,:=|@./*])
+  | (?P<op>->|>=|<=|==|!=|[{}()\[\]<>,:=|@./*])
   | (?P<word>[A-Za-z_](?:[A-Za-z0-9_]|-(?!>))*)
 """, re.X)
 
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _UNITS = {"s": 1.0, "min": 60.0, "h": 3600.0}
 _COVER_KINDS = ("power", "robots")
+_COLOURS = ("red", "green")
+#: a condition's comparators as written in the source (``==`` is ``=``)
+COMPARATORS = ("<", ">", "<=", ">=", "=", "!=")
+_BEHAVE = ("state", "require", "expect", "cycle", "fails")
 #: the top of a plain ``n=auto``: a bound that never stops a real design, only a runaway one
 AUTO_TOP = 100
 
@@ -100,12 +120,34 @@ class Ref:
 
 
 @dataclass
+class Operand:
+    """``W.S``, ``network.S`` or ``I.S``: ``source`` is everything before the last dot."""
+    source: list         # ["fuel_ctl"], ["network"], ["iron", "box"]
+    signal: str          # "temp", "signal-T", "iron-plate"
+
+    def __str__(self):
+        return ".".join(self.source + [self.signal])
+
+
+@dataclass
+class Cond:
+    left: Operand
+    op: str              # one of COMPARATORS
+    right: object        # Operand or a number
+    line: int
+
+    def __str__(self):
+        return f"{self.left} {self.op} {self.right}"
+
+
+@dataclass
 class Inst:
     name: str
     kind: str
     params: dict
     hints: dict
     line: int
+    when: Cond | None = None   # the machine's own enable condition
 
 
 @dataclass
@@ -116,6 +158,38 @@ class Net:
     consumers: list      # [Ref]
     line: int
     limited: bool = False  # the source says each maker on it is limited (silences CLOG only)
+    when: Cond | None = None   # a gated net: its route's inserters move items while it holds
+
+
+@dataclass
+class Signal:
+    name: str
+    game: str | None     # the pinned game signal, or None: the build picks one
+    line: int
+
+
+@dataclass
+class Wire:
+    name: str
+    colour: str          # "red" | "green"
+    drivers: list        # [Ref]: instances that put signals on it (a net: its belt reads)
+    consumers: list      # [Ref]: instances or gated nets that read it
+    line: int
+
+
+@dataclass
+class Behave:
+    """A control loop's states and what is normal in each, as written (CIRCUITS-1.1.md §4)."""
+    name: str
+    wire: str
+    lines: list          # [(kind, text, line)], kind one of state, require, expect, cycle, fails
+    line: int
+
+
+@dataclass
+class Expect:
+    text: str
+    line: int
 
 
 @dataclass
@@ -143,6 +217,10 @@ class Module:
     nets: list = field(default_factory=list)
     asserts: list = field(default_factory=list)
     covers: list = field(default_factory=list)
+    signals: list = field(default_factory=list)
+    wires: list = field(default_factory=list)
+    behaves: list = field(default_factory=list)
+    expects: list = field(default_factory=list)
 
 
 @dataclass
@@ -257,10 +335,84 @@ class _P:
             mod.asserts.append(self.assert_())
         elif tok.text in _COVER_KINDS and self.peek(1).kind == "word" and self.peek(2).text == ":":
             mod.covers.append(self.cover())
+        elif tok.text == "signal" and self.peek(1).kind == "word":
+            mod.signals.append(self.signal())
+        elif tok.text == "wire" and self.peek(1).kind == "word" and self.peek(2).text in _COLOURS:
+            mod.wires.append(self.wire())
+        elif tok.text == "behave" and self.peek(1).kind == "word" and self.peek(2).text == "on":
+            mod.behaves.append(self.behave())
+        elif tok.text == "expect" and self.peek(1).text != "=":
+            mod.expects.append(self.expect_line())
         elif self.peek(1).text == "=":
             mod.insts.append(self.inst())
         else:
             self.err(f"expected an instance, net, assert or cover, got {tok.text!r}")
+
+    def rest_of_line(self, line):
+        """The tokens left on source line ``line``, joined as written (one space between)."""
+        out = []
+        while self.peek().kind != "eof" and self.peek().line == line:
+            out.append(self.next().text)
+        text = " ".join(out)
+        return re.sub(r" ?([.,:]) ?", lambda m: m.group(1) + (" " if m.group(1) != "." else ""),
+                      text).strip()
+
+    def signal(self):
+        line = self.expect("signal").line
+        name = self.name("signal name").text
+        game = None
+        if self.accept("="):
+            game = self.word("a game signal (signal-T, iron-plate)").text
+        return Signal(name, game, line)
+
+    def wire(self):
+        line = self.expect("wire").line
+        name = self.name("wire name").text
+        colour = self.next().text
+        self.expect(":")
+        drivers = self.refs()
+        consumers = self.refs() if self.accept("->") else []
+        return Wire(name, colour, drivers, consumers, line)
+
+    def operand(self):
+        tok = self.name("a wire, network or instance")
+        parts = [tok.text]
+        if self.peek().text != ".":
+            self.err(f"a condition reads W.SIGNAL, network.ITEM or INSTANCE.SIGNAL, got "
+                     f"{tok.text!r}", tok)
+        while self.accept("."):
+            parts.append(self.word("a signal").text)
+        return Operand(parts[:-1], parts[-1])
+
+    def cond(self):
+        line = self.peek().line
+        left = self.operand()
+        op = self.next()
+        text = "=" if op.text == "==" else op.text
+        if text not in COMPARATORS:
+            self.err(f"expected a comparison ({', '.join(COMPARATORS)}), got {op.text!r}", op)
+        right = self.number() if self.peek().kind == "num" else self.operand()
+        return Cond(left, text, right, line)
+
+    def behave(self):
+        line = self.expect("behave").line
+        name = self.name("behave name").text
+        self.expect("on")
+        wire = self.name("wire name").text
+        self.expect("{")
+        lines = []
+        while not self.accept("}"):
+            tok = self.next()
+            if tok.kind == "eof":
+                self.err(f"behave {name} is not closed", tok)
+            if tok.text not in _BEHAVE:
+                self.err(f"a behave line starts with {', '.join(_BEHAVE)}, got {tok.text!r}", tok)
+            lines.append((tok.text, self.rest_of_line(tok.line), tok.line))
+        return Behave(name, wire, lines, line)
+
+    def expect_line(self):
+        tok = self.expect("expect")
+        return Expect(self.rest_of_line(tok.line), tok.line)
 
     def ref(self):
         tok = self.name("instance name")
@@ -293,7 +445,8 @@ class _P:
         drivers = self.refs()
         self.expect("->")
         consumers = self.refs()
-        return Net(name, items, drivers, consumers, line, limited)
+        when = self.cond() if self.accept("when") else None
+        return Net(name, items, drivers, consumers, line, limited, when)
 
     def assert_(self):
         line = self.expect("assert").line
@@ -352,7 +505,8 @@ class _P:
                     rot = self.number()
                 self.expect(")")
                 hints["at"] = (x, y, rot)
-        return Inst(tok.text, kind, params, hints, tok.line)
+        when = self.cond() if self.accept("when") else None
+        return Inst(tok.text, kind, params, hints, tok.line, when)
 
     def param(self):
         key = self.name("parameter").text

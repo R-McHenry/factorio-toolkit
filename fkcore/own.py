@@ -11,7 +11,14 @@ an apply pasted (its key, name, position, direction and, for a carrier, its surf
   who touched it (a ``last_user``) makes it a foreign change again, under the policy. The 0534 run
   (2026-10-20) kept its own dropped rows under ``watch plots: keep``, left 166 entities standing
   outside every plot after a plot move, and 28 ghosts after a factory was emptied;
-- a carrier laid again under another net is known by the net it was pasted under (``nets``).
+- a carrier laid again under another net is known by the net it was pasted under (``nets``);
+- 2.0 (circuits in the source): an entity pasted with circuit settings (a condition, a reading, a
+  filter, its wires; a chest's slot limit too) keeps a signature of them (``settings``). When the
+  design's differ, the next apply orders it out before the paste, so robots lay it fresh with the
+  new ones: a changed limit reaches the world on the next build (the 2039 run's mall script set
+  its limits again by Lua after every rebuild, and its chest bars by hand: "a limit change is not
+  re-pasted"). A record written before 2.0 has no signatures (``UNKNOWN``, kept as ``?``):
+  nothing is laid fresh for them until an apply writes the record again.
 
 The record is seeded once, when there is none, from the .fkp files last written (``seed``: the
 flow's write_layout does it before writing the new ones, so a run upgraded from 1.1 starts from
@@ -22,6 +29,7 @@ but for ``load`` and ``save``; stdlib only.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -30,7 +38,10 @@ from . import compose
 from . import fkp as fkpmod
 
 __all__ = ["Row", "at", "path", "load", "save", "rows_of", "seed", "dropped", "in_scope",
-           "update", "nets"]
+           "update", "nets", "settings", "resettled", "UNKNOWN"]
+
+#: a row's settings signature in a record written before 2.0: not known
+UNKNOWN = "?"
 
 
 @dataclass(frozen=True)
@@ -41,6 +52,7 @@ class Row:
     y: float
     dir: int | None = None
     net: str | None = None            # a carrier's surface net, "<factory>/<net>"
+    sig: str | None = None            # its circuit settings' signature (2.0), None: it has none
 
 
 def at(name, x, y):
@@ -60,8 +72,9 @@ def load(game, surface):
     with open(p, encoding="utf-8") as fh:
         data = json.load(fh)
     out = {}
-    for key, name, x, y, d, net in data.get("rows") or ():
-        row = Row(key, name, x, y, d, net)
+    known = data.get("sigs") is True
+    for key, name, x, y, d, net, *rest in data.get("rows") or ():
+        row = Row(key, name, x, y, d, net, rest[0] if rest else (None if known else UNKNOWN))
         out[at(name, x, y)] = row
     return out
 
@@ -71,8 +84,11 @@ def save(game, surface, record):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     rows = sorted(record.values(), key=lambda r: (fkpmod.natural_key(r.key), r.x, r.y))
     head = json.dumps({"surface": surface,
-                       "about": "the toolkit's own entities: what the applies pasted (fkcore.own)"})
-    body = ",\n".join(json.dumps([r.key, r.name, r.x, r.y, r.dir, r.net]) for r in rows)
+                       "about": "the toolkit's own entities: what the applies pasted (fkcore.own)",
+                       "sigs": True})
+    body = ",\n".join(json.dumps([r.key, r.name, r.x, r.y, r.dir, r.net]
+                                 + ([r.sig] if r.sig is not None else []))
+                      for r in rows)
     with open(p, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(head[:-1] + ', "rows": [\n' + body + ("\n" if body else "") + "]}\n")
 
@@ -84,12 +100,61 @@ def _net(e):
     return f"{e.plot}/{net}" if e.plot else net
 
 
+def settings(e, wires=()):
+    """The signature of entity ``e``'s circuit settings: its typed circuit attrs, a chest's slot
+    limit (``bar``) and the circuit wires ``wires`` (``w`` records) that touch it, by colour and
+    the other end's key. None when it has none of them."""
+    from .codec import CIRCUIT_ATTRS
+    got = [[k, e.attrs[k]] for k in CIRCUIT_ATTRS if e.attrs.get(k)]
+    try:
+        bar = json.loads(e.attrs.get("config") or "{}").get("bar")
+    except (ValueError, AttributeError):
+        bar = None
+    if bar is not None:
+        got.append(["bar", bar])
+    ends = []
+    for w in wires:
+        a, b = fkpmod.split_end(w.a)[0], fkpmod.split_end(w.b)[0]
+        if e.key in (a, b):
+            ends.append([w.colour, w.a if e.key == b else w.b])
+    if ends:
+        got.append(["wires", sorted(ends)])
+    if not got:
+        return None
+    return hashlib.sha1(json.dumps(got, separators=(",", ":")).encode()).hexdigest()[:10]
+
+
 def rows_of(s):
     """{at: Row} of every entity of a composed surface (``compose.Surface``)."""
     out = {}
+    touch = {}
+    for w in getattr(s, "wires", ()):
+        for end in (w.a, w.b):
+            touch.setdefault(fkpmod.split_end(end)[0], []).append(w)
     for key in sorted(s.entities, key=fkpmod.natural_key):
         e = s.entities[key]
-        out[at(e.name, e.x, e.y)] = Row(key, e.name, e.x, e.y, e.dir, _net(e))
+        out[at(e.name, e.x, e.y)] = Row(key, e.name, e.x, e.y, e.dir, _net(e),
+                                        settings(e, touch.get(key, ())))
+    return out
+
+
+def resettled(record, s, verdicts):
+    """The verdicts (OK, DRIFT or GHOST: it stands or is pending) of entities the record shows
+    pasted with other circuit settings than the design ``s`` has now: the next apply lays them
+    fresh. A row the record has no signature for (``UNKNOWN``) is left alone."""
+    if not record:
+        return []
+    design = rows_of(s)
+    out = []
+    for v in verdicts:
+        if v.verdict not in ("OK", "DRIFT", "GHOST"):
+            continue
+        k = at(v.name, v.x, v.y)
+        row, now = record.get(k), design.get(k)
+        if row is None or now is None or row.sig == UNKNOWN:
+            continue
+        if row.sig != now.sig:
+            out.append(v)
     return out
 
 

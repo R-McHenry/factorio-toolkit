@@ -703,12 +703,30 @@ def _bridge_in_plots(ents, sf, cat):
     return keep, sorted(gone, key=fkp.natural_key)
 
 
+def _circuits(ctx):
+    """2.0 (circuits in the source, ``fkcore.circuits``): each factory's circuit settings and
+    wires, laid again from its source on the layout as it stands, before the floorplan composes
+    it. -> (report lines, checks)."""
+    from . import circuits
+    lines, checks = [], []
+    for factory, lay in list(ctx.layouts.items()):
+        flat = ctx.flats.get(factory)
+        if flat is None:
+            continue
+        new, clines, cchecks = circuits.lay(flat, lay, ctx.cat)
+        ctx.layouts[factory] = new
+        lines += [f"circuits {factory}: {line}" for line in clines]
+        checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in cchecks]
+        checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
+    return lines, checks
+
+
 def s_floorplan(ctx, args):
     sf = ctx.surface
     o = _opts(args)
     infra_path = os.path.join(ctx.root, f"{sf.name}.fkp")
     infra = None
-    lines, checks = [], []
+    lines, checks = _circuits(ctx)
     if os.path.exists(infra_path):
         prev = fkp.load(infra_path)
         ents = prev.entities

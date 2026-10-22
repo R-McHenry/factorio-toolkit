@@ -55,7 +55,7 @@ from . import codec, link, scene, sense
 from . import own as ownmod
 from .fkp import natural_key
 
-__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
+__all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area", "paste_blueprint",
            "force_for", "scaffold", "rip_points", "rip_load", "rip_minutes", "moved",
            "rip_report"]
 
@@ -86,6 +86,7 @@ class ApplyReport:
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
     hand: list = field(default_factory=list)   # placed by hand, replaced or removed (2.0)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
+    resettled: list = field(default_factory=list)  # laid fresh for new circuit settings (2.0)
     own: dict | None = None            # the record of what the applies pasted, after this one
     chunks: int = 0
     seeded: int = 0
@@ -119,6 +120,9 @@ class ApplyReport:
             items = sorted({i for v in self.relaid for i in v.wrong_items})
             out.append(f"  {len(self.relaid)} carriers laid under another net held "
                        f"{', '.join(items)}: ordered up, and the paste lays them fresh")
+        if self.resettled:
+            out.append(f"  {len(self.resettled)} with new circuit settings (a limit, a condition, a "
+                       "wire): ordered up, and the paste lays them fresh with the new ones")
         if self.placed_alone:
             out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts")
         if self.misplaced:
@@ -170,6 +174,14 @@ def scope_area(rows, cat, margin=2):
     if not xs:
         return None
     return (min(xs) - margin, min(ys) - margin, max(xs) + 1 + margin, max(ys) + 1 + margin)
+
+
+def paste_blueprint(rows, s, cat, description=None, label=None):
+    """The blueprint an apply pastes: ``rows`` with their poles' copper wires (derived) and the
+    surface's circuit wires (2.0, its ``w`` records) whose ends are both among them."""
+    return codec.blueprint(rows, description=description, label=label,
+                           wires=codec.pole_wires(rows, cat),
+                           links=codec.links_of(rows, getattr(s, "wires", ())))
 
 
 def _anchor(rows, cat):
@@ -224,6 +236,10 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.relaid = [v for v in before.verdicts if v.renet and v.wrong_items
                       and v.verdict in ("OK", "DRIFT")]
         _decon(r, s.name, force, [(v.name, v.x, v.y) for v in rep.relaid])
+        # 2.0: settings the design changed (the record shows what was pasted) are laid fresh
+        rep.resettled = [v for v in ownmod.resettled(own, s, before.verdicts)
+                         if v not in rep.relaid]
+        _decon(r, s.name, force, [(v.name, v.x, v.y) for v in rep.resettled])
         rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
     if not rows:
         rep.notes.append("nothing designed in this scope")
@@ -241,8 +257,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         elif ore:
             rep.notes.append("no ore seeded: the drills stand on the terrain's ore")
     desc = f"fk apply {s.name} area {','.join(str(int(v)) for v in area)} ({len(rows)} entities)"
-    bp = codec.blueprint(rows, description=desc, label=label or f"apply {s.name}",
-                         wires=codec.pole_wires(rows, cat))
+    bp = paste_blueprint(rows, s, cat, desc, label or f"apply {s.name}")
     at = _anchor(rows, cat)
     rep.pasted = _int(link.paste(r, s.name, force, bp, at))
     want = {(row["name"], float(row["x"]), float(row["y"])) for row in rows}
