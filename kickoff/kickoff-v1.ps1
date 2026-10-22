@@ -41,6 +41,9 @@ $dirty = git -C $v5 status --short -- fkcore agent kickoff scenario
 if ($dirty) { Write-Host "note: uncommitted changes in v5; the run uses the commit $sha, not them" }
 $stamp = Get-Date -Format "yyyyMMdd-HHmm"
 $name = if ($Name) { "$stamp-$Name" } else { "$stamp-$Prompt" }
+# the game's save takes ".x" for an extension: "lead-2.0" was saved as "lead-2.zip" and the
+# kickoff stopped looking for its save (2026-10-22)
+if ($name -match '\.') { throw "a run name has no dots ($name): the game would save it under another name" }
 $run = Join-Path $P "runs\$name"
 
 # one run at a time: an earlier session would share the world with this one
