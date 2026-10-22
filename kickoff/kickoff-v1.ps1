@@ -7,6 +7,7 @@ kickoff-v1: a V1 player run, the laptop side (the V1 successor of v4-hand\kickof
   kickoff-v1.cmd -NoLaunch             no DeepSeek (the map and the run folder only)
   kickoff-v1.cmd -Player claude        a Claude Code player: its CLAUDE.md, and its goal loop
                                        (claude_loop.py) in a window of its own (the run's play.cmd)
+  kickoff-v1.cmd -Name NAME            the run is <time>-NAME (default: the prompt's name)
   kickoff-v1.cmd -Player claude -Workers claude
                                        2.0: a Claude lead player (agent\prompts\lead-v1.md unless
                                        -Prompt says otherwise) with Claude worker subagents
@@ -21,7 +22,8 @@ run folder C:\fk-player\runs\<time>-<prompt> from new_run.py (everything from th
 then DeepSeek as computah through C:\fk-player\launch.ps1, whose preflight and first message
 come from the run's launch.json; then the feed window.
 #>
-param([string]$Prompt = "core-v1", [switch]$NoReset, [switch]$NoLaunch, [string]$Sha = "HEAD",
+param([string]$Prompt = "core-v1", [string]$Name = "", [switch]$NoReset, [switch]$NoLaunch,
+      [string]$Sha = "HEAD",
       [ValidateSet("deepseek", "claude")][string]$Player = "deepseek",
       [ValidateSet("none", "claude")][string]$Workers = "none", [string]$WorkerModel = "inherit")
 $ErrorActionPreference = "Stop"
@@ -38,7 +40,7 @@ if ($LASTEXITCODE -ne 0) { throw "no commit $Sha in $v5" }
 $dirty = git -C $v5 status --short -- fkcore agent kickoff scenario
 if ($dirty) { Write-Host "note: uncommitted changes in v5; the run uses the commit $sha, not them" }
 $stamp = Get-Date -Format "yyyyMMdd-HHmm"
-$name = "$stamp-$Prompt"
+$name = if ($Name) { "$stamp-$Name" } else { "$stamp-$Prompt" }
 $run = Join-Path $P "runs\$name"
 
 # one run at a time: an earlier session would share the world with this one
