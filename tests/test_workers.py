@@ -186,6 +186,15 @@ class LoopFeedTest(unittest.TestCase):
         self.assertEqual(state["reports"], ["Waiting for the scout.",
                                             "Copper next: plot copper at 110,-50."])
 
+    def test_a_background_shell_task_is_no_worker(self):
+        # the first lead run (2026-10-21 20:40): the lead's background command came back as a
+        # task_notification with no Agent call behind it
+        lines, state = [], {"sid": "", "tools": 0, "result": None, "context": 0, "agents": {}}
+        claude_loop.feed({"type": "system", "subtype": "task_notification", "tool_use_id": "b1",
+                          "status": "completed", "summary": "Check research and kit stock"},
+                         lines.append, state)
+        self.assertEqual(lines, ["background task completed: Check research and kit stock"])
+
     def test_the_hand_over_and_fresh_messages_name_the_files(self):
         self.assertIn("NOTES.md", claude_loop.HANDOVER)
         self.assertIn("GOAL.md", claude_loop.HANDOVER)

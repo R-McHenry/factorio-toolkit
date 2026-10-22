@@ -15,7 +15,7 @@ report back briefly. Rory watches the world and enjoys seeing it come together.
   toolkit), `docs\LANGUAGE.md` the factory language, `docs\EXAMPLES.md` factories that build
   cleanly, `docs\STRATEGY.md` Rory's advice.
 - `NOTES.md`: what the players before wrote down and what the lead keeps. `helpers\`: reusable
-  features (its README says how).
+  features (its README says how). `AGENTS.md` is the lead's brief, not yours.
 
 Read what your task needs.
 

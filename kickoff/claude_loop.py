@@ -233,8 +233,13 @@ def feed(ev, log, state):
     t = ev.get("type")
     agents = state.setdefault("agents", {})
     if t == "system" and ev.get("subtype") == "task_notification":
-        what = agents.pop(ev.get("tool_use_id"), None) or ev.get("description") or ""
         rep = (ev.get("handback_report") or {}).get("text") or ev.get("summary") or ""
+        if ev.get("tool_use_id") not in agents:
+            # a background shell command of the player's, not a worker (the first lead run's
+            # log called one "worker completed" with nothing in it, 2026-10-21)
+            log(f"{pad}background task {ev.get('status', 'done')}: {short(rep, 200)}")
+            return
+        what = agents.pop(ev.get("tool_use_id"))
         use = ev.get("usage") or {}
         log(f"worker {ev.get('status', 'done')} ({short(what, 80)}; "
             f"{int(use.get('total_tokens') or 0) // 1000}k tokens, {use.get('tool_uses', 0)} tool "
