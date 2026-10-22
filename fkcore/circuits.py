@@ -24,8 +24,11 @@ What the source says, and what the layout gets:
   onto the belt of a net that ends in a chest, runs while the logistic network holds fewer than
   N of it (``logistic=ITEM<N``, no wire). ``fill=N``: every inserter that takes it straight into a
   chest runs while that chest holds fewer than N (``if=ITEM<N`` and a red wire, the chest's
-  ``.signals``). These are real limits; they don't silence ``CLOG`` (Rory, 2026-10-21: only one
-  inserter from the source into each sink, or ``limited``, does).
+  ``.signals``), and every inserter that feeds each of its machines takes the same condition on the
+  same wire, so the machine stops at most one craft past N. A machine with no input inserter (a
+  belt or the ground feeds it) has nothing to gate: a ``LIMIT`` line says it keeps crafting past N
+  and ``keep=`` may suit better. These are real limits; they don't silence ``CLOG`` (Rory,
+  2026-10-21: only one inserter from the source into each sink, or ``limited``, does).
 - ``guard`` on a crafter: it reads its recipe's ingredients (``read=ingredients``) onto a red wire
   to every inserter that feeds it, which sets its filters from them (``filter=circuit``). A
   recipe changed in the game changes what they carry, with no script and no new paste of them.
@@ -565,7 +568,7 @@ class _Layer:
     def limits(self):
         for path, kind, n in self.c.limits:
             inst = self.flat.insts[path]
-            done, onto_belt, shared = [], 0, set()
+            done, held, unfed, onto_belt, shared = [], set(), set(), 0, set()
             for key in inst.machines:
                 makes = self.flat.machines[key].makes
                 for ins, dst in self.hops_out(key):
@@ -598,6 +601,17 @@ class _Layer:
                             self.join(wire, dst)
                             self.join(wire, ins)
                             done.append(ins)
+                            for mkey in inst.machines:
+                                feeds = self.hops_in(mkey)
+                                if not feeds:
+                                    unfed.add(mkey)
+                                for feed in feeds:
+                                    if feed in held:          # already on this pass's one wire
+                                        continue
+                                    if self.set(feed, "if", f"{item}<{n}",
+                                                f"{path} fill={n}"):
+                                        self.join(wire, feed)
+                                        held.add(feed)
                     elif self.set(ins, "logistic", f"{item}<{n}", f"{path} keep={n}"):
                         done.append(ins)
             what = (f"the logistic network holds fewer than {n}" if kind == "keep"
@@ -606,6 +620,10 @@ class _Layer:
                 self.lines.append(f"{path} {kind}={n}: {len(done)} inserter"
                                   f"{'s run' if len(done) != 1 else ' runs'} while {what} "
                                   f"({', '.join(done[:4])}{' ...' if len(done) > 4 else ''})")
+            if kind == "fill" and held:
+                self.lines.append(f"  {path} fill={n}: {len(held)} input inserter"
+                                  f"{'s hold' if len(held) != 1 else ' holds'} the machine on the "
+                                  "same wire, so it finishes at most the craft in progress")
             if kind == "fill" and onto_belt:
                 self.check("LIMIT", path, f"fill={n}: {onto_belt} of its inserters drop onto a "
                            "belt, not into a chest, so there is no chest to count; keep= counts "
@@ -614,6 +632,11 @@ class _Layer:
                 self.check("LIMIT", path, f"{kind}={n}: no inserter takes its product into a chest "
                            "(straight in, or onto the belt of a net that ends in a chest), so "
                            "nothing is limited")
+            if kind == "fill" and unfed:
+                self.check("LIMIT", path, f"fill={n}: no input inserter feeds "
+                           f"{', '.join(sorted(unfed, key=fkpmod.natural_key))}, so there is "
+                           f"nothing to gate: the machine keeps crafting past {n}; keep= may suit "
+                           "better")
             if kind == "keep" and shared and done:
                 self.lines.append(f"  {path} keep={n} also holds back what its belt carries to "
                                   f"{', '.join(sorted(shared))}")

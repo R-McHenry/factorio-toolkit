@@ -185,8 +185,11 @@ pipe = AsmRow<n=2, recipe=pipe, keep=100>
   a products belt into one chest, each maker keeps its own item, and the chest stays unlimited.
   The maker's inserters must be in a logistic network (a roboport's orange area).
 - `fill=N`: every inserter that takes its product straight into a chest runs while that chest
-  holds fewer than N (a red wire from the chest and a circuit condition). It needs no robots, and
-  it stops a one-off crafter at N in its chest: its inserter stops, then the machine.
+  holds fewer than N (a red wire from the chest and a circuit condition), and every inserter that
+  feeds each machine takes the same condition on the same wire: it stops feeding at N, so the
+  machine finishes at most the craft in progress. It needs no robots. A machine with no input
+  inserter (a belt or the ground feeds it) cannot be held: a `LIMIT` line says it keeps crafting
+  past N, and `keep=` may suit better.
 - A limit where nothing goes into a chest (gears that feed machines only) is a `LIMIT` line.
 - A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
   `limited` (once each maker on it has its limit).
