@@ -134,10 +134,50 @@ class LimitTest(unittest.TestCase):
 
     def test_fill_counts_in_the_chest_by_a_red_wire(self):
         _flat, lay, lines, cks = laid(mall(ins=", fill=50"))
-        self.assertEqual(with_attr(lay, "if"), {"~inss/i0": "inserter<50"})
+        ifs = with_attr(lay, "if")
+        self.assertEqual(set(ifs), {"~inss/i0", "~circs/i1", "~fe/i3", "~gears/i2"})
+        self.assertEqual(set(ifs.values()), {"inserter<50"})
         self.assertEqual(lay.wirenets, {"ibox.signals": fkp.WireNet("ibox.signals", "red")})
-        self.assertEqual(lay.wires, [fkp.Wire("ibox.signals", "red", "ibox/c0", "~inss/i0")])
+        self.assertEqual({w.net for w in lay.wires}, {"ibox.signals"})
+        self.assertEqual({w.a for w in lay.wires} | {w.b for w in lay.wires},
+                         {"ibox/c0"} | set(ifs))
         self.assertEqual(cks, [])
+
+    def test_fill_holds_the_machine_by_gating_what_feeds_it(self):
+        # the live A7 case: a one-off crafter fed from a chest, its product into a chest
+        src = """
+feed = Chest<requester, item=iron-plate, rate=2/s>   @(0, 2)
+sm   = Assembler<recipe=iron-gear-wheel, fill=6>     @(4, 2)
+box  = Chest<provider>                               @(10, 2)
+net in:  feed -> sm
+net out: sm -> box
+"""
+        _flat, lay, lines, cks = laid(src)
+        self.assertEqual(with_attr(lay, "if"), {"~in/i0": "iron-gear-wheel<6",
+                                                "~out/i0": "iron-gear-wheel<6"})
+        self.assertEqual(lay.wirenets, {"box.signals": fkp.WireNet("box.signals", "red")})
+        self.assertEqual({w.a for w in lay.wires} | {w.b for w in lay.wires},
+                         {"box/c0", "~in/i0", "~out/i0"})
+        self.assertIn("  sm fill=6: 1 input inserter holds the machine on the same wire, so it "
+                      "finishes at most the craft in progress", lines)
+        self.assertEqual(cks, [])
+
+    def test_fill_with_no_input_inserter_says_the_machine_keeps_crafting(self):
+        # the ore belt that feeds this furnace is the player's, not a net: no input inserter stands
+        # in the design, so fill= has nothing to gate (the machine is not held).
+        src = """
+f   = Furnace<recipe=iron-plate, fill=6> @(2, 2)
+box = Chest<provider>                    @(5, 2)
+net plates: f -> box
+"""
+        _flat, lay, lines, cks = laid(src)
+        self.assertEqual(with_attr(lay, "if"), {"~plates/i0": "iron-plate<6"})
+        self.assertEqual([c.code for c in cks], ["LIMIT"])
+        self.assertIn("no input inserter", cks[0].msg)
+        self.assertIn("nothing to gate", cks[0].msg)
+        self.assertIn("keeps crafting past 6", cks[0].msg)
+        self.assertIn("keep= may suit better", cks[0].msg)
+        self.assertFalse(any("hold the machine" in line for line in lines))
 
     def test_a_limit_with_no_chest_to_limit_says_so(self):
         _flat, lay, _lines, cks = laid(mall(gear=", keep=10"))
