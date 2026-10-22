@@ -147,7 +147,7 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   `CLOG` goes in exactly two ways: its route is one inserter from the source straight into each
   sink (`connect.one_inserter`; the route step clears the line), or the source writes the net
   `limited`. 1.1's requester-driven exemption and 1.7's for a net into chests that take any item
-  are gone. See docs/RELEASE-2.0-draft.md.
+  are gone. See docs/RELEASE-2.0.md.
 
 ## Rate model (nominal, V1) [built]
 

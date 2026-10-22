@@ -1,12 +1,13 @@
-# Toolkit 2.0 (draft): V2 complete
+# Toolkit 2.0 (2026-10-22): V2 complete
 
-The draft of the 2.0 release note. It grows as the round's pieces land on main. It becomes
-`docs/RELEASE-2.0.md`, with `__version__` "2.0" and the tag `v2.0`, on the release that completes
-the round (Rory, 2026-10-21: releases are the only version numbers, the major is the design
-generation; `CORE-V2.md`, "The versions"). 1.7 (tagged, `docs/RELEASE-1.7.md`) already shipped the
-round's first pieces: pin and patch, burner drills, `fk fresh` for crafters, labs from a chest,
-mixed chests, helpers, STRATEGY.md and fair play in Rory's words. No new rules: checks warn, never
-gate, and the briefs stay short.
+V2's lanes and throughput, side-loading smelter arrays, circuits and inserter limits in the
+source, route patching, the lead and worker player harness, and the lead planning ahead
+(`fk stage`), with what the first lead run (20261021-2039) found. Releases are the only version
+numbers, and the major is the design generation (Rory, 2026-10-21; `CORE-V2.md`, "The versions").
+1.7 (`docs/RELEASE-1.7.md`) already shipped the round's first pieces: pin and patch, burner
+drills, `fk fresh` for crafters, labs from a chest, mixed chests, helpers, STRATEGY.md and fair
+play in Rory's words. No new rules: checks warn, never gate, and the briefs stay short. 684 tests
+OK.
 
 | named feature in 2.0 | state |
 |---|---|
