@@ -171,7 +171,8 @@ map's ore, water and cliffs; `ON_TERRAIN`, `OFF_ORE`], `run_models`, `elaborate`
 1.6: the `n=auto` counts, `FIT`], `report_rates`,
 `place` [built: hints, `@patch` for MinerRow], `route` [built: v4's steiner tree router per net,
 splits, merges, direct insertion, k->m through a hub, the underground guard; fluid nets by the fluid
-plug-in: pipes, pipe-to-ground; 1.2: a net is routed again when anything it is laid to moved],
+plug-in: pipes, pipe-to-ground; 1.2: a net is routed again when anything it is laid to moved;
+2.0: a net with an end added or dropped is patched, its standing route judged by the netlist],
 `cover power` [built] `|robots` [built; 1.2: chests the surface's network reaches need no
 roboport, a storage chest beside each one placed; 1.7 pin and patch: the committed poles and
 roboports stay where they still fit, new ones only where something new needs them, `--fresh`

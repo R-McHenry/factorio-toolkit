@@ -423,6 +423,102 @@ class LabKxmTest(unittest.TestCase):
                          ["copper-ore", "iron-gear-wheel", "iron-ore"])
 
 
+PLATES = """
+ore   = MinerRow<n=2, resource=iron-ore>   @(14, 0, rot 2)
+coal  = MinerRow<n=1, resource=coal>       @(24, 0, rot 2)
+smelt = SmelterRow<n=2, recipe=iron-plate> @(6, 12)
+a1 = Assembler<recipe=iron-gear-wheel>     @(4, 24)
+a2 = Assembler<recipe=iron-gear-wheel>     @(10, 24)
+a3 = Assembler<recipe=iron-gear-wheel>     @(16, 24)
+net ore_: ore -> smelt
+net fuel: coal -> smelt
+net plates: smelt -> a1, a2, a3
+"""
+
+
+def committed(r):
+    """{net: carriers} of a routed layout: what the next build's ``patch`` gets."""
+    out = {}
+    for e in r.layout.entities.values():
+        if e.owner.startswith("~"):
+            out.setdefault(e.owner[1:], []).append(e)
+    return out
+
+
+def standing(r, net, old):
+    """How many of ``old`` (a net's committed carriers) stand unchanged in ``r``."""
+    now = {(e.name, e.x, e.y, e.dir) for k, e in r.layout.entities.items()
+           if k.startswith(f"~{net}/")}
+    return sum((e.name, e.x, e.y, e.dir) in now for e in old)
+
+
+class PatchTest(unittest.TestCase):
+    """2.0 (Rory, 2026-10-21): "Pin what stands and make patch changes rather than regenerating
+    the base". A net with an end added keeps its route and gets only the new branch."""
+
+    def test_an_assembler_added_keeps_every_carrier(self):
+        flat, lay = build(PLATES)
+        first = route.route_layout(flat, lay, CAT)
+        connected(self, flat, first)
+        old = committed(first)
+        flat, lay = build(PLATES.replace("a3 = Assembler", "a4 = Assembler<recipe=iron-gear-"
+                                         "wheel> @(22, 24)\na3 = Assembler")
+                          .replace("-> a1, a2, a3", "-> a1, a2, a3, a4"))
+        r = route.route_layout(flat, lay, CAT, patch=old)
+        connected(self, flat, r)                        # every pair joined, no LEAK
+        self.assertEqual((r.routed, r.kept, r.again), ([], ["fuel", "ore_"], {}))
+        # all 19 committed carriers of plates stand (100%); the belt's end runs on by 6 belts
+        # to an inserter into a4: 19 of the patched route's 26 carriers are the old ones
+        self.assertEqual(standing(r, "plates", old["plates"]), len(old["plates"]))
+        self.assertEqual(r.patched, {"plates": "1 -> 4, a4.in1: ~plates/b15 extended, 6 belts, "
+                                               "1 inserter; 19 of 19 carriers kept"})
+        self.assertEqual(len(carriers(r, "plates")), 26)
+        self.assertIn("patched   plates: 1 -> 4, a4.in1:", r.lines[2])
+
+    def test_a_dropped_end_takes_its_branch_up(self):
+        flat, lay = build(PLATES)
+        old = committed(route.route_layout(flat, lay, CAT))
+        flat, lay = build(PLATES.replace("-> a1, a2, a3", "-> a1, a3"))
+        r = route.route_layout(flat, lay, CAT, patch=old)
+        connected(self, flat, r)
+        self.assertEqual(r.patched["plates"], "1 -> 2, 1 carrier taken up (no end of the net "
+                                              "needs it now); 18 of 19 carriers kept")
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        self.assertEqual([k for k, _v in rep.graph.pred.get("a2/m0", ())], [])  # nothing feeds a2
+
+    def test_a_patch_that_cannot_be_laid_routes_the_net_again(self):
+        # one inserter from the chest into a stands; b, far off, has no branch to take from it,
+        # so the net is laid again as a whole (an inserter for a, a belt for b)
+        src = ("src = Chest<requester, item=iron-plate, rate=1/s> @(0, 1)\n"
+               "a   = Assembler<recipe=iron-gear-wheel>         @(2, 0)\n"
+               "b   = Assembler<recipe=iron-gear-wheel>         @(14, 6)\n"
+               "na  = Chest<provider, limit=10>                 @(6, 1)\n"
+               "net ga: a -> na\n")
+        flat, lay = build(src + "net p: src -> a\n")
+        old = committed(route.route_layout(flat, lay, CAT))
+        self.assertEqual([e.name for e in old["p"]], ["fast-inserter"])
+        flat, lay = build(src + "net p: src -> a, b\n")
+        r = route.route_layout(flat, lay, CAT, patch=old)
+        connected(self, flat, r)
+        self.assertEqual((r.routed, r.kept, r.patched), (["p"], ["ga"], {}))
+        self.assertEqual(r.again["p"], "its committed route does not join src/c0 -> b/m0; "
+                                       "patching it failed: no branch from the standing route "
+                                       "reaches b.in1")
+        # a belt net whose new branch can't be laid is routed again just the same
+        flat, lay = build(PLATES)
+        old = committed(route.route_layout(flat, lay, CAT))
+        flat, lay = build(PLATES.replace("a3 = Assembler", "a4 = Assembler<recipe=iron-gear-"
+                                         "wheel> @(22, 24)\na3 = Assembler")
+                          .replace("-> a1, a2, a3", "-> a1, a2, a3, a4"))
+        with mock.patch.object(route._Patch, "add_consumer", return_value=None):
+            r = route.route_layout(flat, lay, CAT, patch=old)
+        connected(self, flat, r)
+        self.assertEqual((r.routed, r.patched), (["plates"], {}))
+        self.assertEqual(r.again["plates"], "its committed route does not join smelt/m0 -> a4/m0 "
+                                            "and 1 more pair; patching it failed: no branch from "
+                                            "the standing route reaches a4.in1")
+
+
 class RedgreenTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

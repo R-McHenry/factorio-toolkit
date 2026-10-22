@@ -38,18 +38,27 @@ are approximate.
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report
 to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
-in the source: unchanged rows and routes stay where they are, and a net is routed again when one
-of its ends moves (a chest one tile over, too, or a machine added to it).
+in the source: unchanged rows and routes stay where they are, a net is patched when a machine is
+added to it or taken off it, and it is routed again when one of its ends moves (a chest one tile
+over, too).
 
 Rebuilds keep what stands. The poles and roboports a build laid stay where they are wherever the
 new design leaves their spot free, and new ones go only where something new needs them, so power
 and the robot network keep running through a rebuild (`out\cover_power.txt` says how many were
 kept; `cover power --fresh` or `cover robots --fresh` in the build script lays them all anew).
 Old poles and roboports the design no longer has stay up until the design's own stand there, and
-the first build after that takes them up. So a patch is cheap: a row beside the others, a chest
-one tile over, one more net into what stands. The design the next build keeps to is the one the
-last full build wrote (`write_layout`, just before the paste); `fk build --to diff` and `--to
-report_checks` write nothing, so try changes with them freely.
+the first build after that takes them up.
+
+Routes stand too. A net with a new machine keeps its belts and gets only a branch to the new
+machine, laid into what stands: a splitter in place of a straight belt, the belt's end run on, a
+belt side-loaded onto it (a new driver), or an inserter straight off the belt. A machine taken
+off a net takes its branch with it. `out\route.txt` says `patched` with how many of the net's
+carriers it kept, or `routed again:` and why, when no branch fits and the net is laid anew. The
+route follows the net's ends, not its name: a net whose sink changed under the same name
+(`X -> lab` to `X -> px`) is never kept as it was. So a patch is cheap: a row beside the others,
+a chest one tile over, one more machine on a net, one more net into what stands. The design the
+next build keeps to is the one the last full build wrote (`write_layout`, just before the paste);
+`fk build --to diff` and `--to report_checks` write nothing, so try changes with them freely.
 
 A build also takes back what it built before and your design no longer has: a row you replaced,
 the old ground of a plot you moved or shrank, a factory you emptied, its unbuilt ghosts too. The

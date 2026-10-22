@@ -68,7 +68,19 @@ Nets are routed one at a time, each seeing the ones before it; a net that fails 
 front and the pass is retried, and the pass that routes the most nets is kept. ``fkcore.connect``
 is the judge: a routed layout is done when every net is connected with no LEAK. The router runs it
 on its own result: a net whose route leaks or does not connect is re-routed around the tiles at
-fault (twice at most), else refused with the judge's line. Pure, stdlib only, deterministic.
+fault (twice at most), else refused with the judge's line.
+
+**A rebuild patches what stands** (2.0, Rory 2026-10-21: "Pin what stands and make patch changes
+rather than regenerating the base"). ``route --only stale`` hands the router, as ``patch``, the
+committed route of every net none of whose ends moved. The judge reads it against the netlist as
+it is now, not by the net's name: a route that joins every driver to every consumer, leaks
+nowhere and has no carrier that serves no end stands as it is. Any other keeps what still serves,
+loses a dropped end's branch, and gets one branch per new end from the router's own search: a new
+consumer off where every standing driver reaches it (a dead-end belt extended, a splitter in
+place of a straight belt, an inserter off a belt), a new driver into where it reaches every
+consumer (side-loaded onto a belt, into the back of a belt nothing feeds, an inserter onto one).
+A patch that can't be laid or that the judge refuses is routed again as a whole, with the reason.
+Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
@@ -79,7 +91,8 @@ from dataclasses import dataclass, field
 from . import connect as connectmod
 from . import fkp as fkpmod
 from .expand import attach_points, frame_of
-from .steiner import FixedSink, Grid, TapSink, grow
+from .steiner import COSTS, FixedSink, Grid, TapSink, Tree, grow
+from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
 
 __all__ = ["NetJob", "Routed", "jobs", "route_layout", "fluid_nets"]
 
@@ -116,8 +129,9 @@ class NetJob:
     def signature(self):
         """Everything a route of this net is laid to: per role, its start or goal tiles with their
         headings and the tiles of the machines it inserts into or picks from; and the reserved
-        tiles. A committed route is kept (``route --only stale``) only while this is the same: a
-        chest moved one tile changes no belt end, only its machine's tiles (1.2, the 0534 run)."""
+        tiles. A committed fluid route is kept (``route --only stale``) only while this is the
+        same: a chest moved one tile changes no belt end, only its machine's tiles (1.2, the 0534
+        run). A belt route is kept or patched while no end moved (``moved_ends``)."""
         return (tuple(sorted((o, tuple(sorted(a))) for o, a in self.anchors.items())),
                 tuple(sorted(self.reserved)))
 
@@ -127,6 +141,20 @@ class NetJob:
         roles = set(self.anchors) | set(other.anchors)
         return sorted(r for r in roles if sorted(self.anchors.get(r, ())) !=
                       sorted(other.anchors.get(r, ())))
+
+    def moved_ends(self, old):
+        """The roles with an end that no longer stands where it stood in ``old`` (the same net on
+        the committed layout), sorted: a belt end on another tile or heading, a machine of the
+        role on other tiles. A role or a machine only one of the two has is an end added or
+        dropped, not moved: the committed route is patched for it (2.0, Rory 2026-10-21: "Pin
+        what stands and make patch changes rather than regenerating the base")."""
+        out = []
+        for role in sorted(set(self.anchors) & set(old.anchors)):
+            now, was = self.anchors[role], old.anchors[role]
+            rects = {a[1]: a[2] for a in now if len(a) == 3}
+            if any(a not in now if len(a) == 2 else rects.get(a[1], a[2]) != a[2] for a in was):
+                out.append(role)
+        return out
 
     def drivers(self):
         return len(self.starts) + len(self.sources)
@@ -150,8 +178,10 @@ class Routed:
     lines: list                    # one report line per net
     routed: list                   # net names routed this run
     failed: dict                   # net -> reason
-    kept: list                     # nets that already had carriers (pinned)
+    kept: list                     # nets whose carriers stand as they were (pinned)
     passes: int = 1
+    patched: dict = field(default_factory=dict)    # net -> what its patch laid and kept
+    again: dict = field(default_factory=dict)      # net -> why its committed route was not kept
 
 
 class _Bounded(Grid):
@@ -642,9 +672,10 @@ def _hub_search(cat, job, blocked, spans, clear, box, limit):
 
 
 # -- one net --------------------------------------------------------------------------------------
-def _settle_leaves(cat, laid, ents):
+def _settle_leaves(cat, laid, ents, also=frozenset()):
     """A tapped belt's last tile points on into whatever stands ahead: turn it (never back at its
-    feed) where that is another net's belt. -> the carriers, or None when no turn is clear."""
+    feed) where that is another net's belt, or one of the keys ``also`` (a patch's tapped branch:
+    the standing route it branched from). -> the carriers, or None when no turn is clear."""
     occ = {}
     for e in ents:
         if _is_belt(cat, e):
@@ -665,7 +696,7 @@ def _settle_leaves(cat, laid, ents):
         def bad(d):
             ahead = (tx + _DX[d], ty + _DY[d])
             o = occ.get(ahead)
-            return o is not None and o.net != e.net
+            return o is not None and (o.net != e.net or o.key in also)
 
         if not bad(h):
             out.append(e)
@@ -753,36 +784,548 @@ def _judge(flat, lay, cat, mine, js):
     return out
 
 
+# -- patching a committed route (2.0) -------------------------------------------------------------
+_BELTY = frozenset({"transport-belt", "splitter"})    # what a drop or a pickup patch meets
+
+
+def _placed(flat, job):
+    """The machines of the instances the net's job has an end in (``_judge``'s pairs)."""
+    out = set()
+    for owner in job.owners:
+        out |= set(flat.insts[owner.rsplit(".", 1)[0]].machines)
+    return out
+
+
+def _ends_of(flat, table, job, g, routed=True):
+    """(drivers, consumers): the net's endpoint keys that stand in graph ``g``; ``routed``: only
+    those of the instances the router lays the net to (a Literal's are laid by hand)."""
+    placed = _placed(flat, job) if routed else None
+    drivers, consumers = table.get(job.net, ((), ()))
+    pick = lambda ends: sorted({k for k, _i in ends if k in g.nodes
+                                and (placed is None or k in placed)}, key=fkpmod.natural_key)
+    return pick(drivers), pick(consumers)
+
+
+def _flows(g, net, drivers, consumers):
+    """({driver: what it reaches}, {consumer: what reaches it}) through ``net``'s carriers."""
+    cons, drvs = set(consumers), set(drivers)
+    return ({d: g.reach({d}, net, ends=cons) for d in drivers},
+            {c: g.reach({c}, net, forward=False, ends=drvs) for c in consumers})
+
+
+def _serving(g, net, drivers, consumers, keys):
+    """The keys of ``keys`` (route carriers) on some path from a driver to a consumer."""
+    fwd, bwd = _flows(g, net, drivers, consumers)
+    up = set().union(*fwd.values())
+    down = set().union(*bwd.values())
+    return {k for k in keys if k in up and k in down}
+
+
+def _common(sets):
+    sets = list(sets)
+    return set.intersection(*sets) if sets else set()
+
+
+def _fresh_keys(laid, net, used):
+    """``laid`` keyed after every key in ``used``: a committed route's keys, taken-up ones too,
+    never go to another carrier (the diff would read a moved belt)."""
+    top = {}
+    for k in used:
+        local = k.rsplit("/", 1)[1]
+        if local[1:].isdigit():
+            top[local[0]] = max(top.get(local[0], -1), int(local[1:]))
+    out = []
+    for e in laid:
+        letter = e.key.rsplit("/", 1)[1][0]
+        top[letter] = top.get(letter, -1) + 1
+        out.append(fkpmod.Entity(f"~{net}/{letter}{top[letter]}", e.name, e.x, e.y, e.dir,
+                                 dict(e.attrs)))
+    return out
+
+
+def _new_branch(grid, starts, sink, net, reverse, limit):
+    """One branch from the standing route: one A* from every start state at once to ``sink``
+    (grow()'s own step). -> (plan entities, the start it left from, path) or None."""
+    probe = Tree(grid, (grid.box[0] - 9, grid.box[1] - 9, 0, 0))     # empty: the search's ground
+    probe.sink_terminal = {}
+    got = _search(probe, starts, [sink], [0], limit)
+    if got is None:
+        return None
+    path, how, _i, _cost = got
+    t = Tree(grid, path[0])
+    t.sink_terminal = {}
+    for a, b in zip(path, path[1:]):
+        t.succ[a] = ("jump", b) if b[3] else ("step", b)
+    t.sink_at[path[-1]] = 0
+    if isinstance(sink, TapSink):
+        t.taps = sink.pick(path, probe)          # the choice the search's goal test made
+    t.touch()
+    return t.entities([sink], net=net, reverse=reverse), how, path
+
+
+def _branch_words(laid):
+    """'12 belts, 2 underground ends, 1 inserter' for a new branch's carriers."""
+    belts = sum(e.name == "transport-belt" for e in laid)
+    ugs = sum(e.name == "underground-belt" for e in laid)
+    ins = sum(e.key.rsplit("/", 1)[1].startswith("i") for e in laid)
+    words = [f"{belts} belt{'s' if belts != 1 else ''}"]
+    if ugs:
+        words.append(f"{ugs} underground ends")
+    if ins:
+        words.append(f"{ins} inserter{'s' if ins != 1 else ''}")
+    return ", ".join(words)
+
+
+class _Patch:
+    """One net's patch in the making: its standing carriers, what it adds, and the ground."""
+
+    def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid):
+        self.cat, self.flat, self.table, self.job, self.net = cat, flat, table, job, job.net
+        self.ents, self.kept, self.added, self.replaced = list(ents), list(kept), [], []
+        self.frames, self.js, self.box, self.limit = frames, js, box, limit
+        self.terrain, self.avoid = terrain, set(avoid)
+        self.used = {e.key for e in kept}
+        self.refresh()
+
+    def refresh(self):
+        """The graph, the flows and the ground with what stands now."""
+        cat, net = self.cat, self.net
+        allents = self.ents + self.kept + self.added
+        self.g = connectmod.graph(allents, cat)
+        self.drivers, self.consumers = _ends_of(self.flat, self.table, self.job, self.g)
+        self.fwd, self.bwd = _flows(self.g, net, self.drivers, self.consumers)
+        ends = set(self.job.ends())
+        self.base = (_ground(cat, allents, self.frames, self.js, net, self.terrain)
+                     | (self.avoid - ends))
+        self.fronts = {}
+        for e in allents:
+            if not _is_belt(cat, e) or e.attrs.get("ug") == "in" or _heading(e) is None:
+                continue
+            h = _heading(e)
+            for tx, ty in fkpmod.tiles_of(cat, e):
+                self.fronts.setdefault((tx + _DX[h], ty + _DY[h]), []).append(e.key)
+        # a new belt never stands where any belt points, the net's own included (it would be fed)
+        self.blocked = self.base | (set(self.fronts) - ends)
+        self.spans = _ug_spans(cat, allents)
+        self.clear = _belt_tiles(cat, allents)
+
+    def route_keys(self):
+        return {e.key for e in self.kept + self.added}
+
+    def grid(self, target, reverse=False):
+        """The ground of one new branch, and the tiles it may not start on: the net's other
+        free end tiles too, so one new end's branch never takes another's tile (the router lays
+        every end of a net in one search; a patch lays them one at a time)."""
+        others = set(self.job.ends()) - {target}
+        g = _Bounded(self.blocked | others, self.box, self.spans,
+                     self.clear if reverse else None)
+        return g, others
+
+    def standing(self):
+        """(drivers that reach a consumer, consumers a driver reaches)."""
+        cons = set(self.consumers)
+        sd = [d for d in self.drivers if self.fwd[d] & cons]
+        sc = [c for c in self.consumers if any(c in self.fwd[d] for d in self.drivers)]
+        return sd, sc
+
+    def lay(self, laid, replaced=()):
+        laid = _fresh_keys(laid, self.net, self.used)
+        self.used |= {e.key for e in laid}
+        self.kept = [e for e in self.kept if e.key not in replaced]
+        self.added = [e for e in self.added if e.key not in replaced] + laid
+        self.replaced += list(replaced)
+        self.refresh()
+        return laid
+
+    # -- a consumer: a branch out of the standing route ------------------------------------------
+    def out_starts(self, sources):
+        """Start states of a new branch from route carriers ``sources`` (every standing driver
+        reaches them): a dead-end belt extended, or a splitter cut into a straight belt."""
+        g, out = self.g, []
+        for key in sorted(sources, key=fkpmod.natural_key):
+            n = g.nodes[key]
+            h = _H.get(n.dir)
+            if h is None or n.kind not in ("transport-belt", "underground-belt"):
+                continue
+            (tx, ty), = n.tiles
+            f = (tx + _DX[h], ty + _DY[h])
+            if (n.kind == "transport-belt" or n.ug == "out") and f not in g.at \
+                    and f not in self.base and self.fronts.get(f) == [key]:
+                out.append(((f[0], f[1], h, 0), 0.0, ("leaf", key)))
+            if n.kind != "transport-belt":
+                continue
+            feeds = [(k, via) for k, via in g.pred.get(key, ()) if g.nodes[k].kind in _BELT_KINDS]
+            ahead = [(k, via) for k, via in g.succ.get(key, ()) if g.nodes[k].kind in _BELT_KINDS]
+            if len(feeds) != 1 or feeds[0][1] != "belt" or len(ahead) != 1 \
+                    or ahead[0][1] != "belt" or g.nodes[ahead[0][0]].net != self.net:
+                continue
+            for side in (1, 3):
+                sh = (h + side) % 4
+                m = (tx + _DX[sh], ty + _DY[sh])
+                o2 = (m[0] + _DX[h], m[1] + _DY[h])
+                if m in g.at or m in self.base or m in self.fronts or o2 in g.at \
+                        or o2 in self.blocked:
+                    continue
+                out.append(((o2[0], o2[1], h, 0), COSTS["split"] - COSTS["belt"],
+                            ("split", key, side)))
+        return out
+
+    def add_consumer(self, role, belt, machine):
+        """Join one new consumer end to the standing route. -> report words, or None."""
+        sd, _sc = self.standing()
+        mine = self.route_keys()
+        common = _common(self.fwd[d] for d in sd) & mine
+        if machine is not None:
+            got = self._tap_from(common, machine) or self._direct_from(sd, machine)
+            if got:
+                return f"{role}: {got}"
+        grid, others = self.grid(belt[0] if belt is not None else None)
+        starts = [s for s in self.out_starts(common) if (s[0][0], s[0][1]) not in others]
+        if not starts:
+            return None
+        sinks = ([FixedSink(role, belt[0], belt[1])] if belt is not None else
+                 [TapSink(machine[0], machine[1], 1, hands) for hands in _HANDS])
+        for sink in sinks:
+            got = _new_branch(grid, starts, sink, self.net, False, self.limit)
+            if got is not None:
+                break
+        else:
+            return None
+        plan, how, _path = got
+        laid = _carriers(self.job, plan, self.net)
+        replaced, words = (), ""
+        if how[0] == "split":
+            _k, key, side = how
+            n = self.g.nodes[key]
+            (tx, ty), = n.tiles
+            h = _H[n.dir]
+            sh = (h + side) % 4
+            laid.append(fkpmod.Entity(f"~{self.net}/s0", "splitter",
+                                      _clean(tx + (_DX[sh] + 1) / 2), _clean(ty + (_DY[sh] + 1) / 2),
+                                      h * 4, {"net": self.net}))
+            replaced, words = (key,), f"a splitter in place of {key}"
+        else:
+            words = f"{how[1]} extended"
+        also = frozenset(mine) if belt is None else frozenset()
+        settled = _settle_leaves(self.cat, laid, self.ents + self.kept + self.added, also)
+        if settled is None:
+            return None
+        laid = self.lay(settled, replaced)
+        return f"{role}: {words}, {_branch_words([e for e in laid if e.name != 'splitter'])}"
+
+    def _tap_from(self, keys, machine):
+        """An inserter from a standing belt the drivers reach straight into a new machine."""
+        mkey, rect = machine
+        grid, _others = self.grid(None)
+        free = lambda q: not grid.blocked(q) and q not in self.g.at
+        for hands in _HANDS:
+            sink = TapSink(mkey, rect, 1, hands)
+            for key in sorted(keys, key=fkpmod.natural_key):
+                n = self.g.nodes[key]
+                if n.kind not in _BELT_KINDS or (n.kind == "underground-belt" and not n.ug):
+                    continue
+                for tile in n.tiles:
+                    for q, name, direction in sink.taps_at(tile, free):
+                        e = fkpmod.Entity(f"~{self.net}/i0", name, q[0] + 0.5, q[1] + 0.5,
+                                          direction, {"net": self.net})
+                        laid = self.lay([e])
+                        return f"an inserter from {key} ({laid[0].key})"
+        return None
+
+    def _direct_from(self, drivers, machine):
+        """A machine-to-machine net (no belt stands): an inserter from every standing driver
+        machine straight into the new one, where each fits."""
+        rects = dict(self.job.sources)
+        if not drivers or any(d not in rects for d in drivers):
+            return None
+        grid, _others = self.grid(None)
+        plan, taken = [], set()
+        for d in drivers:
+            got = _direct_pair(rects[d], machine[1], grid, taken)
+            if got is None:
+                return None
+            plan.append(got)
+            taken.add((math.floor(got["x"]), math.floor(got["y"])))
+        laid = self.lay(_carriers(self.job, plan, self.net))
+        return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} from {', '.join(drivers)}"
+
+    # -- a driver: a branch into the standing route ----------------------------------------------
+    def in_roots(self, targets):
+        """Root states of a new driver's branch, laid reversed, into route belts ``targets``
+        (they reach every consumer): beside a belt, side-loading onto it (never a curve, which a
+        second input would straighten), or behind a belt no belt feeds yet."""
+        g, out = self.g, []
+        for key in sorted(targets, key=fkpmod.natural_key):
+            n = g.nodes[key]
+            e = _H.get(n.dir)
+            if n.kind != "transport-belt" or e is None:
+                continue
+            (tx, ty), = n.tiles
+            vias = [via for k, via in g.pred.get(key, ()) if g.nodes[k].kind in _BELT_KINDS]
+            if "curve" in vias:
+                continue
+            ways = [(s, "side-loaded onto") for s in ((e + 1) % 4, (e + 3) % 4)]
+            if not vias:
+                ways.append((e, "into the back of"))
+            for s, words in ways:
+                u = (tx - _DX[s], ty - _DY[s])
+                if u in g.at or u in self.blocked:
+                    continue
+                out.append(((u[0], u[1], (s + 2) % 4, 0), 0.0, (words, key)))
+        return out
+
+    def add_driver(self, role, belt, machine):
+        """Join one new driver end into the standing route. -> report words, or None."""
+        mine = self.route_keys()
+        common = _common(self.bwd[c] for c in self.consumers) & mine
+        if machine is not None:
+            got = self._drop_onto(common, machine) or self._direct_into(machine)
+            if got:
+                return f"{role}: {got}"
+        grid, others = self.grid(belt[0] if belt is not None else None, reverse=True)
+        roots = [s for s in self.in_roots(common) if (s[0][0], s[0][1]) not in others]
+        if not roots:
+            return None
+        sinks = ([FixedSink(role, belt[0], (belt[1] + 2) % 4)] if belt is not None else
+                 [TapSink(machine[0], machine[1], 1, hands) for hands in _HANDS])
+        for sink in sinks:
+            got = _new_branch(grid, roots, sink, self.net, True, self.limit)
+            if got is not None:
+                break
+        else:
+            return None
+        plan, how, _path = got
+        settled = _settle_leaves(self.cat, _carriers(self.job, plan, self.net),
+                                 self.ents + self.kept + self.added)
+        if settled is None:
+            return None
+        laid = self.lay(settled)
+        return f"{role}: {_branch_words(laid)}, {how[0]} {how[1]}"
+
+    def _drop_onto(self, keys, machine):
+        """An inserter from a new driver machine straight onto a standing belt that reaches every
+        consumer."""
+        mkey, rect = machine
+        grid, _others = self.grid(None)
+        for hands in _HANDS:
+            for key in sorted(keys, key=fkpmod.natural_key):
+                n = self.g.nodes[key]
+                if n.kind not in _BELTY and not (n.kind == "underground-belt" and n.ug == "in"):
+                    continue
+                for (tx, ty) in n.tiles:
+                    for h in range(4):
+                        for name in hands:
+                            r = _REACH[name]
+                            q = (tx + _DX[h] * r, ty + _DY[h] * r)
+                            pick = (q[0] + _DX[h] * r, q[1] + _DY[h] * r)
+                            if grid.blocked(q) or q in self.g.at or not (
+                                    rect[0] <= pick[0] < rect[2] and rect[1] <= pick[1] < rect[3]):
+                                continue
+                            e = fkpmod.Entity(f"~{self.net}/i0", name, q[0] + 0.5, q[1] + 0.5,
+                                              h * 4, {"net": self.net})
+                            laid = self.lay([e])
+                            return f"an inserter onto {key} ({laid[0].key})"
+        return None
+
+    def _direct_into(self, machine):
+        """A machine-to-machine net: an inserter from the new driver into every consumer
+        machine, where each fits."""
+        rects = dict(self.job.taps)
+        if not self.consumers or any(c not in rects for c in self.consumers):
+            return None
+        grid, _others = self.grid(None)
+        plan, taken = [], set()
+        for c in self.consumers:
+            got = _direct_pair(machine[1], rects[c], grid, taken)
+            if got is None:
+                return None
+            plan.append(got)
+            taken.add((math.floor(got["x"]), math.floor(got["y"])))
+        laid = self.lay(_carriers(self.job, plan, self.net))
+        return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} into {', '.join(self.consumers)}"
+
+
+def _role_ends(flat, job, machines, side):
+    """[(role, belt end or None, (machine key, rect) or None)]: the ends on ``side`` of the
+    net's roles in the instances of ``machines``, one per belt end or machine."""
+    machines, out = set(machines), []
+    for role, entries in sorted(job.anchors.items()):
+        if not machines & set(flat.insts[role.rsplit(".", 1)[0]].machines):
+            continue
+        for a in entries:
+            if a[0] != side:
+                continue
+            if len(a) == 2:
+                out.append((role, a[1], None))
+            elif a[1] in machines:
+                out.append((role, None, (a[1], a[2])))
+    return out
+
+
+def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain=(), avoid=()):
+    """Patch one net's committed route ``old`` (carriers) on the layout ``ents``, whose ends all
+    still stand where they stood: keep what still serves, take up what serves no end any more (a
+    dropped end's branch), and route only each new end into it. -> (carriers, report text) or
+    (None, why).
+
+    2.0 (Rory, 2026-10-21): "Pin what stands and make patch changes rather than regenerating the
+    base ... routing a new section into the old one, even as a bit of spaghetti, beats ripping
+    everything up." The first lead run's players re-laid iron, coal and plates at once for one
+    consumer added, and iron stood for 20 minutes. A new consumer branches off where every
+    standing driver reaches: a dead-end belt extended, a splitter cut into a straight belt, or an
+    inserter straight off a belt (or a driver machine) into it; a new driver joins where it
+    reaches every consumer: side-loaded onto a belt, into the back of a belt nothing feeds, or an
+    inserter onto it. Each branch is the router's own search (``steiner``), on the router's
+    ground, and ``fkcore.connect`` judges the result: every pair joined, no LEAK."""
+    net = job.net
+    mine = {e.key for e in old}
+    g = connectmod.graph(list(ents) + list(old), cat)
+    serve = _serving(g, net, *_ends_of(flat, table, job, g, routed=False), mine)
+    rep = connectmod.connect(g, cat, {net: table.get(net, ((), ()))})
+    leak = next((lk for lk in rep.leaks if lk.src in serve or lk.dst in serve), None)
+    if leak is not None:
+        return None, f"what stands of its route would LEAK: {leak.text}"
+    kept = [e for e in old if e.key in serve]
+    p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
+    p.used |= mine
+    sd, sc = p.standing()
+    if not sd or not sc:
+        return None, "nothing of its committed route joins a driver to a consumer now"
+    apart = [(d, c) for d in sd for c in sc if c not in p.fwd[d]]
+    if apart:
+        return None, f"its committed route leaves {apart[0][0]} -> {apart[0][1]} apart"
+    new_c = [c for c in p.consumers if c not in sc]
+    new_d = [d for d in p.drivers if d not in sd]
+    words = []
+    for role, belt, machine in _role_ends(flat, job, new_c, "in"):
+        got = p.add_consumer(role, belt, machine)
+        if got is None:
+            return None, f"no branch from the standing route reaches {role}"
+        words.append(got)
+    for role, belt, machine in _role_ends(flat, job, new_d, "out"):
+        got = p.add_driver(role, belt, machine)
+        if got is None:
+            return None, f"no branch from {role} reaches the standing route"
+        words.append(got)
+    rep = connectmod.connect(p.g, cat, {net: table.get(net, ((), ()))})
+    keys = p.route_keys()
+    leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
+    if leak is not None:
+        return None, f"the patch would LEAK: {leak.text}"
+    r = rep.nets.get(net)
+    apart = [(d, c) for d, c in (r.unreached if r else ()) if d in p.drivers and c in p.consumers]
+    if apart:
+        return None, f"the patch leaves {apart[0][0]} -> {apart[0][1]} apart"
+    alone = [k for k in (r.unpaired if r else ()) if k in keys]
+    if alone:
+        return None, f"the game would pair no exit with {', '.join(alone[:4])}"
+    gone = len(old) - len(kept)
+    if gone:
+        words.append(f"{gone} carrier{'s' if gone != 1 else ''} taken up (no end of the net "
+                     f"needs {'them' if gone != 1 else 'it'} now)")
+    text = (f"{job.drivers()} -> {job.consumers()}, " + ("; ".join(words) or "nothing new")
+            + f"; {len(p.kept)} of {len(old)} carriers kept")
+    return p.kept + p.added, text
+
+
+def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
+    """The committed routes of ``patch`` ({net: carriers}: nets none of whose ends moved) on
+    ``new``, judged against the netlist as it is now (``fkcore.connect``). A route that joins
+    every driver of its net to every consumer, leaks nowhere and has no carrier that serves no
+    end stands as it is; any other is patched (``_patch_net``), or routed again when it can't
+    be. What stands is added to ``new``. -> (nets kept as they were, {net: patch report},
+    {net: why it is routed again}).
+
+    2.0: the netlist decides, not the net's name. The first lead run changed a net's sink and
+    kept its name (``net packs: X -> lab`` to ``X -> px``): the route stood as it was, the build
+    said OK, and the old inserter still fed the lab."""
+    table = connectmod.endpoints(flat)
+    for net in sorted(patch):
+        for e in patch[net]:
+            new.add(fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
+    g = connectmod.graph(new, cat)
+    rep = connectmod.connect(g, cat, table)
+    faulty = {}
+    for net in sorted(patch):
+        keys = {e.key for e in patch[net]}
+        leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
+        drivers, consumers = _ends_of(flat, table, js[net], g)
+        r = rep.nets.get(net)
+        apart = [(d, c) for d, c in (r.unreached if r else ())
+                 if d in drivers and c in consumers]
+        idle = [] if js[net].fluid else sorted(
+            keys - _serving(g, net, *_ends_of(flat, table, js[net], g, routed=False), keys),
+            key=fkpmod.natural_key)
+        if leak is not None:
+            faulty[net] = f"its committed route would LEAK: {leak.text}"
+        elif apart:
+            more = len(apart) - 1
+            faulty[net] = (f"its committed route does not join {apart[0][0]} -> {apart[0][1]}"
+                           + (f" and {more} more pair{'s' if more != 1 else ''}" if more else ""))
+        elif idle:
+            faulty[net] = (f"{len(idle)} of its committed carriers serve no end of it now "
+                           f"({idle[0]} ...)")
+        elif js[net].skip:
+            faulty[net] = js[net].skip
+    for net in faulty:
+        for e in patch[net]:
+            del new.entities[e.key]
+    standing = sorted(n for n in patch if n not in faulty)
+    patched, again = {}, {}
+    pending = {n: patch[n] for n in faulty}
+    for net in sorted(faulty):
+        old = pending.pop(net)
+        if js[net].fluid or js[net].skip:
+            again[net] = faulty[net]
+            continue
+        # the routes still waiting for their patch stand in the way, as their carriers may stay
+        ground = list(new.entities.values()) + [e for ents in pending.values() for e in ents]
+        try:
+            got, how = _patch_net(flat, cat, table, js[net], old, ground, frames, js, box, limit,
+                                  terrain, avoid)
+        except Exception as exc:         # noqa: BLE001 - the net is routed again, as before 2.0
+            got, how = None, f"{type(exc).__name__}: {exc}"
+        if got is None:
+            again[net] = f"{faulty[net]}; patching it failed: {how}"
+            continue
+        for e in got:
+            new.add(e)
+        patched[net] = how
+    return standing, patched, again
+
+
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                 blocked=(), hand=None) -> Routed:
+                 blocked=(), hand=None, patch=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach."""
     global _HANDS
     if not hand or hand == "fast-inserter":
-        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked)
+        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
     if _REACH.get(hand) != 1:
         raise ValueError(f"hand is a short inserter (inserter, fast-inserter, burner-inserter), "
                          f"got {hand!r}")
     saved, _HANDS = _HANDS, ((hand,), (hand, "long-handed-inserter"))
     try:
-        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked)
+        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
     finally:
         _HANDS = saved
 
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                  blocked=()) -> Routed:
+                  blocked=(), patch=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
     tiles east and south (the frame starts at 0, 0). ``blocked``: ground no carrier may use,
-    in the factory frame (terrain: water, cliffs)."""
+    in the factory frame (terrain: water, cliffs). ``patch``: {net: its committed carriers} for
+    nets none of whose ends moved (``route --only stale``): each stands as it is, is patched,
+    or is routed again (``_standing``), before the nets with nothing laid are routed."""
     js = jobs(flat, lay, cat)
     terrain = frozenset(tuple(t) for t in blocked)
     have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
-    kept = sorted(n for n in js if n in have)
-    todo = [n for n in js if n not in have and js[n].skip is None and not js[n].fluid]
-    todo.sort(key=lambda n: (-len(js[n].ends()), n))
+    patch = {n: ents for n, ents in (patch or {}).items() if n in js and n not in have}
+    todo = [n for n in js if n not in have and n not in patch and js[n].skip is None
+            and not js[n].fluid]
     frames = set()
     for path, rec in lay.insts.items():
         if rec.kind in ("Literal", "Bus") or path not in flat.insts:
@@ -791,12 +1334,22 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         frames |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
     w, h = lay.size or (0, 0)
     box = bounds or (0, 0, w + margin, h + margin)
+    base = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
+                         dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
+    standing, patched, again = [], {}, {}
+    if patch:
+        claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
+        standing, patched, again = _standing(flat, base, cat, js, patch, frames, box, limit,
+                                             terrain, set().union(*claims.values()))
+        todo += [n for n in again if js[n].skip is None and not js[n].fluid]
+    kept = sorted(n for n in js if n in have or n in standing)
+    todo.sort(key=lambda n: (-len(js[n].ends()), n))
     retries = len(todo) if retries is None else retries
-    claims = _direct_claims(cat, js, todo, list(lay.entities.values()), frames, box, terrain)
+    claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
     best = None
     order = list(todo)
     for attempt in range(retries + 1):
-        ents = list(lay.entities.values())
+        ents = list(base.entities.values())
         added, failed, how = {}, {}, {}
         for net in order:
             avoid = set()
@@ -818,8 +1371,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         order = [n for n in order if n in failed] + [n for n in order if n not in failed]
     _score, added, failed, how, passes, order = best
     added, failed, how = dict(added), dict(failed), dict(how)
-    new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
-                        dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
+    new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(base.insts), dict(base.covers),
+                        dict(base.plots), dict(base.claims), dict(base.marks),
+                        dict(base.entities))
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
@@ -829,7 +1383,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                          terrain)
         if guard:
             failed[net] = f"{failed[net]}; {guard}"
-    fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and js[n].skip is None)
+    fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and n not in kept
+                        and js[n].skip is None)
     plugin = _fluid_plugin() if fluid_todo else None
     if plugin is not None:
         f_added, f_how, f_failed = plugin.route(flat, new, cat, fluid_todo, terrain, box, limit)
@@ -847,6 +1402,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         job = js[net]
         if net in kept:
             lines.append(f"kept      {net}: its carriers are already laid (pinned)")
+        elif net in patched:
+            lines.append(f"patched   {net}: {patched[net]}")
         elif job.skip:
             lines.append(f"skipped   {net}: {job.skip}")
         elif net in added and job.fluid:
@@ -855,7 +1412,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, {how[net]}")
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
-    return Routed(new, lines, sorted(added), failed, kept, passes)
+    return Routed(new, lines, sorted(added), failed, kept, passes, patched, again)
 
 
 def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain):
