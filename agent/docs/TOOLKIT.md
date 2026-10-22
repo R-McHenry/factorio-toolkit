@@ -439,10 +439,12 @@ what the steps before it made. Keep it, or tweak it: leave `apply` out while you
 paste until the network has what it lays: report_bom says when a paste would take up running
 machines while their replacements are short). `size`, after `elaborate`, counts
 the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --to
-report_checks` runs part of it (`report_rates:2` names the second `report_rates`); it starts from the layout the last build left, or lays it out again when a source file changed since. `tier minimize
---allow yellow,red` lays red belts where a yellow lane is too thin for what the design asks
-(`--red 20` caps how many; `tier maximize` uses the fastest allowed everywhere; the default
-`--allow yellow` keeps every belt yellow). A belt never goes down a tier unless you add
+report_checks` runs part of it (`report_rates:2` names the second `report_rates`). It starts
+from the layout the last build left, or lays it out again when a source file changed since (and
+says so); `fk look` says when the source has moved on from the `.fkp` files it judges.
+`tier minimize --allow yellow,red` lays red belts where a yellow lane is too thin for what the
+design asks (`--red 20` caps how many; `tier maximize` uses the fastest allowed everywhere; the
+default `--allow yellow` keeps every belt yellow). A belt never goes down a tier unless you add
 `--downgrade`.
 `route --hand inserter` links machines with plain inserters
 instead of fast ones (rows take `inserter=inserter` for the same).

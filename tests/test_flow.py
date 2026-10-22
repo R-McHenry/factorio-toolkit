@@ -5,13 +5,52 @@ import shutil
 import tempfile
 import unittest
 
-from fkcore import compose, connect, fkp, flow
+from fkcore import compose, connect, fkp, flow, look, scene
 from fkcore.catalog import Catalog
 from fkcore.elaborate import ADVICE, elaborate_file
 
 CAT = Catalog.load()
 GAME = os.path.join(os.path.dirname(__file__), "..", "games", "redgreen")
 SOURCES = ("main.fk", "nauvis.surface", "nauvis.build.fkb")
+
+#: 2.0.4 A2: a game codebase the size of the live run's shop: one crafter into a provider chest,
+#: the shape of the shop.fkp whose old recipe the stale checkpoints kept. The surface is mall and
+#: the module shop, so the factory checkpoint (out/<step>/gear.fkp) and the committed .fkp
+#: (shop.fkp) are different files, as in the run.
+SHOP_FK = """\
+fein = Chest<requester, item=iron-plate, rate=1/s> @(0, 5)
+gear = Assembler<recipe=iron-gear-wheel>          @(2, 0)
+gb   = Chest<provider>                            @(8, 0)
+net in:  fein -> gear
+net out: gear -> gb
+"""
+SHOP_SURFACE = """\
+surface  mall
+mode     lab
+terrain  none
+catalog  base
+place gear = shop plot 0,0 30x20
+"""
+#: the live run's script order: diff and report_bom before write_layout, robots before power, so
+#: a host `--from diff` (the reported failure) runs write_layout after the layout steps.
+SHOP_SCRIPT = """\
+read_surface    mall
+read_terrain    none
+elaborate
+size
+place           --keep pinned
+route           --only stale --effort normal
+tier            minimize
+cover robots
+cover power     --pole medium-electric-pole
+floorplan
+report_checks
+diff            --scope stale
+report_bom      --stock none
+write_layout
+apply           --scope stale
+stop_on         invariant
+"""
 
 
 class FlowTest(unittest.TestCase):
@@ -31,6 +70,38 @@ class FlowTest(unittest.TestCase):
 
     def read(self, name):
         with open(os.path.join(self.dir, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def shop(self, fk=None):
+        """The A2 game codebase under self.dir/shop, written from scratch."""
+        folder = os.path.join(self.dir, "shop")
+        os.makedirs(folder, exist_ok=True)
+        for name, text in (("shop.fk", fk or SHOP_FK), ("mall.surface", SHOP_SURFACE),
+                           ("mall.build.fkb", SHOP_SCRIPT)):
+            with open(os.path.join(folder, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        return folder
+
+    def shop_build(self, folder, frm=None, to=None, said=None):
+        return flow.run(os.path.join(folder, "mall.build.fkb"), frm, to, CAT,
+                        echo=said.append if said is not None else (lambda _line: None))
+
+    def shop_change(self, folder, old, new):
+        path = os.path.join(folder, "shop.fk")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn(old, text)
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text.replace(old, new))
+
+    def shop_recipe(self, folder, *parts):
+        """The recipe of the shop's one crafter in a factory checkpoint or the committed .fkp."""
+        lay = fkp.load(os.path.join(folder, *parts))
+        return sorted({e.attrs.get("recipe") for e in lay.entities.values()
+                       if e.key.startswith("gear/") and e.attrs.get("recipe")})
+
+    def shop_read(self, folder, *parts):
+        with open(os.path.join(folder, *parts), encoding="utf-8") as fh:
             return fh.read()
 
     def test_the_default_script_builds_redgreen(self):
@@ -163,41 +234,95 @@ class FlowTest(unittest.TestCase):
         self.assertIn("skipped, no game link", self.read("out/diff.txt"))
         self.assertIn("skipped, no game link", self.read("out/apply.txt"))
 
-    def test_a_resume_after_a_source_change_lays_out_again(self):
-        # 2.0.4 (the second lead run, 2026-10-22): a recipe changed in red.fk, the build resumed
-        # on checkpoints laid from the old source, and write_layout wrote (and the paste laid)
-        # the old recipe; the look then judged against that .fkp and said OK
-        def recipes():
-            lay = fkp.load(os.path.join(self.dir, "main.fkp"))
-            return sorted(e.attrs.get("recipe") for e in lay.entities.values()
-                          if e.key.startswith("ins/") and e.attrs.get("recipe"))
-
-        code, ctx = self.build(to="report_checks")
+    def test_a_resume_after_a_recipe_change_lays_out_again(self):
+        # 2.0.4 A2 (the second lead run, 2026-10-22): a recipe changed in the source, a build
+        # resumed on the old out/<step>/ checkpoints, write_layout wrote the old recipe into the
+        # .fkp, the paste laid it, and `fk look` judged against that .fkp and said OK.
+        folder = self.shop()
+        code, ctx = self.shop_build(folder, to="write_layout")
         self.assertEqual(code, 0, ctx.log)
-        src = self.read("main.fk").replace("AsmRow<n=1, recipe=inserter>",
-                                           "AsmRow<n=1, recipe=assembling-machine-1>")
-        with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(src)
+        old = ctx.composed
+        self.assertEqual(self.shop_recipe(folder, "out", "cover_power", "gear.fkp"),
+                         ["iron-gear-wheel"])
+        self.shop_change(folder, "recipe=iron-gear-wheel>", "recipe=iron-stick>")
         said = []
-        code, ctx = flow.run(self.script, "report_bom", "write_layout", CAT, echo=said.append)
+        code, ctx = self.shop_build(folder, "diff", "write_layout", said)
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual(recipes(), ["assembling-machine-1"])
-        self.assertIn("main.fk changed", said[0])
-        self.assertIn("main.fk changed", self.read("out/report_bom.txt"))
-        for step in ("place", "cover_robots", "floorplan"):         # the checkpoints are new too
-            with open(os.path.join(self.dir, "out", step, "main.fkp"), encoding="utf-8") as fh:
-                self.assertIn("recipe=assembling-machine-1", fh.read(), step)
+        self.assertIn("out/cover_power was laid from other source (shop.fk changed)", said[0])
+        self.assertIn("shop.fk changed", self.shop_read(folder, "out", "diff.txt"))
+        # every checkpoint is laid from the new source, not just the one the resume loaded
+        for step in ("place", "route", "tier", "cover_power", "cover_robots", "floorplan"):
+            self.assertEqual(self.shop_recipe(folder, "out", step, "gear.fkp"),
+                             ["iron-stick"], step)
+        self.assertEqual(self.shop_recipe(folder, "shop.fkp"), ["iron-stick"])
+        self.assertEqual(flow.layout_source_changes(folder), [])
+        # the look before the paste: the new .fkp against the game as the old build left it is a
+        # recipe DRIFT, not the OK the stale .fkp gave
+        sf, _surface_lay, _path, new = look.composed(folder, CAT)
+        area = look.default_area(new, CAT)
+        lk = look.report(new, scene.design_scene(old, CAT, area), CAT, area, look.policy(sf))
+        self.assertEqual((lk.ok, lk.designed), (9, 10))
+        self.assertEqual([(v.verdict, v.detail) for v in lk.rep.verdicts if v.verdict != "OK"],
+                         [("DRIFT", "recipe iron-gear-wheel, designed iron-stick")])
+        self.assertIn("DRIFT", "\n".join(lk.lines()))
+        self.assertIn("designed iron-stick", "\n".join(lk.lines()))
         # the same source again: the checkpoints are taken as they stand, nothing is laid again
         said = []
-        code, ctx = flow.run(self.script, "report_bom", "write_layout", CAT, echo=said.append)
+        code, ctx = self.shop_build(folder, "diff", "write_layout", said)
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual([l.split("]")[0] for l in said], ["[15/19", "[16/19"])
-        self.assertEqual(flow.layout_source_changes(self.dir), [])
-        # a look judges against main.fkp: it says when the source changed since it was written
-        with open(os.path.join(self.dir, "main.fk"), "a", encoding="utf-8", newline="\n") as fh:
+        self.assertEqual([line.split("]")[0] for line in said], ["[12/16", "[13/16", "[14/16"])
+        # a look also says when the source moved on from the .fkp (until the next build writes it)
+        with open(os.path.join(folder, "shop.fk"), "a", encoding="utf-8", newline="\n") as fh:
             fh.write("# an edit not built yet\n")
-        self.assertEqual(len(flow.layout_source_changes(self.dir)), 1)
-        self.assertIn("main.fk changed since main.fkp", flow.layout_source_changes(self.dir)[0])
+        self.assertEqual(len(flow.layout_source_changes(folder)), 1)
+        self.assertIn("shop.fk changed since shop.fkp",
+                      flow.layout_source_changes(folder)[0])
+
+    def test_a_resume_after_a_guard_or_fill_change_lays_out_again(self):
+        # 2.0.4 A2: a guard/fill change is a source change too. The circuits are laid at
+        # floorplan, so out/floorplan/<factory>.fkp (what a later `--from` build or a look
+        # reads) must be written again, not left as the previous build wrote it.
+        folder = self.shop()
+        code, ctx = self.shop_build(folder, to="write_layout")
+        self.assertEqual(code, 0, ctx.log)
+        before = fkp.load(os.path.join(folder, "out", "floorplan", "gear.fkp"))
+        self.assertFalse(any(a in e.attrs for e in before.entities.values()
+                             for a in ("if", "read", "filter")))
+        self.shop_change(folder, "recipe=iron-gear-wheel>",
+                         "recipe=iron-gear-wheel, fill=20, guard>")
+        said = []
+        code, ctx = self.shop_build(folder, "diff", "write_layout", said)
+        self.assertEqual(code, 0, ctx.log)
+        self.assertIn("shop.fk changed", said[0])
+        for parts in (("out", "floorplan", "gear.fkp"), ("shop.fkp",)):
+            lay = fkp.load(os.path.join(folder, *parts))
+            attrs = {e.key: e.attrs for e in lay.entities.values()}
+            self.assertEqual(attrs["gear/m0"].get("read"), "ingredients", parts)
+            self.assertEqual(attrs["~in/i1"].get("filter"), "circuit", parts)
+            self.assertEqual(attrs["~out/i0"].get("if"), "iron-gear-wheel<20", parts)
+        self.assertEqual(flow.layout_source_changes(folder), [])
+
+    def test_a_checkpoint_with_no_source_stamp_is_stale(self):
+        # 2.0.4 A2: the live run's checkpoints were written before the stamp existed. A build
+        # must not take one as current: it is laid out again (the first build after the upgrade
+        # would otherwise write and paste the old design again).
+        folder = self.shop()
+        code, ctx = self.shop_build(folder, to="write_layout")
+        self.assertEqual(code, 0, ctx.log)
+        self.shop_change(folder, "recipe=iron-gear-wheel>", "recipe=iron-stick>")
+        os.remove(os.path.join(folder, "out", "cover_power", "source.json"))
+        said = []
+        code, ctx = self.shop_build(folder, "diff", "write_layout", said)
+        self.assertEqual(code, 0, ctx.log)
+        self.assertIn("it does not say what source it was laid from", said[0])
+        for step in ("place", "route", "tier", "cover_power", "cover_robots", "floorplan"):
+            self.assertEqual(self.shop_recipe(folder, "out", step, "gear.fkp"),
+                             ["iron-stick"], step)
+        with open(os.path.join(folder, "out", "cover_power", "source.json"),
+                  encoding="utf-8") as fh:
+            stamp = json.load(fh)
+        self.assertEqual(stamp["files"]["shop.fk"],
+                         flow._source_files(folder)["shop.fk"])
 
     def test_stop_on_stops_on_a_check(self):
         src = self.read("main.fk").replace("net cable:  cable -> circ\n", "")
