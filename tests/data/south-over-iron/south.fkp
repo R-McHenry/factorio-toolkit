@@ -1,0 +1,701 @@
+fkp 1 factory south
+size 79x44
+inst box Chest provider=true at 50,16 rot 0 sig c724e6c441
+inst cb Assembler duty=0.2 inserter=inserter recipe=electronic-circuit at 53,19 rot 0 sig 3089bb2673
+inst coal Chest item=coal rate=0.9 requester=true at 40,31 rot 0 sig 61565a40ca
+inst copper/box Chest limit=8 provider=true at 64,7 rot 0 sig c724e6c441
+inst copper/coal Chest item=coal rate=0.3 requester=true at 78,7 rot 0 sig 61565a40ca
+inst copper/ore MinerRow drill=burner-mining-drill fuel=coal inserter=inserter n=4 resource=copper-ore at 66,18 rot 0 sig ce2fc61736
+inst copper/smelt SmelterRow inserter=inserter n=4 recipe=copper-plate at 66,9 rot 0 sig c6910098ab
+inst febox Chest limit=4 provider=true at 37,24 rot 0 sig c724e6c441
+inst ga Assembler duty=0.2 inserter=inserter recipe=iron-gear-wheel at 45,8 rot 0 sig 3f9747f521
+inst gc Assembler duty=0.2 inserter=inserter recipe=iron-gear-wheel at 46,11 rot 0 sig 3f9747f521
+inst gx Assembler duty=0.2 inserter=inserter recipe=iron-gear-wheel at 45,18 rot 0 sig 3f9747f521
+inst ins2 Assembler duty=0.2 inserter=inserter keep=100 recipe=inserter at 46,15 rot 0 sig 98ad29fcda
+inst iore MinerRow n=16 resource=iron-ore at 32,33 rot 0 sig 3c4f2b3969
+inst ism SmelterArray n=24 recipe=iron-plate at 25,4 rot 0 sig 864f56f29d
+inst kb Assembler duty=0.2 inserter=inserter recipe=copper-cable at 57,19 rot 0 sig 3f9747f521
+inst pole Assembler duty=0.2 inserter=inserter keep=50 recipe=medium-electric-pole at 57,23 rot 0 sig 98ad29fcda
+inst pw Chest plain=true at 44,43 rot 0 sig 62b8047039
+inst r2 Literal file=relay.json at 54,7 rot 0 sig f3275aa1c9
+inst sp Assembler duty=0.2 inserter=inserter keep=20 recipe=splitter at 52,15 rot 0 sig 98ad29fcda
+inst stbox Chest limit=2 provider=true at 58,27 rot 0 sig 653f62b678
+inst steel SmelterRow inserter=inserter n=4 recipe=steel-plate at 42,24 rot 2 sig c6910098ab
+inst stk Assembler duty=0.2 inserter=inserter recipe=iron-stick at 53,23 rot 0 sig 3f9747f521
+inst yb Assembler duty=0.2 inserter=inserter recipe=transport-belt at 49,8 rot 0 sig 3089bb2673
+inst yb3 Assembler duty=0.2 inserter=inserter keep=200 recipe=transport-belt at 49,18 rot 0 sig 3089bb2673
+inst yu Assembler duty=0.2 inserter=inserter keep=50 recipe=underground-belt at 49,12 rot 0 sig 3089bb2673
+cover power power pole=medium-electric-pole
+e box/c0 passive-provider-chest 50.5,16.5 role=provider
+e cb/m0 assembling-machine-1 54.5,20.5 recipe=electronic-circuit
+e coal/c0 requester-chest 40.5,31.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":54,"index":1,"name":"coal","quality":"normal"}],"index":1}]}}' item=coal rate=0.9 role=requester
+e copper/box/c0 passive-provider-chest 64.5,7.5 config='{"bar":8}' role=provider
+e copper/coal/c0 requester-chest 78.5,7.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":18,"index":1,"name":"coal","quality":"normal"}],"index":1}]}}' item=coal rate=0.3 role=requester
+e copper/ore/f0 inserter 66.5,19.5 N net=copper/fuel
+e copper/ore/f1 inserter 68.5,19.5 N net=copper/fuel
+e copper/ore/f2 inserter 70.5,19.5 N net=copper/fuel
+e copper/ore/f3 inserter 72.5,19.5 N net=copper/fuel
+e copper/ore/in1b0 transport-belt 66.5,18.5 E net=copper/fuel
+e copper/ore/in1b1 transport-belt 67.5,18.5 E net=copper/fuel
+e copper/ore/in1b2 transport-belt 68.5,18.5 E net=copper/fuel
+e copper/ore/in1b3 transport-belt 69.5,18.5 E net=copper/fuel
+e copper/ore/in1b4 transport-belt 70.5,18.5 E net=copper/fuel
+e copper/ore/in1b5 transport-belt 71.5,18.5 E net=copper/fuel
+e copper/ore/in1b6 transport-belt 72.5,18.5 E net=copper/fuel
+e copper/ore/in1b7 transport-belt 73.5,18.5 E net=copper/fuel
+e copper/ore/m0 burner-mining-drill 67,21 S resource=copper-ore
+e copper/ore/m1 burner-mining-drill 69,21 S resource=copper-ore
+e copper/ore/m2 burner-mining-drill 71,21 S resource=copper-ore
+e copper/ore/m3 burner-mining-drill 73,21 S resource=copper-ore
+e copper/ore/outb0 transport-belt 66.5,22.5 W net=copper/ore_
+e copper/ore/outb1 transport-belt 67.5,22.5 W net=copper/ore_
+e copper/ore/outb2 transport-belt 68.5,22.5 W net=copper/ore_
+e copper/ore/outb3 transport-belt 69.5,22.5 W net=copper/ore_
+e copper/ore/outb4 transport-belt 70.5,22.5 W net=copper/ore_
+e copper/ore/outb5 transport-belt 71.5,22.5 W net=copper/ore_
+e copper/ore/outb6 transport-belt 72.5,22.5 W net=copper/ore_
+e copper/ore/outb7 transport-belt 73.5,22.5 W net=copper/ore_
+e copper/smelt/f0 inserter 66.5,11.5 N net=copper/ore_
+e copper/smelt/f1 inserter 68.5,11.5 N net=copper/ore_
+e copper/smelt/f2 inserter 70.5,11.5 N net=copper/ore_
+e copper/smelt/f3 inserter 72.5,11.5 N net=copper/ore_
+e copper/smelt/in1b0 transport-belt 66.5,10.5 E net=copper/ore_
+e copper/smelt/in1b1 transport-belt 67.5,10.5 E net=copper/ore_
+e copper/smelt/in1b2 transport-belt 68.5,10.5 E net=copper/ore_
+e copper/smelt/in1b3 transport-belt 69.5,10.5 E net=copper/ore_
+e copper/smelt/in1b4 transport-belt 70.5,10.5 E net=copper/ore_
+e copper/smelt/in1b5 transport-belt 71.5,10.5 E net=copper/ore_
+e copper/smelt/in1b6 transport-belt 72.5,10.5 E net=copper/ore_
+e copper/smelt/in1b7 transport-belt 73.5,10.5 S net=copper/ore_
+e copper/smelt/in2b0 transport-belt 66.5,9.5 E net=copper/fuel
+e copper/smelt/in2b1 transport-belt 67.5,9.5 E net=copper/fuel
+e copper/smelt/in2b2 transport-belt 68.5,9.5 E net=copper/fuel
+e copper/smelt/in2b3 transport-belt 69.5,9.5 E net=copper/fuel
+e copper/smelt/in2b4 transport-belt 70.5,9.5 E net=copper/fuel
+e copper/smelt/in2b5 transport-belt 71.5,9.5 E net=copper/fuel
+e copper/smelt/in2b6 transport-belt 72.5,9.5 E net=copper/fuel
+e copper/smelt/in2b7 transport-belt 73.5,9.5 E net=copper/fuel
+e copper/smelt/l0 long-handed-inserter 67.5,11.5 N net=copper/fuel
+e copper/smelt/l1 long-handed-inserter 69.5,11.5 N net=copper/fuel
+e copper/smelt/l2 long-handed-inserter 71.5,11.5 N net=copper/fuel
+e copper/smelt/l3 long-handed-inserter 73.5,11.5 N net=copper/fuel
+e copper/smelt/m0 stone-furnace 67,13 recipe=copper-plate fuel=coal
+e copper/smelt/m1 stone-furnace 69,13 recipe=copper-plate fuel=coal
+e copper/smelt/m2 stone-furnace 71,13 recipe=copper-plate fuel=coal
+e copper/smelt/m3 stone-furnace 73,13 recipe=copper-plate fuel=coal
+e copper/smelt/o0 inserter 66.5,14.5 N net=cupl
+e copper/smelt/o1 inserter 68.5,14.5 N net=cupl
+e copper/smelt/o2 inserter 70.5,14.5 N net=cupl
+e copper/smelt/o3 inserter 72.5,14.5 N net=cupl
+e copper/smelt/outb0 transport-belt 66.5,15.5 W net=cupl
+e copper/smelt/outb1 transport-belt 67.5,15.5 W net=cupl
+e copper/smelt/outb2 transport-belt 68.5,15.5 W net=cupl
+e copper/smelt/outb3 transport-belt 69.5,15.5 W net=cupl
+e copper/smelt/outb4 transport-belt 70.5,15.5 W net=cupl
+e copper/smelt/outb5 transport-belt 71.5,15.5 W net=cupl
+e copper/smelt/outb6 transport-belt 72.5,15.5 W net=cupl
+e copper/smelt/outb7 transport-belt 73.5,15.5 W net=cupl
+e febox/c0 passive-provider-chest 37.5,24.5 config='{"bar":4}' role=provider
+e ga/m0 assembling-machine-1 46.5,9.5 recipe=iron-gear-wheel
+e gc/m0 assembling-machine-1 47.5,12.5 recipe=iron-gear-wheel
+e gx/m0 assembling-machine-1 46.5,19.5 recipe=iron-gear-wheel
+e ins2/m0 assembling-machine-1 47.5,16.5 recipe=inserter
+e iore/m0 electric-mining-drill 33.5,34.5 S resource=iron-ore
+e iore/m1 electric-mining-drill 36.5,34.5 S resource=iron-ore
+e iore/m2 electric-mining-drill 39.5,34.5 S resource=iron-ore
+e iore/m3 electric-mining-drill 42.5,34.5 S resource=iron-ore
+e iore/m4 electric-mining-drill 45.5,34.5 S resource=iron-ore
+e iore/m5 electric-mining-drill 48.5,34.5 S resource=iron-ore
+e iore/m6 electric-mining-drill 51.5,34.5 S resource=iron-ore
+e iore/m7 electric-mining-drill 54.5,34.5 S resource=iron-ore
+e iore/m8 electric-mining-drill 33.5,38.5 N resource=iron-ore
+e iore/m9 electric-mining-drill 36.5,38.5 N resource=iron-ore
+e iore/m10 electric-mining-drill 39.5,38.5 N resource=iron-ore
+e iore/m11 electric-mining-drill 42.5,38.5 N resource=iron-ore
+e iore/m12 electric-mining-drill 45.5,38.5 N resource=iron-ore
+e iore/m13 electric-mining-drill 48.5,38.5 N resource=iron-ore
+e iore/m14 electric-mining-drill 51.5,38.5 N resource=iron-ore
+e iore/m15 electric-mining-drill 54.5,38.5 N resource=iron-ore
+e iore/outb0 transport-belt 33.5,36.5 E net=ore_i
+e iore/outb1 transport-belt 34.5,36.5 E net=ore_i
+e iore/outb2 transport-belt 35.5,36.5 E net=ore_i
+e iore/outb3 transport-belt 36.5,36.5 E net=ore_i
+e iore/outb4 transport-belt 37.5,36.5 E net=ore_i
+e iore/outb5 transport-belt 38.5,36.5 E net=ore_i
+e iore/outb6 transport-belt 39.5,36.5 E net=ore_i
+e iore/outb7 transport-belt 40.5,36.5 E net=ore_i
+e iore/outb8 transport-belt 41.5,36.5 E net=ore_i
+e iore/outb9 transport-belt 42.5,36.5 E net=ore_i
+e iore/outb10 transport-belt 43.5,36.5 E net=ore_i
+e iore/outb11 transport-belt 44.5,36.5 E net=ore_i
+e iore/outb12 transport-belt 45.5,36.5 E net=ore_i
+e iore/outb13 transport-belt 46.5,36.5 E net=ore_i
+e iore/outb14 transport-belt 47.5,36.5 E net=ore_i
+e iore/outb15 transport-belt 48.5,36.5 E net=ore_i
+e iore/outb16 transport-belt 49.5,36.5 E net=ore_i
+e iore/outb17 transport-belt 50.5,36.5 E net=ore_i
+e iore/outb18 transport-belt 51.5,36.5 E net=ore_i
+e iore/outb19 transport-belt 52.5,36.5 E net=ore_i
+e iore/outb20 transport-belt 53.5,36.5 E net=ore_i
+e iore/outb21 transport-belt 54.5,36.5 E net=ore_i
+e iore/outb22 transport-belt 55.5,36.5 E net=ore_i
+e ism/coal0b0 transport-belt 29.5,28.5 S net=fuel
+e ism/coal0b1 transport-belt 30.5,28.5 W net=fuel
+e ism/coal0s0 splitter 31.5,29 W net=fuel
+e ism/coal0s1 splitter 29,29.5 S net=fuel
+e ism/coal0u0 underground-belt 32.5,29.5 W net=fuel ug=out
+e ism/coalin underground-belt 36.5,29.5 W net=fuel ug=in
+e ism/f0 inserter 26.5,26.5 W net=ore_i+fuel
+e ism/f1 inserter 26.5,25.5 W net=ore_i+fuel
+e ism/f2 inserter 26.5,22.5 W net=ore_i+fuel
+e ism/f3 inserter 26.5,21.5 W net=ore_i+fuel
+e ism/f4 inserter 26.5,18.5 W net=ore_i+fuel
+e ism/f5 inserter 26.5,17.5 W net=ore_i+fuel
+e ism/f6 inserter 26.5,14.5 W net=ore_i+fuel
+e ism/f7 inserter 26.5,13.5 W net=ore_i+fuel
+e ism/f8 inserter 26.5,10.5 W net=ore_i+fuel
+e ism/f9 inserter 26.5,9.5 W net=ore_i+fuel
+e ism/f10 inserter 26.5,6.5 W net=ore_i+fuel
+e ism/f11 inserter 26.5,5.5 W net=ore_i+fuel
+e ism/f12 inserter 34.5,26.5 E net=fuel+ore_i
+e ism/f13 inserter 34.5,25.5 E net=fuel+ore_i
+e ism/f14 inserter 34.5,22.5 E net=fuel+ore_i
+e ism/f15 inserter 34.5,21.5 E net=fuel+ore_i
+e ism/f16 inserter 34.5,18.5 E net=fuel+ore_i
+e ism/f17 inserter 34.5,17.5 E net=fuel+ore_i
+e ism/f18 inserter 34.5,14.5 E net=fuel+ore_i
+e ism/f19 inserter 34.5,13.5 E net=fuel+ore_i
+e ism/f20 inserter 34.5,10.5 E net=fuel+ore_i
+e ism/f21 inserter 34.5,9.5 E net=fuel+ore_i
+e ism/f22 inserter 34.5,6.5 E net=fuel+ore_i
+e ism/f23 inserter 34.5,5.5 E net=fuel+ore_i
+e ism/feed0e0 transport-belt 35.5,4.5 N net=fuel|ore_i
+e ism/feed0e1 transport-belt 35.5,5.5 N net=fuel|ore_i
+e ism/feed0e2 transport-belt 35.5,6.5 N net=fuel|ore_i
+e ism/feed0e3 transport-belt 35.5,7.5 N net=fuel|ore_i
+e ism/feed0e4 transport-belt 35.5,8.5 N net=fuel|ore_i
+e ism/feed0e5 transport-belt 35.5,9.5 N net=fuel|ore_i
+e ism/feed0e6 transport-belt 35.5,10.5 N net=fuel|ore_i
+e ism/feed0e7 transport-belt 35.5,11.5 N net=fuel|ore_i
+e ism/feed0e8 transport-belt 35.5,12.5 N net=fuel|ore_i
+e ism/feed0e9 transport-belt 35.5,13.5 N net=fuel|ore_i
+e ism/feed0e10 transport-belt 35.5,14.5 N net=fuel|ore_i
+e ism/feed0e11 transport-belt 35.5,15.5 N net=fuel|ore_i
+e ism/feed0e12 transport-belt 35.5,16.5 N net=fuel|ore_i
+e ism/feed0e13 transport-belt 35.5,17.5 N net=fuel|ore_i
+e ism/feed0e14 transport-belt 35.5,18.5 N net=fuel|ore_i
+e ism/feed0e15 transport-belt 35.5,19.5 N net=fuel|ore_i
+e ism/feed0e16 transport-belt 35.5,20.5 N net=fuel|ore_i
+e ism/feed0e17 transport-belt 35.5,21.5 N net=fuel|ore_i
+e ism/feed0e18 transport-belt 35.5,22.5 N net=fuel|ore_i
+e ism/feed0e19 transport-belt 35.5,23.5 N net=fuel|ore_i
+e ism/feed0e20 transport-belt 35.5,24.5 N net=fuel|ore_i
+e ism/feed0e21 transport-belt 35.5,25.5 N net=fuel|ore_i
+e ism/feed0e22 transport-belt 35.5,26.5 N net=fuel|ore_i
+e ism/feed0e23 transport-belt 35.5,27.5 N net=fuel|ore_i
+e ism/feed0e24 transport-belt 35.5,28.5 N net=fuel|ore_i
+e ism/feed0e25 transport-belt 35.5,29.5 N net=fuel|ore_i
+e ism/feed0e26 transport-belt 35.5,30.5 N net=fuel|ore_i
+e ism/feed0m0 transport-belt 26.5,30.5 W net=ore_i|fuel
+e ism/feed0m1 transport-belt 27.5,30.5 W net=ore_i|fuel
+e ism/feed0m2 transport-belt 28.5,30.5 W net=ore_i|fuel
+e ism/feed0n0 transport-belt 29.5,30.5 E net=fuel|ore_i
+e ism/feed0n1 transport-belt 30.5,30.5 E net=fuel|ore_i
+e ism/feed0n2 transport-belt 31.5,30.5 E net=fuel|ore_i
+e ism/feed0n3 transport-belt 32.5,30.5 E net=fuel|ore_i
+e ism/feed0n4 transport-belt 33.5,30.5 E net=fuel|ore_i
+e ism/feed0n5 transport-belt 34.5,30.5 E net=fuel|ore_i
+e ism/feed0w0 transport-belt 25.5,4.5 N net=ore_i|fuel
+e ism/feed0w1 transport-belt 25.5,5.5 N net=ore_i|fuel
+e ism/feed0w2 transport-belt 25.5,6.5 N net=ore_i|fuel
+e ism/feed0w3 transport-belt 25.5,7.5 N net=ore_i|fuel
+e ism/feed0w4 transport-belt 25.5,8.5 N net=ore_i|fuel
+e ism/feed0w5 transport-belt 25.5,9.5 N net=ore_i|fuel
+e ism/feed0w6 transport-belt 25.5,10.5 N net=ore_i|fuel
+e ism/feed0w7 transport-belt 25.5,11.5 N net=ore_i|fuel
+e ism/feed0w8 transport-belt 25.5,12.5 N net=ore_i|fuel
+e ism/feed0w9 transport-belt 25.5,13.5 N net=ore_i|fuel
+e ism/feed0w10 transport-belt 25.5,14.5 N net=ore_i|fuel
+e ism/feed0w11 transport-belt 25.5,15.5 N net=ore_i|fuel
+e ism/feed0w12 transport-belt 25.5,16.5 N net=ore_i|fuel
+e ism/feed0w13 transport-belt 25.5,17.5 N net=ore_i|fuel
+e ism/feed0w14 transport-belt 25.5,18.5 N net=ore_i|fuel
+e ism/feed0w15 transport-belt 25.5,19.5 N net=ore_i|fuel
+e ism/feed0w16 transport-belt 25.5,20.5 N net=ore_i|fuel
+e ism/feed0w17 transport-belt 25.5,21.5 N net=ore_i|fuel
+e ism/feed0w18 transport-belt 25.5,22.5 N net=ore_i|fuel
+e ism/feed0w19 transport-belt 25.5,23.5 N net=ore_i|fuel
+e ism/feed0w20 transport-belt 25.5,24.5 N net=ore_i|fuel
+e ism/feed0w21 transport-belt 25.5,25.5 N net=ore_i|fuel
+e ism/feed0w22 transport-belt 25.5,26.5 N net=ore_i|fuel
+e ism/feed0w23 transport-belt 25.5,27.5 N net=ore_i|fuel
+e ism/feed0w24 transport-belt 25.5,28.5 N net=ore_i|fuel
+e ism/feed0w25 transport-belt 25.5,29.5 N net=ore_i|fuel
+e ism/feed0w26 transport-belt 25.5,30.5 N net=ore_i|fuel
+e ism/m0 stone-furnace 28,27 recipe=iron-plate fuel=coal
+e ism/m1 stone-furnace 28,25 recipe=iron-plate fuel=coal
+e ism/m2 stone-furnace 28,23 recipe=iron-plate fuel=coal
+e ism/m3 stone-furnace 28,21 recipe=iron-plate fuel=coal
+e ism/m4 stone-furnace 28,19 recipe=iron-plate fuel=coal
+e ism/m5 stone-furnace 28,17 recipe=iron-plate fuel=coal
+e ism/m6 stone-furnace 28,15 recipe=iron-plate fuel=coal
+e ism/m7 stone-furnace 28,13 recipe=iron-plate fuel=coal
+e ism/m8 stone-furnace 28,11 recipe=iron-plate fuel=coal
+e ism/m9 stone-furnace 28,9 recipe=iron-plate fuel=coal
+e ism/m10 stone-furnace 28,7 recipe=iron-plate fuel=coal
+e ism/m11 stone-furnace 28,5 recipe=iron-plate fuel=coal
+e ism/m12 stone-furnace 33,27 recipe=iron-plate fuel=coal
+e ism/m13 stone-furnace 33,25 recipe=iron-plate fuel=coal
+e ism/m14 stone-furnace 33,23 recipe=iron-plate fuel=coal
+e ism/m15 stone-furnace 33,21 recipe=iron-plate fuel=coal
+e ism/m16 stone-furnace 33,19 recipe=iron-plate fuel=coal
+e ism/m17 stone-furnace 33,17 recipe=iron-plate fuel=coal
+e ism/m18 stone-furnace 33,15 recipe=iron-plate fuel=coal
+e ism/m19 stone-furnace 33,13 recipe=iron-plate fuel=coal
+e ism/m20 stone-furnace 33,11 recipe=iron-plate fuel=coal
+e ism/m21 stone-furnace 33,9 recipe=iron-plate fuel=coal
+e ism/m22 stone-furnace 33,7 recipe=iron-plate fuel=coal
+e ism/m23 stone-furnace 33,5 recipe=iron-plate fuel=coal
+e ism/o0 inserter 29.5,26.5 W net=fe
+e ism/o1 inserter 29.5,25.5 W net=fe
+e ism/o2 inserter 29.5,22.5 W net=fe
+e ism/o3 inserter 29.5,21.5 W net=fe
+e ism/o4 inserter 29.5,18.5 W net=fe
+e ism/o5 inserter 29.5,17.5 W net=fe
+e ism/o6 inserter 29.5,14.5 W net=fe
+e ism/o7 inserter 29.5,13.5 W net=fe
+e ism/o8 inserter 29.5,10.5 W net=fe
+e ism/o9 inserter 29.5,9.5 W net=fe
+e ism/o10 inserter 29.5,6.5 W net=fe
+e ism/o11 inserter 29.5,5.5 W net=fe
+e ism/o12 inserter 31.5,26.5 E net=fe
+e ism/o13 inserter 31.5,25.5 E net=fe
+e ism/o14 inserter 31.5,22.5 E net=fe
+e ism/o15 inserter 31.5,21.5 E net=fe
+e ism/o16 inserter 31.5,18.5 E net=fe
+e ism/o17 inserter 31.5,17.5 E net=fe
+e ism/o18 inserter 31.5,14.5 E net=fe
+e ism/o19 inserter 31.5,13.5 E net=fe
+e ism/o20 inserter 31.5,10.5 E net=fe
+e ism/o21 inserter 31.5,9.5 E net=fe
+e ism/o22 inserter 31.5,6.5 E net=fe
+e ism/o23 inserter 31.5,5.5 E net=fe
+e ism/ore0b0 transport-belt 28.5,32.5 N net=ore_i
+e ism/ore0b1 transport-belt 28.5,33.5 N net=ore_i
+e ism/ore0s splitter 29,31.5 N net=ore_i
+e ism/out0b0 transport-belt 30.5,4.5 S net=fe
+e ism/out0b1 transport-belt 30.5,5.5 S net=fe
+e ism/out0b2 transport-belt 30.5,6.5 S net=fe
+e ism/out0b3 transport-belt 30.5,7.5 S net=fe
+e ism/out0b4 transport-belt 30.5,8.5 S net=fe
+e ism/out0b5 transport-belt 30.5,9.5 S net=fe
+e ism/out0b6 transport-belt 30.5,10.5 S net=fe
+e ism/out0b7 transport-belt 30.5,11.5 S net=fe
+e ism/out0b8 transport-belt 30.5,12.5 S net=fe
+e ism/out0b9 transport-belt 30.5,13.5 S net=fe
+e ism/out0b10 transport-belt 30.5,14.5 S net=fe
+e ism/out0b11 transport-belt 30.5,15.5 S net=fe
+e ism/out0b12 transport-belt 30.5,16.5 S net=fe
+e ism/out0b13 transport-belt 30.5,17.5 S net=fe
+e ism/out0b14 transport-belt 30.5,18.5 S net=fe
+e ism/out0b15 transport-belt 30.5,19.5 S net=fe
+e ism/out0b16 transport-belt 30.5,20.5 S net=fe
+e ism/out0b17 transport-belt 30.5,21.5 S net=fe
+e ism/out0b18 transport-belt 30.5,22.5 S net=fe
+e ism/out0b19 transport-belt 30.5,23.5 S net=fe
+e ism/out0b20 transport-belt 30.5,24.5 S net=fe
+e ism/out0b21 transport-belt 30.5,25.5 S net=fe
+e ism/out0u0 underground-belt 30.5,26.5 S net=fe ug=in
+e ism/out0u1 underground-belt 30.5,31.5 S net=fe ug=out
+e ism/out0x0 transport-belt 30.5,32.5 S net=fe
+e ism/out0x1 transport-belt 30.5,33.5 S net=fe
+e kb/m0 assembling-machine-1 58.5,20.5 recipe=copper-cable
+e pole/m0 assembling-machine-1 58.5,24.5 recipe=medium-electric-pole
+e power/copper-p0 medium-electric-pole 66.5,6.5
+e power/copper-p1 medium-electric-pole 75.5,8.5
+e power/copper-p2 medium-electric-pole 69.5,14.5
+e power/copper-p3 medium-electric-pole 69.5,16.5
+e power/p0 medium-electric-pole 29.5,8.5
+e power/p1 medium-electric-pole 37.5,8.5
+e power/p2 medium-electric-pole 48.5,10.5
+e power/p3 medium-electric-pole 31.5,11.5
+e power/p4 medium-electric-pole 55.5,11.5
+e power/p5 medium-electric-pole 29.5,15.5
+e power/p6 medium-electric-pole 51.5,15.5
+e power/p7 medium-electric-pole 58.5,15.5
+e power/p8 medium-electric-pole 43.5,17.5
+e power/p9 medium-electric-pole 31.5,19.5
+e power/p10 medium-electric-pole 54.5,22.5
+e power/p11 medium-electric-pole 29.5,23.5
+e power/p12 medium-electric-pole 37.5,23.5
+e power/p13 medium-electric-pole 46.5,25.5
+e power/p14 medium-electric-pole 57.5,26.5
+e power/p15 medium-electric-pole 28.5,28.5
+e power/p16 medium-electric-pole 43.5,31.5
+e power/p17 medium-electric-pole 52.5,31.5
+e power/p18 medium-electric-pole 56.5,34.5
+e power/p19 medium-electric-pole 32.5,36.5
+e power/p20 medium-electric-pole 43.5,42.5
+e power/p21 medium-electric-pole 52.5,42.5
+e pw/c0 iron-chest 44.5,43.5 role=plain
+e r2/medium-electric-pole0 medium-electric-pole 58.5,7.5 N
+e r2/roboport0 roboport 56,9 N
+e sp/m0 assembling-machine-1 53.5,16.5 recipe=splitter
+e stbox/c0 passive-provider-chest 58.5,27.5 config='{"bar":2}' role=provider
+e steel/f0 inserter 49.5,28.5 S net=fe
+e steel/f1 inserter 47.5,28.5 S net=fe
+e steel/f2 inserter 45.5,28.5 S net=fe
+e steel/f3 inserter 43.5,28.5 S net=fe
+e steel/in1b0 transport-belt 49.5,29.5 W net=fe
+e steel/in1b1 transport-belt 48.5,29.5 W net=fe
+e steel/in1b2 transport-belt 47.5,29.5 W net=fe
+e steel/in1b3 transport-belt 46.5,29.5 W net=fe
+e steel/in1b4 transport-belt 45.5,29.5 W net=fe
+e steel/in1b5 transport-belt 44.5,29.5 W net=fe
+e steel/in1b6 transport-belt 43.5,29.5 W net=fe
+e steel/in1b7 transport-belt 42.5,29.5 N net=fe
+e steel/in2b0 transport-belt 49.5,30.5 W net=fuel
+e steel/in2b1 transport-belt 48.5,30.5 W net=fuel
+e steel/in2b2 transport-belt 47.5,30.5 W net=fuel
+e steel/in2b3 transport-belt 46.5,30.5 W net=fuel
+e steel/in2b4 transport-belt 45.5,30.5 W net=fuel
+e steel/in2b5 transport-belt 44.5,30.5 W net=fuel
+e steel/in2b6 transport-belt 43.5,30.5 W net=fuel
+e steel/in2b7 transport-belt 42.5,30.5 W net=fuel
+e steel/l0 long-handed-inserter 48.5,28.5 S net=fuel
+e steel/l1 long-handed-inserter 46.5,28.5 S net=fuel
+e steel/l2 long-handed-inserter 44.5,28.5 S net=fuel
+e steel/l3 long-handed-inserter 42.5,28.5 S net=fuel
+e steel/m0 stone-furnace 49,27 recipe=steel-plate fuel=coal
+e steel/m1 stone-furnace 47,27 recipe=steel-plate fuel=coal
+e steel/m2 stone-furnace 45,27 recipe=steel-plate fuel=coal
+e steel/m3 stone-furnace 43,27 recipe=steel-plate fuel=coal
+e steel/o0 inserter 49.5,25.5 S net=stl
+e steel/o1 inserter 47.5,25.5 S net=stl
+e steel/o2 inserter 45.5,25.5 S net=stl
+e steel/o3 inserter 43.5,25.5 S net=stl
+e steel/outb0 transport-belt 49.5,24.5 E net=stl
+e steel/outb1 transport-belt 48.5,24.5 E net=stl
+e steel/outb2 transport-belt 47.5,24.5 E net=stl
+e steel/outb3 transport-belt 46.5,24.5 E net=stl
+e steel/outb4 transport-belt 45.5,24.5 E net=stl
+e steel/outb5 transport-belt 44.5,24.5 E net=stl
+e steel/outb6 transport-belt 43.5,24.5 E net=stl
+e steel/outb7 transport-belt 42.5,24.5 E net=stl
+e stk/m0 assembling-machine-1 54.5,24.5 recipe=iron-stick
+e yb3/m0 assembling-machine-1 50.5,19.5 recipe=transport-belt
+e yb/m0 assembling-machine-1 50.5,9.5 recipe=transport-belt
+e yu/m0 assembling-machine-1 50.5,13.5 recipe=underground-belt
+e ~cbo/b0 transport-belt 50.5,21.5 W net=cbo
+e ~cbo/b1 transport-belt 51.5,21.5 W net=cbo
+e ~cbo/b2 transport-belt 49.5,21.5 W net=cbo
+e ~cbo/b3 transport-belt 48.5,21.5 W net=cbo
+e ~cbo/b4 transport-belt 47.5,21.5 W net=cbo
+e ~cbo/b5 transport-belt 46.5,21.5 W net=cbo
+e ~cbo/b6 transport-belt 45.5,21.5 W net=cbo
+e ~cbo/b7 transport-belt 44.5,21.5 N net=cbo
+e ~cbo/b8 transport-belt 44.5,20.5 N net=cbo
+e ~cbo/b9 transport-belt 44.5,19.5 N net=cbo
+e ~cbo/b10 transport-belt 44.5,18.5 N net=cbo
+e ~cbo/b11 transport-belt 44.5,17.5 N net=cbo
+e ~cbo/i0 fast-inserter 53.5,18.5 S net=cbo
+e ~cbo/i1 fast-inserter 52.5,21.5 E net=cbo
+e ~cbo/i2 fast-inserter 45.5,17.5 W net=cbo
+e ~copper/fuel/b0 transport-belt 65.5,5.5 S net=copper/fuel
+e ~copper/fuel/b1 transport-belt 66.5,5.5 W net=copper/fuel
+e ~copper/fuel/b2 transport-belt 67.5,5.5 W net=copper/fuel
+e ~copper/fuel/b3 transport-belt 68.5,5.5 W net=copper/fuel
+e ~copper/fuel/b4 transport-belt 69.5,5.5 W net=copper/fuel
+e ~copper/fuel/b5 transport-belt 70.5,5.5 W net=copper/fuel
+e ~copper/fuel/b6 transport-belt 71.5,5.5 W net=copper/fuel
+e ~copper/fuel/b7 transport-belt 72.5,5.5 W net=copper/fuel
+e ~copper/fuel/b8 transport-belt 73.5,5.5 W net=copper/fuel
+e ~copper/fuel/b9 transport-belt 74.5,5.5 W net=copper/fuel
+e ~copper/fuel/b10 transport-belt 75.5,5.5 W net=copper/fuel
+e ~copper/fuel/b11 transport-belt 76.5,5.5 W net=copper/fuel
+e ~copper/fuel/b12 transport-belt 77.5,5.5 W net=copper/fuel
+e ~copper/fuel/b13 transport-belt 78.5,5.5 W net=copper/fuel
+e ~copper/fuel/b14 transport-belt 65.5,6.5 S net=copper/fuel
+e ~copper/fuel/b15 transport-belt 65.5,7.5 S net=copper/fuel
+e ~copper/fuel/b16 transport-belt 64.5,9.5 S net=copper/fuel
+e ~copper/fuel/b17 transport-belt 64.5,10.5 S net=copper/fuel
+e ~copper/fuel/b18 transport-belt 64.5,11.5 S net=copper/fuel
+e ~copper/fuel/b19 transport-belt 64.5,12.5 S net=copper/fuel
+e ~copper/fuel/b20 transport-belt 64.5,13.5 S net=copper/fuel
+e ~copper/fuel/b21 transport-belt 64.5,14.5 S net=copper/fuel
+e ~copper/fuel/b22 transport-belt 64.5,15.5 S net=copper/fuel
+e ~copper/fuel/b23 transport-belt 64.5,16.5 S net=copper/fuel
+e ~copper/fuel/b24 transport-belt 64.5,17.5 S net=copper/fuel
+e ~copper/fuel/b25 transport-belt 64.5,18.5 E net=copper/fuel
+e ~copper/fuel/b26 transport-belt 65.5,18.5 E net=copper/fuel
+e ~copper/fuel/b27 transport-belt 65.5,9.5 E net=copper/fuel
+e ~copper/fuel/i0 fast-inserter 78.5,6.5 S net=copper/fuel
+e ~copper/fuel/s0 splitter 65,8.5 S net=copper/fuel
+e ~copper/ore_/b0 transport-belt 65.5,22.5 N net=copper/ore_
+e ~copper/ore_/b1 transport-belt 65.5,21.5 N net=copper/ore_
+e ~copper/ore_/b2 transport-belt 65.5,20.5 N net=copper/ore_
+e ~copper/ore_/b3 transport-belt 65.5,13.5 N net=copper/ore_
+e ~copper/ore_/b4 transport-belt 65.5,12.5 N net=copper/ore_
+e ~copper/ore_/b5 transport-belt 65.5,11.5 N net=copper/ore_
+e ~copper/ore_/b6 transport-belt 65.5,10.5 E net=copper/ore_
+e ~copper/ore_/u0 underground-belt 65.5,19.5 N net=copper/ore_ ug=in
+e ~copper/ore_/u1 underground-belt 65.5,14.5 N net=copper/ore_ ug=out
+e ~cupl/b0 transport-belt 59.5,15.5 S net=cupl
+e ~cupl/b1 transport-belt 59.5,16.5 S net=cupl
+e ~cupl/b2 transport-belt 59.5,17.5 E net=cupl
+e ~cupl/b3 transport-belt 60.5,17.5 E net=cupl
+e ~cupl/b4 transport-belt 61.5,17.5 E net=cupl
+e ~cupl/b5 transport-belt 62.5,17.5 N net=cupl
+e ~cupl/b6 transport-belt 62.5,16.5 N net=cupl
+e ~cupl/b7 transport-belt 62.5,15.5 N net=cupl
+e ~cupl/b8 transport-belt 62.5,14.5 N net=cupl
+e ~cupl/b9 transport-belt 62.5,13.5 N net=cupl
+e ~cupl/b10 transport-belt 62.5,12.5 N net=cupl
+e ~cupl/b11 transport-belt 62.5,11.5 N net=cupl
+e ~cupl/b12 transport-belt 62.5,10.5 N net=cupl
+e ~cupl/b13 transport-belt 62.5,9.5 N net=cupl
+e ~cupl/b14 transport-belt 62.5,8.5 N net=cupl
+e ~cupl/b15 transport-belt 62.5,7.5 N net=cupl
+e ~cupl/i0 fast-inserter 59.5,18.5 N net=cupl
+e ~cupl/i1 fast-inserter 63.5,7.5 W net=cupl
+e ~cupl/u0 underground-belt 65.5,15.5 W net=cupl ug=in
+e ~cupl/u1 underground-belt 60.5,15.5 W net=cupl ug=out
+e ~fe/b0 transport-belt 30.5,34.5 S net=fe
+e ~fe/b1 transport-belt 30.5,35.5 S net=fe
+e ~fe/b2 transport-belt 30.5,36.5 S net=fe
+e ~fe/b3 transport-belt 30.5,37.5 S net=fe
+e ~fe/b4 transport-belt 30.5,38.5 S net=fe
+e ~fe/b5 transport-belt 30.5,39.5 S net=fe
+e ~fe/b6 transport-belt 30.5,40.5 E net=fe
+e ~fe/b7 transport-belt 31.5,40.5 E net=fe
+e ~fe/b8 transport-belt 32.5,40.5 E net=fe
+e ~fe/b9 transport-belt 33.5,40.5 E net=fe
+e ~fe/b10 transport-belt 34.5,40.5 E net=fe
+e ~fe/b11 transport-belt 35.5,40.5 E net=fe
+e ~fe/b12 transport-belt 36.5,40.5 E net=fe
+e ~fe/b13 transport-belt 37.5,40.5 E net=fe
+e ~fe/b14 transport-belt 38.5,40.5 E net=fe
+e ~fe/b15 transport-belt 39.5,40.5 E net=fe
+e ~fe/b16 transport-belt 40.5,40.5 E net=fe
+e ~fe/b17 transport-belt 41.5,40.5 E net=fe
+e ~fe/b18 transport-belt 42.5,40.5 E net=fe
+e ~fe/b19 transport-belt 43.5,40.5 E net=fe
+e ~fe/b20 transport-belt 44.5,40.5 E net=fe
+e ~fe/b21 transport-belt 45.5,40.5 E net=fe
+e ~fe/b22 transport-belt 46.5,40.5 E net=fe
+e ~fe/b23 transport-belt 47.5,40.5 E net=fe
+e ~fe/b24 transport-belt 48.5,40.5 E net=fe
+e ~fe/b25 transport-belt 49.5,40.5 E net=fe
+e ~fe/b26 transport-belt 50.5,40.5 E net=fe
+e ~fe/b27 transport-belt 51.5,40.5 E net=fe
+e ~fe/b28 transport-belt 52.5,40.5 E net=fe
+e ~fe/b29 transport-belt 53.5,40.5 E net=fe
+e ~fe/b30 transport-belt 54.5,40.5 E net=fe
+e ~fe/b31 transport-belt 55.5,40.5 E net=fe
+e ~fe/b32 transport-belt 56.5,40.5 N net=fe
+e ~fe/b33 transport-belt 56.5,39.5 N net=fe
+e ~fe/b34 transport-belt 56.5,38.5 N net=fe
+e ~fe/b35 transport-belt 56.5,31.5 N net=fe
+e ~fe/b36 transport-belt 56.5,30.5 N net=fe
+e ~fe/b37 transport-belt 57.5,28.5 N net=fe
+e ~fe/b38 transport-belt 57.5,27.5 W net=fe
+e ~fe/b39 transport-belt 56.5,27.5 N net=fe
+e ~fe/b40 transport-belt 56.5,16.5 W net=fe
+e ~fe/b41 transport-belt 55.5,16.5 N net=fe
+e ~fe/b42 transport-belt 55.5,15.5 N net=fe
+e ~fe/b43 transport-belt 55.5,14.5 W net=fe
+e ~fe/b44 transport-belt 54.5,14.5 W net=fe
+e ~fe/b45 transport-belt 53.5,14.5 N net=fe
+e ~fe/b46 transport-belt 53.5,13.5 N net=fe
+e ~fe/b47 transport-belt 52.5,11.5 W net=fe
+e ~fe/b49 transport-belt 53.5,11.5 N net=fe
+e ~fe/b50 transport-belt 53.5,10.5 N net=fe
+e ~fe/b51 transport-belt 56.5,28.5 W net=fe
+e ~fe/b52 transport-belt 55.5,28.5 W net=fe
+e ~fe/b53 transport-belt 53.5,29.5 W net=fe
+e ~fe/b54 transport-belt 52.5,29.5 W net=fe
+e ~fe/b55 transport-belt 51.5,29.5 S net=fe
+e ~fe/b56 transport-belt 51.5,30.5 S net=fe
+e ~fe/b57 transport-belt 51.5,31.5 W net=fe
+e ~fe/b58 transport-belt 50.5,31.5 W net=fe
+e ~fe/b59 transport-belt 49.5,31.5 W net=fe
+e ~fe/b60 transport-belt 48.5,31.5 W net=fe
+e ~fe/b61 transport-belt 47.5,31.5 W net=fe
+e ~fe/b62 transport-belt 46.5,31.5 W net=fe
+e ~fe/b63 transport-belt 45.5,31.5 W net=fe
+e ~fe/b64 transport-belt 38.5,31.5 N net=fe
+e ~fe/b65 transport-belt 38.5,30.5 N net=fe
+e ~fe/b66 transport-belt 39.5,28.5 N net=fe
+e ~fe/b67 transport-belt 39.5,27.5 N net=fe
+e ~fe/b68 transport-belt 39.5,26.5 N net=fe
+e ~fe/b69 transport-belt 39.5,25.5 N net=fe
+e ~fe/b70 transport-belt 39.5,24.5 N net=fe
+e ~fe/b71 transport-belt 39.5,23.5 N net=fe
+e ~fe/b72 transport-belt 39.5,22.5 N net=fe
+e ~fe/b73 transport-belt 39.5,21.5 N net=fe
+e ~fe/b74 transport-belt 39.5,20.5 E net=fe
+e ~fe/b75 transport-belt 40.5,20.5 E net=fe
+e ~fe/b76 transport-belt 41.5,20.5 E net=fe
+e ~fe/b77 transport-belt 42.5,20.5 N net=fe
+e ~fe/b78 transport-belt 42.5,19.5 N net=fe
+e ~fe/b79 transport-belt 42.5,18.5 N net=fe
+e ~fe/b80 transport-belt 42.5,17.5 N net=fe
+e ~fe/b81 transport-belt 42.5,16.5 E net=fe
+e ~fe/b82 transport-belt 43.5,16.5 N net=fe
+e ~fe/b83 transport-belt 43.5,15.5 N net=fe
+e ~fe/b84 transport-belt 43.5,14.5 N net=fe
+e ~fe/b85 transport-belt 43.5,13.5 E net=fe
+e ~fe/b86 transport-belt 44.5,13.5 E net=fe
+e ~fe/b87 transport-belt 45.5,13.5 E net=fe
+e ~fe/b88 transport-belt 38.5,28.5 W net=fe
+e ~fe/b89 transport-belt 37.5,28.5 N net=fe
+e ~fe/b91 transport-belt 53.5,28.5 W net=fe
+e ~fe/b92 transport-belt 51.5,27.5 N net=fe
+e ~fe/b93 transport-belt 51.5,26.5 N net=fe
+e ~fe/b94 transport-belt 51.5,25.5 N net=fe
+e ~fe/b96 transport-belt 51.5,28.5 W net=fe
+e ~fe/b97 transport-belt 50.5,28.5 S net=fe
+e ~fe/b98 transport-belt 50.5,29.5 W net=fe
+e ~fe/i0 long-handed-inserter 55.5,26.5 S net=fe
+e ~fe/i1 long-handed-inserter 51.5,22.5 S net=fe
+e ~fe/i2 fast-inserter 52.5,18.5 S net=fe
+e ~fe/i3 long-handed-inserter 55.5,18.5 N net=fe
+e ~fe/i4 long-handed-inserter 52.5,14.5 E net=fe
+e ~fe/i5 fast-inserter 52.5,10.5 E net=fe
+e ~fe/i6 long-handed-inserter 50.5,11.5 E net=fe
+e ~fe/i7 long-handed-inserter 37.5,26.5 S net=fe
+e ~fe/i8 long-handed-inserter 43.5,20.5 W net=fe
+e ~fe/i9 long-handed-inserter 45.5,16.5 W net=fe
+e ~fe/i10 long-handed-inserter 45.5,11.5 S net=fe
+e ~fe/s0 splitter 57,29.5 N net=fe
+e ~fe/s1 splitter 53,12.5 N net=fe
+e ~fe/s2 splitter 54.5,29 W net=fe
+e ~fe/s3 splitter 39,29.5 N net=fe
+e ~fe/s4 splitter 52.5,28 W net=fe
+e ~fe/s5 splitter 52,24.5 N net=fe
+e ~fe/u0 underground-belt 56.5,37.5 N net=fe ug=in
+e ~fe/u1 underground-belt 56.5,32.5 N net=fe ug=out
+e ~fe/u2 underground-belt 56.5,26.5 N net=fe ug=in
+e ~fe/u3 underground-belt 56.5,21.5 N net=fe ug=out
+e ~fe/u4 underground-belt 56.5,20.5 N net=fe ug=in
+e ~fe/u5 underground-belt 56.5,17.5 N net=fe ug=out
+e ~fe/u6 underground-belt 44.5,31.5 W net=fe ug=in
+e ~fe/u7 underground-belt 39.5,31.5 W net=fe ug=out
+e ~fe/u8 underground-belt 52.5,23.5 N net=fe ug=in
+e ~fe/u9 underground-belt 52.5,19.5 N net=fe ug=out
+e ~fuel/b0 transport-belt 41.5,28.5 S net=fuel
+e ~fuel/b1 transport-belt 40.5,28.5 E net=fuel
+e ~fuel/b2 transport-belt 40.5,29.5 N net=fuel
+e ~fuel/b3 transport-belt 41.5,29.5 S net=fuel
+e ~fuel/b4 transport-belt 41.5,30.5 S net=fuel
+e ~fuel/b5 transport-belt 42.5,32.5 E net=fuel
+e ~fuel/b6 transport-belt 43.5,32.5 E net=fuel
+e ~fuel/b7 transport-belt 44.5,32.5 E net=fuel
+e ~fuel/b8 transport-belt 45.5,32.5 E net=fuel
+e ~fuel/b9 transport-belt 46.5,32.5 E net=fuel
+e ~fuel/b10 transport-belt 47.5,32.5 E net=fuel
+e ~fuel/b11 transport-belt 48.5,32.5 E net=fuel
+e ~fuel/b12 transport-belt 49.5,32.5 E net=fuel
+e ~fuel/b13 transport-belt 50.5,32.5 E net=fuel
+e ~fuel/b14 transport-belt 51.5,32.5 E net=fuel
+e ~fuel/b15 transport-belt 52.5,32.5 E net=fuel
+e ~fuel/b16 transport-belt 53.5,32.5 N net=fuel
+e ~fuel/b17 transport-belt 53.5,31.5 N net=fuel
+e ~fuel/b18 transport-belt 53.5,30.5 W net=fuel
+e ~fuel/b19 transport-belt 41.5,32.5 W net=fuel
+e ~fuel/b20 transport-belt 40.5,32.5 W net=fuel
+e ~fuel/b21 transport-belt 39.5,32.5 W net=fuel
+e ~fuel/b22 transport-belt 38.5,32.5 W net=fuel
+e ~fuel/b23 transport-belt 37.5,32.5 N net=fuel
+e ~fuel/b24 transport-belt 37.5,31.5 N net=fuel
+e ~fuel/b25 transport-belt 37.5,30.5 N net=fuel
+e ~fuel/b26 transport-belt 37.5,29.5 W net=fuel
+e ~fuel/i0 fast-inserter 40.5,30.5 S net=fuel
+e ~fuel/s0 splitter 42,31.5 S net=fuel
+e ~fuel/u0 underground-belt 52.5,30.5 W net=fuel ug=in
+e ~fuel/u1 underground-belt 50.5,30.5 W net=fuel ug=out
+e ~gao/i0 fast-inserter 48.5,8.5 W net=gao
+e ~gco/i0 fast-inserter 46.5,14.5 N net=gco
+e ~gxo/i0 fast-inserter 48.5,18.5 W net=gxo
+e ~kbo/i0 fast-inserter 56.5,19.5 E net=kbo
+e ~kbo/i1 fast-inserter 57.5,22.5 N net=kbo
+e ~ore_i/b0 transport-belt 56.5,36.5 E net=ore_i
+e ~ore_i/b1 transport-belt 57.5,36.5 S net=ore_i
+e ~ore_i/b2 transport-belt 57.5,37.5 S net=ore_i
+e ~ore_i/b3 transport-belt 57.5,38.5 S net=ore_i
+e ~ore_i/b4 transport-belt 57.5,39.5 S net=ore_i
+e ~ore_i/b5 transport-belt 57.5,40.5 S net=ore_i
+e ~ore_i/b6 transport-belt 57.5,41.5 W net=ore_i
+e ~ore_i/b7 transport-belt 56.5,41.5 W net=ore_i
+e ~ore_i/b8 transport-belt 55.5,41.5 W net=ore_i
+e ~ore_i/b9 transport-belt 54.5,41.5 W net=ore_i
+e ~ore_i/b10 transport-belt 53.5,41.5 W net=ore_i
+e ~ore_i/b11 transport-belt 52.5,41.5 W net=ore_i
+e ~ore_i/b12 transport-belt 51.5,41.5 W net=ore_i
+e ~ore_i/b13 transport-belt 50.5,41.5 W net=ore_i
+e ~ore_i/b14 transport-belt 49.5,41.5 W net=ore_i
+e ~ore_i/b15 transport-belt 48.5,41.5 W net=ore_i
+e ~ore_i/b16 transport-belt 47.5,41.5 W net=ore_i
+e ~ore_i/b17 transport-belt 46.5,41.5 W net=ore_i
+e ~ore_i/b18 transport-belt 45.5,41.5 W net=ore_i
+e ~ore_i/b19 transport-belt 44.5,41.5 W net=ore_i
+e ~ore_i/b20 transport-belt 43.5,41.5 W net=ore_i
+e ~ore_i/b21 transport-belt 42.5,41.5 W net=ore_i
+e ~ore_i/b22 transport-belt 41.5,41.5 W net=ore_i
+e ~ore_i/b23 transport-belt 40.5,41.5 W net=ore_i
+e ~ore_i/b24 transport-belt 39.5,41.5 W net=ore_i
+e ~ore_i/b25 transport-belt 38.5,41.5 W net=ore_i
+e ~ore_i/b26 transport-belt 37.5,41.5 W net=ore_i
+e ~ore_i/b27 transport-belt 36.5,41.5 W net=ore_i
+e ~ore_i/b28 transport-belt 35.5,41.5 W net=ore_i
+e ~ore_i/b29 transport-belt 34.5,41.5 W net=ore_i
+e ~ore_i/b30 transport-belt 33.5,41.5 W net=ore_i
+e ~ore_i/b31 transport-belt 32.5,41.5 W net=ore_i
+e ~ore_i/b32 transport-belt 31.5,41.5 W net=ore_i
+e ~ore_i/b33 transport-belt 30.5,41.5 W net=ore_i
+e ~ore_i/b34 transport-belt 29.5,41.5 W net=ore_i
+e ~ore_i/b35 transport-belt 28.5,41.5 N net=ore_i
+e ~ore_i/b36 transport-belt 28.5,40.5 N net=ore_i
+e ~ore_i/b37 transport-belt 28.5,39.5 N net=ore_i
+e ~ore_i/b38 transport-belt 28.5,38.5 N net=ore_i
+e ~ore_i/b39 transport-belt 28.5,37.5 N net=ore_i
+e ~ore_i/b40 transport-belt 28.5,36.5 N net=ore_i
+e ~ore_i/b41 transport-belt 28.5,35.5 N net=ore_i
+e ~ore_i/b42 transport-belt 28.5,34.5 N net=ore_i
+e ~poles/i0 fast-inserter 58.5,26.5 N net=poles logistic=medium-electric-pole<50
+e ~products/i0 fast-inserter 49.5,16.5 W net=products logistic=inserter<100
+e ~products/i1 fast-inserter 51.5,16.5 E net=products logistic=splitter<20
+e ~products/i2 fast-inserter 50.5,17.5 S net=products logistic=transport-belt<200
+e ~products/i3 fast-inserter 50.5,15.5 N net=products logistic=underground-belt<50
+e ~stko/i0 fast-inserter 56.5,23.5 W net=stko
+e ~stl/b0 transport-belt 50.5,24.5 N net=stl
+e ~stl/b1 transport-belt 50.5,23.5 W net=stl
+e ~stl/b2 transport-belt 49.5,23.5 N net=stl
+e ~stl/b3 transport-belt 49.5,22.5 E net=stl
+e ~stl/b4 transport-belt 61.5,22.5 S net=stl
+e ~stl/b5 transport-belt 61.5,23.5 S net=stl
+e ~stl/b6 transport-belt 61.5,24.5 S net=stl
+e ~stl/b7 transport-belt 61.5,25.5 S net=stl
+e ~stl/b8 transport-belt 61.5,26.5 S net=stl
+e ~stl/b9 transport-belt 61.5,27.5 W net=stl
+e ~stl/b10 transport-belt 60.5,27.5 W net=stl
+e ~stl/i0 fast-inserter 60.5,23.5 E net=stl
+e ~stl/i1 fast-inserter 59.5,27.5 E net=stl
+e ~stl/u0 underground-belt 50.5,22.5 E net=stl ug=in
+e ~stl/u1 underground-belt 55.5,22.5 E net=stl ug=out
+e ~stl/u2 underground-belt 56.5,22.5 E net=stl ug=in
+e ~stl/u3 underground-belt 60.5,22.5 E net=stl ug=out
+e ~ybo/b0 transport-belt 50.5,7.5 E net=ybo
+e ~ybo/b1 transport-belt 50.5,6.5 S net=ybo
+e ~ybo/b2 transport-belt 49.5,6.5 E net=ybo
+e ~ybo/b3 transport-belt 51.5,7.5 E net=ybo
+e ~ybo/b4 transport-belt 52.5,7.5 E net=ybo
+e ~ybo/b5 transport-belt 53.5,7.5 N net=ybo
+e ~ybo/b6 transport-belt 53.5,6.5 N net=ybo
+e ~ybo/b7 transport-belt 53.5,5.5 E net=ybo
+e ~ybo/b8 transport-belt 54.5,5.5 S net=ybo
+e ~ybo/i0 fast-inserter 49.5,11.5 N net=ybo
+e ~ybo/i1 fast-inserter 49.5,7.5 S net=ybo
+e ~ybo/i2 long-handed-inserter 54.5,13.5 N net=ybo
+e ~ybo/u0 underground-belt 54.5,6.5 S net=ybo ug=in
+e ~ybo/u1 underground-belt 54.5,11.5 S net=ybo ug=out

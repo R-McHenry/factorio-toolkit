@@ -18,6 +18,11 @@ Checks it can run on its own (each starts a server, checks, stops it):
                                             dropped rows go (a built assembler, an unbuilt ghost), and a
                                             belt laid under another net with the old net's plates is
                                             ordered out with a fresh ghost on it
+    python tools/laptop_server.py ghosts    2.0.4: single ghosts on uncharted ground keep settings
+    python tools/laptop_server.py turned    2.0.5: on uncharted ground, belts, undergrounds, an
+                                            inserter and a splitter standing turned (or the other
+                                            end) on the design's tiles are ordered out and laid
+                                            fresh as designed; the next apply finds none
 """
 from __future__ import annotations
 
@@ -349,6 +354,110 @@ rcon.print(c)""").strip()
     return 0 if ok else 1
 
 
+def check_turned():
+    """2.0.5 (TURNED): what an old factory left on a new one's tiles under the same names, facing
+    the old ways (the 2.0 run's south iron array on the burner iron block), where the paste is
+    refused: a play apply orders each out and lays its single ghost as designed; once robots took
+    the old ones up and built the ghosts (here: destroyed, revived) every one faces as designed,
+    and a second apply turns nothing. The 2.0 run's map refused every paste (uncharted: its
+    apply.txt says "0 ghosts placed"), but this server's lab ground takes them even uncharted
+    (2026-10-22: the ghosts check's paste placed all 10), so the refusal is simulated (the paste
+    places nothing) and all the rest is the game's. Where a paste lands, it turns them itself."""
+    import json
+    from unittest import mock
+    from fkcore import apply as applymod, compose, fkp
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    text = ("fkp 1 factory tu\nsize 10x3\n"
+            "e ~b/b0 transport-belt 0.5,0.5 E net=b\n"
+            "e ~b/b1 transport-belt 1.5,0.5 E net=b\n"
+            "e ~b/b2 transport-belt 2.5,0.5 E net=b\n"
+            "e ~b/u0 underground-belt 3.5,0.5 E net=b ug=in\n"
+            "e ~b/u1 underground-belt 6.5,0.5 E net=b ug=out\n"
+            "e ~b/b3 transport-belt 7.5,0.5 E net=b\n"
+            "e ~b/s0 splitter 8.5,1 E net=b\n"
+            "e ~b/i0 inserter 2.5,1.5 N net=b\n")
+    sur = compose.compose(fkp.loads("fkp 1 surface lab\nplot tu at 320,320 rot 0 size 10x3\n"),
+                          {"tu": fkp.loads(text)}, cat)
+    # what stands first: b0 turned round, b1 a quarter turn off, b2 as designed, the two
+    # underground ends swapped, b3 as designed, the splitter turned round, the inserter too
+    stand = [["transport-belt", 320.5, 320.5, 12, None], ["transport-belt", 321.5, 320.5, 0, None],
+             ["transport-belt", 322.5, 320.5, 4, None],
+             ["underground-belt", 323.5, 320.5, 4, "output"],
+             ["underground-belt", 326.5, 320.5, 4, "input"],
+             ["transport-belt", 327.5, 320.5, 4, None], ["splitter", 328.5, 321, 12, None],
+             ["inserter", 322.5, 321.5, 8, None]]
+    want = {(r["name"], float(r["x"]), float(r["y"])): (r["direction"] or 0,
+                                                        {"in": "input", "out": "output"}.get(
+                                                            r["attrs"].get("ug")))
+            for r in applymod.scope_rows(sur)}
+    area = (300, 300, 350, 340)
+    read_lua = ("local s = game.get_surface('lab') local o = {} "
+                "for _, p in pairs(helpers.json_to_table(__P__)) do "
+                "for _, e in pairs(s.find_entities_filtered{position = {p[2], p[3]}, radius = 0.3}) do "
+                "local g = e.type == 'entity-ghost' local ug = nil "
+                "pcall(function() ug = e.belt_to_ground_type end) "
+                "o[#o + 1] = {n = g and e.ghost_name or e.name, x = e.position.x, y = e.position.y, "
+                "d = e.direction, g = g, dc = e.to_be_deconstructed(), ug = ug} end end "
+                "rcon.print(helpers.table_to_json(o))")
+    pts = link._q(json.dumps(stand))
+
+    def read(r):
+        reply = r.lua(read_lua.replace("__P__", pts)).strip()
+        return json.loads(reply) if reply.startswith("[") else []
+
+    def judge(stage, got, built):
+        """Each design tile holds one thing not ordered out (built, when ``built``), as designed."""
+        bad = 0
+        for (name, x, y), (d, ug) in sorted(want.items()):
+            here = [t for t in got if (t["n"], t["x"], t["y"]) == (name, x, y)]
+            lay = [t for t in here if not t["dc"] and not (built and t["g"])]
+            ok = len(lay) == 1 and lay[0]["d"] == d and (ug is None or lay[0]["ug"] == ug)
+            bad += not ok
+            print(f"  {stage:<7} {name} {x},{y}: " + " + ".join(
+                f"{'ghost ' if t['g'] else ''}d{t['d']}{' ' + t['ug'] if t.get('ug') else ''}"
+                f"{' (decon)' if t['dc'] else ''}" for t in here) + f"  {'OK' if ok else 'NOT'}")
+        return bad
+
+    with LaptopServer("turned", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            charted = r.lua(f"""
+local s, f = game.get_surface('{s}'), game.forces['{f}']
+for cx = 9, 10 do for cy = 9, 10 do s.request_to_generate_chunks({{cx * 32 + 16, cy * 32 + 16}}, 0) end end
+s.force_generate_chunk_requests()
+local c = 0
+for cx = 9, 10 do for cy = 9, 10 do if f.is_chunk_charted(s, {{cx, cy}}) then c = c + 1 end end end
+for _, t in pairs(helpers.json_to_table({pts})) do
+  s.create_entity{{name = t[1], position = {{t[2], t[3]}}, direction = t[4], force = f, type = t[5]}}
+end
+rcon.print(c)""").strip()
+            print(f"charted chunks under the plot: {charted} of 4")
+            print("as the old factory left them:")
+            judge("before", read(r), True)
+            with mock.patch.object(link, "paste", lambda *a, **k: "0"):
+                rep = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            print("\n".join(rep.lines()))
+            bad = judge("ghosts", read(r), False)
+            r.lua(f"""
+local s = game.get_surface('{s}')
+for _, e in pairs(s.find_entities_filtered{{area = {{{{{area[0]}, {area[1]}}}, {{{area[2]}, {area[3]}}}}}}}) do
+  if e.valid and e.type ~= 'entity-ghost' and e.to_be_deconstructed() then e.destroy() end
+end
+local n = 0
+for _, g in pairs(s.find_entities_filtered{{area = {{{{{area[0]}, {area[1]}}}, {{{area[2]}, {area[3]}}}}}, type = 'entity-ghost'}}) do
+  local _, e = g.revive() if e then n = n + 1 end
+end
+rcon.print(n)""")
+            bad += judge("built", read(r), True)
+            again = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            print("applied again: " + "; ".join(again.lines()[1:]))
+    ok = (charted == "0" and rep.pasted == 0 and len(rep.turned) == 6 and not bad
+          and again.turned == [])
+    print("turned entities where the paste is refused:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
-    raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts}[what]())
+    raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
+                      "turned": check_turned}[what]())

@@ -192,7 +192,12 @@ applied scope is empty: that is 1:1. [1.2: the toolkit's own entities that the d
 pasted under when that was another one.] [1.7: scaffolding. An apply leaves a `NOBODY` pole or
 roboport that stands on no tile of the design up while the design's own of that kind in its area
 are not all built, so a rebuild doesn't cut power or the robot network; the first apply after
-they stand takes it up.]
+they stand takes it up.] [2.0.5: a belt, underground, splitter, inserter, pipe-to-ground, pump or
+drill that stands, or waits as a ghost, on its design entity's position turned or as the other
+underground end is `turned` (a `TURNED` check before the paste). Where the paste can't land
+(uncharted ground) nothing turns it, so the apply orders it out and gives it a single ghost as
+designed. A factory built over another kept the old one's belts that way (the 2.0 run's south
+array).]
 
 ## Watch, notify, fair play [built: `sense` policies, notify nearby/all/off, the alert push with reminders, the free reads `stats` and `chart`; the `lab` scenario runs the test map, `/lab` used by Rory]
 

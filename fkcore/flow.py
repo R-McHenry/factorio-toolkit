@@ -1247,6 +1247,10 @@ def s_diff(ctx, args):
         lines.append(f"hand: {len(hand)} placed by hand that the apply would replace or remove:")
         lines += [f"  {line}" for line in hand]
         checks += [Check("HAND", ctx.surface.name, line) for line in hand]
+    turned = _turned(ctx, rep)
+    if turned:
+        lines.append(f"  {turned.msg}")
+        checks.append(turned)
     if ctx.surface.mode != "lab":
         far = _unreached(ctx, r, rep)
         if far:
@@ -1270,6 +1274,29 @@ def s_diff(ctx, args):
 
 #: the diff's verdicts the paste lays an entity for
 _TO_LAY = ("MISSING", "GHOST", "WRONG")
+
+
+def _turned(ctx, rep):
+    """A ``TURNED`` check for the belts, undergrounds, splitters, inserters (and pipes-to-ground,
+    pumps, drills) that stand, or wait as ghosts, on their design entity's position under its name
+    but facing another way or as the other underground end, or None. Their lines stop there. 2.0.5
+    (the 2.0 run's south iron array, 2026-10-22): a factory built over another kept the old one's
+    belts wherever the names matched, facing the old ways; on uncharted ground the paste turns
+    nothing, so every build kept them, and the diff's DRIFT count said so only as a number. The
+    apply now orders them out and lays them fresh as designed."""
+    bad = [v for v in rep.verdicts if v.turned]
+    if not bad:
+        return None
+    shown = ", ".join(f"{(v.key or v.name).split(':', 1)[-1]} "
+                      f"({'a ghost' if v.verdict.startswith('GHOST') else v.detail})"
+                      for v in bad[:4])
+    names = sorted({v.name for v in bad})
+    msg = (f"{len(bad)} {', '.join(names)} stand on their design tiles facing another way or as "
+           f"the other underground end, so their lines stop there ({shown}"
+           f"{' ...' if len(bad) > 4 else ''}): the apply lays them fresh as designed (ordered "
+           "out, robots take each up and build it again). A factory built over another keeps the "
+           "old one's belts where the names match, facing the old ways")
+    return Check("TURNED", ctx.surface.name, msg)
 
 
 def _unreached(ctx, r, rep, batch=80):

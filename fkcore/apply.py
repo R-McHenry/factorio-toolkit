@@ -38,6 +38,18 @@ A setting the game would not take on a ghost is named in the report (``alone_mis
 entity that stands but is ordered out (ordered up for new settings) is not a placed one: it
 goes, so it gets its ghost too.
 
+Turned (2.0.5, :func:`turned_rows`): a belt, an underground, a splitter, an inserter, a
+pipe-to-ground, a pump or a drill of the design's name on its position that faces another way, or
+is the other underground end, is no placed one either. Where the paste can land, it turns or
+replaces such a one itself (a laptop test server, 2.0.77: a belt, an inserter or a splitter is
+turned in place, a belt a quarter turn off and an underground of the other end get a ghost and
+are ordered out); where it is refused (uncharted ground) the one found stood as it was, counted as
+placed, and every later build kept it so. So after the paste each one still turned is ordered out
+and gets its single ghost (``turned``): robots take it up and lay it as designed. The 2.0 run's
+south iron array (2026-10-22) stood on the burner iron block it replaced: 25 of that block's belts
+and one inserter were on the array's tiles under the same names, and every build left them
+facing the old block's ways, so ore and coal stopped at them.
+
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
 (or a lab revive) it is all ``OK``, which is 1:1. Nothing here registers anything; every game
 call is one RCON command with the link's 5 s timeout.
@@ -62,7 +74,7 @@ from . import own as ownmod
 from .fkp import natural_key
 
 __all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
-           "paste_blueprint",
+           "paste_blueprint", "turned_rows",
            "force_for", "scaffold", "rip_points", "rip_load", "rip_minutes", "moved",
            "rip_report"]
 
@@ -93,6 +105,7 @@ class ApplyReport:
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
     hand: list = field(default_factory=list)   # placed by hand, replaced or removed (2.0)
+    turned: list = field(default_factory=list)  # keys found turned, ordered out, laid fresh (2.0.5)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
     resettled: list = field(default_factory=list)  # laid fresh for new circuit settings (2.0)
     own: dict | None = None            # the record of what the applies pasted, after this one
@@ -131,6 +144,12 @@ class ApplyReport:
         if self.resettled:
             out.append(f"  {len(self.resettled)} with new circuit settings (a limit, a condition, a "
                        "wire): ordered up, and the paste lays them fresh with the new ones")
+        if self.turned:
+            shown = ", ".join(k.split(":", 1)[-1] for k in self.turned[:6])
+            out.append(f"  TURNED {len(self.turned)} stood on their design tiles facing another way "
+                       f"or as the other underground end ({shown}"
+                       f"{' ...' if len(self.turned) > 6 else ''}): ordered out, and laid fresh "
+                       "as designed")
         if self.placed_alone:
             out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts "
                        "with their settings and wires (uncharted ground refuses a paste)")
@@ -217,6 +236,32 @@ def _placed(cap):
     condition on uncharted ground went, and nothing took its place)."""
     return {(t["n"], float(t["x"]), float(t["y"])) for t in cap["things"]
             if t["g"] or not t.get("dc")}
+
+
+def turned_rows(rows, cap, cat):
+    """The indices of ``rows`` (one of ``sense.TURN_KINDS``) whose ghost, or with no ghost their
+    entity built and not ordered out, stands on the row's position under its name facing another
+    way or as the other underground end, in a snapshot ``cap`` taken after the paste: the paste
+    was refused there, so nothing will turn it. A ghost an earlier build left of an older design
+    is one too (ordered out, the game removes it at once)."""
+    built, ghosts = {}, {}
+    for t in cap["things"]:
+        k = (t["n"], float(t["x"]), float(t["y"]))
+        if t.get("g"):
+            ghosts[k] = t
+        elif not t.get("dc"):
+            built[k] = t
+    out = []
+    for i, row in enumerate(rows):
+        k = (row["name"], float(row["x"]), float(row["y"]))
+        t = ghosts.get(k) or built.get(k)
+        if t is None or not cat.has_entity(row["name"]) \
+                or cat.kind(row["name"]) not in sense.TURN_KINDS:
+            continue
+        if sense.turn(cat, row["name"], row.get("direction"), (row.get("attrs") or {}).get("ug"),
+                      t.get("d"), t.get("ug")):
+            out.append(i)
+    return out
 
 
 def single_ghosts(rows, s, cat, refused):
@@ -315,6 +360,14 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     if mode != "lab":
         rep.misplaced = len(stray)
     placed = _placed(cap)
+    if mode != "lab" and not rep.misplaced:
+        # what the paste left turned goes, and its single ghost takes its place (2.0.5)
+        bad = turned_rows(rows, cap, cat)
+        if bad:
+            out = [(rows[i]["name"], float(rows[i]["x"]), float(rows[i]["y"])) for i in bad]
+            _decon(r, s.name, force, out)
+            rep.turned = [rows[i]["src"] for i in bad]
+            placed -= set(out)
     refused = [i for i, row in enumerate(rows)
                if (row["name"], float(row["x"]), float(row["y"])) not in placed]
     if refused and not rep.misplaced:

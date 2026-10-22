@@ -8,7 +8,10 @@ Every layout entity in the area gets one verdict, matched to the world by positi
 
 - ``OK``: there, as designed;
 - ``GHOST``: its ghost is there (pending);
-- ``DRIFT``: there, but turned, the other underground end, or another recipe;
+- ``DRIFT``: there, but turned, the other underground end, or another recipe; a belt, an
+  underground, a splitter, an inserter, a pipe-to-ground, a pump or a drill that stands turned
+  or as the other end is also ``turned`` (2.0.5): the next apply lays it fresh as designed (a
+  ghost of an older design facing another way too);
 - ``WRONG``: another entity stands on its tiles;
 - ``MISSING``: nothing there (never built, or destroyed: the next apply restores it).
 
@@ -49,12 +52,19 @@ from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
 
-__all__ = ["Verdict", "SenseReport", "sense", "duration_ticks", "hand_edits"]
+__all__ = ["Verdict", "SenseReport", "sense", "duration_ticks", "hand_edits", "turn",
+           "TURN_KINDS"]
 
 TICKS_PER_S = 60
 _CARRIERS = fkpmod.CARRIER_TYPES
 _DIRECTIONAL = {"transport-belt", "underground-belt", "splitter", "inserter", "pipe-to-ground",
                 "pump", "mining-drill", "offshore-pump", "boiler", "generator"}
+#: the kinds an apply lays fresh when one stands on its design entity's position turned, or as
+#: the other underground end (2.0.5): such a one breaks its line, and a robot replaces it for one
+#: item. Generators, boilers and offshore pumps stay a DRIFT to read: a power plant is not taken
+#: up for a turn
+TURN_KINDS = ("transport-belt", "underground-belt", "splitter", "inserter", "pipe-to-ground",
+              "pump", "mining-drill")
 
 
 @dataclass
@@ -73,6 +83,9 @@ class Verdict:
     #: WRONG: what stands on the design entity's tiles, [(name, x, y, last_user, ghost, own)];
     #: ``own``: the toolkit pasted it (the record says so), so it is no hand edit (2.0)
     under: list = field(default_factory=list)
+    #: DRIFT or GHOST: one of ``TURN_KINDS`` turned or the other underground end, which the next
+    #: apply lays fresh (2.0.5)
+    turned: bool = False
 
     def __str__(self):
         where = f"{_fmt(self.x)},{_fmt(self.y)}"
@@ -80,6 +93,8 @@ class Verdict:
         text = f"{self.verdict:<8} {self.name} {where}" + (f" {self.key}" if self.key else "")
         if self.detail:
             text += f": {self.detail}"
+        if self.turned:
+            text += "; TURNED: the next build lays it fresh as designed"
         if self.wrong_items:
             text += f"; WRONG_ITEM {', '.join(self.wrong_items)}"
             if self.renet:
@@ -200,10 +215,17 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             t = things[i]
             owners[i] = e.key.rsplit("/", 1)[0]
             if t["ghost"]:
-                verdicts.append(Verdict("GHOST", e.name, e.x, e.y, e.key, "pending"))
+                v = Verdict("GHOST", e.name, e.x, e.y, e.key, "pending")
+                v.turned = cat.kind(e.name) in TURN_KINDS and bool(
+                    turn(cat, e.name, e.dir, e.attrs.get("ug"), t["direction"], t["ug"]))
+                verdicts.append(v)
                 continue
-            drift = _drift(e, t, cat)
+            turned = turn(cat, e.name, e.dir, e.attrs.get("ug"), t["direction"], t["ug"])
+            drift = "; ".join(turned + _recipe_drift(e, t, cat))
             v = Verdict("DRIFT" if drift else "OK", e.name, e.x, e.y, e.key, drift)
+            v.turned = bool(turned) and cat.kind(e.name) in TURN_KINDS
+            if v.turned and t.get("last_user"):
+                v.actor = t["last_user"]          # a player turned it (or placed it so)
             net = _net(e)
             names = fkpmod.net_names(net)
             if names and net_items and all(n in net_items for n in names) \
@@ -320,7 +342,8 @@ def hand_edits(rep, held=()):
     - a thing on a design entity's tiles that the toolkit did not paste (the ``own`` record does
       not have it): the paste goes over it, kept by the watch policy or not;
     - a foreign ``NOBODY`` (``revert`` / ``strict``) the apply orders out, unless ``held``
-      (scaffolding, {(name, x, y)}).
+      (scaffolding, {(name, x, y)});
+    - a ``turned`` one a player touched last (2.0.5): the build lays it fresh as designed.
 
     Who: the entity's ``last_user``. Entities placed in the map editor carry none (the first lead
     run's map, 2026-10-21: none of 555 had one, Rory's edit among them), and neither do the
@@ -338,6 +361,9 @@ def hand_edits(rep, held=()):
             out.append(f"{_who(v.actor)} {'a ghost of ' if v.ghost else ''}{v.name} at "
                        f"{_fmt(v.x)},{_fmt(v.y)}, which the design doesn't have; this build "
                        "removes it")
+        elif v.turned and v.actor:
+            out.append(f"{v.actor} turned {v.name} at {_fmt(v.x)},{_fmt(v.y)} ({_local(v.key)}: "
+                       f"{v.detail}); this build lays it fresh as designed")
     return out
 
 
@@ -376,21 +402,29 @@ def _wrong(net, t, net_items):
     return sorted(set(t["items"]) - ok)
 
 
-def _drift(e, t, cat):
+def turn(cat, name, want_dir, want_ug, got_dir, got_ug):
+    """How an entity standing on a design entity's position, of its name, is turned against it:
+    [``faces 12, designed 4``] and [``underground input, designed output``], or [] when it faces
+    as designed. ``want_dir``: the design's direction (None: not given); ``want_ug``: its ``ug=``
+    (in, out); ``got_dir`` / ``got_ug``: what the game reports (None: unread, not judged)."""
     out = []
-    kind = cat.kind(e.name)
-    want_dir = e.dir or 0
-    if (kind in _DIRECTIONAL or e.dir is not None) and int(t["direction"]) != int(want_dir):
-        out.append(f"faces {int(t['direction'])}, designed {int(want_dir)}")
-    want_ug = {"in": "input", "out": "output"}.get(e.attrs.get("ug"))
-    if want_ug and t["ug"] and t["ug"] != want_ug:
-        out.append(f"underground {t['ug']}, designed {want_ug}")
+    want = want_dir or 0
+    if (cat.kind(name) in _DIRECTIONAL or want_dir is not None) and got_dir is not None \
+            and int(got_dir) != int(want):
+        out.append(f"faces {int(got_dir)}, designed {int(want)}")
+    ug = {"in": "input", "out": "output"}.get(want_ug)
+    if ug and got_ug and got_ug != ug:
+        out.append(f"underground {got_ug}, designed {ug}")
+    return out
+
+
+def _recipe_drift(e, t, cat):
     want_recipe = e.attrs.get("recipe")
     # a furnace picks its recipe from what it is fed: the game reports none while it is idle, and
     # there is no setting to compare (found by the first in-game diff, 2026-10-20: 22 false DRIFTs)
-    if want_recipe and kind != "furnace" and t["recipe"] != want_recipe:
-        out.append(f"recipe {t['recipe']}, designed {want_recipe}")
-    return "; ".join(out)
+    if want_recipe and cat.kind(e.name) != "furnace" and t["recipe"] != want_recipe:
+        return [f"recipe {t['recipe']}, designed {want_recipe}"]
+    return []
 
 
 def _hint(t, cat, carrier_tiles):

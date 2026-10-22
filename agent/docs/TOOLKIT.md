@@ -253,7 +253,9 @@ Every designed entity in the area gets a verdict:
   which technology opens it and what it costs
 - `MISSING`: nothing there (destroyed, or never built; the next build restores it)
 - `WRONG`: something else stands on its tiles
-- `DRIFT`: there but turned, or with another recipe
+- `DRIFT`: there but turned, or with another recipe. A belt, underground, splitter, inserter,
+  pipe-to-ground, pump or drill that stands turned (or as the other underground end) says
+  `TURNED`: the next build orders it out and robots lay it again as designed
 - `UNPAIRED`: a built underground belt with no partner in reach, or with another end of the same
   kind (two outputs) so no tunnel forms; the line gives its position. A ghost pair is not built
   and is not reported
@@ -359,6 +361,11 @@ fixing in the source.
   names them), what, where, and on which design entity's tile. The design wins, so the build goes
   on; adopt it into your source, leave it out, or come back to it. A Claude lead hears it like
   chat (`out\hand.txt` keeps every one)
+- `TURNED` (diff, before the paste): belts, undergrounds, splitters or inserters stand on their
+  design tiles under the right name but facing another way (or as the other underground end), so
+  their line stops there. A factory built over another keeps the old one's belts wherever the
+  names match, facing the old ways. The build orders each out and lays it fresh; `out\apply.txt`
+  lists them under TURNED. One a player turned by hand is also a `HAND` line
 - `MISPLACED` / `UNPLACED`: the paste did not land where the design says
 - `LOW_STOCK`: the network holds fewer of an item than the build still needs
 - `LOCKED`: an item to build, or a machine's recipe, isn't researched (the technology and its
