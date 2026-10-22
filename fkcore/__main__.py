@@ -28,6 +28,11 @@ use the game link, and only with FK_LINK=on)
                                           the layout vs the game inside the area: verdicts,
                                           changes here, design and live renders; notify all
                                           pushes the changes to chat and out/inbox.txt
+    wait GAME_DIR built [--area X0,Y0,X1,Y1] [--name ENTITY[,...]] [--max 5m] [--poll 10s]
+                                          poll the world until the area has no ghosts left (or
+                                          the named entity's are gone), or the bound expires:
+                                          one line at the end; exit 0 clear, 1 ghosts left,
+                                          2 a link error
     sense GAME_DIR CAPTURE.json --area X0,Y0,X1,Y1 [--write-marks]
                                           the layout vs a captured scene inside the area only
     alerts GAME_DIR [--force F]           the game's alert panel: new alerts, reminders (the
@@ -200,6 +205,51 @@ def _look(a, cat):
           f"{len(s.problems)} invariant problems (. plot, : claim, ! mark, blank sanctioned)")
     print(compose.render(s, cat, box))
     return 0
+
+
+def _wait(a, cat):
+    """``wait built``: a bounded wait for the ghosts in an area (fkcore.wait), through the link.
+    The area is the design's, as a look without one, unless given; one line at the end."""
+    from . import link, look, wait as waitmod
+    try:
+        max_s = waitmod.parse_duration(a.max)
+        poll_s = waitmod.parse_duration(a.poll)
+    except ValueError as exc:
+        print(f"error: wait built: {exc}", file=sys.stderr)
+        return 2
+    if max_s < 0 or poll_s <= 0:
+        print("error: wait built: --max is 0 or more and --poll is more than 0 (90s, 5m, 1h)",
+              file=sys.stderr)
+        return 2
+    try:
+        sf, _surface_lay, _lay_path, s = look.composed(a.game, cat)
+    except (surfacemod.SurfaceError, OSError) as exc:
+        print(f"error: wait built: {exc}", file=sys.stderr)
+        return 2
+    try:
+        area = _area(a.area) if a.area else look.default_area(s, cat)
+    except SystemExit as exc:
+        print(exc.code, file=sys.stderr)          # _area says why; a bad area is no wait
+        return 2
+    if area is None:
+        print("error: wait built: nothing is designed on this surface", file=sys.stderr)
+        return 2
+    names = [n.strip() for n in (a.name or "").split(",") if n.strip()]
+    r = _game_link("wait built")
+    if r is None:
+        return 2
+    try:
+        with r:
+            code, lines = waitmod.run(r, sf.name, area, names, max_s, poll_s)
+    except KeyboardInterrupt:
+        print("wait built: interrupted; the link is closed and no game call is left running",
+              file=sys.stderr)
+        return 130
+    except (link.LinkError, OSError) as exc:
+        print(f"error: wait built: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    return code
 
 
 def _composed(game, cat):
@@ -548,6 +598,16 @@ def main(argv=None):
     lk.add_argument("--notify", choices=("nearby", "all", "off"))
     lk.add_argument("--watch", help="strict | keep | revert | mark DUR, or plots=A,sanctioned=B")
     lk.add_argument("--write-marks", action="store_true")
+    wt = sub.add_parser("wait", description="a bounded wait for the ghosts in an area (fkcore.wait)")
+    wt.add_argument("game")
+    wt.add_argument("what", choices=("built",))
+    wt.add_argument("--area")
+    wt.add_argument("--name", default="", metavar="ENTITY[,...]",
+                    help="wait only for these entities' ghosts")
+    wt.add_argument("--max", default="5m", metavar="DUR",
+                    help="the bound: 90s, 5m or 1h (default 5m)")
+    wt.add_argument("--poll", default="10s", metavar="DUR",
+                    help="how often to read the world (default 10s)")
     fr = sub.add_parser("fresh")
     fr.add_argument("game")
     fr.add_argument("--area", required=True)
@@ -681,6 +741,8 @@ def main(argv=None):
         return code
     if a.cmd == "look":
         return _look(a, cat)
+    if a.cmd == "wait":
+        return _wait(a, cat)
     if a.cmd == "alerts":
         return _alerts(a, cat)
     if a.cmd == "fresh":

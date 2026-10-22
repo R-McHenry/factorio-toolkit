@@ -7,8 +7,8 @@ toolkit (also pinned: files a running session uses never change under it). Each 
 
 1. runs where it belongs. Design and every pure command run here, where the CPU is (elaborate,
    rates, plan, place, route, cover, floorplan, checks, write_layout). Whatever reads or writes
-   the game runs on the host, where RCON is: diff, apply, a live look, measure, alerts, stats,
-   chart, terrain, chat.
+   the game runs on the host, where RCON is: diff, apply, a live look, a wait, measure, alerts,
+   stats, chart, terrain, chat.
 2. keeps the two copies of ``game\\`` in step: what changed here is pushed before a host step, and
    what the host wrote is pulled after it. Changed means content (``out\\.synced`` keeps each
    file's hash at the last sync), a pull keeps a file edited here since (the next push sends
@@ -377,6 +377,17 @@ def main(argv):
         code = remote(cfg, ["look", ".", "--source", "world"] + _area(rest))
         pull(cfg)
         return code
+    if cmd == "wait":
+        if "-h" in rest or "--help" in rest:
+            print("fk wait built [AREA] [--name ENTITY[,...]] [--max 5m] [--poll 10s]: poll the "
+                  "world until the area has no ghosts left (or the named entity's are gone), or "
+                  "the bound expires; one line at the end; 0 clear, 1 ghosts left, 2 a link "
+                  "error (docs\\TOOLKIT.md, \"The loop\")")
+            return 0
+        push(cfg)
+        code = remote(cfg, ["wait", "."] + _wait_args(rest))
+        pull(cfg)
+        return code
     if cmd == "stage":
         code = local(cfg, ["stage", "."] + rest)
         footer(cfg)
@@ -466,6 +477,18 @@ def _area(rest):
     """``fk look X0,Y0,X1,Y1`` or ``--area X0,Y0,X1,Y1`` -> the fkcore arguments."""
     if rest and not rest[0].startswith("--"):
         return ["--area", rest[0]] + rest[1:]
+    return rest
+
+
+#: ``fk wait built`` takes the area where look does, after the word ``built``.
+_WAIT_AREA = re.compile(r"-?\d+,-?\d+,-?\d+,-?\d+")
+
+
+def _wait_args(rest):
+    """``fk wait built X0,Y0,X1,Y1 ...`` -> ``built --area X0,Y0,X1,Y1 ...`` (fkcore's ``wait``
+    has no positional area, so a negative coordinate never reads as an option)."""
+    if len(rest) > 1 and rest[0] == "built" and _WAIT_AREA.fullmatch(rest[1]):
+        return ["built", "--area", rest[1]] + rest[2:]
     return rest
 
 

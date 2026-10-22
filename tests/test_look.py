@@ -41,6 +41,14 @@ def belt(x, y, d=4, lu=None):
     return row
 
 
+def ug(x, y, kind="input", d=4, ghost=False, name="underground-belt", pair=None):
+    row = {"n": name, "t": "underground-belt", "x": x, "y": y, "d": d, "g": ghost,
+           "force": "lab", "ug": kind, "box": [x - 0.4, y - 0.4, x + 0.4, y + 0.4]}
+    if pair is not None:
+        row["pair"] = list(pair)
+    return row
+
+
 def fix_tile(s):
     """A free tile inside a plot next to a route belt (a fix to that net): (x, y)."""
     for key in sorted(s.entities):
@@ -200,6 +208,49 @@ class LookTest(unittest.TestCase):
             lk = look.run(r, self.dir, CAT)
         self.assertEqual(areas, [(308, 419, 346, 443)])           # every entity's tiles + 2
         self.assertEqual((lk.ok, lk.designed), (120, 120))
+
+    def unpaired_lines(self, extra):
+        return [line for line in self.report(extra).lines() if "UNPAIRED" in line]
+
+    def test_a_built_underground_pair_is_not_unpaired(self):
+        pair = [ug(305.5, 430.5, "input"), ug(308.5, 430.5, "output")]
+        self.assertEqual(self.unpaired_lines(pair), [])
+        self.assertEqual(self.report(pair).unpaired, [])
+
+    def test_two_ends_that_point_the_same_way_never_form_a_tunnel(self):
+        # the second lead run's mall: six outputs placed, no input among them
+        lines = self.unpaired_lines([ug(305.5, 430.5, "output"),
+                                     ug(308.5, 430.5, "output")])
+        self.assertEqual(lines, [
+            "  UNPAIRED underground-belt 305.5,430.5 (output; no partner within 5 tiles)",
+            "  UNPAIRED underground-belt 308.5,430.5 (output; partner at 305.5,430.5 is "
+            "another output, so it points the same way)"])
+        lk = self.report([ug(305.5, 430.5, "output"), ug(308.5, 430.5, "output")])
+        self.assertFalse(any(v.verdict == "UNPAIRED" for v in lk.rep.verdicts))
+        self.assertEqual((lk.ok, lk.designed), (120, 120))         # a warning, never a gate
+
+    def test_a_lone_built_end_is_unpaired_with_its_position(self):
+        self.assertEqual(self.unpaired_lines([ug(305.5, 446.5, "input")]),
+                         ["  UNPAIRED underground-belt 305.5,446.5 (input; no partner within "
+                          "5 tiles)"])
+
+    def test_a_ghost_pair_is_not_built_and_is_not_unpaired(self):
+        self.assertEqual(self.unpaired_lines([ug(305.5, 430.5, "input", ghost=True),
+                                              ug(308.5, 430.5, "output", ghost=True)]), [])
+
+    def test_a_ghost_is_no_partner_for_a_built_end(self):
+        self.assertEqual(self.unpaired_lines([ug(305.5, 430.5, "input"),
+                                              ug(308.5, 430.5, "output", ghost=True)]),
+                         ["  UNPAIRED underground-belt 305.5,430.5 (input; no partner within "
+                          "5 tiles)"])
+
+    def test_the_games_pair_truth_is_trusted(self):
+        # the game paired the western output (as its `pair` says), so only the eastern one warns
+        lines = self.unpaired_lines([ug(305.5, 430.5, "output", pair=(308.5, 430.5)),
+                                     ug(308.5, 430.5, "output")])
+        self.assertEqual(lines, [
+            "  UNPAIRED underground-belt 308.5,430.5 (output; partner at 305.5,430.5 is "
+            "another output, so it points the same way)"])
 
     def test_policy_overrides(self):
         sf = surfacemod.loads("surface lab\nmode lab\nwatch sanctioned: mark 2h\n")
