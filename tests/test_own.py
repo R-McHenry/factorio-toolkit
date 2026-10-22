@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from fkcore import apply as applymod, fkp, flow, link, own, scene, sense
+from fkcore import apply as applymod, codec, compose, fkp, flow, link, own, scene, sense
 from fkcore.catalog import Catalog
 from tests.test_fkp import MINI
 from tests.test_sense import AREA, NETS, SURFACE, WATCH, find, live_as_designed, surface
@@ -68,6 +68,41 @@ class RecordTest(unittest.TestCase):
         self.assertIn(own.at("transport-belt", 16.5, 1.5), after)       # still stood: ordered out
         self.assertNotIn(own.at("transport-belt", 20.5, 9.5), after)    # gone already
         self.assertTrue(set(own.rows_of(s)) <= set(after))              # the design, pasted
+
+
+class RequesterSettingsTest(unittest.TestCase):
+    """A3 (2.0.4): a requester's request is a setting of the standing chest: a changed one is laid
+    fresh by the next apply (raising max= in the source left the game's request as it was)."""
+
+    SURF = "fkp 1 surface nauvis\nplot asks at 0,0 rot 0 size 3x1\n"
+    V = sense.Verdict("OK", "requester-chest", 0.5, 0.5, key="nauvis:asks/c/req0")
+
+    def design(self, most=10, trash=False):
+        req = {"sections": [{"index": 1, "filters": [
+            {"index": 1, "name": "iron-plate", "quality": "normal", "comparator": "=",
+             "count": 10, "max_count": most}]}]}
+        if trash:
+            req["trash_not_requested"] = True
+        fac = fkp.Layout("factory", "asks", (3, 1))
+        fac.add(fkp.Entity("c/req0", "requester-chest", 0.5, 0.5,
+                           attrs={"config": codec.config_text({"request_filters": req})}))
+        return compose.compose(fkp.loads(self.SURF), {"asks": fac}, CAT)
+
+    def sig(self, s):
+        return own.rows_of(s)[own.at("requester-chest", 0.5, 0.5)].sig
+
+    def test_a_changed_max_or_trash_is_a_changed_signature(self):
+        old = self.design()
+        self.assertNotEqual(self.sig(old), self.sig(self.design(most=40)))
+        self.assertNotEqual(self.sig(old), self.sig(self.design(trash=True)))
+        self.assertEqual(self.sig(old), self.sig(self.design()))
+
+    def test_resettled_names_a_chest_whose_request_changed(self):
+        rec = own.rows_of(self.design())
+        self.assertEqual(own.resettled(rec, self.design(), [self.V]), [])
+        for changed in (self.design(most=40), self.design(trash=True)):
+            self.assertEqual([v.key for v in own.resettled(rec, changed, [self.V])],
+                             ["nauvis:asks/c/req0"])
 
 
 class SenseTest(unittest.TestCase):

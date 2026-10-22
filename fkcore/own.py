@@ -13,7 +13,8 @@ an apply pasted (its key, name, position, direction and, for a carrier, its surf
   outside every plot after a plot move, and 28 ghosts after a factory was emptied;
 - a carrier laid again under another net is known by the net it was pasted under (``nets``);
 - 2.0 (circuits in the source): an entity pasted with circuit settings (a condition, a reading, a
-  filter, its wires; a chest's slot limit too) keeps a signature of them (``settings``). When the
+  filter, its wires; a chest's slot limit and request too) keeps a signature of them
+  (``settings``). When the
   design's differ, the next apply orders it out before the paste, so robots lay it fresh with the
   new ones: a changed limit reaches the world on the next build (the 2039 run's mall script set
   its limits again by Lua after every rebuild, and its chest bars by hand: "a limit change is not
@@ -102,16 +103,22 @@ def _net(e):
 
 def settings(e, wires=()):
     """The signature of entity ``e``'s circuit settings: its typed circuit attrs, a chest's slot
-    limit (``bar``) and the circuit wires ``wires`` (``w`` records) that touch it, by colour and
-    the other end's key. None when it has none of them."""
+    limit (``bar``) and request (``request_filters``) and the circuit wires ``wires`` (``w``
+    records) that touch it, by colour and the other end's key. None when it has none of them."""
     from .codec import CIRCUIT_ATTRS
     got = [[k, e.attrs[k]] for k in CIRCUIT_ATTRS if e.attrs.get(k)]
     try:
-        bar = json.loads(e.attrs.get("config") or "{}").get("bar")
+        config = json.loads(e.attrs.get("config") or "{}")
     except (ValueError, AttributeError):
-        bar = None
-    if bar is not None:
-        got.append(["bar", bar])
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    if config.get("bar") is not None:
+        got.append(["bar", config["bar"]])
+    req = config.get("request_filters")
+    if req is not None:
+        got.append(["request_filters", json.dumps(req, sort_keys=True, separators=(",", ":"),
+                                                  ensure_ascii=True)])
     ends = []
     for w in wires:
         a, b = fkpmod.split_end(w.a)[0], fkpmod.split_end(w.b)[0]
