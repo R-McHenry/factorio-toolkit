@@ -319,7 +319,11 @@ class StageTest(unittest.TestCase):
         self.write("stages/1/plant.fk", 'reactor = Literal<file="plant.json"> @(0, 0)\n')
         self.write("stages/1/plant.json",
                    '[{"name": "small-electric-pole", "x": 0.5, "y": 0.5}]\n')
-        self.write("stages/1/nauvis.surface", "place plant = plant plot 40,0 4x4\n", mode="a")
+        # clear of stage 2's own added gears line: two appends at the same spot are a real
+        # surface conflict, which the replay should keep and the lead settle
+        text = self.read("stages/1/nauvis.surface")
+        self.write("stages/1/nauvis.surface",
+                   text.replace("place iron", "place plant = plant plot 40,0 4x4\nplace iron"))
         out = self.fk("edit", "1")
         self.assertIn("plant.json", out)
         self.assertIn("the 1 stage after it replayed cleanly", out)
@@ -331,6 +335,53 @@ class StageTest(unittest.TestCase):
         self.assertNotIn("No such file", out)
         self.assertTrue(os.path.exists(os.path.join(self.dir, "stages", "2", "plant.json")))
         self.assertTrue(os.path.exists(os.path.join(self.dir, "stages", "2", "plant.fk")))
+
+    def test_edit_carries_a_literals_file_into_the_edited_stage(self):
+        # 2.0.4 (the lead-v2 run, stage 7): plant.fk reads plant-40mw.json, and the edit took the
+        # .fk but dropped the JSON, so check 7 said "No such file" and the horizon had no rates
+        self.fk("insert", "plant")
+        self.fk("insert", "more smelting")
+        self.more_smelting(2)
+        self.fk("edit", "2")
+        self.write("stages/1/plant.fk",
+                   'reactor = Literal<file="plant-40mw.json"> @(0, 0)\n')
+        self.write("stages/1/plant-40mw.json",
+                   '[{"name": "small-electric-pole", "x": 0.5, "y": 0.5}]\n')
+        self.write("stages/1/nauvis.surface", "place plant = plant plot 40,0 4x4\n", mode="a")
+        out = self.fk("edit", "1")
+        self.assertIn("nauvis.surface, plant-40mw.json, plant.fk", out)
+        self.assertNotIn("not taken", out)
+        self.assertNotIn("CONFLICT", out)
+        one, two = self.plan.stages()
+        self.assertIn("plant-40mw.json", self.plan.ls(one.commit))
+        self.assertIn("plant-40mw.json", self.plan.ls(two.commit))     # the stage after it
+        self.assertEqual(self.plan.measure(one.commit)["errors"], [])
+        self.assertIn("added game\\plant-40mw.json", self.fk("next", "--apply"))
+        self.assertTrue(os.path.exists(os.path.join(self.game, "plant-40mw.json")))
+
+    def test_a_literals_file_outside_the_codebase_or_in_out_is_not_carried(self):
+        # a Literal's file travels only inside the codebase: a path above it, one in out\ and an
+        # absolute one stay where they are, so the plan never holds them
+        self.fk("insert", "relay")
+        self.write("stages/outside.json", "[]\n")
+        self.write("stages/1/out/cache.json", "[]\n")
+        self.write("stages/1/relay.fk",
+                   '# a relay\n'
+                   'port = Literal<file="relay.json"> @(0, 0)\n'
+                   'far = Literal<file="../outside.json"> @(4, 0)\n'
+                   'cached = Literal<file="out/cache.json"> @(8, 0)\n'
+                   'absolute = Literal<file="C:/tmp/x.json"> @(12, 0)\n')
+        self.write("stages/1/relay.json",
+                   '[{"name": "small-electric-pole", "x": 0.5, "y": 0.5}]\n')
+        out = self.fk("edit", "1")
+        self.assertIn("stage 1 now holds source relay.fk, relay.json", out)
+        self.assertNotIn("not taken", out)
+        st, = self.plan.stages()
+        files = self.plan.ls(st.commit)
+        self.assertIn("relay.json", files)
+        self.assertNotIn("outside.json", files)
+        self.assertFalse([f for f in files if f.startswith("out/")])
+        self.assertNotIn("x.json", files)
 
     def test_a_folders_own_edits_survive_a_plan_change(self):
         self.fk("insert", "more smelting")
