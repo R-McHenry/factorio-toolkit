@@ -239,6 +239,27 @@ wire ctl2 red: k2 -> gate
         _flat, _lay, _lines, cks = laid(src)
         self.assertIn("WIRE_LEAK", [c.code for c in cks])
 
+    BELT = """
+src  = Chest<requester, item=iron-plate, rate=1/s> @(0, 0)
+dst  = Assembler<recipe=iron-gear-wheel>           @(10, 0)
+gate = Assembler<recipe=iron-stick>                @(10, 6) when jam.iron-plate > 5
+net feed: src -> dst
+wire jam red: feed -> gate
+"""
+
+    def test_a_net_drives_a_wire_by_a_belt_that_reads_it(self):
+        _flat, lay, _lines, cks = laid(self.BELT)
+        belt, = [k for k, v in with_attr(lay, "read").items() if v == "hold"]
+        self.assertEqual(lay.entities[belt].attrs["net"], "feed")
+        self.assertIn(belt, {w.a for w in lay.wires} | {w.b for w in lay.wires})
+        self.assertEqual(cks, [])
+
+    def test_a_belt_on_no_wire_keeps_no_reading_in_the_game(self):
+        src = self.BELT.replace(" when jam.iron-plate > 5", "").replace("feed -> gate", "feed")
+        _flat, _lay, _lines, cks = laid(src)
+        self.assertEqual([c.code for c in cks], ["WIRE"])
+        self.assertIn("a belt that is on no wire", cks[0].msg)
+
     def test_a_network_condition_on_a_machine(self):
         _flat, lay, _lines, cks = laid("g = Assembler<recipe=iron-gear-wheel> @(0, 0) "
                                        "when network.iron-gear-wheel < 100\n")
@@ -308,6 +329,42 @@ e ~o/i0 fast-inserter 1.5,9.5 E net=o filter=circuit logistic=iron-gear-wheel>=1
                      "circuit_enabled": True}})}}]
         back, _desc = codec.read_blueprint(codec.blueprint(rows))
         self.assertIn("control_behavior", back[0]["attrs"]["config"])
+
+    def test_a_belt_reads_by_the_keys_the_game_keeps(self):
+        # measured on a laptop test server (2.0.77, the lead engineer, 2026-10-22): read_contents
+        # arrived false; these come back as written
+        self.assertEqual(codec.control_behavior({"read": "hold"}), {"control_behavior": {
+            "circuit_read_hand_contents": True, "circuit_contents_read_mode": 1}})
+        self.assertEqual(codec.control_behavior({"read": "pulse"})["control_behavior"]
+                         ["circuit_contents_read_mode"], 0)
+
+    def game_export(self, attrs, change=None):
+        """A one-entity blueprint as the game exports it: its tags kept, an item signal's type
+        dropped (the game's default); ``change`` edits its control_behavior first."""
+        lay = fkp.loads("fkp 1 factory f\nsize 4x4\n")
+        lay.add(fkp.Entity("~n/i0", "fast-inserter", 1.5, 1.5, 4, dict({"net": "n"}, **attrs)))
+        bp = json.loads(zlib.decompress(base64.b64decode(codec.fkp_to_blueprint(lay)[1:])))
+        cb = bp["blueprint"]["entities"][0]["control_behavior"]
+        for cond in ("logistic_condition", "circuit_condition"):
+            if cond in cb:
+                cb[cond]["first_signal"].pop("type")
+        if change:
+            change(cb)
+        text = json.dumps(bp, separators=(",", ":"))
+        return codec.blueprint_to_fkp("0" + base64.b64encode(zlib.compress(
+            text.encode())).decode()).entities["~n/i0"].attrs
+
+    def test_a_game_export_without_the_item_type_reads_back_as_written(self):
+        got = self.game_export({"logistic": "iron-plate<100"})
+        self.assertEqual(got.get("logistic"), "iron-plate<100")
+        self.assertNotIn("config", got)
+
+    def test_settings_changed_in_the_game_win_over_the_tags(self):
+        got = self.game_export({"logistic": "iron-plate<100"},
+                               lambda cb: cb["logistic_condition"].update(constant=40))
+        self.assertNotIn("logistic", got)
+        self.assertEqual(json.loads(got["config"])["control_behavior"]["logistic_condition"]
+                         ["constant"], 40)
 
     def test_a_constant_combinator_sends_with_quality(self):
         f = codec.control_behavior({"signals": "signal-A:1|iron-plate:5"})

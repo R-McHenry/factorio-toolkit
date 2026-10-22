@@ -33,7 +33,8 @@ inserter's filters), and the layout's ``w`` records become the blueprint's ``wir
 - ``if=S<N`` (or ``S>=T``, another signal): enabled while the condition holds (``circuit_enabled``,
   ``circuit_condition``); ``logistic=S<N``: the same against the logistic network's count
   (``connect_to_logistic_network``, ``logistic_condition``);
-- ``read=temperature`` with ``signal=S`` (a reactor), ``read=hold|pulse`` (a belt's contents),
+- ``read=temperature`` with ``signal=S`` (a reactor), ``read=hold|pulse`` (a belt's contents,
+  which the game keeps only on a belt that is on a wire),
   ``read=hand`` (an inserter's hand), ``read=ingredients`` or ``read=contents`` (a crafter);
 - ``filter=circuit``: an inserter's filters are set by the signals on its wire (the guard: a
   crafter that reads its ingredients tells its input inserters what to carry), ``filter=a|b``
@@ -43,10 +44,15 @@ inserter's filters), and the layout's ``w`` records become the blueprint's ``wir
 
 A signal is typed by its name: a virtual signal (fnet's list), a fluid, else an item. The
 comparators are the game's (``>=`` is ``≥``). The typed settings also ride in ``tags.fkp``, so a
-blueprint read back gives them back and drops the ``control_behavior`` they make; a blueprint
-without them (an imported Literal) keeps it in ``config``. A ``w`` record is ``[a, c, b, c]`` with
-red 1 and green 2, a combinator's output 3 and 4 (fnet's connector table); reading a blueprint
-that carries its records leaves the wires they explain out of the ``wire`` attrs.
+blueprint read back gives them back and drops the ``control_behavior`` they make, as long as the
+entity's fields are what they make (an item signal the game exported without its ``type`` counts
+as an item); otherwise the entity's own fields win, in ``config``, as they do for a blueprint
+without typed settings (an imported Literal). The keys were checked on a laptop test server
+(2.0.77, 2026-10-22): every one survives a paste and a capture.
+
+A ``w`` record is ``[a, c, b, c]`` with red 1 and green 2, a combinator's output 3 and 4 (fnet's
+connector table); reading a blueprint that carries its records leaves the wires they explain out
+of the ``wire`` attrs.
 
 Pure, stdlib only, deterministic.
 """
@@ -94,8 +100,11 @@ _FLUIDS = frozenset((
     "fluoroketone-hot", "heavy-oil", "holmium-solution", "lava", "light-oil", "lithium-brine",
     "lubricant", "molten-copper", "molten-iron", "petroleum-gas", "steam", "sulfuric-acid",
     "thruster-fuel", "thruster-oxidizer", "water"))
-#: belt reading modes (2.0 ``read_contents_mode``)
+#: belt reading modes (2.0 ``circuit_contents_read_mode``, with ``circuit_read_hand_contents``:
+#: measured on a laptop test server, 2.0.77, by the lead engineer, 2026-10-22)
 _BELT_READ = {"pulse": 0, "hold": 1}
+#: where a signal ID sits in the fields the typed settings make
+_SIGNAL_KEYS = ("first_signal", "second_signal", "temperature_signal")
 #: the virtual signals of the game (fnet's signal_space.VIRTUAL_SIGNALS, copied 2026-10-22)
 VIRTUAL_SIGNALS = frozenset(
     [f"signal-{i}" for i in range(10)] + [f"signal-{chr(65 + i)}" for i in range(26)] + [
@@ -174,8 +183,8 @@ def control_behavior(attrs, where="entity"):
         if attrs.get("signal"):
             cb["temperature_signal"] = _signal(attrs["signal"])
     elif read in _BELT_READ:
-        cb["read_contents"] = True
-        cb["read_contents_mode"] = _BELT_READ[read]
+        cb["circuit_read_hand_contents"] = True
+        cb["circuit_contents_read_mode"] = _BELT_READ[read]
     elif read == "hand":
         cb["circuit_read_hand_contents"] = True
     elif read == "ingredients":
@@ -205,6 +214,37 @@ def control_behavior(attrs, where="entity"):
     if cb:
         fields["control_behavior"] = cb
     return fields
+
+
+def _normal(v, key=None):
+    """Game fields as the codec compares them: an item signal the game exported without its
+    ``type`` (item is the game's default, and it drops it) gets it back."""
+    if isinstance(v, list):
+        return [_normal(x, key) for x in v]
+    if not isinstance(v, dict):
+        return v
+    out = {k: _normal(x, k) for k, x in v.items()}
+    if key in _SIGNAL_KEYS or (key == "filters" and "count" in out and "name" in out):
+        out.setdefault("type", "item")
+    return out
+
+
+def _settings_back(extra, fkp_attrs):
+    """On reading a blueprint: the typed circuit settings in ``tags.fkp`` stand for the fields
+    they make, and those fields are dropped, while the entity's fields are what they make. A
+    blueprint the game exported (an item signal without its type) still matches; one whose
+    fields differ (changed in the game, or a belt reading with no wire, which the game keeps no
+    setting for) keeps the game's fields, and the typed settings go."""
+    typed = {k: fkp_attrs[k] for k in CIRCUIT_ATTRS if k in fkp_attrs}
+    if not typed:
+        return
+    game = {f: extra[f] for f in _CIRCUIT_FIELDS if f in extra}
+    if _normal(game) == _normal(control_behavior(typed)):
+        for f in game:
+            del extra[f]
+    else:
+        for k in typed:
+            del fkp_attrs[k]
 
 
 def connector(colour, port=None):
@@ -436,12 +476,11 @@ def parse_blueprint(s):
             attrs["net"] = tags["net"]
         if extra.get("type") in _UG_BACK:
             attrs["ug"] = _UG_BACK[extra.pop("type")]
-        if any(k in (tags.get("fkp") or {}) for k in CIRCUIT_ATTRS):
-            for f in _CIRCUIT_FIELDS:              # made by the typed settings: they come back
-                extra.pop(f, None)
+        fkp_attrs = dict(tags.get("fkp") or {})
+        _settings_back(extra, fkp_attrs)
         if extra:
             attrs["config"] = config_text(extra)
-        attrs.update(tags.get("fkp") or {})
+        attrs.update(fkp_attrs)
         rows.append({"src": tags.get("src"), "name": entity.get("name"),
                      "x": _num(pos.get("x", 0.0)), "y": _num(pos.get("y", 0.0)),
                      "direction": entity.get("direction"), "attrs": attrs})

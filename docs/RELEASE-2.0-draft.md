@@ -275,10 +275,15 @@ a signal is declared (pinned or left to the build), checks warn and never gate. 
   `Reactor`, `HeatExchanger`, `SteamTurbine`, `Chest<plain>`, a heat net by contact) builds
   offline, entity for entity and wire for wire, into plant-w3.json, the blueprint the kickoff
   pastes: 28 entities, 9 wires (`tests\test_plant.py`).
-- **Not checked in the game yet:** the 2.0 blueprint keys for a logistic condition, set filters
-  and read ingredients, and the game's comparators for `<=` / `>=` / `!=` (written as the
-  blueprint string format has them). The reactor's and the plain inserter's settings are exactly
-  plant-w3.json's. A lab check on a laptop server settles the rest.
+- **Checked in the game** (the lead engineer, a laptop test server, 2.0.77, 2026-10-22: the
+  codec's blueprint pasted, revived and captured back). The logistic and circuit conditions with
+  every comparator (`<=` / `>=` / `!=` as the game's ≤ ≥ ≠), set filters, an inserter's hand
+  reading, read ingredients and the constant combinator's sections survive. A belt's reading
+  didn't: its 2.0 keys are `circuit_read_hand_contents` and `circuit_contents_read_mode`, which
+  the codec now writes. The game drops an item signal's `type` on export (item is its default),
+  and reading a blueprint counts a missing type as an item; settings the game holds otherwise
+  than the tags say win, in `config`. An unwired belt keeps no reading at all, not even on its
+  ghost, so a belt reading on no wire is a `WIRE` line.
 
 ## From the first lead run's FRICTION.md and RETRO.md
 

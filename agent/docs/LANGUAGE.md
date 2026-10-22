@@ -216,7 +216,8 @@ gears = Assembler<recipe=iron-gear-wheel> @(9, 0) when network.iron-gear-wheel <
 
 - `wire NAME red|green: drivers -> consumers`: one network of one colour. A driver puts signals
   on it: a chest its contents, `Reactor<read=temperature, signal=S>` its temperature,
-  `Constant<signals="S=N, T=M">` its signals, a net (one of its belts reads what is on it).
+  `Constant<signals="S=N, T=M">` its signals, a net (one of its belts reads what is on it; the
+  game keeps a belt's reading only while it is on a wire).
 - `when A < N` on a net gates it: every inserter and pump of its route moves items only while it
   holds. On an instance, it enables the machine itself. `A` is `WIRE.SIGNAL` (that wire),
   `network.ITEM` (the logistic network's count, no wire) or `INSTANCE.SIGNAL` (what that chest

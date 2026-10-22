@@ -242,7 +242,8 @@ fixing in the source.
   or `fill=` on a maker whose output goes onto a belt: there is no chest to count)
 - `GUARD`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)
 - `SIGNAL` / `WIRE`: a condition reads a signal nothing on its wire makes, or a name that is no
-  signal / a wire nothing drives or reads
+  signal / a wire nothing drives or reads, or a belt reading on no wire (the game keeps a belt's
+  reading only when it is wired)
 - `WIRE_REACH` / `WIRE_LEAK`: two entities of a wire further apart than a wire reaches (9 tiles)
   / two wires of one colour on one entity, so their signals add
 - `GATED` / `REQUIRE`: a gated net the rate model takes as always open (no `behave` cycle on its
