@@ -46,6 +46,7 @@ import io
 import itertools
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -69,6 +70,9 @@ FIELDS = ("milestone", "goal", "needs", "rates", "test")
 OUT = "out"
 #: the measure's version, in its cache's keys: a toolkit that measures otherwise starts afresh
 MEASURE = 1
+#: a Literal's ``file=`` in a .fk (2.0.4): the file it reads travels with the source
+_LITERAL = re.compile(r"\bLiteral\s*<([^>]*)>")
+_FILE = re.compile(r'\bfile\s*=\s*"([^"]+)"')
 _TRAILER = re.compile(r"^Stage:\s*(\d+)\s*$", re.M)
 _GIT = ["-c", "user.name=fk stage", "-c", "user.email=fk-stage@localhost",
         "-c", "core.autocrlf=false", "-c", "core.quotepath=off"]
@@ -135,6 +139,36 @@ def _source_files(folder):
     return sorted(found)
 
 
+def _literal_files(fk, text):
+    """The codebase paths of the files the Literals of .fk ``fk`` (a codebase path) read, from
+    its ``text``. 2.0.4 (the lead-v2 run, 2026-10-22): the plan held relay.fk but not the
+    relay.json its Literal reads, so every check of it said "No such file" and had no rates. A
+    path outside the codebase, in out/ or itself source is not one."""
+    found = set()
+    for line in text.splitlines():
+        for lit in _LITERAL.finditer(line.split("#", 1)[0]):
+            m = _FILE.search(lit.group(1))
+            if not m or ":" in m.group(1):
+                continue
+            path = posixpath.normpath(posixpath.join(posixpath.dirname(fk),
+                                                     m.group(1).replace("\\", "/")))
+            if not (path.startswith(("../", "/")) or path in ("..", ".")
+                    or path.split("/")[0] == OUT or path.endswith(SOURCE)):
+                found.add(path)
+    return found
+
+
+def _side_files(folder):
+    """The files the Literals of ``folder``'s .fk files read (codebase paths)."""
+    found = set()
+    for fk in _source_files(folder):
+        if fk.endswith(".fk"):
+            with open(os.path.join(folder, *fk.split("/")), encoding="utf-8",
+                      errors="replace") as fh:
+                found |= _literal_files(fk, fh.read())
+    return found
+
+
 @contextlib.contextmanager
 def _no_link():
     """No game link, whatever the environment says: a check never touches the world."""
@@ -158,6 +192,7 @@ class Plan:
         # within one command: the refs as this command left them, and each commit's tree (a git
         # call costs about 40 ms on Windows, and a list asked for the same ones dozens of times)
         self._refs, self._trees = {}, {}
+        self._sides = {}                   # tree-ish -> the files its Literals read
 
     # --- git -----------------------------------------------------------------------------------
 
@@ -222,13 +257,37 @@ class Plan:
             self.git("add", "-A", "--", ".", work=folder, index=idx)
             return self.git("write-tree", work=folder, index=idx).strip()
 
+    def side_files(self, treeish):
+        """The files the Literals of a tree's .fk files read (codebase paths), whether the tree
+        holds them or not."""
+        if treeish not in self._sides:
+            r = self._git("grep", "-z", "-I", "-E", r"Literal\s*<", treeish, "--", "*.fk",
+                          ok=(0, 1))
+            found = set()
+            for line in r.stdout.decode("utf-8", "replace").split("\n"):
+                name, _, text = line.partition("\0")
+                if text:
+                    found |= _literal_files(name.partition(":")[2], text)
+            self._sides[treeish] = found
+        return self._sides[treeish]
+
+    def source_spec(self, *treeishes):
+        """The pathspec of the plan's files in these trees: the source and what its Literals
+        read."""
+        sides = set().union(*(self.side_files(t) for t in treeishes))
+        return [*(f"*{e}" for e in SOURCE), *(f":(literal){p}" for p in sorted(sides))]
+
     def source_tree(self, folder, base):
-        """``base`` with the source files of ``folder`` in place of its own."""
+        """``base`` with the source files of ``folder`` in place of its own, and the files their
+        Literals read (2.0.4)."""
         have = set(_source_files(folder))
-        was = {p for p in self.ls(base) if p.endswith(SOURCE)}
+        listed = set(self.ls(base))
+        was = {p for p in listed if p.endswith(SOURCE)}
+        sides = {p for p in _side_files(folder) | self.side_files(base)
+                 if p in listed or os.path.isfile(os.path.join(folder, *p.split("/")))}
         with self._index() as idx:
             self.git("read-tree", base, work=folder, index=idx)
-            paths = sorted(have | was)
+            paths = sorted(have | was | sides)
             if paths:
                 self.git("update-index", "--add", "--remove", "-z", "--stdin", work=folder,
                          index=idx, data="\0".join(paths) + "\0")
@@ -274,8 +333,9 @@ class Plan:
         return sha
 
     def changed(self, a, b, source=True):
-        """Paths that differ between two tree-ishes (source files only by default)."""
-        spec = ["--", *(f"*{e}" for e in SOURCE)] if source else []
+        """Paths that differ between two tree-ishes (source files and the files their Literals
+        read only, by default)."""
+        spec = ["--", *self.source_spec(a, b)] if source else []
         out = self.git("diff", "--name-only", "-z", "--no-renames", a, b, *spec)
         return [p for p in out.split("\0") if p]
 
@@ -830,7 +890,8 @@ def cmd_edit(p, a, out):
     others = [f for f in p.changed(tree, p.tree_of(path), source=False)
               if not f.endswith(SOURCE) and not f.endswith(".fkp")] if os.path.isdir(path) else []
     if others:
-        out(f"  not taken (the plan holds .fk, .surface and .fkb files only): {', '.join(others)}")
+        out(f"  not taken (the plan holds .fk, .surface and .fkb files and the files Literals "
+            f"read only): {', '.join(others)}")
     marked = p.markers([Stage(st.n, new, tree, st.parent, title)]).get(st.n)
     if marked:
         out(f"  stage {st.n} still holds conflict markers in {', '.join(sorted(marked))}")
@@ -1002,7 +1063,7 @@ def cmd_next(p, a, out):
         return 0
     if not a.apply:
         out(p.git("diff", "--no-color", "--no-renames", st.parent, st.commit, "--",
-                  *(f"*{e}" for e in SOURCE)).rstrip())
+                  *p.source_spec(st.parent, st.commit)).rstrip())
         out(f"To build it: fk stage next --apply puts these changes into game\\, then fk build; "
             f"fk stage done {st.n} when it stands.")
         return 0
