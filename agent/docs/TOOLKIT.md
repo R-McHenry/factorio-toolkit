@@ -88,6 +88,12 @@ toolkit remembers what it pasted (`out\own\nauvis.json`), so this holds whatever
 A belt or pipe it lays again under another net, while it still holds the old net's items or
 fluid, is taken up and laid fresh in the same build.
 
+On ground a paste can't use (uncharted ground, with no radar or character to chart it), each
+entity is laid as a single ghost instead, carrying its recipe, underground end, requests, circuit
+settings, filters, fuel and wires, so robots build it the same way. A setting the game won't put
+on a ghost (a requester chest's trash-not-requested, a chest's bar) is named in `out\apply.txt`
+under SETTINGS: set it in the game, or build again once a radar charts the ground.
+
 After `fk build`, the ghosts are in the game and the robots build them from the network's stock.
 Before the paste, `out\report_bom.txt` says what the network can't cover: its `STOCK:` line, and
 LOW_STOCK / LOCKED per item. A ghost that stays is a blocked build, not a slow one: `fk look`
