@@ -719,7 +719,7 @@ class _Layer:
             if e.attrs.get("read") in ("hold", "pulse") and key not in wired \
                     and self.kind(key) == "transport-belt":
                 self.check("WIRE", key, f"read={e.attrs['read']} on a belt that is on no wire: "
-                           "the game keeps a belt's reading only when it is wired to something")
+                           "its reading reaches nothing until the belt is wired to something")
 
     def leaks(self):
         """``WIRE_LEAK``: two wire nets of one colour on one entity are one network in the game,

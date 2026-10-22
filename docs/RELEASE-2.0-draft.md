@@ -282,8 +282,9 @@ a signal is declared (pinned or left to the build), checks warn and never gate. 
   didn't: its 2.0 keys are `circuit_read_hand_contents` and `circuit_contents_read_mode`, which
   the codec now writes. The game drops an item signal's `type` on export (item is its default),
   and reading a blueprint counts a missing type as an item; settings the game holds otherwise
-  than the tags say win, in `config`. An unwired belt keeps no reading at all, not even on its
-  ghost, so a belt reading on no wire is a `WIRE` line.
+  than the tags say win, in `config`. With these keys a belt keeps its reading wired or not
+  (the first check's "unwired belts keep nothing" came from the wrong keys); a reading on no wire
+  reaches nothing, so it is a `WIRE` line.
 
 ## From the first lead run's FRICTION.md and RETRO.md
 

@@ -233,8 +233,7 @@ def _settings_back(extra, fkp_attrs):
     """On reading a blueprint: the typed circuit settings in ``tags.fkp`` stand for the fields
     they make, and those fields are dropped, while the entity's fields are what they make. A
     blueprint the game exported (an item signal without its type) still matches; one whose
-    fields differ (changed in the game, or a belt reading with no wire, which the game keeps no
-    setting for) keeps the game's fields, and the typed settings go."""
+    fields differ (changed in the game) keeps the game's fields, and the typed settings go."""
     typed = {k: fkp_attrs[k] for k in CIRCUIT_ATTRS if k in fkp_attrs}
     if not typed:
         return
