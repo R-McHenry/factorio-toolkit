@@ -108,9 +108,12 @@ class FlowTest(unittest.TestCase):
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
         self.assertEqual(len(ctx.log), 19)
-        # the one check line of the run: this surface has no power plant (games/nauvis has one)
+        # this surface has no power plant (games/nauvis has one), and main makes the transport
+        # belts its routes are built from: BOOTSTRAP names them, one line per net they feed
         self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks if c.code not in ADVICE],
-                         [("floorplan", "NO_POWER", "nauvis main")])
+                         [("floorplan", "NO_POWER", "nauvis main"),
+                          ("report_checks", "BOOTSTRAP", "net main/iron"),
+                          ("report_checks", "BOOTSTRAP", "net main/gear")])
         lay = fkp.load(os.path.join(self.dir, "main.fkp"))
         flat = elaborate_file(os.path.join(self.dir, "main.fk"), CAT)
         self.assertEqual(fkp.invariants(lay, CAT, nets=flat.nets), [])
@@ -573,6 +576,63 @@ class FlowTest(unittest.TestCase):
         g = connect.graph(lay, CAT)
         self.assertEqual([k for k, _via in g.pred.get("lab/m0", ())], [])  # nothing feeds the lab
         self.assertEqual([k for k, _via in g.pred.get("px/c0", ())], ["~packs/i0"])
+
+    def build_bootstrap_factory(self, extra=""):
+        """A small factory whose iron route tunnels under its fuel belt: every underground end
+        has one maker, and that maker eats iron plates from the same net. ``extra`` adds source
+        lines before the nets (a provider of the building item)."""
+        boot = os.path.join(self.dir, "boot")
+        os.makedirs(boot, exist_ok=True)
+        files = {
+            "t.fk": "fe   = Chest<requester, item=iron-plate>            @(0, 10)\n"
+                    "ug   = Assembler<recipe=underground-belt>           @(30, 10)\n"
+                    "gear = Assembler<recipe=iron-gear-wheel>            @(30, 20)\n"
+                    "coal = Chest<requester, item=coal>                  @(15, 0)\n"
+                    "box  = Chest<provider>                              @(15, 30)\n"
+                    + extra
+                    + "\nnet fuel: coal -> box\nnet iron: fe -> ug, gear\n",
+            "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+                              "place boot = t plot 0,0 50x40\n",
+            "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\nplace\n"
+                                "route\nreport_checks\nwrite_layout\n",
+        }
+        for name, text in files.items():
+            with open(os.path.join(boot, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        code, ctx = flow.run(os.path.join(boot, "nauvis.build.fkb"), cat=CAT,
+                             echo=lambda _line: None)
+        self.assertEqual(code, 0, ctx.log)
+        return ctx
+
+    def bootstrap_undergrounds(self):
+        lay = fkp.load(os.path.join(self.dir, "boot", "t.fkp"))
+        return [e for e in lay.entities.values()
+                if e.name == "underground-belt" and e.attrs.get("net") == "iron"]
+
+    def test_a_net_whose_route_needs_its_only_makers_item(self):
+        # 2.0.4 A12 (the live run's mall): its last ghosts were underground belts carrying the
+        # mall's own iron, and the only maker of underground belts sat behind them
+        ctx = self.build_bootstrap_factory()
+        boot = [c for _step, c in ctx.checks if c.code == "BOOTSTRAP"]
+        self.assertEqual([c.where for c in boot], ["net boot/iron"])
+        n = len(self.bootstrap_undergrounds())
+        self.assertGreaterEqual(n, 2)                # the route really tunnels under the fuel
+        self.assertIn(f"{n} underground-belt", boot[0].msg)
+        self.assertIn("the only maker (boot/ug)", boot[0].msg)
+        self.assertIn("takes iron-plate from this same net", boot[0].msg)
+        self.assertIn("stock the underground-belt first", boot[0].msg)
+        self.assertIn("BOOTSTRAP", self.read(os.path.join("boot", "out", "report_checks.txt")))
+        # one line per net per run: report_checks again adds no matching line
+        _lines, again = flow.s_report_checks(ctx, [])
+        self.assertFalse([c for c in again if c.code == "BOOTSTRAP"])
+
+    def test_a_building_item_from_outside_is_no_bootstrap(self):
+        # the same design, with a requester chest of underground belts: a maker independent of
+        # the net (the item comes from outside), so the net can be built from stock
+        ctx = self.build_bootstrap_factory(
+            "ugc  = Chest<requester, item=underground-belt>      @(0, 30)\n")
+        self.assertEqual([c for _step, c in ctx.checks if c.code == "BOOTSTRAP"], [])
+        self.assertGreaterEqual(len(self.bootstrap_undergrounds()), 2)   # the same design
 
     def test_a_malformed_script_is_refused(self):
         with open(self.script, "a", encoding="utf-8") as fh:

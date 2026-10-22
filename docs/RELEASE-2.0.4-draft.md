@@ -1,3 +1,4 @@
+﻿
 # Toolkit 2.0.4 (draft): point fixes
 
 - **Single ghosts carry what the paste would have given them** (A1, the second lead run): on
@@ -36,3 +37,9 @@
   prints one line: 0 clear, 1 the bound expired with ghosts left, 2 a link error. `fk look` also
   prints an `UNPAIRED` line for each built underground belt whose partner is missing or is
   another end of the same kind (the mall's six outputs never formed a tunnel), with its position.
+- **`BOOTSTRAP`** (flow's `report_checks`, a warning, never a gate): a net whose own route needs a
+  building item (a belt, an underground, a splitter, an inserter) that only a maker fed from that
+  same net makes, so neither can be built before the other. The mall's last ghosts were four
+  underground belts carrying the mall's own iron, behind the only maker of undergrounds. One line
+  per net, naming the item, how many the route lays, the maker and what it takes from the net;
+  none when the item comes from outside or another maker is fed elsewhere.

@@ -45,7 +45,10 @@ class NauvisTest(unittest.TestCase):
 
     def test_the_surface_composes_with_no_check_line(self):
         self.assertEqual(self.code, 0, self.ctx.log)
-        self.assertEqual([(s, c) for s, c in self.ctx.checks if c.code not in ADVICE], [])
+        # BOOTSTRAP (2.0.4) is about main's own belt maker feeding the routes it is built from,
+        # one line per net, not about the composed surface
+        self.assertEqual([(s, c) for s, c in self.ctx.checks
+                          if c.code not in ADVICE and c.code != "BOOTSTRAP"], [])
         s = self.ctx.composed
         self.assertEqual(sorted(s.plots), ["boot", "main", "plant"])
         self.assertEqual(s.problems, [])

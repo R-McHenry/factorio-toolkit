@@ -969,6 +969,63 @@ def _on_terrain(t, s, cat):
     return lines, checks
 
 
+def _bootstrap_checks(ctx, factory, flat, lay):
+    """BOOTSTRAP (2.0.4, the live run's mall): a net whose own route needs a building item (a
+    belt, an underground, a splitter, an inserter ...: a carrier whose name is also an item) that
+    only makers fed from that same net make. Then the route cannot be built before its makers,
+    and its makers cannot run before the route is built.
+
+    For each net: the items of the carriers on it (``e.attrs["net"]``, lanes included), the
+    machines that make each item, and whether every one of them takes an item from this net. One
+    line per net, and none when there is no maker in the factory (the item comes from outside, a
+    raw resource or stock) or a maker independent of the net (a second row, a requester chest)."""
+    on_net = {}
+    for e in lay.entities.values():
+        for name in fkp.net_names(e.attrs.get("net")):
+            on_net.setdefault(name, []).append(e)
+    out = []
+    for net in flat.nets.values():
+        ents = on_net.get(net.name)
+        if not ents:
+            continue
+        counts = {}
+        for e in ents:
+            counts[e.name] = counts.get(e.name, 0) + 1
+        fed_by = {key for key, _item in net.consumers}
+        rows = []
+        for item in sorted(counts, key=lambda i: (-counts[i], i)):
+            if not ctx.cat.is_item(item):
+                continue                    # not a building item (a carrier that is no item)
+            makers = [m for m in flat.machines.values() if item in m.makes]
+            if not makers:                  # it comes from outside: stock, a raw resource
+                continue
+            if not all(m.key in fed_by for m in makers):
+                continue                    # a maker that does not depend on this net
+            keys = {m.key for m in makers}
+            takes = sorted({i for key, i in net.consumers if key in keys})
+            rows.append((item, counts[item], makers, takes))
+        if not rows:
+            continue
+        clauses = []
+        for item, _count, makers, takes in rows:
+            insts = sorted({f"{factory}/{m.inst}" for m in makers})
+            only = f"the only maker ({insts[0]})" if len(insts) == 1 \
+                else f"the only makers ({', '.join(insts)})"
+            clauses.append(f"{only} {'takes' if len(insts) == 1 else 'take'} "
+                           f"{', '.join(takes)} from this same net")
+        if len(rows) == 1:
+            msg = (f"its route needs {rows[0][1]} {rows[0][0]}, and {clauses[0]}: stock the "
+                   f"{rows[0][0]} first, or build that maker first")
+        else:
+            needs = " and ".join(f"{count} {item}" for item, count, _m, _t in rows)
+            detail = "; ".join(f"{item}: {clause}" for (item, _n, _m, _t), clause
+                               in zip(rows, clauses))
+            msg = (f"its route needs {needs}: {detail}: stock what the route needs first, or "
+                   "build those makers first")
+        out.append(Check("BOOTSTRAP", f"net {factory}/{net.name}", msg))
+    return out
+
+
 def s_report_checks(ctx, args):
     """Connectivity of every net and the invariants, now; then every check line of the run."""
     lines, checks = [], []
@@ -978,6 +1035,8 @@ def s_report_checks(ctx, args):
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
         checks += _invariant_checks(factory, fkp.invariants(lay, ctx.cat, nets=flat.nets))
+        seen = {c.where for _step, c in ctx.checks if c.code == "BOOTSTRAP"}
+        checks += [c for c in _bootstrap_checks(ctx, factory, flat, lay) if c.where not in seen]
     if ctx.composed is not None:
         checks += _invariant_checks(ctx.surface.name, ctx.composed.problems)
     run = [(step, c) for step, c in ctx.checks] + [("report_checks", c) for c in checks]

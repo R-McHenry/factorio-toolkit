@@ -340,6 +340,11 @@ fixing in the source.
   construction area reaches, counting the roboports the paste lays where robots reach: robots
   never build them. It names power-bridge poles among them, since a roboport powered only through
   such a bridge never gets its power
+- `BOOTSTRAP` (report_checks): a net's own route needs a building item (a belt, an underground, a
+  splitter, an inserter) whose only maker in the factory takes an item from that same net, so
+  neither can be built first. The line names the item, how many the route lays, the maker and what
+  it takes from the net: stock that item first, or build that maker first. No line when the item
+  comes from outside or another maker is fed elsewhere
 - `NO_ROBOTS`: a logistic chest outside every logistic area of the main robot network (robots
   won't serve it), or entities outside its construction area (robots won't build them). The kit's
   roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`
