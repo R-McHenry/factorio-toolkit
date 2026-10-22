@@ -1,4 +1,4 @@
-# Toolkit 2.0.5 (draft): what the live 2.0 run showed after 2.0.4
+# Toolkit 2.0.5: what the live 2.0 run showed after 2.0.4
 
 ## Turned belts on a new factory's tiles are laid fresh (TURNED)
 
