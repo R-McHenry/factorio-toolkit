@@ -186,6 +186,165 @@ def check_own():
     return 0 if got == want and rep.dropped == 2 and len(rep.relaid) == 1 else 1
 
 
+#: what the ghosts check reads back of each design entity, ghost or built: every read is
+#: pcall'd, since a ghost lacks some of them
+_READ = r"""
+local s = game.get_surface(__SURFACE__)
+local out = {}
+local function get(fn) local ok, v = pcall(fn) if ok then return v end end
+for _, p in ipairs(helpers.json_to_table(__POS__)) do
+  for _, e in pairs(s.find_entities_filtered{position = {p[2], p[3]}, radius = 0.3}) do
+    local g = e.type == 'entity-ghost'
+    if (g and e.ghost_name or e.name) == p[1] then
+      local r = {key = p[4], ghost = g, dc = e.to_be_deconstructed(), d = e.direction}
+      local rc = get(function() return e.get_recipe() end)
+      r.recipe = rc and rc.name
+      r.ug = get(function() return e.belt_to_ground_type end)
+      local cb = get(function() return e.get_control_behavior() end)
+      if cb then
+        r.enable = get(function() return cb.circuit_enable_disable end)
+        local c = get(function() return cb.circuit_condition end)
+        if c and c.first_signal then
+          r.cond = c.first_signal.name .. c.comparator .. tostring(c.constant)
+        end
+        r.read = get(function() return cb.read_contents end)
+        r.read_mode = get(function() return cb.read_contents_mode end)
+        if (get(function() return cb.sections_count end) or 0) > 0 then
+          local f = cb.get_section(1).filters[1]
+          r.signals = f and f.value and (f.value.name .. ':' .. tostring(f.min))
+        end
+      end
+      local ls = get(function() return e.get_logistic_sections() end)
+      if ls then
+        local q = {}
+        for _, sec in pairs(ls.sections) do
+          for _, f in pairs(sec.filters) do
+            if f.value then q[#q + 1] = f.value.name .. ':' .. tostring(f.min) .. '-' .. tostring(f.max) end
+          end
+        end
+        r.requests = table.concat(q, ',')
+      end
+      r.trash = get(function() return e.get_requester_point().trash_not_requested end)
+      r.split = get(function() return e.splitter_input_priority .. '/' .. e.splitter_output_priority end)
+      r.split_filter = get(function() return e.splitter_filter.name.name end)
+        or get(function() return e.splitter_filter.name end)
+      r.plan = get(function()
+        local p = g and e.insert_plan or e.item_request_proxy.insert_plan
+        return p[1].id.name .. ':' .. p[1].items.in_inventory[1].count
+      end)
+      r.use_filters = get(function() return e.use_filters end)
+      local f1 = get(function() return e.get_filter(1) end)
+      r.filter = f1 and (f1.name or (f1.value and f1.value.name)) or nil
+      local inv = (not g) and get(function() return e.get_inventory(defines.inventory.chest) end)
+      if inv then r.bar = get(function() return inv.get_bar() end) end
+      local w = {}
+      for _, id in ipairs({1, 2, 5}) do
+        local c = get(function() return e.get_wire_connector(id, false) end)
+        if c and c.connection_count > 0 then w[#w + 1] = id .. 'x' .. c.connection_count end
+      end
+      r.wires = table.concat(w, ',')
+      out[#out + 1] = r
+    end
+  end
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
+def check_ghosts():
+    """2.0.4 (A1): a play apply on uncharted ground (lab tiles generated for the lab force and
+    never charted, as on the 2.0 run's map with no radar and no character) is refused by the
+    paste and placed as single ghosts; what each ghost keeps of its settings and wires is read
+    back, and again once they are revived (as robots build them). Then the built inserter is
+    ordered out (as an order-up for new settings does) and a second apply must lay its ghost."""
+    import json
+    from fkcore import apply as applymod, compose, fkp
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    req = json.dumps({"bar": 2, "request_filters": {"trash_not_requested": True, "sections": [
+        {"index": 1, "filters": [{"index": 1, "name": "iron-plate", "quality": "normal",
+                                  "comparator": "=", "count": 12, "max_count": 10}]}]}},
+                     separators=(",", ":"))
+    text = ("fkp 1 factory gh\nsize 12x6\nwire w red\n"
+            "w w red box/c0 ~n/i0\n"
+            "e m/m0 assembling-machine-2 1.5,1.5 recipe=iron-gear-wheel\n"
+            f"e box/c0 requester-chest 3.5,0.5 config='{req}'\n"
+            "e ~n/i0 inserter 4.5,0.5 E net=n if=iron-plate<5\n"
+            "e ~n/i1 fast-inserter 4.5,1.5 E net=n filter=iron-plate|copper-plate\n"
+            "e cc/k0 constant-combinator 6.5,0.5 N signals=signal-A:7\n"
+            "e ~b/b0 transport-belt 6.5,2.5 E net=b read=hold\n"
+            "e ~b/u0 underground-belt 7.5,2.5 E net=b ug=in\n"
+            "e ~b/u1 underground-belt 9.5,2.5 E net=b ug=out\n"
+            "e power/p0 small-electric-pole 0.5,4.5\n"
+            "e power/p1 small-electric-pole 5.5,4.5\n")
+    want = {"m/m0": {"recipe": "iron-gear-wheel"},
+            "box/c0": {"requests": "iron-plate:10-10", "trash": True, "wires": "1x1"},
+            "~n/i0": {"enable": True, "cond": "iron-plate<5", "wires": "1x1"},
+            "~n/i1": {"use_filters": True, "filter": "iron-plate"},
+            "cc/k0": {"signals": "signal-A:7"},
+            "~b/b0": {"read": True, "read_mode": 1},
+            "~b/u0": {"ug": "input", "d": 4}, "~b/u1": {"ug": "output", "d": 4},
+            "power/p0": {"wires": "5x1"}, "power/p1": {"wires": "5x1"}}
+    sur = compose.compose(fkp.loads("fkp 1 surface lab\nplot gh at 320,320 rot 0 size 12x6\n"),
+                          {"gh": fkp.loads(text)}, cat)
+    rows = applymod.scope_rows(sur)
+    pos = json.dumps([[r["name"], float(r["x"]), float(r["y"]), r["src"].split(":gh/")[-1]]
+                      for r in rows])
+    area = (300, 300, 350, 340)
+    ins = "{324.5, 320.5}"                    # ~n/i0
+
+    def read(r, ghost):
+        body = _READ.replace("__SURFACE__", link._q(s)).replace("__POS__", link._q(pos))
+        reply = r.lua(body).strip()
+        got = json.loads(reply) if reply.startswith("[") else []
+        return {t["key"]: t for t in got if t["ghost"] == ghost}
+
+    def judge(stage, got, ghost):
+        bad = 0
+        for key, w in want.items():
+            t = got.get(key)
+            miss = {k: [t.get(k), v] for k, v in w.items() if t and t.get(k) != v}
+            ok = bool(t) and t.get("ghost") == ghost and not miss
+            bad += not ok
+            print(f"  {stage:<6} {key:<9} {'OK' if ok else 'NOT' if t else 'MISSING'} "
+                  f"{'' if ok or not t else 'got, wanted: ' + json.dumps(miss)}")
+        return bad
+
+    with LaptopServer("ghosts", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            charted = r.lua(f"""
+local s, f = game.get_surface('{s}'), game.forces['{f}']
+for cx = 9, 10 do for cy = 9, 10 do s.request_to_generate_chunks({{cx * 32 + 16, cy * 32 + 16}}, 0) end end
+s.force_generate_chunk_requests()
+local c = 0
+for cx = 9, 10 do for cy = 9, 10 do if f.is_chunk_charted(s, {{cx, cy}}) then c = c + 1 end end end
+rcon.print(c)""").strip()
+            print(f"charted chunks under the plot: {charted} of 4")
+            rep = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            print("\n".join(rep.lines()))
+            ghosts = read(r, True)
+            r.lua(link.lua_revive(s, area))
+            built = read(r, False)
+            r.lua(f"game.get_surface('{s}').find_entity('inserter', {ins})"
+                  f".order_deconstruction('{f}') rcon.print('ok')")
+            rep2 = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            print("\n".join(rep2.lines()))
+            again = r.lua(
+                f"local o = {{}} for _, e in pairs(game.get_surface('{s}').find_entities_filtered"
+                f"{{position = {ins}, radius = 0.3}}) do local g = e.type == 'entity-ghost' "
+                "o[#o + 1] = (g and ('ghost:' .. e.ghost_name) or e.name) .. "
+                "(e.to_be_deconstructed() and '(decon)' or '') end "
+                "rcon.print(table.concat(o, ' '))").strip()
+            relaid = read(r, True).get("~n/i0", {})
+    bad = judge("ghost", ghosts, True) + judge("built", built, False)
+    print(f"  inserter ordered out, applied again: {again}; the new ghost's wires "
+          f"{relaid.get('wires')!r}, condition {relaid.get('cond')!r}")
+    ok = (charted == "0" and rep.pasted == 0 and rep.placed_alone == len(rows) and not bad
+          and "ghost:inserter" in again)
+    print("single ghosts on uncharted ground:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
-    raise SystemExit({"chat": check_chat, "own": check_own}[what]())
+    raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts}[what]())
