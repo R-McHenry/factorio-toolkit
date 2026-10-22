@@ -31,3 +31,5 @@ left lane; a second coal miner keeps all 29 and side-loads onto coal's own belt.
 connected, no LEAK, no `LANE` line. An unchanged rebuild of every game in `games\` keeps every
 route. Tests: `tests\test_lanes_pairs.py` `PatchPairTest` (a consumer of both, a driver of each
 net, a dropped consumer, the fallback).
+
+692 tests OK.
