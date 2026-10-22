@@ -17,9 +17,19 @@ A ``k=v`` value with whitespace, a quote, a backslash or ``#`` in it (a Literal'
 is written in shell-style single quotes, and a line is read the shell way, so a quoted ``#`` is
 data, not a comment.
 
+A carrier's ``net=`` (2.0, CORE-V2.md "Nets, carriers and the record": a net is one lane) is one
+net, ``iron``, on whichever lanes its items fall (every V1 layout reads as before), or a belt's two
+lanes, ``iron|copper`` (``iron`` on the left lane looking downstream, ``copper`` on the right),
+``iron|`` or ``|copper`` for one lane only, and ``ore+fuel|`` for two nets on one lane. An
+inserter, a pipe or a pump has no lanes: ``ore+fuel`` is two nets through one inserter into its
+one target. :func:`net_names` and :func:`net_lanes` read it, :func:`pair_net` and :func:`hand_net`
+write it; a ``~<net>`` owner may name such a carrier's nets (``~ore|fuel``: the route of two nets
+that share a belt).
+
 :func:`invariants` lists what makes a layout malformed: two entities on a tile, an entity outside
-the factory's size, an owner that does not resolve, a carrier with no net or two nets. The writer
-(:func:`dumps` with ``cat``) refuses a layout that has any. Pure, stdlib only.
+the factory's size, an owner that does not resolve, a carrier with no net, a net written with a
+comma, more than two lanes, or lanes on a carrier that has none. The writer (:func:`dumps` with
+``cat``) refuses a layout that has any. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -29,7 +39,8 @@ from dataclasses import dataclass, field
 
 __all__ = ["FkpError", "InvariantError", "Entity", "Inst", "Cover", "Plot", "Claim", "Mark",
            "Layout", "loads", "dumps", "load", "save", "invariants", "tiles_of", "DIRS",
-           "CARRIER_TYPES", "natural_key", "fmt"]
+           "CARRIER_TYPES", "LANE_TYPES", "natural_key", "fmt", "net_names", "net_lanes",
+           "pair_net", "hand_net", "map_nets"]
 
 DIRS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
         "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
@@ -38,6 +49,47 @@ _DIR = {d: i for i, d in enumerate(DIRS)}
 #: Entity types that move a net's items: each must carry exactly one net (CORE.md invariants).
 CARRIER_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "inserter", "pipe",
                            "pipe-to-ground", "pump", "loader", "loader-1x1", "linked-belt"})
+#: The carriers with two lanes, whose ``net=`` may name a net per lane (``iron|copper``).
+LANE_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "loader", "loader-1x1",
+                        "linked-belt"})
+
+
+# -- a carrier's nets (2.0: a net is one lane) ----------------------------------------------------
+def net_names(net):
+    """Every net a ``net=`` names, in order and once each: ``iron|copper`` -> [iron, copper]."""
+    out = []
+    for part in re.split(r"[|+]", net or ""):
+        if part and part not in out:
+            out.append(part)
+    return out
+
+
+def net_lanes(net):
+    """``{"L": [nets], "R": [nets]}`` of a ``net=`` written with lanes (``iron|copper``, ``iron|``),
+    None for one written without (``iron``: V1, on whichever lanes its items fall)."""
+    if not net or "|" not in net:
+        return None
+    left, right = net.split("|", 1)
+    return {"L": [p for p in left.split("+") if p], "R": [p for p in right.split("+") if p]}
+
+
+def pair_net(left, right):
+    """The ``net=`` of a belt with ``left`` on its left lane and ``right`` on its right."""
+    return f"{left}|{right}"
+
+
+def hand_net(net):
+    """The ``net=`` of a carrier without lanes (an inserter) that carries what ``net`` does:
+    ``ore|fuel`` -> ``ore+fuel``."""
+    return "+".join(net_names(net)) if net else net
+
+
+def map_nets(net, fn):
+    """``net`` with every name turned by ``fn``, its lanes kept: the surface's ``<factory>/<net>``
+    of ``ore|fuel`` is ``main/ore|main/fuel``."""
+    if not net:
+        return net
+    return re.sub(r"[^|+]+", lambda m: fn(m.group()), net)
 
 
 class FkpError(ValueError):
@@ -368,7 +420,7 @@ def invariants(lay: Layout, cat, nets=None) -> list:
     ``~net`` owner resolves when some carrier in the file carries that net.
     """
     problems = []
-    carried = {e.net for e in lay.entities.values() if e.net}
+    carried = {n for e in lay.entities.values() for n in net_names(e.net)}
     known_nets = set(nets) if nets is not None else carried
     owners = set(lay.insts) | set(lay.covers)
     taken = {}
@@ -381,16 +433,24 @@ def invariants(lay: Layout, cat, nets=None) -> list:
         if not owner:
             problems.append(f"{key}: a key is <owner>/<local>")
         elif owner.startswith("~"):
-            if owner[1:] not in known_nets:
+            if not net_names(owner[1:]) or any(n not in known_nets
+                                               for n in net_names(owner[1:])):
                 problems.append(f"{key}: owner {owner} is not a net of this factory")
         elif owner not in owners and not any(owner.startswith(p + "/") for p in lay.insts):
             problems.append(f"{key}: owner {owner} is not an inst or cover line")
         if cat.kind(e.name) in CARRIER_TYPES:
             net = e.net
-            if not net:
+            if not net or not net_names(net):
                 problems.append(f"{key}: a {e.name} carries no net")
-            elif "," in net or "|" in net:
-                problems.append(f"{key}: a {e.name} carries two nets ({net})")
+            elif "," in net:
+                problems.append(f"{key}: a {e.name} carries two nets ({net}): a belt's lanes "
+                                "are written a|b, an inserter's nets a+b")
+            elif net.count("|") > 1:
+                problems.append(f"{key}: a {e.name} has two lanes, not {net.count('|') + 1} "
+                                f"({net})")
+            elif "|" in net and cat.kind(e.name) not in LANE_TYPES:
+                problems.append(f"{key}: a {e.name} has no lanes ({net}): its nets are written "
+                                f"{hand_net(net)}")
         try:
             tiles = tiles_of(cat, e)
         except ValueError as exc:

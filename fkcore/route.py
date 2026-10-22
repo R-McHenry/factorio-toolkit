@@ -36,6 +36,10 @@ reached by direct insertion: a fast (or long-handed) inserter beside the belt pi
 (``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver works the same way on a
 reversed tree, so its inserter turns round to pick from the machine.
 
+Two nets that share a belt (``lanes A | B``, 2.0) are one job, ``A|B``: each net from its drivers
+to its side of a join, and one route of both lanes from the join to every consumer
+(``fkcore.pairs``, which lays it through ``_route_one`` part by part; ``NetJob.parts``).
+
 A **fluid net** (every item a fluid) is not a belt job: it goes to the fluid plug-in,
 ``fkcore.fluid_route.route(flat, lay, cat, nets, blocked, box, limit) -> (added, how, failed)``
 (``{net: [Entity]}``, ``{net: report text}``, ``{net: reason}``), called after the belt nets
@@ -109,6 +113,7 @@ class NetJob:
     fluid: bool = False                            # a fluid net: the fluid plug-in routes it
     reserved: list = field(default_factory=list)   # tiles a fluid net's connections need
     anchors: dict = field(default_factory=dict)    # "<inst>.<role>" -> what the route is laid to
+    parts: tuple = ()                              # two nets on one belt: (A, B, both) jobs
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
@@ -225,6 +230,9 @@ def jobs(flat, lay, cat) -> dict:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
                 mine.append((side, job.goals[-1]))
             job.owners.append(f"{path}.{role}")
+    if getattr(flat, "pairs", None):
+        from . import pairs
+        pairs.merge(flat, out)
     for net, job in out.items():
         if job.skip is not None or job.fluid:
             continue
@@ -680,6 +688,9 @@ def _settle_leaves(cat, laid, ents):
 
 
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None):
+    if job.parts:
+        from . import pairs
+        return pairs.route(cat, job, ents, frames, js, box, limit, terrain, avoid, spans)
     net = job.net
     blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
     spans = _ug_spans(cat, ents) if spans is None else spans
@@ -721,8 +732,8 @@ def _judge(flat, lay, cat, mine, js):
     out = {}
 
     def route_net(key):
-        n = g.nodes.get(key)
-        return n.net if n is not None and n.net in mine and key.startswith(f"~{n.net}/") else None
+        owner = key.rsplit("/", 1)[0] if key in g.nodes else ""
+        return owner[1:] if owner.startswith("~") and owner[1:] in mine else None
 
     for lk in rep.leaks:
         a, b = route_net(lk.src), route_net(lk.dst)
@@ -733,14 +744,15 @@ def _judge(flat, lay, cat, mine, js):
         _reason, tiles = out.setdefault(blame, (f"its route would LEAK: {lk.text}", set()))
         tiles |= set(g.nodes[key].tiles)
     for name in mine:
-        r = rep.nets.get(name)
-        if r is None or name in out:
+        rs = [rep.nets[n] for n in fkpmod.net_names(name) if n in rep.nets]   # a pair: both
+        if not rs or name in out:
             continue
         placed = set()
         for owner in js[name].owners:
             placed |= set(flat.insts[owner.rsplit(".", 1)[0]].machines)
-        apart = [(d, c) for d, c in r.unreached if d in placed and c in placed]
-        alone = [k for k in r.unpaired if k.startswith(f"~{name}/")]
+        apart = [(d, c) for r in rs for d, c in r.unreached if d in placed and c in placed]
+        alone = sorted({k for r in rs for k in r.unpaired if k.startswith(f"~{name}/")},
+                       key=fkpmod.natural_key)
         if not apart and not alone:
             continue
         reason = f"its route does not connect {len(apart)} driver->consumer pairs"

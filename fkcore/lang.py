@@ -3,9 +3,10 @@
     file    := (import | module | stmt)*        # the file's top level is the factory body
     import  := 'import' Name (',' Name)* 'from' STRING
     module  := 'module' Name '{' stmt* '}'
-    stmt    := inst | net | assert | cover
+    stmt    := inst | net | lanes | assert | cover
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint*
     net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs
+    lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
@@ -18,15 +19,17 @@ Words may contain dashes (item names); instance, module and net names may not. E
 source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
 an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7, Rory 2026-10-21)
 says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
-and implements no limit. Pure, stdlib only.
+and implements no limit. ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can
+share a belt) says nets A and B share every belt they are on, A on the left lane and B on the
+right looking downstream: the router lays them as one pair (``fkcore.pairs``). Pure, stdlib only.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 
-__all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Assert", "Cover", "Module",
-           "File", "Auto", "AUTO_TOP"]
+__all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
+           "Module", "File", "Auto", "AUTO_TOP"]
 
 
 class FkSyntaxError(Exception):
@@ -119,6 +122,13 @@ class Net:
 
 
 @dataclass
+class Lanes:
+    left: str            # the net on the left lane, looking downstream
+    right: str           # the net on the right lane
+    line: int
+
+
+@dataclass
 class Assert:
     ref: Ref
     op: str
@@ -143,6 +153,7 @@ class Module:
     nets: list = field(default_factory=list)
     asserts: list = field(default_factory=list)
     covers: list = field(default_factory=list)
+    lanes: list = field(default_factory=list)      # [Lanes]: two nets that share a belt
 
 
 @dataclass
@@ -253,6 +264,8 @@ class _P:
             self.err(f"expected a statement, got {tok.text or tok.kind!r}")
         if tok.text == "net" and self.peek(1).kind == "word":
             mod.nets.append(self.net())
+        elif tok.text == "lanes" and self.peek(1).kind == "word":
+            mod.lanes.append(self.lanes())
         elif tok.text == "assert":
             mod.asserts.append(self.assert_())
         elif tok.text in _COVER_KINDS and self.peek(1).kind == "word" and self.peek(2).text == ":":
@@ -294,6 +307,16 @@ class _P:
         self.expect("->")
         consumers = self.refs()
         return Net(name, items, drivers, consumers, line, limited)
+
+    def lanes(self):
+        line = self.expect("lanes").line
+        left = self.name("net name").text
+        if not self.accept("|"):
+            self.err("two nets share a belt as lanes LEFT | RIGHT, like lanes ore | fuel")
+        right = self.name("net name").text
+        if right == left:
+            self.err(f"lanes {left} | {right}: a net is one lane; name two nets")
+        return Lanes(left, right, line)
 
     def assert_(self):
         line = self.expect("assert").line

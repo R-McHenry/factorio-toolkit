@@ -20,6 +20,11 @@ long-handed inserter from the far one, at the furnaces' pitch 2.
 Machine entities carry what a Literal needs to rebuild them (recipe, resource, fuel, role, rate),
 so ``unfold`` can turn any row into a Literal with the same keys and the same netlist.
 
+``SmelterArray`` (2.0) is Rory's smelter stack (games/v2-bench/smelter-stack-ghosts.json, his ghosts
+on nauvis, 2026-10-20) at any count: each column of furnaces is fed from one belt with ore on one
+lane and fuel on the other, side-loaded at its foot. A role written ``in1|in2`` is such a belt: its
+carriers carry both roles' nets, in1's on the left lane (``fkcore.expand.role_net``).
+
 The ``Bus`` (Rory's 4-belt bus, 2026-10-21) is no row: its belts and splitters are the bus's own
 net (role ``pool``), and each load and tap is a port, one belt beside the bus (its stub) whose
 role is the net a ``.fk`` net binds to it, with one attach point where the router meets it. Its
@@ -33,7 +38,7 @@ import json
 from dataclasses import dataclass, field
 
 __all__ = ["FragmentError", "FEnt", "Role", "Fragment", "fragment", "FRAGMENTS", "bus",
-           "bus_ports", "bus_check", "bus_side"]
+           "bus_ports", "bus_check", "bus_side", "smelter_array", "array_shape"]
 
 E, S, W, N = 4, 8, 12, 0
 _INSERTER = "fast-inserter"
@@ -233,6 +238,116 @@ def lab_row(n, inputs):
     return ents, roles, (3 * n, h)
 
 
+# -- the smelter array (Rory's smelter stack, 2026-10-20: games/v2-bench) -------------------------
+_PLAIN = "inserter"
+
+
+def array_shape(n, per, units=None):
+    """(units, furnaces per unit west to east) of a SmelterArray of ``n`` furnaces: the fewest
+    units that keep each column at most ``per`` furnaces (one yellow lane of ore), unless
+    ``units`` is given; the furnaces as even as they go, the extra ones in the western units."""
+    k = int(units) if units else max(1, -(-n // (2 * max(1, per))))
+    if not 1 <= k <= n:
+        raise FragmentError(f"SmelterArray: {k} units for {n} furnaces (a unit has 1 or more)")
+    return k, [n // k + (1 if u < n % k else 0) for u in range(k)]
+
+
+def smelter_array(n, recipe, inputs, outputs, machine="stone-furnace", fuel=None, per=24,
+                  units=None):
+    """Rory's smelter stack: units 11 tiles wide, west to east, each two columns of 2x2
+    furnaces around a plate belt. Local rows, M = 2 x the tallest column:
+
+    - rows 0..M-1, the furnaces, at the foot of their column (furnace b from the foot: rows
+      M-2-2b and M-1-2b, its two inserters on its upper row when b is even, its lower row when
+      odd: Rory's ghost). x+0 the west feed belt (north), x+1 its inserters, x+2..3 the furnaces,
+      x+4 their plate inserters, x+5 the plate belt (south), x+6..10 the same mirrored.
+    - row M: x+4 a belt south, x+5 a belt west, x+6 the coal splitter (west, rows M and M+1);
+    - row M+1: x+1 and x+2 the coal's pass-through under the west column (an entrance and the
+      exit from x+5), x+3..4 the coal splitter south, x+5 an entrance, x+7 the exit from the
+      unit to the east (from the entrance at x 11k on the eastmost unit: the coal's port);
+    - row M+2: the two feed belts running apart from x+3|x+4, west and east, side-loaded with
+      ore from the south and coal from the north: ore on the west belt's left lane and coal on
+      its right, coal on the east belt's left and ore on its right (2-to-1 merges, measured);
+      they turn north into the columns at x+0 and x+10;
+    - row M+3: the ore splitter north (x+3..4) and the plate belt's exit (x+5, from its entrance
+      on row M-2: the bottom furnaces' inserters drop onto it);
+    - rows M+4, M+5: the ore's belt in (x+3, north) and the plates' out (x+5, south): each
+      unit's two ports, side by side, open to the south.
+
+    The westmost unit has no pass-through (its coal splitter's west output stays empty, so it
+    sends all on to its own furnaces). Every inserter is a plain one, as in Rory's ghost: a stone
+    furnace takes 0.34/s of ore and coal and a plain inserter moves 0.86/s. -> (entities, roles,
+    size)"""
+    if len(inputs) != 2:
+        raise FragmentError("SmelterArray takes its ore and its fuel on two nets that share no "
+                            "belt: it side-loads them onto the lanes of its own feed belts (got "
+                            + "; ".join(", ".join(b) for b in inputs) + ")")
+    k, counts = array_shape(n, per, units)
+    tall = max((c + 1) // 2 for c in counts)
+    m_ = 2 * tall
+    ents, machines = [], []
+    ore_at, out_at = [], []
+    attrs = {"recipe": recipe}
+    if fuel:
+        attrs["fuel"] = fuel
+    m = 0
+    for u, c in enumerate(counts):
+        x0 = 11 * u
+        cols = ((c + 1) // 2, c // 2)
+        for side, f in enumerate(cols):
+            fx, feed_x, out_x = (x0 + 3, x0 + 1.5, x0 + 4.5) if side == 0 else \
+                (x0 + 8, x0 + 9.5, x0 + 6.5)
+            face = W if side == 0 else E
+            for b in range(f):
+                row = m_ - 2 - 2 * b if b % 2 == 0 else m_ - 1 - 2 * b
+                ents.append(FEnt(f"m{m}", machine, fx, m_ - 1 - 2 * b, None, None, dict(attrs)))
+                ents.append(FEnt(f"f{m}", _PLAIN, feed_x, row + 0.5, face,
+                                 "in1|in2" if side == 0 else "in2|in1"))
+                ents.append(FEnt(f"o{m}", _PLAIN, out_x, row + 0.5, face, "out"))
+                machines.append(f"m{m}")
+                m += 1
+            top = m_ - 2 * f
+            feed = x0 if side == 0 else x0 + 10
+            role = "in1|in2" if side == 0 else "in2|in1"
+            ents += [FEnt(f"feed{u}{'we'[side]}{y}", "transport-belt", feed + 0.5, y + 0.5, N,
+                          role) for y in range(top, m_ + 3)]
+        for y in range(m_ - 2 * max(cols), m_ - 2):          # the plate belt, south
+            ents.append(FEnt(f"out{u}b{y}", "transport-belt", x0 + 5.5, y + 0.5, S, "out"))
+        ents += [FEnt(f"out{u}u0", "underground-belt", x0 + 5.5, m_ - 1.5, S, "out", {"ug": "in"}),
+                 FEnt(f"out{u}u1", "underground-belt", x0 + 5.5, m_ + 3.5, S, "out",
+                      {"ug": "out"}),
+                 FEnt(f"out{u}x0", "transport-belt", x0 + 5.5, m_ + 4.5, S, "out"),
+                 FEnt(f"out{u}x1", "transport-belt", x0 + 5.5, m_ + 5.5, S, "out")]
+        out_at.append((x0 + 5.5, m_ + 5.5, S))
+        ents += [FEnt(f"ore{u}s", "splitter", x0 + 4, m_ + 3.5, N, "in1"),
+                 FEnt(f"ore{u}b0", "transport-belt", x0 + 3.5, m_ + 4.5, N, "in1"),
+                 FEnt(f"ore{u}b1", "transport-belt", x0 + 3.5, m_ + 5.5, N, "in1")]
+        ore_at.append((x0 + 3.5, m_ + 5.5, N))
+        ents += [FEnt(f"feed{u}m{j}", "transport-belt", x0 + 1.5 + j, m_ + 2.5, W, "in1|in2")
+                 for j in range(3)]
+        ents += [FEnt(f"feed{u}n{j}", "transport-belt", x0 + 4.5 + j, m_ + 2.5, E, "in2|in1")
+                 for j in range(6)]
+        ents += [FEnt(f"coal{u}s0", "splitter", x0 + 6.5, m_ + 1, W, "in2"),
+                 FEnt(f"coal{u}s1", "splitter", x0 + 4, m_ + 1.5, S, "in2"),
+                 FEnt(f"coal{u}b0", "transport-belt", x0 + 4.5, m_ + 0.5, S, "in2"),
+                 FEnt(f"coal{u}b1", "transport-belt", x0 + 5.5, m_ + 0.5, W, "in2"),
+                 FEnt(f"coal{u}u0", "underground-belt", x0 + 7.5, m_ + 1.5, W, "in2",
+                      {"ug": "out"})]
+        if u > 0:                     # the pass-through on to the unit to the west
+            ents += [FEnt(f"coal{u}u1", "underground-belt", x0 + 5.5, m_ + 1.5, W, "in2",
+                          {"ug": "in"}),
+                     FEnt(f"coal{u}u2", "underground-belt", x0 + 2.5, m_ + 1.5, W, "in2",
+                          {"ug": "out"}),
+                     FEnt(f"coal{u}u3", "underground-belt", x0 + 1.5, m_ + 1.5, W, "in2",
+                          {"ug": "in"})]
+    ents.append(FEnt("coalin", "underground-belt", 11 * k + 0.5, m_ + 1.5, W, "in2",
+                     {"ug": "in"}))
+    roles = {"in1": Role("in1", "in", inputs[0], machines, ore_at),
+             "in2": Role("in2", "in", inputs[1], machines, [(11 * k + 0.5, m_ + 1.5, W)]),
+             "out": Role("out", "out", outputs[0] if outputs else [], machines, out_at)}
+    return ents, roles, (11 * k + 1, m_ + 6)
+
+
 # -- the bus (Rory's 4-belt bus, 2026-10-21: agent/docs/examples/bus4.json) ----------------------
 #: a port's staircase climbs across the bus from the side its stream comes from to the side it goes
 #: to: input priority on the first, output priority toward the second (the game's splitter fields)
@@ -401,6 +516,9 @@ FRAGMENTS = {
         if str(p.get("drill", "")).startswith("burner") else
         miner_row(int(p["n"]), p["resource"], o, p.get("drill", "electric-mining-drill"))),
     "LabRow": lambda p, i, o: lab_row(int(p["n"]), i),
+    "SmelterArray": lambda p, i, o: smelter_array(
+        int(p["n"]), p["_recipe"], i, o, p.get("machine", "stone-furnace"), p.get("_fuel"),
+        int(p.get("_per", 24)), p.get("units")),
     "Bus": lambda p, i, o: _bus(p),
 }
 
@@ -416,7 +534,8 @@ def fragment(kind, params, inputs, outputs) -> Fragment:
     # of the fast ones (1.1, from the 0534 player's own patch: the start has 48 plain inserters,
     # 20 fast ones and the fast recipe locked)
     if params.get("inserter"):
+        default = _PLAIN if kind == "SmelterArray" else _INSERTER   # Rory's stack: plain ones
         for e in ents:
-            if e.name == _INSERTER:
+            if e.name == default:
                 e.name = str(params["inserter"])
     return _finish(Fragment(kind, dict(params), ents, roles, size))

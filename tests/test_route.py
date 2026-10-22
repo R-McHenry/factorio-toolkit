@@ -438,7 +438,7 @@ class RedgreenTest(unittest.TestCase):
         self.assertEqual(fkp.invariants(self.r.layout, CAT, nets=self.flat.nets), [])
         self.assertEqual({x.status for x in self.rep.nets.values()}, {"connected"})
         self.assertEqual(self.rep.leaks, [])
-        self.assertEqual(self.rep.checks, [])          # no UNROUTED, OPEN, LEAK or UG_SIDELOAD
+        self.assertEqual(self.rep.checks, [])          # no UNROUTED, OPEN or LEAK
 
     def test_counts(self):
         routes = [e for k, e in self.r.layout.entities.items() if k.startswith("~")]

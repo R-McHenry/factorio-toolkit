@@ -20,6 +20,12 @@ A ``Bus`` instance is a net of its own, named as the instance (its belts and spl
 the loads that nets feed drive it, the taps that nets draw from consume it (``_bus_nets``). So a
 net ends at a load (``net iron1: smelt -> bus.load1``) or starts at a tap (``net fe: bus.tap1 ->
 gears``), and the bus joins them. A port no net names is in none, and no check line names it.
+
+``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can share a belt) pairs two
+nets of the same module: ``Flat.pairs`` maps the pair's ``.fkp`` net (``A|B``, A on the left lane)
+to (A, B), and ``Flat.lane_of`` each of them to it. A pair is two single nets on one belt, never a
+sushi net, so it draws no ``CLOG`` of its own. A net shares a belt with one other net at most, and
+a fluid net or a Bus has no lanes to share: either is malformed source (ElabError).
 Pure, stdlib only.
 """
 from __future__ import annotations
@@ -34,7 +40,7 @@ __all__ = ["ElabError", "Machine", "FlatNet", "Check", "Flat", "load", "elaborat
            "AUTO_KINDS"]
 
 #: the templates whose count may be ``n=auto``: the rows
-AUTO_KINDS = ("MinerRow", "SmelterRow", "AsmRow", "LabRow")
+AUTO_KINDS = ("MinerRow", "SmelterRow", "SmelterArray", "AsmRow", "LabRow")
 
 
 class ElabError(ValueError):
@@ -114,6 +120,8 @@ class Flat:
     covers: list = field(default_factory=list)      # [(lang.Cover, scope path)]
     checks: list = field(default_factory=list)      # [Check]
     scopes: dict = field(default_factory=dict)      # scope path -> {name: Inst}
+    pairs: dict = field(default_factory=dict)       # "A|B" -> (A, B): two nets on one belt
+    lane_of: dict = field(default_factory=dict)     # net -> its pair's "A|B"
 
     def resolve_ref(self, ref, scope=""):
         """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine."""
@@ -174,9 +182,11 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat = Flat(name, f.path)
     flat._layout = layout
     flat._sizes = dict(sizes or {})
+    flat._lanes = []
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     _resolve_nets(flat)
     _bus_nets(flat)
+    _resolve_lanes(flat, cat)
     _endpoint_checks(flat)
     return flat
 
@@ -242,6 +252,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         flat.asserts.append((a, prefix))
     for c in mod.covers:
         flat.covers.append((c, prefix))
+    for ln in getattr(mod, "lanes", ()):
+        flat._lanes.append((ln, prefix, src))
 
 
 def _auto(flat, path, inst, src):
@@ -422,6 +434,28 @@ def _bus_nets(flat):
                 consumers.append((key, item))
                 flat._in_hold.setdefault((key, item), []).append(path)
         flat.nets[path] = FlatNet(path, [item], drivers, consumers, True, inst.line)
+
+
+def _resolve_lanes(flat, cat):
+    """``lanes A | B`` -> ``flat.pairs`` and ``flat.lane_of`` (the module's own nets)."""
+    for ln, prefix, src in flat._lanes:
+        a, b = _join(prefix, ln.left), _join(prefix, ln.right)
+        for name, short in ((a, ln.left), (b, ln.right)):
+            if name not in flat.nets:
+                raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: no net {short}")
+            if name in flat.insts and flat.insts[name].kind == "Bus":
+                raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: {short} is a Bus, "
+                                "several belts of its own")
+            if any(cat.is_fluid(i) for i in flat.nets[name].items):
+                raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} is a "
+                                "fluid's, and pipes have no lanes")
+            if name in flat.lane_of:
+                raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} "
+                                f"already shares a belt ({flat.lane_of[name]}), and a belt has "
+                                "two lanes")
+        key = f"{a}|{b}"
+        flat.pairs[key] = (a, b)
+        flat.lane_of[a] = flat.lane_of[b] = key
 
 
 def _items_text(items):

@@ -992,7 +992,7 @@ def belts(sz, factory, r):
         sized = [p for p in _insts(flat, [k for k, _i in net.drivers + net.consumers]) if p in rows]
         if not sized:
             continue
-        found = routedmod.critical(r, [nid for nid, n in r.net_of.items() if n == name])
+        found = routedmod.critical(r, r.nodes_of(name))
         if found is None:
             continue
         nid, req, cap, ratio = found
