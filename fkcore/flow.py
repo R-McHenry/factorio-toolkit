@@ -887,8 +887,46 @@ def _bom_live(ctx):
                    and ctx.cat.kind(e.name) == "assembling-machine"})
     sup = supply.read(r, _force(ctx), ctx.surface.name, need, used)
     lines, checks = supply.bom(need, sup, used)
-    return ([lines[0], f"  to build: {what}; {sum(need.values())} entities",
-             f"  {supply.research_line(sup.research)}"] + lines[1:]), checks
+    lines = ([lines[0], f"  to build: {what}; {sum(need.values())} entities",
+              f"  {supply.research_line(sup.research)}"] + lines[1:])
+    # the first lead run (2026-10-21): a paste took up the burner row before the 137 belts its
+    # replacement needed were made (23 in stock), and iron stood still until they were
+    short = [c.where for c in checks if c.code == "LOW_STOCK"]
+    running = _machines_taken_up(ctx) if short else []
+    if running:
+        warn = (f"the paste takes up {len(running)} machine{'s' if len(running) != 1 else ''} "
+                f"that stand now while {len(short)} kind{'s' if len(short) != 1 else ''} it lays "
+                f"are SHORT ({', '.join(short[:6])}): what they make stops until those are made; "
+                "`stop_on LOW_STOCK` in the build script holds the paste until the network has them")
+        lines.append(f"  {warn}")
+        checks.append(Check("RIP", ctx.surface.name, warn))
+    return lines, checks
+
+
+#: what a paste that takes it up stops (2.0, report_bom's warning)
+_MACHINE_KINDS = ("assembling-machine", "furnace", "mining-drill", "lab", "boiler", "generator",
+                  "rocket-silo")
+
+
+def _machines_taken_up(ctx):
+    """The built machines the last diff says the paste takes up: a NOBODY one that is no ghost,
+    and what stands built under a WRONG verdict. [name]."""
+    if ctx.last_diff is None:
+        return []
+
+    def machine(name):
+        try:
+            return ctx.cat.kind(name) in _MACHINE_KINDS
+        except (KeyError, ValueError):
+            return False
+    out = []
+    for v in ctx.last_diff.verdicts:
+        head = v.verdict.split()[0]
+        if head == "NOBODY" and not v.ghost and machine(v.name):
+            out.append(v.name)
+        elif head == "WRONG":
+            out += [u[0] for u in v.under if len(u) > 4 and not u[4] and machine(u[0])]
+    return out
 
 
 def s_report_bom(ctx, args):
@@ -1077,7 +1115,10 @@ def _hand_file(ctx, lines):
 
 
 def s_stop_on(ctx, args):
-    return [f"stop_on: {', '.join(sorted(ctx.stop_on))}"], []
+    # the first lead run (2026-10-21): "stop_on: INVARIANT" as a full build's last line read as
+    # the failure behind a nonzero exit, which came from the worker's own shell chain
+    codes = ", ".join(sorted(ctx.stop_on))
+    return [f"stop_on {codes}: a check of these stops the run; none has stopped it so far"], []
 
 
 STEPS = {
@@ -1161,8 +1202,20 @@ def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
         ctx.log.append(summary)
         echo(summary)
         if stops:
-            echo(f"stopped at line {ln.n} ({ln.cmd}): {len(stops)} {stops[0].code} "
-                 f"line(s), first: {stops[0]}")
+            why = (f"stopped at line {ln.n} ({ln.cmd}): {len(stops)} {stops[0].code} "
+                   f"line(s), first: {stops[0]}")
+            echo(why)
+            # the steps this run would have reached say so, instead of keeping an earlier run's
+            # report (the first lead run's mall2 designer read stale report_checks and route
+            # lines after a build stopped at elaborate, 2026-10-21)
+            for later in lines[i + 1:last + 1]:
+                if later.cmd in written:
+                    continue
+                with open(os.path.join(ctx.out, f"{later.cmd}.txt"), "w", encoding="utf-8",
+                          newline="\n") as fh:
+                    fh.write(f"# {later.text}   (line {later.n} of {os.path.basename(script)})\n"
+                             f"not run: the build {why}\n")
+                written.add(later.cmd)
             _close(ctx)
             return 1, ctx
     _close(ctx)

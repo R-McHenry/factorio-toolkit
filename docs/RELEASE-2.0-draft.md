@@ -157,6 +157,13 @@ once: iron stood for 20 minutes.
   to the mall's ghosts, and the shop stood GHOST SHORT, unable to make inserters).
 - **Docs:** a requester drives a net, a provider or storage chest only ends one; a product's chest
   is best a provider, since robots put any leftovers into the nearest storage chest.
+- **The build says what it stops.** `report_bom --stock live` warns (RIP) when the paste would take
+  up built machines while kinds it lays are SHORT (the burner row went before its 137 belts were
+  made, and iron stood still), and points to `stop_on LOW_STOCK`. A build that stops writes "not
+  run" into the reports of the steps it didn't reach, instead of leaving the last run's lines
+  there; the stop_on step says which checks would stop the run and that none has (its old
+  "stop_on: INVARIANT" read as the failure behind a worker's nonzero exit, which came from the
+  worker's own shell chain).
 
 ## Not in 2.0 yet
 

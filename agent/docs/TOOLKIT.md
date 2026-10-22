@@ -298,7 +298,9 @@ its poles, and `floorplan --bridge-power` lays the bridge again around the plots
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design, or add
-`stop_on UNFED` before a big paste so a check stops the build. `size`, after `elaborate`, counts
+`stop_on UNFED` before a big paste so a check stops the build (`stop_on LOW_STOCK` holds the
+paste until the network has what it lays: report_bom says when a paste would take up running
+machines while their replacements are short). `size`, after `elaborate`, counts
 the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --to
 report_checks` runs part of it (`report_rates:2` names the second `report_rates`). `tier minimize
 --allow yellow,red` lays red belts where a yellow lane is too thin for what the design asks

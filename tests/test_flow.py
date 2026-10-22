@@ -171,9 +171,34 @@ class FlowTest(unittest.TestCase):
         self.assertTrue(any(c.code == "UNFED" for _s, c in ctx.checks))
         with open(self.script, "a", encoding="utf-8") as fh:
             fh.write("stop_on UNFED\n")
+        self.assertIn("routed    belt", self.read("out/route.txt"))
+        self.assertIn("stop_on INVARIANT: a check of these stops the run; none has stopped it so "
+                      "far", self.read("out/stop_on.txt"))
         code, ctx = self.build()
         self.assertEqual(code, 1)
         self.assertTrue(ctx.log[-1].startswith("[ 4/20] elaborate"))
+        # the steps it didn't reach say so, not the last run's lines (2026-10-21)
+        route = self.read("out/route.txt")
+        self.assertIn("not run: the build stopped at line", route)
+        self.assertIn("(elaborate): ", route)
+        self.assertNotIn("routed    belt", route)
+
+    def test_the_machines_a_paste_takes_up(self):
+        # the first lead run (2026-10-21): a paste took up the burner row while the belts its
+        # replacement needed were SHORT, and iron stood still; report_bom warns from these
+        from fkcore.sense import Verdict
+
+        class Rep:
+            verdicts = [Verdict("NOBODY", "burner-mining-drill", 1, 1),
+                        Verdict("NOBODY", "assembling-machine-1", 5.5, 5.5, ghost=True),
+                        Verdict("NOBODY", "transport-belt", 2.5, 2.5),
+                        Verdict("WRONG", "transport-belt", 9.5, 9.5,
+                                under=[("stone-furnace", 9, 9, None, False, True)]),
+                        Verdict("OK", "electric-mining-drill", 20.5, 20.5)]
+        ctx = flow.Ctx(self.dir, self.script, CAT, os.path.join(self.dir, "out"))
+        self.assertEqual(flow._machines_taken_up(ctx), [])
+        ctx.last_diff = Rep
+        self.assertEqual(flow._machines_taken_up(ctx), ["burner-mining-drill", "stone-furnace"])
 
     def test_the_kickoff_template_runs_through_the_routed_rates(self):
         # every new run's script (tier, then report_rates again) on its plant, a Literal with
