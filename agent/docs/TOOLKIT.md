@@ -144,7 +144,8 @@ yield is in its tooltip.
 `fk stage` keeps a plan of stages in git beside `game\`. `main` is what is built; the plan is one
 commit per stage on top of it, and each commit's message is the stage's spec: its goal, what it
 needs first, the rates it should reach, and the test that says it's done. A stage holds source only
-(`.fk` files, the surface file, the build script), and its layout is computed when it is checked. A
+(`.fk` files, the surface file, the build script, and the file each Literal reads), and its layout
+is computed when it is checked. A
 stage keeps its number however the plan changes.
 
 ```

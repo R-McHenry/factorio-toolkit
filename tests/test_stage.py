@@ -115,8 +115,8 @@ class StageTest(unittest.TestCase):
         self.write("stages/1/notes.json", "{}\n")                     # not source: stays out
         out = self.fk("edit", "1")
         self.assertIn("stage 1 now holds source iron.fk", out)
-        self.assertIn("not taken (the plan holds .fk, .surface and .fkb files only): notes.json",
-                      out)
+        self.assertIn("not taken (the plan holds .fk, .surface and .fkb files and the files "
+                      "Literals read only): notes.json", out)
         st, = self.plan.stages()
         self.assertEqual((st.n, st.title), (1, "more smelting"))
         self.assertEqual(st.spec, {"goal": "8 furnaces", "rates": "iron-plate 120/min",
@@ -281,6 +281,56 @@ class StageTest(unittest.TestCase):
         out = self.fk("list")
         self.assertNotIn("CONFLICT", out)
         self.assertIn("horizon 2.00x", out)
+
+    def test_a_literals_file_travels_with_its_fk(self):
+        # 2.0.4 (the lead-v2 run, 2026-10-22): stage 1 took relay.fk but not the relay.json its
+        # Literal reads, so every check of the plan said "relay.fk Literal: No such file"
+        self.fk("insert", "relay")
+        self.write("stages/1/relay.fk", '# a relay\nport = Literal<file="relay.json"> @(0, 0)\n')
+        self.write("stages/1/relay.json",
+                   '[{"name": "small-electric-pole", "x": 0.5, "y": 0.5}]\n')
+        self.write("stages/1/nauvis.surface", "place relay = relay plot 22,0 4x4\n", mode="a")
+        out = self.fk("edit", "1")
+        self.assertIn("stage 1 now holds source nauvis.surface, relay.fk, relay.json", out)
+        self.assertNotIn("not taken", out)
+        st, = self.plan.stages()
+        self.assertIn("relay.json", self.plan.ls(st.commit))
+        got = self.plan.measure(st.commit)
+        self.assertEqual(got["errors"], [])
+        self.assertEqual(got["plates"], 60.0)
+        self.assertIn("+++ b/relay.json", self.fk("next"))
+        self.assertIn("added game\\relay.json", self.fk("next", "--apply"))
+        self.assertTrue(os.path.exists(os.path.join(self.game, "relay.json")))
+        # an edit of the file alone is an edit of the stage
+        self.fk("check", "1")
+        self.write("stages/1/relay.json",
+                   '[{"name": "small-electric-pole", "x": 1.5, "y": 0.5}]\n')
+        self.assertIn("stages\\1 has unsaved edits (relay.json)", self.fk("list"))
+        self.assertIn("stage 1 now holds source relay.json", self.fk("edit", "1"))
+
+    def test_a_literals_file_reaches_the_stages_replayed_after_it(self):
+        # 2.0.4 (the lead-v2 run, 11:39): stage 7's plant-40mw.json was not taken by edit, and
+        # stages 3 and 5, replayed after it, stopped at elaborate with "No such file"
+        self.fk("insert", "plant")
+        self.fk("insert", "gears")
+        self.add_gears(2)
+        self.fk("edit", "2")
+        self.fk("check", "2")                                 # stages\2 made before the plant
+        self.write("stages/1/plant.fk", 'reactor = Literal<file="plant.json"> @(0, 0)\n')
+        self.write("stages/1/plant.json",
+                   '[{"name": "small-electric-pole", "x": 0.5, "y": 0.5}]\n')
+        self.write("stages/1/nauvis.surface", "place plant = plant plot 40,0 4x4\n", mode="a")
+        out = self.fk("edit", "1")
+        self.assertIn("plant.json", out)
+        self.assertIn("the 1 stage after it replayed cleanly", out)
+        one, two = self.plan.stages()
+        self.assertIn("plant.json", self.plan.ls(one.commit))
+        self.assertIn("plant.json", self.plan.ls(two.commit))
+        self.assertEqual(self.plan.measure(two.commit)["errors"], [])
+        out = self.fk("check", "2")                           # the folder brought up to it
+        self.assertNotIn("No such file", out)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "stages", "2", "plant.json")))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "stages", "2", "plant.fk")))
 
     def test_a_folders_own_edits_survive_a_plan_change(self):
         self.fk("insert", "more smelting")
