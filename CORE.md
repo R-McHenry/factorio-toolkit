@@ -23,7 +23,7 @@ Endpoint rule: a machine is on at most one net per (item, direction).
 
 ```
 inst    := name '=' Kind ('<' param (',' param)* '>')? hint*     # template, boundary or sub-module
-net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs   # limited: 1.7
+net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs   # limited: 2.0
 refs    := ref (',' ref)*      ref := name ('.' name)* ('.*')?
 assert  := 'assert' ref '.rate' ('>='|'<='|'>'|'<'|'==') N ('/s'|'/min')
 cover   := ('power'|'robots') name ':' 'cover' ('all' | refs) (',' param)*
@@ -47,7 +47,7 @@ value   := N ('/s'|'/min'|'/h')? | word ('|' word)* | STRING | 'auto' (N '..' N)
   factory source code should have been parametric for number of bldgs"), the fewest machines
   that meet the surface's targets, the factory's asserts and what the row's consumers ask.
   `LabRow<n, rate=>`: each lab takes at most `rate` of each pack it is fed.
-- 1.7 [built] (Rory's decisions of 2026-10-21, assessment-20261021): `Lab<rate=>`, one lab whose
+- 2.0 [built] (Rory's decisions of 2026-10-21, assessment-20261021): `Lab<rate=>`, one lab whose
   inserters the router lays (labs around a multi-item chest take their packs by one inserter
   each); `MinerRow<drill=burner-mining-drill>` lays 2x2 burner drills fed fuel from a belt; `net
   NAME limited:` says the source limits each maker on it (it silences `CLOG` and `UNLIMITED`,
@@ -110,7 +110,8 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   no rate), `ASSERT` (a nominal rate assert failed); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
   `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
   [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; [built: cover robots]
-  `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests), 1.1 `SHARED_BELT`;
+  `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests); `SHARED_BELT` (the
+  lane-pair belt check of an earlier spec, never built) is superseded by V2 lanes;
   1.6 [built: size] `SIZE` (an `n=auto` row can't meet a target, an assert or what its
   consumers ask, and what stops it; after route, a sized net that asks more than its belts carry)
   and `FIT` (a sized row runs past its plot or into another instance's frame).
@@ -137,12 +138,12 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   stale; `cover robots` counts the surface's network and puts a storage chest beside each
   roboport it places; `floorplan --bridge-power` lays a bridge again around a plot laid over it;
   `fk lua` takes any chunk (stdin over ssh, its lines kept). See docs/RELEASE-1.2.md.
-  1.7 [built] (Rory, 2026-10-21): `CLOG` is not raised for a sushi net into chests that take any
+  2.0 [built] (Rory, 2026-10-21): `CLOG` is not raised for a sushi net into chests that take any
   item (one inserter into an all-accepting multi-sink); `SUSHI_LIMIT` (a `limit=` on a chest a
   mixed belt of makers feeds: a full chest stops the whole belt, the limit belongs at each
   maker), and such a chest's own `UNLIMITED` line; `fk fresh` also takes up a crafter whose output
   holds what its recipe no longer makes, and a chest its crafters fill with what none of them
-  makes now. See docs/RELEASE-1.7.md.
+  makes now. See docs/RELEASE-2.0.md.
 
 ## Rate model (nominal, V1) [built]
 
@@ -168,11 +169,11 @@ map's ore, water and cliffs; `ON_TERRAIN`, `OFF_ORE`], `run_models`, `elaborate`
 splits, merges, direct insertion, k->m through a hub, the underground guard; fluid nets by the fluid
 plug-in: pipes, pipe-to-ground; 1.2: a net is routed again when anything it is laid to moved],
 `cover power` [built] `|robots` [built; 1.2: chests the surface's network reaches need no
-roboport, a storage chest beside each one placed; 1.7 pin and patch: the committed poles and
+roboport, a storage chest beside each one placed; 2.0 pin and patch: the committed poles and
 roboports stay where they still fit, new ones only where something new needs them, `--fresh`
 lays them anew], `floorplan` [built, `--bridge-power`; 1.2: a plot takes the bridge's poles, and
 the bridge is laid again around it], `report_checks`, `report_bom`, `write_layout`, `diff`,
-`apply`, `stop_on <check ...>` (default: invariants only). 1.7: the template writes after `diff`
+`apply`, `stop_on <check ...>` (default: invariants only). 2.0: the template writes after `diff`
 and `report_bom`, just before `apply`, so `--to diff` writes nothing. `fk build <surface> [--from X --to Y]`; every line is also a command on its own.
 Merge, insert, chests-to-net and net-to-chests edit source and layout only [built, on paper].
 
@@ -182,7 +183,7 @@ Per tile: `OK`, `GHOST`, `MISSING`, `WRONG` (another entity), `DRIFT` (direction
 `CLAIMED`, `MARKED`, `NOBODY`. Per carrier: `WRONG_ITEM`. After robots finish, the diff inside the
 applied scope is empty: that is 1:1. [1.2: the toolkit's own entities that the design dropped are
 `NOBODY` under any policy; `WRONG_ITEM` covers a pipe's fluid, and names the net a carrier was
-pasted under when that was another one.] [1.7: scaffolding. An apply leaves a `NOBODY` pole or
+pasted under when that was another one.] [2.0: scaffolding. An apply leaves a `NOBODY` pole or
 roboport that stands on no tile of the design up while the design's own of that kind in its area
 are not all built, so a rebuild doesn't cut power or the robot network; the first apply after
 they stand takes it up.]

@@ -109,7 +109,7 @@ class CoverTest(unittest.TestCase):
                          "1 wire component")
 
     def test_pinned_poles_stay_and_new_ones_only_fill_gaps(self):
-        # 1.7 (Rory, 2026-10-21: pin and patch): a rebuild that adds a machine keeps the poles that
+        # 2.0 (Rory, 2026-10-21: pin and patch): a rebuild that adds a machine keeps the poles that
         # stand and adds one only where the new machine has none (it used to re-lay all of them)
         lay = L(ROW, "12x7")
         first, _rep = cover_power(lay, CAT)

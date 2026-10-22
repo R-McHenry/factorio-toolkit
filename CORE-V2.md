@@ -7,19 +7,26 @@ test server (`tools/laptop_server.py`, Factorio 2.0.77) before code relies on it
 
 ## The versions
 
-| version | a net is | the router | the model |
+Releases are the only version numbers (Rory, 2026-10-21). The major is the design generation:
+1.x was the V1 core, and the round that completes V2 (lanes, throughput, buses, side-loading
+smelter arrays, circuits in the source, the lead and worker player harness) ships as 2.0. A
+feature goes by its name until a release ships it, and each release note says which named
+features it delivers. The repo name `v5`, the deploy folders `fk-v5-<sha>` and the `.fkp` format
+version are not release numbers.
+
+| release | a net is | the router | the model |
 |---|---|---|---|
-| V1 | connected or not; one net per belt, both lanes | trees of belts, splitters and undergrounds; no side-loads | nominal, no capacity |
-| V2 | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; tier per connector; lays no side-loads; two nets that share a belt somewhere share it everywhere | the flow solver: flow, load, starved and blocked machines, routed rates |
-| 2.x | as V2 | knows side-loads: 2-to-1 merges, and lane separation (a splitter, then an underground side-load per net) | as V2 |
-| V2.1 | k lanes in one step (2, 3, ...): the bus | lays k-lane nets | as V2 |
+| 1.x (V1) | connected or not; one net per belt, both lanes | trees of belts, splitters and undergrounds; no side-loads | nominal, no capacity |
+| 2.0 (V2) | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; tier per connector; lays no side-loads; two nets that share a belt somewhere share it everywhere | the flow solver: flow, load, starved and blocked machines, routed rates |
+| side-load-aware routing (a name, no release yet) | as 2.0 | knows side-loads: 2-to-1 merges, and lane separation (a splitter, then an underground side-load per net) | as 2.0 |
+| 2.1: multi-lane nets | k lanes in one step (2, 3, ...): the bus | lays k-lane nets | as 2.0 |
 
-V2.1 goes from one lane straight to k lanes, not "a full belt, then several" (Rory). It is
-unconventional: an agent may plan a bus of 5 iron lanes and 3 copper lanes, where a person never
-plans odd lane counts. [open, V2.1: steer to whole belts, or let it be]
+Multi-lane nets go from one lane straight to k lanes, not "a full belt, then several" (Rory). It
+is unconventional: an agent may plan a bus of 5 iron lanes and 3 copper lanes, where a person
+never plans odd lane counts. [open, 2.1: steer to whole belts, or let it be]
 
-**V2.1 next, and how (Rory, 2026-10-20):** go straight to multi-lane nets, but do not route them
-with the general router. Two ways to support them:
+**Multi-lane nets (2.1) next, and how (Rory, 2026-10-20):** go straight to multi-lane nets, but
+do not route them with the general router. Two ways to support them:
 
 1. **A bus router**: lays a net as a parallel bus of k belts, with undergrounds and splitters
    where needed, as one unit.
@@ -54,7 +61,7 @@ input first and fills a preferred output first; the required flows, without capa
 evenly, so a staircase's far belt doesn't read as binding while the others stand empty), and
 `CAPACITY` names the victims beyond the bus.
 
-[open, for V2.1: which bus templates come next (the balancer); whether the bus router is needed
+[open, for 2.1: which bus templates come next (the balancer); whether the bus router is needed
 now the bus template exists; a balancer per k-to-m hub, and which sizes; several items on one bus
 (today a second item is a second bus beside it); the lab: the staircases' priorities as measured
 in the game (the solver has the game's documented behaviour, not a measurement yet)]
@@ -63,7 +70,7 @@ in the game (the solver has the game's documented behaviour, not a measurement y
 
 - **lane** (Rory): one side of a belt, L or R looking downstream (the game's transport lines 1 and
   2). It carries half the tier's belt rate: yellow 7.5/s, red 15, blue 22.5, turbo 30.
-- **width**: the lanes a net takes. V2: 1, and 2 for a two-sided MinerRow. V2.1: any.
+- **width**: the lanes a net takes. 2.0: 1, and 2 for a two-sided MinerRow. 2.1: any.
 - **tier**: transport, fast, express, turbo (belts, undergrounds and splitters alike).
 - **connector** (Rory): one lane of one carrier (a belt, an underground, a splitter half), or one
   inserter, side-load joint or pump. The report groups a run of connectors that carry the same flow.
@@ -109,12 +116,13 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
 - Checks [proposed]: `LANE` when a net's items land on a lane the layout gives other nets, or nets
   share a lane or an inserter without going to the same sink (`LEAK` at lane level).
   `UG_SIDELOAD` goes: a side-loaded underground is a valid connection for the open-side lane and a
-  blocked one for the other (Rory). `SHARED_BELT` (1.1 spec, never built) goes.
+  blocked one for the other (Rory). `SHARED_BELT`, the lane-pair belt check of an earlier spec
+  that was never built, goes: V2 lanes supersede that spec.
 - `WRONG_LANE` goes (Rory): an item gets no leniency for being on the right belt in the wrong net.
   An item on a lane whose nets don't carry it is `WRONG_ITEM`, per lane. The snapshot already
   reads each lane, and only adds them up today.
 
-## The router in V2.0 (Rory)
+## The router in 2.0 (Rory)
 
 - No side-loads. It lays none today: the routed redgreen layout has 665 belt, 77 turn and 13
   underground edges, and not one side-load.
@@ -126,8 +134,9 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
   the `tier` step after `route`, below]
 - No direct insertion where a net's flow is above a threshold: a lane, or what the lab finds.
   Inserters bind early.
-- 2.x: side-loads as merges (the smelter stack's side-loader) and lane separation (a splitter,
-  then each branch side-loads an underground that passes only its own net).
+- Side-load-aware routing (a later feature, no release yet): side-loads as merges (the smelter
+  stack's side-loader) and lane separation (a splitter, then each branch side-loads an underground
+  that passes only its own net).
 
 ## Flow [built, first slice: `fkcore/lanes.py`, `fkcore/throughput.py`, `tests/test_throughput.py`]
 
@@ -278,7 +287,7 @@ furnaces that takes ore on one lane of an ore|coal belt.
 
 The solver delivers 7.5/s past the row's head: the first 24 furnaces run and the last 8 starve
 (belt order), and the drills are blocked to 75%. A red input lane, a second smelter row, or
-V2.1's two lanes fixes it.
+2.1's two-lane nets fix it.
 
 ## Inserters
 
@@ -369,7 +378,7 @@ merging that all with one net." A subagent tried it on paper (`games/v2-bench/jo
 - **The trunk is one lane.** The rows drop their plates on one lane, and merging keeps it there:
   at 3.75/s everything arrives; at 15/s the trunk delivers 7.5, and `CAPACITY` names the trunk's
   yellow lanes and the hub's yellow splitters. `tier minimize` turns 51 belts and splitters red
-  and all 15/s arrive. Beyond turbo's 30/s a lane it needs V2.1.
+  and all 15/s arrive. Beyond turbo's 30/s a lane it needs multi-lane nets (2.1).
 - **The merge tree is not fair.** Two even merge splitters give the last driver half the trunk and
   the other two a quarter each, as in the game: with a thin trunk the last factory runs at 0.75
   and the others at 0.375.
@@ -406,7 +415,7 @@ and up; a splitter with one output blocked; a machine's fluid port.
 1. The joint solve of several items on one lane (now: shares fixed where they meet).
 2. A ring of belts (the solver caps its rounds; not tested).
 3. The `.fkp` lane notation and the `LANE` check (my proposals above).
-4. V2.1: steer to whole belts, or let an agent plan odd lane counts?
+4. Multi-lane nets (2.1): steer to whole belts, or let an agent plan odd lane counts?
 5. The path matrix (the "giga brain option"): when it is worth building.
 6. The next slices: the catalog's inserter speeds (now a table in `fkcore/lanes.py`); the
    router's tier per connector (the miner line case is a solver test already: red in the middle

@@ -31,7 +31,7 @@ tiles, plot edges and anything else to keep clear come in as ``keep_out``. The s
 New poles are numbered north to south, then west to east. Poles already under ``owner`` and named
 ``p<k>`` are the previous run's: they are ignored (neither obstacle nor wire node) and
 :func:`apply_cover` replaces them; every other pole in the layout is an existing wire node that is
-never moved. 1.7 (Rory, 2026-10-21: rebuilds pin what stands and patch, they don't regenerate):
+never moved. 2.0 (Rory, 2026-10-21: rebuilds pin what stands and patch, they don't regenerate):
 ``pinned`` poles, the committed .fkp's own ``p<k>``, stay where they still fit (no new entity or
 keep-out tile under them) and power what they reach, so a rebuild adds poles only where coverage
 is missing and never re-lays the grid that stands (both overnight players lost power to a re-laid
@@ -86,7 +86,7 @@ class CoverReport:
     pruned: int                    # greedy picks dropped again as redundant
     existing: int                  # poles already in the layout (wire nodes)
     checks: list = field(default_factory=list)      # [Check]: NO_POWER, POWER_SPLIT
-    pinned: int = 0                # of ``poles``, the committed ones kept where they stand (1.7)
+    pinned: int = 0                # of ``poles``, the committed ones kept where they stand (2.0)
 
     @property
     def ok(self):

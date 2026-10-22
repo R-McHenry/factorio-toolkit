@@ -90,7 +90,7 @@ class FlowTest(unittest.TestCase):
                       self.read("out/report_checks.txt"))
 
     def test_a_moved_row_keeps_the_poles_that_stand(self):
-        # 1.7 (Rory, 2026-10-21: pin and patch): a rebuild keeps the committed poles where they
+        # 2.0 (Rory, 2026-10-21: pin and patch): a rebuild keeps the committed poles where they
         # still fit, so the grid that stands is not re-laid; cover power --fresh lays it anew
         def poles():
             lay = fkp.load(os.path.join(self.dir, "main.fkp"))

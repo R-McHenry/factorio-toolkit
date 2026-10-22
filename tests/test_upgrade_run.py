@@ -21,7 +21,7 @@ def steps(text):
 
 
 class WriteLastTest(unittest.TestCase):
-    """1.7: ``write_layout`` just before ``apply``, so ``fk build --to diff`` writes nothing (the
+    """2.0: ``write_layout`` just before ``apply``, so ``fk build --to diff`` writes nothing (the
     players' dry runs had made their design the one the next build kept to)."""
 
     def test_an_old_script_writes_just_before_the_paste(self):

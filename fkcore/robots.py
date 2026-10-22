@@ -17,7 +17,7 @@ A factory without logistic chests gets none (building it is the network's job). 
 ``<owner>/s<k>``, so what robots take up nearby is stored nearby (1.2: the run's rebuilds far
 from spawn sent every taken-up item 110 tiles to the kit's chests). Run it before ``cover
 power``, so the poles power the roboports too. :func:`apply_robots` returns the layout with them
-and ``cover robots robots``. 1.7 (Rory, 2026-10-21: pin and patch): the committed roboports
+and ``cover robots robots``. 2.0 (Rory, 2026-10-21: pin and patch): the committed roboports
 (``pinned``) stay where they still fit and still reach a chest, so a rebuild adds roboports only
 where none reaches and never moves the network that stands.
 
@@ -89,7 +89,7 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", ser
     """-> (new Entities: roboports keyed ``<owner>/r<k>`` and, with ``storage`` (a chest
     prototype), a storage chest beside each keyed ``<owner>/s<k>``; RobotReport). ``served``:
     [(x, y, radius)] logistic squares of the surface's network in this factory's frame.
-    ``pinned``: the committed .fkp's own ``r<k>`` / ``s<k>`` (1.7, pin and patch): a roboport
+    ``pinned``: the committed .fkp's own ``r<k>`` / ``s<k>`` (2.0, pin and patch): a roboport
     that still fits and still reaches a chest of the factory stays where it stands, and so does
     its storage chest where that still fits; new roboports go only where no kept one reaches."""
     r = _radius(cat, roboport, "logistic_radius")

@@ -22,10 +22,10 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
 - 1.6: the build script gets the template's `size` line after `elaborate` (the build counts the
   `n=auto` rows); a script without one says so when a factory has such a row. The host's
   toolkit must be 1.6 too: it replays the size step for `--from diff`.
-- 1.7: the build script's `write_layout` moves to just before `apply`, as in the template, so
+- 2.0: the build script's `write_layout` moves to just before `apply`, as in the template, so
   `fk build --to diff` writes nothing (a dry run had made its design the one the next build kept
   to). A run without `helpers\\` gets the template's (the player's reusable features); one that
-  has it keeps its own. The host's toolkit must be 1.7 too: it runs `write_layout` now.
+  has it keeps its own. The host's toolkit must be 2.0 too: it runs `write_layout` now.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -90,7 +90,7 @@ def _size(text):
 
 
 def _write_last(text):
-    """The build script with ``write_layout`` just before ``apply`` (1.7), so ``--to diff`` and
+    """The build script with ``write_layout`` just before ``apply`` (2.0), so ``--to diff`` and
     ``--to report_bom`` write nothing (None: nothing to change)."""
     lines = text.splitlines(True)
     steps = [line.split("#")[0].split()[:1] for line in lines]
@@ -214,7 +214,7 @@ def upgrade(run, sha, dry=False):
 
 
 TELL = """Tell the player (its next message; a Claude player's INBOX.md):
-  Toolkit 1.7 is in: a rebuild keeps what stands. The poles and roboports a build laid stay
+  Toolkit 2.0 is in: a rebuild keeps what stands. The poles and roboports a build laid stay
   where the new design leaves them room, new ones go only where something new needs them, and
   old ones stay up until the new ones stand, so power and robots keep running (`cover power
   --fresh` lays them all anew). `fk build --to diff` is a dry run now: the design is written just

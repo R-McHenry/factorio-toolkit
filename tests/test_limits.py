@@ -100,7 +100,7 @@ class LimitedProductionChecksTest(unittest.TestCase):
         self.assertEqual(advice(limited), [])
 
     def test_a_mixed_belt_that_machines_feed_into_one_chest(self):
-        # 1.7 (Rory, 2026-10-21): one inserter into an all-accepting multi-sink raises no CLOG; a
+        # 2.0 (Rory, 2026-10-21): one inserter into an all-accepting multi-sink raises no CLOG; a
         # chest takes whatever reaches it, so no item waits behind another (1.1 raised it here).
         # A chest of many items goes unlimited, the limits belong at the makers: a slot limit
         # only stops the whole belt sooner (SUSHI_LIMIT), and `limited` says the makers are
@@ -227,7 +227,7 @@ class FakeLink:
     def lua(self, text):
         if "held_stack" in text:                    # the stuck-hands read
             return self.hands
-        if "get_output_inventory" in text:          # the stale-crafters read (1.7)
+        if "get_output_inventory" in text:          # the stale-crafters read (2.0)
             return self.left
         self.sent.append(text)
         return self.ordered
@@ -266,7 +266,7 @@ class FreshTest(unittest.TestCase):
         self.assertIn("inserter 5.5,1.5 holds iron-gear-wheel", "\n".join(lines))
 
     def test_a_crafters_old_product_goes_too(self):
-        # 1.7 (Rory, 2026-10-21): the 2005 player's shop, switched from stone furnaces to labs:
+        # 2.0 (Rory, 2026-10-21): the 2005 player's shop, switched from stone furnaces to labs:
         # the crafter's output and its 1-slot provider still held stone furnaces
         r = FakeLink(ordered="4", left='[["assembling-machine-2", 7.5, 4.5, "crafter", '
                                       '["stone-furnace"]], ["passive-provider-chest", 9.5, '

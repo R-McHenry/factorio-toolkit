@@ -1,8 +1,18 @@
-# Toolkit 1.7 (2026-10-21): rebuilds keep what stands, and the round-2 pieces
+# Toolkit 2.0: V2 complete (in progress)
 
-Rory's decisions after the first V1 runs (`assessment-20261021\ASSESSMENT.md`, "Decided with
-Rory"), the pieces that don't need a session of their own. No new rules: checks warn, never gate,
-and the brief stays as short as it was. 554 tests OK.
+Releases are the only version numbers (Rory, 2026-10-21): 1.x was the V1 core, and the round that
+completes V2 ships as 2.0 (`CORE-V2.md`, "The versions"). This note grows as the round's pieces
+land on main, and `v2.0` is tagged when the round is done. The pieces are Rory's decisions after
+the first V1 runs (`assessment-20261021\ASSESSMENT.md`, "Decided with Rory"). No new rules:
+checks warn, never gate, and the brief stays as short as it was.
+
+| named feature | in 2.0 so far |
+|---|---|
+| pin and patch: rebuilds keep what stands | in |
+| the smaller pieces: STRATEGY.md, fair play in Rory's words, burner drills, `fk fresh` for crafters, labs from a chest, mixed chests, helpers | in |
+| the lead and worker player harness, Claude workers first | in progress |
+| lanes and throughput players lean on: lane-pair belts, thick and main buses, side-loading smelter arrays | its session waits to be started |
+| circuits in the source: wire nets, conditions, inserter limits | its session waits to be started |
 
 ## Pin and patch: a rebuild that doesn't cut power
 
@@ -73,7 +83,7 @@ What changed:
 - **Helpers** (`kickoff/template/helpers` -> `<run>\helpers`): a README (what goes there, fair
   play), `python -m helpers [FEATURE]`, `game.lua()` through the run's own `fk lua`, and four seed
   probes the first players wrote again and again: grids, machines, stock, labs.
-- `kickoff/upgrade_run.py` 1.7: the build script's `write_layout` moves before `apply`, a run
+- `kickoff/upgrade_run.py` 2.0: the build script's `write_layout` moves before `apply`, a run
   without `helpers\` gets the template's, and TELL says what changed.
 - The four merged worktrees under `.worktrees\` are removed (their branches `bus`, `size`,
   `fk-plan`, `fix-141` stay, all contained in main).
@@ -85,7 +95,7 @@ gets all of it from the kickoff (the kit, the template's script and helpers, the
 The host toolkit must be this commit too, as the kickoff deploys it (`fk-v5-SHA`): the host runs
 `write_layout` now. An old run would need `upgrade_run.py` (only with Rory's approval).
 
-## Not in 1.7
+## Not in 2.0
 
 - The three large pieces of the round, proposed as sessions of their own and not started yet:
   V2 in full (lane-pair belts, thick and main buses with the backbone of fixed poles and

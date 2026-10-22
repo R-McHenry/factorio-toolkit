@@ -46,7 +46,7 @@ class BurnerRowTest(unittest.TestCase):
 
 
 class LabsFromAChestTest(unittest.TestCase):
-    """1.7 (Rory, 2026-10-21): a lab fed from a multi-item chest by one inserter is valid (the
+    """2.0 (Rory, 2026-10-21): a lab fed from a multi-item chest by one inserter is valid (the
     inserter only takes what the lab accepts), and one inserter into an all-accepting multi-sink
     raises no CLOG. The 2005 player laid its purple lab corner by hand for want of it."""
 

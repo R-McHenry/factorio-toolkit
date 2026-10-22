@@ -12,7 +12,7 @@ RUN_DIR gets:
   .toolkit/fkcore/     the toolkit at SHA (git archive): the design steps run on the laptop
   game/                the game codebase (kickoff/template/game): the surface, the build script,
                        the plant
-  helpers/             the player's reusable features (kickoff/template/helpers, 1.7: Rory,
+  helpers/             the player's reusable features (kickoff/template/helpers, 2.0: Rory,
                        2026-10-21, helpers grow as a library, not a pile of one-off scripts)
   run.json             where the game is: host, host_game, host_toolkit, the toolkit's sha, the
                        brief and its md5, the start time

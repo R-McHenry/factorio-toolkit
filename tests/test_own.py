@@ -186,7 +186,7 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual(r.ordered, [("transport-belt", 16.5, 1.5)])
 
     def test_old_poles_stay_up_until_the_new_ones_stand(self):
-        # 1.7 (Rory, 2026-10-21): scaffolding. The design's pole is still a ghost, so the old one
+        # 2.0 (Rory, 2026-10-21): scaffolding. The design's pole is still a ghost, so the old one
         # stays up and power keeps running; once the new one stands, the next apply takes it up
         live = copy.deepcopy(live_as_designed(self.s))
         find(live, "small-electric-pole", 13.5, 1.5)["ghost"] = True
