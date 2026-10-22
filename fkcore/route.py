@@ -83,13 +83,15 @@ loses a dropped end's branch, and gets one branch per new end from the router's 
 consumer off where every standing driver reaches it (a dead-end belt extended, a splitter in
 place of a straight belt, an inserter off a belt), a new driver into where it reaches every
 consumer (side-loaded onto a belt, into the back of a belt nothing feeds, an inserter onto one).
-A patch that can't be laid or that the judge refuses is routed again as a whole, with the reason.
+A lane pair is patched by its two nets, each new driver on its own lane (2.0.2). A patch that
+can't be laid or that the judge refuses is routed again as a whole, with the reason.
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
 import heapq
 import math
+import re
 from dataclasses import dataclass, field
 
 from . import connect as connectmod
@@ -839,20 +841,21 @@ def _common(sets):
     return set.intersection(*sets) if sets else set()
 
 
-def _fresh_keys(laid, net, used):
-    """``laid`` keyed after every key in ``used``: a committed route's keys, taken-up ones too,
-    never go to another carrier (the diff would read a moved belt)."""
+def _fresh_keys(laid, owner, used, prefix=""):
+    """``laid`` keyed ``~<owner>/<prefix><letter><k>`` after every key in ``used``: a committed
+    route's keys, taken-up ones too, never go to another carrier (the diff would read a moved
+    belt). ``prefix``: a lane pair's part (``l``: its left net's own, ``r``: its right's)."""
     top = {}
     for k in used:
-        local = k.rsplit("/", 1)[1]
-        if local[1:].isdigit():
-            top[local[0]] = max(top.get(local[0], -1), int(local[1:]))
+        m = re.fullmatch(r"([lr]?)([a-z])(\d+)", k.rsplit("/", 1)[1])
+        if m:
+            top[m[1], m[2]] = max(top.get((m[1], m[2]), -1), int(m[3]))
     out = []
     for e in laid:
         letter = e.key.rsplit("/", 1)[1][0]
-        top[letter] = top.get(letter, -1) + 1
-        out.append(fkpmod.Entity(f"~{net}/{letter}{top[letter]}", e.name, e.x, e.y, e.dir,
-                                 dict(e.attrs)))
+        top[prefix, letter] = top.get((prefix, letter), -1) + 1
+        out.append(fkpmod.Entity(f"~{owner}/{prefix}{letter}{top[prefix, letter]}", e.name,
+                                 e.x, e.y, e.dir, dict(e.attrs)))
     return out
 
 
@@ -880,7 +883,7 @@ def _branch_words(laid):
     """'12 belts, 2 underground ends, 1 inserter' for a new branch's carriers."""
     belts = sum(e.name == "transport-belt" for e in laid)
     ugs = sum(e.name == "underground-belt" for e in laid)
-    ins = sum(e.key.rsplit("/", 1)[1].startswith("i") for e in laid)
+    ins = sum(e.name not in ("transport-belt", "underground-belt", "splitter") for e in laid)
     words = [f"{belts} belt{'s' if belts != 1 else ''}"]
     if ugs:
         words.append(f"{ugs} underground ends")
@@ -890,10 +893,13 @@ def _branch_words(laid):
 
 
 class _Patch:
-    """One net's patch in the making: its standing carriers, what it adds, and the ground."""
+    """One net's patch in the making: its standing carriers, what it adds, and the ground. A lane
+    pair (``A|B``, 2.0) is patched by its two member nets: each has its own drivers, consumers and
+    reach, and a new carrier's ``net=`` says which lanes it carries."""
 
     def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid):
         self.cat, self.flat, self.table, self.job, self.net = cat, flat, table, job, job.net
+        self.members = fkpmod.net_names(job.net) or [job.net]
         self.ents, self.kept, self.added, self.replaced = list(ents), list(kept), [], []
         self.frames, self.js, self.box, self.limit = frames, js, box, limit
         self.terrain, self.avoid = terrain, set(avoid)
@@ -901,12 +907,14 @@ class _Patch:
         self.refresh()
 
     def refresh(self):
-        """The graph, the flows and the ground with what stands now."""
+        """The graph, each member's ends and flows, and the ground with what stands now."""
         cat, net = self.cat, self.net
         allents = self.ents + self.kept + self.added
         self.g = connectmod.graph(allents, cat)
-        self.drivers, self.consumers = _ends_of(self.flat, self.table, self.job, self.g)
-        self.fwd, self.bwd = _flows(self.g, net, self.drivers, self.consumers)
+        self.ends, self.fwd, self.bwd = {}, {}, {}
+        for m in self.members:
+            self.ends[m] = _ends_of(self.flat, self.table, self.job, self.g, net=m)
+            self.fwd[m], self.bwd[m] = _flows(self.g, m, *self.ends[m])
         ends = set(self.job.ends())
         self.base = (_ground(cat, allents, self.frames, self.js, net, self.terrain)
                      | (self.avoid - ends))
@@ -925,6 +933,14 @@ class _Patch:
     def route_keys(self):
         return {e.key for e in self.kept + self.added}
 
+    def standing(self, m):
+        """(member ``m``'s drivers that reach one of its consumers, its consumers one reaches)."""
+        drivers, consumers = self.ends[m]
+        cons = set(consumers)
+        sd = [d for d in drivers if self.fwd[m][d] & cons]
+        sc = [c for c in consumers if any(c in self.fwd[m][d] for d in drivers)]
+        return sd, sc
+
     def grid(self, target, reverse=False):
         """The ground of one new branch, and the tiles it may not start on: the net's other
         free end tiles too, so one new end's branch never takes another's tile (the router lays
@@ -934,15 +950,17 @@ class _Patch:
                      self.clear if reverse else None)
         return g, others
 
-    def standing(self):
-        """(drivers that reach a consumer, consumers a driver reaches)."""
-        cons = set(self.consumers)
-        sd = [d for d in self.drivers if self.fwd[d] & cons]
-        sc = [c for c in self.consumers if any(c in self.fwd[d] for d in self.drivers)]
-        return sd, sc
-
-    def lay(self, laid, replaced=()):
-        laid = _fresh_keys(laid, self.net, self.used)
+    def lay(self, laid, nets, replaced=()):
+        """Add ``laid`` (plan carriers) carrying ``nets``: belts ``A|B`` for both lanes of a pair,
+        inserters ``A+B``; keyed under the job, a pair member's own with its part's prefix."""
+        net = "|".join(nets)
+        for e in laid:
+            lanes = self.cat.has_entity(e.name) and self.cat.kind(e.name) in fkpmod.LANE_TYPES
+            e.attrs["net"] = net if lanes else fkpmod.hand_net(net)
+        prefix = ""
+        if len(self.members) > 1 and len(nets) == 1:
+            prefix = "l" if nets[0] == self.members[0] else "r"
+        laid = _fresh_keys(laid, self.net, self.used, prefix)
         self.used |= {e.key for e in laid}
         self.kept = [e for e in self.kept if e.key not in replaced]
         self.added = [e for e in self.added if e.key not in replaced] + laid
@@ -953,7 +971,8 @@ class _Patch:
     # -- a consumer: a branch out of the standing route ------------------------------------------
     def out_starts(self, sources):
         """Start states of a new branch from route carriers ``sources`` (every standing driver
-        reaches them): a dead-end belt extended, or a splitter cut into a straight belt."""
+        reaches them): a dead-end belt extended, or a splitter cut into a straight belt. Both
+        keep every item on its lane."""
         g, out = self.g, []
         for key in sorted(sources, key=fkpmod.natural_key):
             n = g.nodes[key]
@@ -970,7 +989,7 @@ class _Patch:
             feeds = [(k, via) for k, via in g.pred.get(key, ()) if g.nodes[k].kind in _BELT_KINDS]
             ahead = [(k, via) for k, via in g.succ.get(key, ()) if g.nodes[k].kind in _BELT_KINDS]
             if len(feeds) != 1 or feeds[0][1] != "belt" or len(ahead) != 1 \
-                    or ahead[0][1] != "belt" or g.nodes[ahead[0][0]].net != self.net:
+                    or ahead[0][1] != "belt" or not set(g.nodes[ahead[0][0]].nets) & set(n.nets):
                 continue
             for side in (1, 3):
                 sh = (h + side) % 4
@@ -983,13 +1002,17 @@ class _Patch:
                             ("split", key, side)))
         return out
 
-    def add_consumer(self, role, belt, machine):
-        """Join one new consumer end to the standing route. -> report words, or None."""
-        sd, _sc = self.standing()
-        mine = self.route_keys()
-        common = _common(self.fwd[d] for d in sd) & mine
+    def add_consumer(self, role, belt, machine, nets):
+        """Join one new consumer end of ``nets`` (its members) to the standing route, off the
+        carriers that every standing driver of each reaches and that carry none but them (a
+        branch of both lanes for both nets of a pair). -> report words, or None."""
+        g, mine = self.g, self.route_keys()
+        common = mine
+        for m in nets:
+            common = common & _common(self.fwd[m][d] for d in self.standing(m)[0])
+        common = {k for k in common if set(g.nodes[k].nets) <= set(nets)}
         if machine is not None:
-            got = self._tap_from(common, machine) or self._direct_from(sd, machine)
+            got = self._tap_from(common, machine, nets) or self._direct_from(machine, nets)
             if got:
                 return f"{role}: {got}"
         grid, others = self.grid(belt[0] if belt is not None else None)
@@ -1009,7 +1032,7 @@ class _Patch:
         replaced, words = (), ""
         if how[0] == "split":
             _k, key, side = how
-            n = self.g.nodes[key]
+            n = g.nodes[key]
             (tx, ty), = n.tiles
             h = _H[n.dir]
             sh = (h + side) % 4
@@ -1023,10 +1046,10 @@ class _Patch:
         settled = _settle_leaves(self.cat, laid, self.ents + self.kept + self.added, also)
         if settled is None:
             return None
-        laid = self.lay(settled, replaced)
+        laid = self.lay(settled, nets, replaced)
         return f"{role}: {words}, {_branch_words([e for e in laid if e.name != 'splitter'])}"
 
-    def _tap_from(self, keys, machine):
+    def _tap_from(self, keys, machine, nets):
         """An inserter from a standing belt the drivers reach straight into a new machine."""
         mkey, rect = machine
         grid, _others = self.grid(None)
@@ -1040,46 +1063,60 @@ class _Patch:
                 for tile in n.tiles:
                     for q, name, direction in sink.taps_at(tile, free):
                         e = fkpmod.Entity(f"~{self.net}/i0", name, q[0] + 0.5, q[1] + 0.5,
-                                          direction, {"net": self.net})
-                        laid = self.lay([e])
+                                          direction, {})
+                        laid = self.lay([e], nets)
                         return f"an inserter from {key} ({laid[0].key})"
         return None
 
-    def _direct_from(self, drivers, machine):
-        """A machine-to-machine net (no belt stands): an inserter from every standing driver
-        machine straight into the new one, where each fits."""
+    def _direct_from(self, machine, nets):
+        """A machine-to-machine net: an inserter from every standing driver machine of each of
+        ``nets`` straight into the new one, where each fits."""
         rects = dict(self.job.sources)
-        if not drivers or any(d not in rects for d in drivers):
+        drivers = [(d, m) for m in nets for d in self.standing(m)[0]]
+        if not drivers or any(d not in rects for d, _m in drivers):
             return None
         grid, _others = self.grid(None)
         plan, taken = [], set()
-        for d in drivers:
+        for d, m in drivers:
             got = _direct_pair(rects[d], machine[1], grid, taken)
             if got is None:
                 return None
-            plan.append(got)
+            plan.append((got, m))
             taken.add((math.floor(got["x"]), math.floor(got["y"])))
-        laid = self.lay(_carriers(self.job, plan, self.net))
-        return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} from {', '.join(drivers)}"
+        for got, m in plan:
+            self.lay(_carriers(self.job, [got], self.net), [m])
+        names = [d for d, _m in drivers]
+        return f"{len(plan)} inserter{'s' if len(plan) != 1 else ''} from {', '.join(names)}"
 
     # -- a driver: a branch into the standing route ----------------------------------------------
-    def in_roots(self, targets):
-        """Root states of a new driver's branch, laid reversed, into route belts ``targets``
-        (they reach every consumer): beside a belt, side-loading onto it (never a curve, which a
-        second input would straighten), or behind a belt no belt feeds yet."""
+    def in_roots(self, targets, m):
+        """Root states of a new branch of member ``m``, laid reversed, into route belts
+        ``targets`` (they reach every consumer of ``m``): beside a belt, side-loading onto it
+        (never a curve, which a second input would straighten), or behind a belt no belt feeds
+        yet. Onto a belt of a lane pair, only from the side of ``m``'s lane: a side-load lands on
+        the near lane (CORE-V2 "Lane physics")."""
         g, out = self.g, []
         for key in sorted(targets, key=fkpmod.natural_key):
             n = g.nodes[key]
             e = _H.get(n.dir)
-            if n.kind != "transport-belt" or e is None:
+            if n.kind != "transport-belt" or e is None or m not in n.nets:
                 continue
             (tx, ty), = n.tiles
             vias = [via for k, via in g.pred.get(key, ()) if g.nodes[k].kind in _BELT_KINDS]
             if "curve" in vias:
                 continue
-            ways = [(s, "side-loaded onto") for s in ((e + 1) % 4, (e + 3) % 4)]
-            if not vias:
-                ways.append((e, "into the back of"))
+            if n.nets == (m,):
+                ways = [(s, "side-loaded onto") for s in ((e + 1) % 4, (e + 3) % 4)]
+                if not vias:
+                    ways.append((e, "into the back of"))
+            else:
+                lanes = fkpmod.net_lanes(n.net) or {}
+                if m in lanes.get("L", ()):
+                    ways = [((e + 1) % 4, "side-loaded onto the left lane of")]
+                elif m in lanes.get("R", ()):
+                    ways = [((e + 3) % 4, "side-loaded onto the right lane of")]
+                else:
+                    ways = []
             for s, words in ways:
                 u = (tx - _DX[s], ty - _DY[s])
                 if u in g.at or u in self.blocked:
@@ -1087,43 +1124,45 @@ class _Patch:
                 out.append(((u[0], u[1], (s + 2) % 4, 0), 0.0, (words, key)))
         return out
 
-    def add_driver(self, role, belt, machine):
-        """Join one new driver end into the standing route. -> report words, or None."""
-        mine = self.route_keys()
-        common = _common(self.bwd[c] for c in self.consumers) & mine
+    def add_driver(self, role, belt, machine, m):
+        """Join one new driver end of member ``m`` into the standing route, where it reaches
+        every consumer of ``m``. -> report words, or None."""
+        common = _common(self.bwd[m][c] for c in self.ends[m][1]) & self.route_keys()
         if machine is not None:
-            got = self._drop_onto(common, machine) or self._direct_into(machine)
+            got = self._drop_onto(common, machine, m) or self._direct_into(machine, m)
             if got:
                 return f"{role}: {got}"
         grid, others = self.grid(belt[0] if belt is not None else None, reverse=True)
-        roots = [s for s in self.in_roots(common) if (s[0][0], s[0][1]) not in others]
+        roots = [s for s in self.in_roots(common, m) if (s[0][0], s[0][1]) not in others]
         if not roots:
             return None
         sinks = ([FixedSink(role, belt[0], (belt[1] + 2) % 4)] if belt is not None else
                  [TapSink(machine[0], machine[1], 1, hands) for hands in _HANDS])
         for sink in sinks:
-            got = _new_branch(grid, roots, sink, self.net, True, self.limit)
+            got = _new_branch(grid, roots, sink, m, True, self.limit)
             if got is not None:
                 break
         else:
             return None
         plan, how, _path = got
-        settled = _settle_leaves(self.cat, _carriers(self.job, plan, self.net),
+        settled = _settle_leaves(self.cat, _carriers(self.job, plan, m),
                                  self.ents + self.kept + self.added)
         if settled is None:
             return None
-        laid = self.lay(settled)
+        laid = self.lay(settled, [m])
         return f"{role}: {_branch_words(laid)}, {how[0]} {how[1]}"
 
-    def _drop_onto(self, keys, machine):
-        """An inserter from a new driver machine straight onto a standing belt that reaches every
-        consumer."""
+    def _drop_onto(self, keys, machine, m):
+        """An inserter from a new driver machine of ``m`` straight onto a standing belt of ``m``
+        alone that reaches every consumer (an inserter drops on a belt's far lane, so never onto
+        a pair's belt)."""
         mkey, rect = machine
         grid, _others = self.grid(None)
         for hands in _HANDS:
             for key in sorted(keys, key=fkpmod.natural_key):
                 n = self.g.nodes[key]
-                if n.kind not in _BELTY and not (n.kind == "underground-belt" and n.ug == "in"):
+                if n.nets != (m,) or (n.kind not in _BELTY and not (
+                        n.kind == "underground-belt" and n.ug == "in")):
                     continue
                 for (tx, ty) in n.tiles:
                     for h in range(4):
@@ -1135,27 +1174,28 @@ class _Patch:
                                     rect[0] <= pick[0] < rect[2] and rect[1] <= pick[1] < rect[3]):
                                 continue
                             e = fkpmod.Entity(f"~{self.net}/i0", name, q[0] + 0.5, q[1] + 0.5,
-                                              h * 4, {"net": self.net})
-                            laid = self.lay([e])
+                                              h * 4, {})
+                            laid = self.lay([e], [m])
                             return f"an inserter onto {key} ({laid[0].key})"
         return None
 
-    def _direct_into(self, machine):
-        """A machine-to-machine net: an inserter from the new driver into every consumer
-        machine, where each fits."""
+    def _direct_into(self, machine, m):
+        """A machine-to-machine net: an inserter from the new driver of ``m`` into every
+        consumer machine of ``m``, where each fits."""
         rects = dict(self.job.taps)
-        if not self.consumers or any(c not in rects for c in self.consumers):
+        consumers = self.ends[m][1]
+        if not consumers or any(c not in rects for c in consumers):
             return None
         grid, _others = self.grid(None)
         plan, taken = [], set()
-        for c in self.consumers:
+        for c in consumers:
             got = _direct_pair(machine[1], rects[c], grid, taken)
             if got is None:
                 return None
             plan.append(got)
             taken.add((math.floor(got["x"]), math.floor(got["y"])))
-        laid = self.lay(_carriers(self.job, plan, self.net))
-        return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} into {', '.join(self.consumers)}"
+        laid = self.lay(_carriers(self.job, plan, m), [m])
+        return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} into {', '.join(consumers)}"
 
 
 def _role_ends(flat, job, machines, side):
@@ -1189,49 +1229,70 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     inserter straight off a belt (or a driver machine) into it; a new driver joins where it
     reaches every consumer: side-loaded onto a belt, into the back of a belt nothing feeds, or an
     inserter onto it. Each branch is the router's own search (``steiner``), on the router's
-    ground, and ``fkcore.connect`` judges the result: every pair joined, no LEAK."""
-    net = job.net
+    ground, and ``fkcore.connect`` judges the result: every pair joined, no LEAK.
+
+    A lane pair (``A|B``, 2.0.2; the lead's merge of V2 lanes, 2026-10-22, routed a changed pair
+    again whole) is patched by its two nets: a new consumer of both branches off the belt of both
+    lanes (a splitter or the belt's end, which keep each item on its lane), a new driver of A
+    joins A's own belt or the left lane of the pair's, and each net's report is judged."""
+    members = fkpmod.net_names(job.net) or [job.net]
+    sub = {m: table.get(m, ((), ())) for m in members}
     mine = {e.key for e in old}
     g = connectmod.graph(list(ents) + list(old), cat)
-    serve = _serving(g, net, *_ends_of(flat, table, job, g, routed=False), mine)
-    rep = connectmod.connect(g, cat, {net: table.get(net, ((), ()))})
+    serve = set()
+    for m in members:
+        serve |= _serving(g, m, *_ends_of(flat, table, job, g, routed=False, net=m), mine)
+    rep = connectmod.connect(g, cat, sub)
     leak = next((lk for lk in rep.leaks if lk.src in serve or lk.dst in serve), None)
     if leak is not None:
         return None, f"what stands of its route would LEAK: {leak.text}"
     kept = [e for e in old if e.key in serve]
     p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
     p.used |= mine
-    sd, sc = p.standing()
-    if not sd or not sc:
-        return None, "nothing of its committed route joins a driver to a consumer now"
-    apart = [(d, c) for d in sd for c in sc if c not in p.fwd[d]]
-    if apart:
-        return None, f"its committed route leaves {apart[0][0]} -> {apart[0][1]} apart"
-    new_c = [c for c in p.consumers if c not in sc]
-    new_d = [d for d in p.drivers if d not in sd]
+    new_c, new_d = set(), set()
+    for m in members:
+        sd, sc = p.standing(m)
+        if not sd or not sc:
+            of = f" of {m}" if len(members) > 1 else ""
+            return None, f"nothing of its committed route joins a driver{of} to a consumer now"
+        apart = [(d, c) for d in sd for c in sc if c not in p.fwd[m][d]]
+        if apart:
+            return None, f"its committed route leaves {apart[0][0]} -> {apart[0][1]} apart"
+        drivers, consumers = p.ends[m]
+        new_c |= {c for c in consumers if c not in sc}
+        new_d |= {d for d in drivers if d not in sd}
+
+    def nets_of(role, machine, side):
+        """The members whose ends (``side``: 0 drivers, 1 consumers) the role's machine is."""
+        keys = {machine[0]} if machine else set(flat.insts[role.rsplit(".", 1)[0]].machines)
+        return [m for m in members if keys & set(p.ends[m][side])]
+
     words = []
     for role, belt, machine in _role_ends(flat, job, new_c, "in"):
-        got = p.add_consumer(role, belt, machine)
+        got = p.add_consumer(role, belt, machine, nets_of(role, machine, 1))
         if got is None:
             return None, f"no branch from the standing route reaches {role}"
         words.append(got)
     for role, belt, machine in _role_ends(flat, job, new_d, "out"):
-        got = p.add_driver(role, belt, machine)
-        if got is None:
-            return None, f"no branch from {role} reaches the standing route"
-        words.append(got)
-    rep = connectmod.connect(p.g, cat, {net: table.get(net, ((), ()))})
+        for m in nets_of(role, machine, 0):
+            got = p.add_driver(role, belt, machine, m)
+            if got is None:
+                return None, f"no branch from {role} reaches the standing route"
+            words.append(got)
+    rep = connectmod.connect(p.g, cat, sub)
     keys = p.route_keys()
     leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
     if leak is not None:
         return None, f"the patch would LEAK: {leak.text}"
-    r = rep.nets.get(net)
-    apart = [(d, c) for d, c in (r.unreached if r else ()) if d in p.drivers and c in p.consumers]
-    if apart:
-        return None, f"the patch leaves {apart[0][0]} -> {apart[0][1]} apart"
-    alone = [k for k in (r.unpaired if r else ()) if k in keys]
-    if alone:
-        return None, f"the game would pair no exit with {', '.join(alone[:4])}"
+    for m in members:
+        r = rep.nets.get(m)
+        drivers, consumers = p.ends[m]
+        apart = [(d, c) for d, c in (r.unreached if r else ()) if d in drivers and c in consumers]
+        if apart:
+            return None, f"the patch leaves {apart[0][0]} -> {apart[0][1]} apart"
+        alone = [k for k in (r.unpaired if r else ()) if k in keys]
+        if alone:
+            return None, f"the game would pair no exit with {', '.join(alone[:4])}"
     gone = len(old) - len(kept)
     if gone:
         words.append(f"{gone} carrier{'s' if gone != 1 else ''} taken up (no end of the net "
@@ -1293,8 +1354,8 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
     pending = {n: patch[n] for n in faulty}
     for net in sorted(faulty):
         old = pending.pop(net)
-        if js[net].fluid or js[net].skip or len(fkpmod.net_names(net)) > 1:
-            again[net] = faulty[net]           # a pair isn't patched yet: routed again as one
+        if js[net].fluid or js[net].skip:
+            again[net] = faulty[net]
             continue
         # the routes still waiting for their patch stand in the way, as their carriers may stay
         ground = list(new.entities.values()) + [e for ents in pending.values() for e in ents]
