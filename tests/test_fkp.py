@@ -188,6 +188,19 @@ class GameSettingsTest(unittest.TestCase):
             with self.assertRaises(codec.CodecError, msg=attrs):
                 codec.blueprint([row])
 
+    def test_a_request_count_is_clamped_to_its_max_count(self):
+        # A3 (2.0.4): the game refuses a request filter whose count > max_count, so a hand-written
+        # config is clamped; a filter without max_count is left alone
+        fields = {"request_filters": {"sections": [{"index": 1, "filters": [
+            {"index": 1, "name": "iron-plate", "quality": "normal", "comparator": "=",
+             "count": 12, "max_count": 10},
+            {"index": 2, "name": "copper-plate", "quality": "normal", "comparator": "=",
+             "count": 12}]}]}}
+        row = {"src": "a/c0", "name": "requester-chest", "x": 0.5, "y": 0.5,
+               "direction": None, "attrs": {"config": codec.config_text(fields)}}
+        got = codec.entity_json(row, 1)["request_filters"]["sections"][0]["filters"]
+        self.assertEqual([(f["count"], f.get("max_count")) for f in got], [(10, 10), (12, None)])
+
     def test_entity_json_and_wire_list_are_what_blueprint_writes(self):
         # the same rows, settings and wires either way: the pieces apply sends as single ghosts
         fac = fkp.loads("fkp 1 factory mall\nsize 6x2\nwire w red\nw w red a/c0 ~n/i0\n"

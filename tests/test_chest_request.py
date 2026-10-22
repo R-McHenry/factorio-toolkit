@@ -61,6 +61,22 @@ class ChestRequestTest(unittest.TestCase):
         lay, _ = expand.expand_factory(elaborate(f, dict(f.modules), CAT, "t"), CAT)
         self.assertEqual(request(blueprint_entities(lay)["inbox/c0"]), ("iron-plate", 100))
 
+    def request_filter(self, attrs=""):
+        line = "rate=1/s" + (f", {attrs}" if attrs else "")
+        f = lang.parse(SRC.format(extra="").replace("rate=1.25/s>", line + ">"), "t.fk")
+        lay, _ = expand.expand_factory(elaborate(f, dict(f.modules), CAT, "t"), CAT)
+        return blueprint_entities(lay)["inbox/c0"]["request_filters"]["sections"][0]["filters"][0]
+
+    def test_max_caps_the_count(self):
+        # A3 (2.0.4): max=4 wrote count 10, max_count 4, which the game refuses
+        got = self.request_filter("max=4")
+        self.assertEqual((got["count"], got["max_count"]), (4, 4))
+        self.assertEqual(self.request_filter("max=10")["count"], 10)          # a minute of 1/s is 60
+        self.assertEqual(self.request_filter("request=20, max=10")["count"], 10)
+        plain = self.request_filter()                                         # no max=: as before
+        self.assertEqual(plain["count"], 60)
+        self.assertNotIn("max_count", plain)
+
 
 if __name__ == "__main__":
     unittest.main()

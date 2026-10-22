@@ -313,7 +313,28 @@ def _config(row, text, entity):
     if clash:
         raise CodecError(f"{row.get('src')}: config sets {', '.join(clash)}, which the codec "
                          f"writes from the row")
+    _clamp_requests(fields)
     return fields
+
+
+def _clamp_requests(fields):
+    """A request filter's count can't exceed its ``max_count`` (the game refuses such a request):
+    lower every count to its bound; a filter without one is left alone. In place, so a
+    hand-written config can't write a request the game refuses."""
+    rf = fields.get("request_filters")
+    sections = rf.get("sections") if isinstance(rf, dict) else None
+    if not isinstance(sections, list):
+        return
+    for section in sections:
+        filters = section.get("filters") if isinstance(section, dict) else None
+        if not isinstance(filters, list):
+            continue
+        for f in filters:
+            if not isinstance(f, dict) or "max_count" not in f:
+                continue
+            count, most = f.get("count"), f["max_count"]
+            if isinstance(count, (int, float)) and isinstance(most, (int, float)) and count > most:
+                f["count"] = most
 
 
 def config_text(fields):

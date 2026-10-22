@@ -208,7 +208,8 @@ _REQUESTS = ("requester", "buffer")
 def _request_fields(item, request, rate, most=None):
     """The game's ``request_filters`` for one item, or a list of them (``item="a,b"``): each at
     the same count, ``request=`` if given, else a minute of the chest's ``rate`` (at least 10),
-    else 100; ``most`` (2.0, ``max=``) is each filter's upper bound, ``max_count``."""
+    else 100; ``most`` (2.0, ``max=``) is each filter's upper bound, ``max_count``, which the
+    count is clamped to (the game refuses a request with count > max_count)."""
     if request is not None:
         count = int(request)
     elif rate is not None and not math.isinf(rate):
@@ -217,6 +218,8 @@ def _request_fields(item, request, rate, most=None):
         count = 100
     items = item if isinstance(item, list) else [item]
     top = {} if most is None else {"max_count": int(most)}
+    if top:
+        count = min(count, top["max_count"])
     return {"request_filters": {"sections": [{"index": 1, "filters": [
         dict({"index": k + 1, "name": it, "quality": "normal", "comparator": "=", "count": count},
              **top)
