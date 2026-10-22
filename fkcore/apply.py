@@ -29,8 +29,14 @@ marks that for deconstruction). Then, by mode:
   free materials).
 
 What the paste refuses (the game won't place an offshore pump from a blueprint: the kickoff
-found it on 2026-10-18, the V1 rehearsal again) is placed as single ghosts, still keyed and
-still built by robots (``placed_alone``).
+found it on 2026-10-18, the V1 rehearsal again; nor anything on uncharted ground: a map with no
+radar and no character, the 2.0 run, 2026-10-22) is placed as single ghosts, still keyed and
+still built by robots (``placed_alone``). Each carries what the paste would have given it
+(2.0.4): its recipe, underground end, requests, circuit settings, filters, fuel and other item
+requests, and its wires (to the other single ghosts and to what the paste placed or stands).
+A setting the game would not take on a ghost is named in the report (``alone_missed``). A design
+entity that stands but is ordered out (ordered up for new settings) is not a placed one: it
+goes, so it gets its ghost too.
 
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
 (or a lab revive) it is all ``OK``, which is 1:1. Nothing here registers anything; every game
@@ -82,6 +88,7 @@ class ApplyReport:
     corrected: tuple | None = None     # the shift a lab paste was corrected by
     misplaced: int = 0                 # ghosts that are not where the design says (play)
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
+    alone_missed: dict = field(default_factory=dict)  # settings those ghosts would not take
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
@@ -125,7 +132,12 @@ class ApplyReport:
             out.append(f"  {len(self.resettled)} with new circuit settings (a limit, a condition, a "
                        "wire): ordered up, and the paste lays them fresh with the new ones")
         if self.placed_alone:
-            out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts")
+            out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts "
+                       "with their settings and wires (uncharted ground refuses a paste)")
+        if self.alone_missed:
+            out.append("  SETTINGS the single ghosts would not take (set them in the game, or "
+                       "build again once a radar charts the ground): "
+                       + ", ".join(f"{k} x{n}" for k, n in sorted(self.alone_missed.items())))
         if self.misplaced:
             out.append(f"  MISPLACED {self.misplaced} ghosts are not where the design says")
         out += [f"  {n}" for n in self.notes]
@@ -199,6 +211,29 @@ def _things(cap):
     return want
 
 
+def _placed(cap):
+    """What stands for the design after a paste: a ghost, or a built entity not ordered out. One
+    ordered out goes, so its row still needs a ghost (2026-10-22: an inserter ordered up for a new
+    condition on uncharted ground went, and nothing took its place)."""
+    return {(t["n"], float(t["x"]), float(t["y"])) for t in cap["things"]
+            if t["g"] or not t.get("dc")}
+
+
+def single_ghosts(rows, s, cat, refused):
+    """What :func:`link.ghosts` places for the rows at indices ``refused``: their blueprint
+    entities, and the paste's wires with an end among them, each end as [name, x, y]."""
+    alone = set(refused)
+    entities = [codec.entity_json(rows[i], k + 1) for k, i in enumerate(refused)]
+    wires = codec.wire_list(rows, codec.pole_wires(rows, cat),
+                            codec.links_of(rows, getattr(s, "wires", ())))
+
+    def end(n):
+        row = rows[n - 1]
+        return [row["name"], float(row["x"]), float(row["y"])]
+    return entities, [[end(a), ca, end(b), cb] for a, ca, b, cb in wires
+                      if a - 1 in alone or b - 1 in alone]
+
+
 def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None):
     """Snapshot ``area`` and judge it against the design: a ``sense.SenseReport``."""
     live = scene.from_capture(link.snapshot(r, s.name, area, tag))
@@ -262,7 +297,8 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     at = _anchor(rows, cat)
     rep.pasted = _int(link.paste(r, s.name, force, bp, at))
     want = {(row["name"], float(row["x"]), float(row["y"])) for row in rows}
-    seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
+    cap = link.snapshot(r, s.name, area, f"{tag}-ghosts")
+    seen = _things(cap)
     rep.present = len(want & set(seen))
     ghosts = {k for k, gs in seen.items() if any(gs)}
     stray = ghosts - want
@@ -272,15 +308,22 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             r.lua(link.lua_destroy(s.name, area, names=["entity-ghost"]))
             link.paste(r, s.name, force, bp, (at[0] - shift[0], at[1] - shift[1]))
             rep.corrected = shift
-            seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
+            cap = link.snapshot(r, s.name, area, f"{tag}-ghosts")
+            seen = _things(cap)
             rep.present = len(want & set(seen))
             stray = {k for k, gs in seen.items() if any(gs)} - want
     if mode != "lab":
         rep.misplaced = len(stray)
-    refused = [row for row in rows
-               if (row["name"], float(row["x"]), float(row["y"])) not in seen]
+    placed = _placed(cap)
+    refused = [i for i, row in enumerate(rows)
+               if (row["name"], float(row["x"]), float(row["y"])) not in placed]
     if refused and not rep.misplaced:
-        rep.placed_alone = _int(r.lua(link.lua_ghosts(s.name, force, refused)))
+        entities, wires = single_ghosts(rows, s, cat, refused)
+        try:
+            got = link.ghosts(r, s.name, force, entities, wires)
+            rep.placed_alone, rep.alone_missed = got["n"], got["missed"]
+        except link.LinkError as exc:
+            rep.notes.append(str(exc))
         if rep.placed_alone:
             seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
             rep.present = len(want & set(seen))

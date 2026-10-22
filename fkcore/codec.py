@@ -407,18 +407,31 @@ def pole_wires(rows, cat):
     return out
 
 
-def blueprint(rows, description=None, label=None, wires=None, links=None) -> str:
-    """Rows -> a blueprint string; ``entity_number`` follows row order. ``wires``: [(i, j)] row
-    indices of poles to join by copper wire (see :func:`pole_wires`); the rows' own circuit wires
-    (``wire`` attrs, see :func:`circuit_wires`) follow them, then ``links`` (2.0): [(i, ci, j, cj)]
-    the layout's ``w`` records as row indices (:func:`links_of`). Deterministic."""
+def entity_json(row, number):
+    """One row as the blueprint entity a paste lays (what :func:`blueprint` writes for it)."""
+    return _entity_json(row, number)
+
+
+def wire_list(rows, wires=None, links=None):
+    """The blueprint's ``wires``: [[i, ci, j, cj]] with 1-based entity numbers. ``wires``: [(i, j)]
+    row indices of poles to join by copper wire (see :func:`pole_wires`); the rows' own circuit
+    wires (``wire`` attrs, see :func:`circuit_wires`) follow them, then ``links`` (2.0):
+    [(i, ci, j, cj)] the layout's ``w`` records as row indices (:func:`links_of`)."""
     rows = list(rows or [])
-    entities = [_entity_json(row, i + 1) for i, row in enumerate(rows)]
-    bp = {"item": "blueprint", "entities": entities, "version": BLUEPRINT_VERSION}
     out = [[i + 1, POLE_COPPER, j + 1, POLE_COPPER] for i, j in wires or ()]
     own = circuit_wires(rows)
     out += [[i + 1, ci, j + 1, cj] for i, ci, j, cj in own]
     out += [[i + 1, ci, j + 1, cj] for i, ci, j, cj in sorted(set(links or ()) - set(own))]
+    return out
+
+
+def blueprint(rows, description=None, label=None, wires=None, links=None) -> str:
+    """Rows -> a blueprint string; ``entity_number`` follows row order; ``wires`` and ``links`` as
+    :func:`wire_list` takes them. Deterministic."""
+    rows = list(rows or [])
+    entities = [_entity_json(row, i + 1) for i, row in enumerate(rows)]
+    bp = {"item": "blueprint", "entities": entities, "version": BLUEPRINT_VERSION}
+    out = wire_list(rows, wires, links)
     if out:
         bp["wires"] = out
     if description:

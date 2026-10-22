@@ -44,7 +44,7 @@ import struct
 
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_rip_load", "lua_stuck_hands", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
-           "lua_seed", "lua_ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
+           "lua_seed", "lua_ghosts", "ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
            "open_from_env", "OUT_DIR", "WINDOWS"]
 
@@ -455,21 +455,156 @@ rcon.print(helpers.table_to_json(out))
 """
 
 
-def lua_ghosts(surface, force, rows):
-    """One ghost per row, placed on its own: for what a blueprint paste refuses (an offshore
-    pump: the kickoff found it, 2026-10-18; v5 again, 2026-10-20). rows: codec rows."""
-    data = json.dumps([[r["name"], float(r["x"]), float(r["y"]), int(r.get("direction") or 0),
-                        r.get("src", "")] for r in rows])
-    return f"""
-local s = game.get_surface({_q(surface)})
-local n = 0
-for _, t in pairs(helpers.json_to_table({_q(data)})) do
-  local g = s.create_entity{{name = 'entity-ghost', inner_name = t[1], position = {{t[2], t[3]}},
-    direction = t[4], force = {_q(force)}}}
-  if g then n = n + 1 if t[5] ~= '' then g.tags = {{src = t[5]}} end end
+_GHOSTS = r"""
+local s = game.get_surface(__SURFACE__)
+local F = __FORCE__
+local d = helpers.json_to_table(__DATA__)
+local missed, n = {}, 0
+local function miss(k) missed[k] = (missed[k] or 0) + 1 end
+local function try(k, fn) if not pcall(fn) then miss(k) end end
+-- a blueprint field's runtime name where the two differ
+local CB = {circuit_enabled = 'circuit_enable_disable'}
+local CB_OF = {
+  ['transport-belt'] = {circuit_read_hand_contents = 'read_contents',
+    circuit_contents_read_mode = 'read_contents_mode'},
+  ['assembling-machine'] = {read_contents = 'circuit_read_contents',
+    read_ingredients = 'circuit_read_ingredients'},
+}
+local FIELD = {input_priority = 'splitter_input_priority', output_priority = 'splitter_output_priority',
+  filter = 'splitter_filter'}
+local DONE = {entity_number = 1, name = 1, position = 1, direction = 1, tags = 1, recipe = 1, type = 1,
+  quality = 1, control_behavior = 1, use_filters = 1, filters = 1, request_filters = 1, items = 1}
+local function slot(f, min, max)
+  return {value = {type = f.type or 'item', name = f.name, quality = f.quality or 'normal'}, min = min, max = max}
 end
-rcon.print(n)
+local function behaviour(g, cb)
+  local c = g.get_or_create_control_behavior()
+  if not c then miss('control_behavior') return end
+  local of = CB_OF[g.ghost_type] or {}
+  for k, v in pairs(cb) do
+    if k == 'sections' then
+      try('control_behavior.sections', function()
+        for _, sec in pairs(v.sections or {}) do
+          local x = c.get_section(sec.index) or c.add_section()
+          for _, f in pairs(sec.filters or {}) do x.set_slot(f.index, slot(f, f.count or 0)) end
+        end
+      end)
+    else
+      try('control_behavior.' .. k, function() c[of[k] or CB[k] or k] = v end)
+    end
+  end
+end
+local function requests(g, rf)
+  try('request_filters', function()
+    local ls = g.get_logistic_sections()
+    while #ls.sections > 0 do ls.remove_section(1) end
+    for _, sec in pairs(rf.sections or {}) do
+      local x = ls.add_section(sec.group)
+      for _, f in pairs(sec.filters or {}) do
+        local min, max = f.count or 0, f.max_count
+        if max and min > max then min = max end
+        x.set_slot(f.index, slot(f, min, max))
+      end
+    end
+  end)
+  if rf.request_from_buffers ~= nil then
+    try('request_filters.request_from_buffers', function() g.request_from_buffers = rf.request_from_buffers end)
+  end
+  if rf.trash_not_requested then miss('request_filters.trash_not_requested') end
+end
+for _, e in ipairs(d.e) do
+  local g = s.create_entity{name = 'entity-ghost', inner_name = e.name, position = e.position,
+    direction = e.direction, force = F, recipe = e.recipe, type = e.type, quality = e.quality}
+  if g then
+    n = n + 1
+    if e.tags then try('tags', function() g.tags = e.tags end) end
+    if e.control_behavior then behaviour(g, e.control_behavior) end
+    if e.use_filters ~= nil then try('use_filters', function() g.use_filters = e.use_filters end) end
+    for _, f in pairs(e.filters or {}) do
+      try('filters', function() g.set_filter(f.index, {name = f.name, quality = f.quality, comparator = f.comparator}) end)
+    end
+    if e.request_filters then requests(g, e.request_filters) end
+    if e.items then try('items', function() g.insert_plan = e.items end) end
+    for k, v in pairs(e) do
+      if not DONE[k] then try(k, function() g[FIELD[k] or k] = v end) end
+    end
+  else
+    miss('ghost not placed: ' .. e.name)
+  end
+end
+local function find(t)
+  local pos = {t[2], t[3]}
+  for _, x in pairs(s.find_entities_filtered{name = t[1], position = pos}) do
+    if not x.to_be_deconstructed() then return x end
+  end
+  return s.find_entities_filtered{ghost_name = t[1], position = pos}[1]
+end
+for _, w in ipairs(d.w) do
+  local a, b = find(w[1]), find(w[3])
+  if a and b then
+    try('wires', function()
+      local ca, cb = a.get_wire_connector(w[2], true), b.get_wire_connector(w[4], true)
+      if not ca.is_connected_to(cb) and not ca.connect_to(cb) then error('refused') end
+    end)
+  else
+    miss('wires')
+  end
+end
+rcon.print(helpers.table_to_json({n = n, missed = missed}))
 """
+
+
+def lua_ghosts(surface, force, entities, wires=()):
+    """Single ghosts for what a blueprint paste refuses (an offshore pump: the kickoff found it,
+    2026-10-18; anything on uncharted ground: the 2.0 run, 2026-10-22), each with what the paste
+    would have given it. ``entities``: blueprint entities (``codec.entity_json``): recipe,
+    underground end, quality, tags, control behaviour, filters, requests and item requests (fuel)
+    go on the ghost, and a field the game won't take on a ghost is counted. ``wires``: [[end,
+    connector, end, connector]], each end [name, x, y], found built (not ordered out) or as a
+    ghost. Every one of these was checked on a laptop test server (2.0.77, 2026-10-22): a ghost
+    keeps them when robots (or a revive) build it. -> JSON {n: ghosts placed, missed: {field: n}}."""
+    data = json.dumps({"e": list(entities), "w": [list(w) for w in wires]},
+                      separators=(",", ":"))
+    return (_GHOSTS.replace("__SURFACE__", _q(surface)).replace("__FORCE__", _q(force))
+            .replace("__DATA__", _q(data)))
+
+
+def ghosts(rcon, surface, force, entities, wires=(), chunk=None):
+    """:func:`lua_ghosts` in RCON-sized calls: the entities in batches of about ``chunk``
+    characters, then the wires (both ends placed by then). -> {n, missed} summed."""
+    n, missed = 0, {}
+    chunk = chunk or CHUNK
+
+    def call(es, ws):
+        nonlocal n
+        reply = rcon.lua(lua_ghosts(surface, force, es, ws)).strip()
+        try:
+            got = json.loads(reply)
+            n += int(got.get("n") or 0)
+            m = got.get("missed")           # Lua's empty table comes back as a JSON list
+            for k, v in (m.items() if isinstance(m, dict) else ()):
+                missed[k] = missed.get(k, 0) + int(v)
+        except (ValueError, TypeError, AttributeError):
+            raise LinkError(f"single ghosts failed: {reply[:300]}") from None
+
+    for batch in _batches(entities, chunk):
+        call(batch, [])
+    for batch in _batches(wires, chunk):
+        call([], batch)
+    return {"n": n, "missed": missed}
+
+
+def _batches(items, chunk):
+    batch, size = [], 0
+    for it in items:
+        k = len(json.dumps(it, separators=(",", ":")))
+        if batch and size + k > chunk:
+            yield batch
+            batch, size = [], 0
+        batch.append(it)
+        size += k
+    if batch:
+        yield batch
 
 
 def lua_say(text):
