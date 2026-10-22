@@ -106,6 +106,24 @@ class LookTest(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             return fh.read().splitlines()
 
+    def test_a_look_says_when_the_source_moved_on_from_the_fkp(self):
+        # 2.0.4 (the second lead run, 2026-10-22): a paste from stale checkpoints wrote red.fkp
+        # with the old recipe, and the look, which judges against the .fkp, said OK
+        import json
+        from fkcore import flow
+        _r, lk = self.run_look()
+        self.assertFalse([n for n in lk.notes if "since" in n])     # no build has said: quiet
+        files = flow._source_files(self.dir)
+        os.makedirs(os.path.join(self.dir, "out"), exist_ok=True)
+        with open(os.path.join(self.dir, "out", "layout-source.json"), "w") as fh:
+            json.dump({"files": dict(files, **{"gears.fk": "0" * 40})}, fh)
+        _r, lk = self.run_look()
+        self.assertEqual((lk.ok, lk.designed), (120, 120))        # the verdicts are the .fkp's
+        said = [n for n in lk.notes if "since" in n]
+        self.assertEqual(len(said), 1, lk.notes)
+        self.assertIn("gears.fk changed since gears.fkp was written", said[0])
+        self.assertIn("note: gears.fk changed", "\n".join(lk.lines()))
+
     def test_the_applied_design_is_ok_n_of_n_and_renders_the_same(self):
         lk = self.report()
         self.assertEqual((lk.ok, lk.designed), (120, 120))

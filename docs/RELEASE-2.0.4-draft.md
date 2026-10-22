@@ -6,6 +6,13 @@
   and item requests, and wires; a setting the game won't put on a ghost (a requester's
   trash-not-requested, a chest's bar) is named in `out\apply.txt` under SETTINGS. A design entity
   that stands but is ordered out for new settings gets its ghost too.
+- **A stale checkpoint no longer pastes an old recipe** (A2, the second lead run): a build that
+  starts after the layout steps (`--from diff` on the host) took `out/<step>/` as it stood even
+  when the source had changed since, so write_layout wrote (and the paste laid) the old recipe.
+  Each layout step now records the source it was laid from (`out/<step>/source.json`); a stale
+  checkpoint (including an older toolkit's, which has no stamp) is laid out again, every step and
+  checkpoint. `fk look` judges the new `.fkp` against the old game as DRIFT, and notes a placed
+  module's `.fk` change not built yet.
 - `fk stage` carries the file each Literal reads (relay.json beside relay.fk, or stage 7's
   plant-40mw.json) with the source: `edit` keeps it in the stage it edits, the stages replayed
   after it get it, and a stage that adds or edits a Literal checks, measures and applies with its

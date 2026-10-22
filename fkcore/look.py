@@ -278,6 +278,9 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
         except (OSError, link.LinkError) as exc:
             lk.notes.append(f"ghosts not judged against the network ({type(exc).__name__}: {exc})")
     lk.notes += notes + [f"composed surface: {p}" for p in s.problems]
+    # 2.0.4: the verdicts judge against the .fkp files; say when the source moved on from them
+    from .flow import layout_source_changes
+    lk.notes += layout_source_changes(game)
     if write_marks and lk.rep.marks:
         for m in lk.rep.marks:
             surface_lay.marks[m.name] = m
