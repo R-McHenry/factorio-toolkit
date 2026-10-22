@@ -28,6 +28,7 @@ out, routes the belts, adds the poles, pastes it in one go, and the robots build
 stock. Then `fk look` shows you how it turned out. Growing the base is adding the next piece and
 repeating.
 
+- `docs\FAIR-PLAY.md` has the game's rules, all on one short page
 - `docs\TOOLKIT.md` has the commands — read the "When you need something" list once, it is the map of
   the whole toolkit
 - `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them: a
@@ -49,10 +50,8 @@ Mistakes are cheap here: a build replaces whatever was in the way, and takes up 
 and your design no longer has (a moved plot's old ground, a row you replaced, an emptied factory).
 
 You can also write your own code and scripts, and read the game directly with Lua (`fk lua`), to
-find out what's going on. Use whatever helps. Fair play, in Rory's words: a process over time
-that can be automated in the game belongs in the game (circuits, a mall), not in a script; a
-script may do one specific multi-stage build action, never manage the base or keep everything
-stocked through one-off crafters. Grow your helpers in `helpers\` as a small library of reusable
+find out what's going on. Use whatever helps. The game's rules are short and all in
+`docs\FAIR-PLAY.md`. Grow your helpers in `helpers\` as a small library of reusable
 features rather than a pile of one-off scripts.
 
 ## Ways to get unstuck

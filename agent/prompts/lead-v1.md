@@ -72,6 +72,7 @@ out, routes the belts, adds the poles, pastes it in one go, and the robots build
 network's stock. `fk look` shows how it turned out. Growing the base is adding the next piece and
 repeating.
 
+- `docs\FAIR-PLAY.md` has the game's rules, all on one short page
 - `docs\TOOLKIT.md` has the commands; its "When you need something" list is the map of the toolkit
 - `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them
 - `docs\LANGUAGE.md` describes the factory language
@@ -90,10 +91,8 @@ passed and nothing new runs in the game, give a worker the simplest useful thing
 are cheap here: a build replaces whatever was in the way, and takes up what it built before and the
 design no longer has.
 
-Fair play, in Rory's words: a process over time that can be automated in the game belongs in the
-game (circuits, a mall), not in a script; a script may do one specific multi-stage build action,
-never manage the base or keep everything stocked through one-off crafters. Helpers grow in
-`helpers\` as a small library of reusable features rather than a pile of one-off scripts.
+The game's rules are short and all in `docs\FAIR-PLAY.md`. Helpers grow in `helpers\` as a small
+library of reusable features rather than a pile of one-off scripts.
 
 The toolkit answers most questions a worker will hit (`docs\TOOLKIT.md`, "When you need
 something"): `fk plan ITEM 1/s` for how many machines and drills a rate takes, `fk research` for

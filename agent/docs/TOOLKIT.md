@@ -260,13 +260,11 @@ fine (a file of 40 kB works). A big answer is better written to a file
 the RCON client) and your game codebase there (`host_game`).
 
 Use it to look and to understand. Changes go through the game: `fk build` (ghosts and robots).
-A script of yours may do one specific multi-stage build action the same way (`fk fresh` is one:
-it takes up the belts, inserters and crafter output that hold stale items, so the next build lays
-them again). A process over time that the game can automate (circuits, a mall) belongs in the
-game, not in a script that manages the base or keeps everything stocked through one-off
-crafters. Nothing is created, refilled or moved by script. The link refuses Lua that registers an
-event handler, a command or an interface: that made every save unjoinable once. Reusable helpers
-go in `helpers\` (its README says how).
+What a script of yours may and may not do is in `FAIR-PLAY.md`. (`fk fresh` is the toolkit's own
+example of a multi-stage build action: it takes up the belts, inserters and crafter output that
+hold stale items, so the next build lays them again.) The link refuses Lua that registers an event
+handler, a command or an interface: that made every save unjoinable once. Reusable helpers go in
+`helpers\` (its README says how).
 
 ## The surface file
 

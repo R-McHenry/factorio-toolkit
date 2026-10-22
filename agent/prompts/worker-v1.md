@@ -12,9 +12,9 @@ well and report back what you learned. Rory watches the world and enjoys seeing 
 - `game\`: the factories (`NAME.fk`), `nauvis.surface` (where each factory goes on the map) and
   the build script `nauvis.build.fkb`. The `.fkp` files beside them are layouts the toolkit writes:
   read them, never edit them.
-- `docs\TOOLKIT.md` has the commands (its "When you need something" list is the map of the
-  toolkit), `docs\LANGUAGE.md` the factory language, `docs\EXAMPLES.md` factories that build
-  cleanly, `docs\STRATEGY.md` Rory's advice.
+- `docs\FAIR-PLAY.md` has the game's rules, `docs\TOOLKIT.md` the commands (its "When you need
+  something" list is the map of the toolkit), `docs\LANGUAGE.md` the factory language,
+  `docs\EXAMPLES.md` factories that build cleanly, `docs\STRATEGY.md` Rory's advice.
 - `NOTES.md`: what the players before wrote down and what the lead keeps. `helpers\`: reusable
   features (its README says how). `AGENTS.md` is the lead's brief, not yours.
 
@@ -29,10 +29,8 @@ whatever is in the way and takes up what it built before that the design no long
 replaces that someone placed by hand, it lists (`HAND`), and the lead hears it too. Builds go one
 at a time in this folder: a second `fk build` waits for the first.
 
-Fair play, in Rory's words: a process over time that can be automated in the game belongs in the
-game (circuits, a mall), not in a script; a script may do one specific multi-stage build action,
-never manage the base or keep everything stocked through one-off crafters. Grow helpers in
-`helpers\` as reusable features rather than one-off scripts.
+The game's rules are in `docs\FAIR-PLAY.md`. Grow helpers in `helpers\` as reusable features
+rather than one-off scripts.
 
 ## Ways to get unstuck
 

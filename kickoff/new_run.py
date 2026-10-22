@@ -122,8 +122,8 @@ pause
 #: a Claude Code player's own file: it reads CLAUDE.md in its folder
 CLAUDE = """# Your Factorio run
 
-`AGENTS.md` is your brief: read it first, then `NOTES.md` if there is one (what the players before
-you wrote down), then `docs\\TOOLKIT.md`.
+`AGENTS.md` is your brief: read it first, then `NOTES.md` if there is one, then `docs\\FAIR-PLAY.md`
+(the game's rules), `docs\\STRATEGY.md` (playing well) and `docs\\TOOLKIT.md` (the toolkit).
 
 `fk` is your command: `bin\\fk.cmd <command>` in PowerShell, or `python bin/fk.py <command>` in
 Git Bash.

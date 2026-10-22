@@ -175,7 +175,9 @@ implies, roughly one and a half to two times.
   until the new ones are up.
 - **The design wins.** Build over what stands there. Temporary builds go in sanctioned space and
   come out when they're done.
-- **Rebuilt belts, pipes and inserter hands can hold old items.** `fk fresh` clears them.
+- **Rebuilt belts, pipes and inserter hands can hold old items.** `fk fresh` clears them. Wrong
+  items coming back a few times from undergrounds is normal; if they keep coming back, something
+  is feeding them.
 - **Drain before a big rip:** shut the input and let the factory run its buffers down. Large rips
   take a while.
 - **Moving a factory:** robots take its machines to other ghosts first. Free what the move needs
@@ -212,10 +214,7 @@ implies, roughly one and a half to two times.
 - **Some things that look wrong are fine:** an idle machine, a hot reactor with no fuel cell,
   ghosts waiting for a robot trip. Ghosts that wait on missing items or locked recipes are a
   blocked build.
-- **Investigate any way you like:** code, scripts, Lua reads. The game rule is only about changing
-  the world: build through ghosts and robots, with nothing created or refilled by script.
-- **A script may carry out one specific multi-step build action.** A process that runs over time and
-  can be automated in the game belongs in the game (circuits, the mall), not in a script that
-  manages the base or keeps everything stocked through one-off crafters.
+- **Investigate any way you like:** code, scripts, Lua reads. The game's rules, about changing the
+  world, are all in `FAIR-PLAY.md`.
 - **Grow helpers into a small library of reusable features** in your codebase rather than many
   one-off scripts, so they scale with the base instead of piling up as debt.
