@@ -25,7 +25,9 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
 - 2.0: the build script's `write_layout` moves to just before `apply`, as in the template, so
   `fk build --to diff` writes nothing (a dry run had made its design the one the next build kept
   to). A run without `helpers\\` gets the template's (the player's reusable features); one that
-  has it keeps its own. The host's toolkit must be 2.0 too: it runs `write_layout` now.
+  has it keeps its own. The host's toolkit must be 2.0 too: it runs `write_layout` now. A run
+  with workers (run.json `workers`) gets the new worker brief in `.claude\\agents\\worker.md`
+  (the old one kept in `.upgrade-<old sha>\\`).
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -45,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-from new_run import CLAUDE, LAUNCH  # noqa: E402
+from new_run import CLAUDE, LAUNCH, LEAD_FIRST, write_worker  # noqa: E402
 
 REPLACED = (".toolkit", "bin", "docs", "AGENTS.md", "CLAUDE.md", "launch.json")
 
@@ -187,6 +189,13 @@ def upgrade(run, sha, dry=False):
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
     shutil.copy(os.path.join(agent, "bin", "fk.cmd"), os.path.join(run, "bin", "fk.cmd"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))
+    workers = cfg.get("workers")
+    if workers and workers.get("backend") == "claude":
+        old_worker = os.path.join(run, ".claude", "agents", "worker.md")
+        if os.path.exists(old_worker):
+            shutil.copy(old_worker, os.path.join(keep, "worker.md"))
+        workers["brief_md5"] = write_worker(run, agent, workers.get("model", "inherit"),
+                                            workers.get("brief", "worker-v1"))
     if helpers:
         shutil.copytree(os.path.join(src, "kickoff", "template", "helpers"),
                         os.path.join(run, "helpers"),
@@ -194,7 +203,7 @@ def upgrade(run, sha, dry=False):
     shutil.copy(os.path.join(agent, "prompts", f"{cfg.get('prompt', 'core-v1')}.md"),
                 os.path.join(run, "AGENTS.md"))
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(LAUNCH, fh, indent=1)
+        json.dump(dict(LAUNCH, first=LEAD_FIRST) if workers else LAUNCH, fh, indent=1)
     if cfg.get("player") == "claude":
         with open(os.path.join(run, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(CLAUDE)

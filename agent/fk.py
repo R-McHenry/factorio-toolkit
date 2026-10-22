@@ -17,9 +17,11 @@ toolkit (also pinned: files a running session uses never change under it). Each 
 3. ends with the footer, ``fkcore poll``: chat lines that are new since the last command, and the
    game's new alerts and reminders.
 
-``fk build`` splits the flow at ``write_layout``: design here (``--to write_layout``), then on the
-host the steps after it (``--from diff``: the floorplan is replayed on the checkpoints). Stdlib
-only. ``FK_RUN`` names the run folder (default: the folder above this file's).
+``fk build`` splits the flow at its first game step: design here, then on the host the steps from
+``diff`` on (``--from diff``: the floorplan is replayed on the checkpoints). One build at a time
+in a run (2.0: a lead player's workers may build at once, and two builds would paste over each
+other's design): a second ``fk build`` waits for the first. Stdlib only. ``FK_RUN`` names the run
+folder (default: the folder above this file's).
 
 ``fk lua`` sends its chunk (the argument, or ``--file F``'s text) over the ssh's stdin, never on
 the command line (1.2): Git for Windows' ssh, an MSYS program, gets at most about 8 kB of one
@@ -132,6 +134,43 @@ def _turn():
         else:
             import fcntl
             fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def _build_lock():
+    """One ``fk build`` at a time in a run: a second one waits here, and says so once. The lock
+    file is in the run folder, outside game\\, so no sync carries it."""
+    with open(os.path.join(RUN, ".fk-build.lock"), "a+b") as fh:
+        said = False
+        if os.name == "nt":
+            import msvcrt
+            while True:
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if not said:
+                        print("fk build: another build runs in this run; this one waits for it",
+                              flush=True)
+                        said = True
+                    time.sleep(2)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                print("fk build: another build runs in this run; this one waits for it", flush=True)
+                fcntl.flock(fh, fcntl.LOCK_EX)
             try:
                 yield
             finally:
@@ -295,7 +334,8 @@ def main(argv):
     if not os.path.exists(STAMP) and cfg["host"] != "local":
         pull(cfg)                          # first use: start from the host's copy
     if cmd == "build":
-        code = build(cfg, rest)
+        with _build_lock():
+            code = build(cfg, rest)
         footer(cfg)
         return code
     if cmd == "look":

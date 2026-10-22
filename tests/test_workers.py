@@ -1,0 +1,217 @@
+"""2.0 (Rory, 2026-10-21): a Claude lead player with Claude worker subagents. The run setup
+(kickoff/new_run.py --workers claude), the hook that keeps Rory's notes for the lead, the loop's
+log of each worker's report and of the lead's context, and one fk build at a time. Offline: no
+claude, no game."""
+import io
+import json
+import os
+import shutil
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from unittest import mock
+
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(ROOT, "kickoff"))
+sys.path.insert(0, os.path.join(ROOT, "agent"))
+import claude_hook  # noqa: E402
+import claude_loop  # noqa: E402
+import fk  # noqa: E402  (agent/fk.py, the player's command)
+import new_run  # noqa: E402
+
+
+def tree_archive(_sha, dest, paths=("fkcore",)):
+    """new_run._archive from the working tree instead of a commit."""
+    for p in paths:
+        src, out = os.path.join(ROOT, p), os.path.join(dest, p)
+        if os.path.isdir(src):
+            shutil.copytree(src, out, ignore=shutil.ignore_patterns("__pycache__", "out"))
+        else:
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            shutil.copy(src, out)
+
+
+class RunSetupTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="fkworkers-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.run_dir = os.path.join(self.dir, "run")
+
+    def make(self, **kw):
+        with mock.patch.object(new_run, "_archive", tree_archive):
+            return new_run.make(self.run_dir, **kw)
+
+    def read(self, *parts):
+        with open(os.path.join(self.run_dir, *parts), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_a_lead_run_gets_the_worker_agent(self):
+        cfg = self.make(prompt="lead-v1", player="claude", workers="claude", local={})
+        worker = self.read(".claude", "agents", "worker.md")
+        head, body = worker.split("\n---\n\n", 1)
+        self.assertIn("name: worker\n", head)
+        self.assertIn("model: inherit\n", head)
+        self.assertIn("disallowedTools: Agent\n", head)
+        self.assertIn("omitClaudeMd: true", head)
+        with open(os.path.join(ROOT, "agent", "prompts", "worker-v1.md"), encoding="utf-8") as fh:
+            self.assertEqual(body, fh.read())
+        self.assertEqual(cfg["workers"]["backend"], "claude")
+        self.assertEqual(json.loads(self.read("run.json"))["workers"]["model"], "inherit")
+        self.assertIn("You lead it.", self.read("AGENTS.md"))
+        self.assertTrue(json.loads(self.read("launch.json"))["first"].startswith(
+            "Lead the Factorio run"))
+        self.assertTrue(os.path.isdir(os.path.join(self.run_dir, "reports")))
+        self.assertTrue(os.path.exists(os.path.join(self.run_dir, "play.cmd")))
+
+    def test_the_workers_model_can_be_named(self):
+        self.make(prompt="lead-v1", player="claude", workers="claude", worker_model="sonnet",
+                  local={})
+        self.assertIn("model: sonnet\n", self.read(".claude", "agents", "worker.md"))
+
+    def test_a_run_without_workers_is_as_before(self):
+        cfg = self.make(player="claude", local={})
+        self.assertNotIn("workers", cfg)
+        self.assertFalse(os.path.exists(os.path.join(self.run_dir, ".claude")))
+        self.assertTrue(json.loads(self.read("launch.json"))["first"].startswith("Play Factorio"))
+
+    def test_workers_need_a_claude_player(self):
+        with self.assertRaises(SystemExit):
+            self.make(prompt="lead-v1", player="deepseek", workers="claude", local={})
+
+    def test_the_command_line_picks_the_lead_brief(self):
+        seen = {}
+        with mock.patch.object(new_run, "make", lambda *a: seen.setdefault("a", a) and {}):
+            with mock.patch("sys.stdout", io.StringIO()):
+                new_run.main([self.run_dir, "--player", "claude", "--workers", "claude"])
+        run, prompt = seen["a"][:2]
+        self.assertEqual((prompt, seen["a"][-2], seen["a"][-1]), ("lead-v1", "claude", "inherit"))
+
+
+class HookTest(unittest.TestCase):
+    """The notes (Rory's chat, INBOX.md, the world line) are the lead's: a tool call inside a
+    worker takes nothing, and the lead gets them at its next shell command or when the worker
+    returns (the Agent tool runs the hook too)."""
+
+    def setUp(self):
+        self.run = tempfile.mkdtemp(prefix="fkhook-")
+        self.addCleanup(shutil.rmtree, self.run, True)
+        os.makedirs(os.path.join(self.run, ".loop"))
+        with open(os.path.join(self.run, ".loop", "notes-pending.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("[Rory_618 in game chat] more red science, please\n\n")
+
+    def hook(self, payload):
+        out = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+                mock.patch("sys.stdout", out), \
+                mock.patch("sys.argv", ["claude_hook.py", self.run]):
+            claude_hook.main()
+        return out.getvalue()
+
+    def test_a_workers_tool_call_leaves_the_notes_for_the_lead(self):
+        said = self.hook({"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                          "agent_id": "a1b2", "agent_type": "worker"})
+        self.assertEqual(said, "")
+        self.assertTrue(os.path.exists(os.path.join(self.run, ".loop", "notes-pending.txt")))
+        said = self.hook({"hook_event_name": "PostToolUse", "tool_name": "Agent"})
+        self.assertIn("more red science, please",
+                      json.loads(said)["hookSpecificOutput"]["additionalContext"])
+        self.assertFalse(os.path.exists(os.path.join(self.run, ".loop", "notes-pending.txt")))
+
+    def test_the_hook_runs_when_a_worker_returns(self):
+        path = claude_loop.settings(self.run)
+        with open(path, encoding="utf-8") as fh:
+            matcher = json.load(fh)["hooks"]["PostToolUse"][0]["matcher"]
+        self.assertEqual(set(matcher.split("|")), {"Bash", "PowerShell", "Agent", "Task"})
+
+
+class LoopFeedTest(unittest.TestCase):
+    """play.log shows each worker's report, and the loop knows the lead's own context size (a
+    worker's API calls read their own context, not the lead's)."""
+
+    def test_a_workers_report_and_the_leads_context(self):
+        lines, state = [], {"sid": "", "tools": 0, "result": None, "context": 0, "agents": {}}
+        log = lines.append
+        claude_loop.feed({"type": "assistant", "message": {
+            "usage": {"input_tokens": 12, "cache_read_input_tokens": 40000,
+                      "cache_creation_input_tokens": 2000},
+            "content": [{"type": "tool_use", "id": "t1", "name": "Agent",
+                         "input": {"description": "build the iron array",
+                                   "subagent_type": "worker", "prompt": "..."}}]}}, log, state)
+        self.assertEqual(state["context"], 42012)
+        claude_loop.feed({"type": "assistant", "parent_tool_use_id": "t1", "message": {
+            "usage": {"input_tokens": 5, "cache_read_input_tokens": 90000},
+            "content": [{"type": "tool_use", "id": "w1", "name": "Bash",
+                         "input": {"command": "python bin/fk.py build"}}]}}, log, state)
+        self.assertEqual(state["context"], 42012)                   # the worker's, not counted
+        self.assertIn("    $ python bin/fk.py build", lines)
+        claude_loop.feed({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1",
+             "content": [{"type": "text", "text": "Built: 32 furnaces stand; 4 ghosts wait for "
+                                                  "inserters (SHORT)."}]}]}}, log, state)
+        self.assertEqual(lines[-1], "worker done (build the iron array): Built: 32 furnaces "
+                                    "stand; 4 ghosts wait for inserters (SHORT).")
+        self.assertEqual(state["agents"], {})
+
+    def test_a_worker_in_the_background_reports_by_notification(self):
+        # Claude Code 2.1.299, measured with claude -p: the Agent tool returns at once ("Async
+        # agent launched"); the report comes in a task_notification, and the lead's next turn in
+        # the same process ends in a result of its own
+        lines, state = [], {"sid": "", "tools": 0, "result": None, "context": 0, "agents": {}}
+        log = lines.append
+        claude_loop.feed({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Agent",
+             "input": {"description": "scout the copper patch", "subagent_type": "worker"}}]}},
+            log, state)
+        claude_loop.feed({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": [
+                {"type": "text", "text": "Async agent launched successfully. agentId: a1"}]}]}},
+            log, state)
+        self.assertFalse([l for l in lines if l.startswith("worker")])
+        claude_loop.feed({"type": "result", "result": "Waiting for the scout.",
+                          "is_error": False}, log, state)
+        claude_loop.feed({"type": "system", "subtype": "task_notification", "tool_use_id": "t1",
+                          "status": "completed", "usage": {"total_tokens": 15157,
+                                                            "tool_uses": 2,
+                                                            "duration_ms": 240000},
+                          "handback_report": {"text": "Copper at 120,-40, 2.1M ore."}},
+                         log, state)
+        self.assertEqual(lines[-1], "worker completed (scout the copper patch; 15k tokens, 2 tool "
+                                    "calls, 4 min): Copper at 120,-40, 2.1M ore.")
+        claude_loop.feed({"type": "result", "result": "Copper next: plot copper at 110,-50.",
+                          "is_error": False}, log, state)
+        claude_loop.feed({"type": "result", "result": "", "is_error": False}, log, state)
+        self.assertEqual(state["reports"], ["Waiting for the scout.",
+                                            "Copper next: plot copper at 110,-50."])
+
+    def test_the_hand_over_and_fresh_messages_name_the_files(self):
+        self.assertIn("NOTES.md", claude_loop.HANDOVER)
+        self.assertIn("GOAL.md", claude_loop.HANDOVER)
+        self.assertIn("about 250k tokens", claude_loop.HANDOVER.format(k=250))
+        self.assertIn("AGENTS.md is your brief as before", claude_loop.FRESH)
+
+
+class BuildLockTest(unittest.TestCase):
+    """Two workers that build at once would paste over each other's design: a second fk build
+    waits for the first."""
+
+    def test_a_second_build_waits_for_the_first(self):
+        d = tempfile.mkdtemp(prefix="fklock-")
+        self.addCleanup(shutil.rmtree, d, True)
+        done = []
+        with mock.patch.object(fk, "RUN", d), mock.patch("sys.stdout", io.StringIO()) as out:
+            with fk._build_lock():
+                t = threading.Thread(target=lambda: fk._build_lock().__enter__()
+                                     or done.append(1), daemon=True)
+                t.start()
+                time.sleep(1.0)
+                self.assertEqual(done, [])                          # still waiting
+            t.join(timeout=10)
+            self.assertEqual(done, [1])
+            self.assertIn("another build runs in this run", out.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,7 +10,7 @@ checks warn, never gate, and the brief stays as short as it was.
 |---|---|
 | pin and patch: rebuilds keep what stands | in |
 | the smaller pieces: STRATEGY.md, fair play in Rory's words, burner drills, `fk fresh` for crafters, labs from a chest, mixed chests, helpers | in |
-| the lead and worker player harness, Claude workers first | in progress |
+| the lead and worker player harness, Claude workers | in (DeepSeek workers wait) |
 | lanes and throughput players lean on: lane-pair belts, thick and main buses, side-loading smelter arrays | its session waits to be started |
 | circuits in the source: wire nets, conditions, inserter limits | its session waits to be started |
 
@@ -52,6 +52,41 @@ What changed:
   build --to diff` is a dry run that writes nothing. `fk build` runs `write_layout` on the host
   now (the split is still at the first game step) and pulls the `.fkp` files back.
 - TOOLKIT.md: "Rebuilds keep what stands", patches are cheap, `--to diff` writes nothing.
+
+## The lead and worker players (Claude workers)
+
+Rory (2026-10-21): the next run is one run, all Claude, a Claude lead player with Claude worker
+subagents. The lead plans, sets strategy and decides, and keeps its own conversation short; each
+worker carries out one design or in-game action and reports back briefly. The overnight players'
+conversations had grown to 500-800k tokens of context, so a round was slow and cost a few dollars.
+
+- **Kickoff**: `kickoff-v1.cmd -Player claude -Workers claude` (`-WorkerModel sonnet` or a model
+  id for the workers; by default they run on the lead's model). `new_run.py --workers claude`
+  makes the run: the lead's brief `agent\prompts\lead-v1.md` as AGENTS.md, the worker as Claude
+  Code's project subagent `.claude\agents\worker.md` (the brief `agent\prompts\worker-v1.md`,
+  `model: inherit`, `disallowedTools: Agent`, `omitClaudeMd: true`), `reports\` for longer
+  findings, run.json `workers`, and a first message for a lead.
+- **The briefs**, short and without new rules. The lead's is the core brief turned to leading:
+  how to give a worker a task (what, where, what done looks like, what it needs to know), that a
+  worker runs in the background and its report wakes the lead, that builds go one at a time, and
+  that Rory's chat reaches the lead only. The worker's is the core brief cut down to a task: the
+  folder, how building works, fair play, the ways to get unstuck, and the short report.
+- **The loop** (`claude_loop.py`): workers' tool calls show indented in play.log, each report as
+  "worker completed (task; tokens, tool calls, minutes): report", and every turn of the lead's
+  in one process as a "turn report". When the lead's context passes `--fresh-at` tokens (default
+  200k, after at least 3 rounds) the next round asks it to bring NOTES.md and GOAL.md up to date,
+  and the round after starts a fresh conversation from them (old ids in claude-sessions.txt).
+- **The hook** keeps Rory's chat, INBOX.md and the world line for the lead: inside a worker (its
+  hook input names an `agent_id`) it takes nothing; the lead gets them at its own next shell
+  command or Agent call.
+- **One build at a time**: `fk build` takes a lock in the run folder, so a second worker's build
+  waits for the first instead of pasting over it.
+- Checked with the real `claude -p` (Claude Code 2.1.299, Haiku, no game): the project agent
+  loads headless, a worker's Bash call reaches the hook with `agent_id` and `agent_type: worker`,
+  the Agent tool launches it in the background ("Async agent launched"), and its report comes in
+  a `task_notification` and wakes the lead in the same process. Tests: `tests\test_workers.py`.
+- DeepSeek workers wait (Rory, 2026-10-21). The seam is run.json `workers.backend`; a Claude
+  lead would only ever see a DeepSeek worker's final output.
 
 ## The rest of the round
 
@@ -102,13 +137,13 @@ The host toolkit must be this commit too, as the kickoff deploys it (`fk-v5-SHA`
 
 ## Not in 2.0
 
-- The three large pieces of the round, proposed as sessions of their own and not started yet:
-  V2 in full (lane-pair belts, thick and main buses with the backbone of fixed poles and
-  roboports, side-loading smelter arrays, throughput players lean on), circuits in the source
-  (wire nets, conditions, inserter limits instead of malllimits.lua-style scripts), and the lead
-  and worker player harness (Claude or DeepSeek workers; a Claude lead sees only a DeepSeek
-  worker's final output).
+- Two large pieces of the round, proposed as sessions of their own and not started yet: V2 in
+  full (lane-pair belts, thick and main buses with the backbone of fixed poles and roboports,
+  side-loading smelter arrays, throughput players lean on) and circuits in the source (wire nets,
+  conditions, inserter limits instead of malllimits.lua-style scripts).
+- DeepSeek workers (Claude workers are in).
 - Route patching: a net whose ends change is routed again as a whole. Keeping its laid belts and
   routing only the new branch into them is a router change of its own.
-- The pace tool (optional): science-per-minute targets per tech tier from the speedrun times.
+- The pace tool (optional): dropped, Rory's revised STRATEGY.md has a pace table computed from
+  the tech tree.
 - Daisy-chained labs and turrets.

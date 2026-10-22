@@ -4,6 +4,7 @@ into C:\\fk-player and the host's kickoff waits for Rory's go.
     python kickoff/new_run.py RUN_DIR [--prompt core-v1] [--sha HEAD]
         [--host computah-ct --host-root /home/computah/factorio/v1-runs]
         [--local --rcon-port P --pw-file F --script-output D]     (a laptop test server)
+        [--player claude --workers claude [--worker-model inherit]]   (a lead and its workers)
 
 RUN_DIR gets:
   AGENTS.md            the brief (agent/prompts/<prompt>.md), GOAL.md, FRICTION.md
@@ -25,6 +26,14 @@ RUN_DIR gets:
                        its hook claude_hook.py, from SHA) for this folder; kickoff-v1.ps1 opens it
   NOTES.md             with --notes FILE: what the players before wrote down for the next one
                        (kickoff-v1.ps1 passes the newest run's NOTES.md)
+  .claude/agents/worker.md
+                       with --workers claude (2.0: Rory, 2026-10-21, a lead player plus worker
+                       players): Claude Code's project subagent, the worker brief
+                       (agent/prompts/worker-v1.md) as its body. The player is the lead (brief
+                       agent/prompts/lead-v1.md unless --prompt says otherwise): it hands each
+                       design or in-game action to a worker and reads back its short report, so
+                       its own conversation stays short. reports/ is where workers put longer
+                       findings.
 
 Everything comes from the toolkit at SHA (git archive: the brief, the docs, bin, the template and
 fkcore), so a run is what that commit says, whatever the working tree holds. The toolkit is
@@ -68,6 +77,38 @@ LAUNCH = {
 }
 
 
+#: what a lead player is sent first (2.0): the same start, said to the one who hands out the work
+LEAD_FIRST = ("Lead the Factorio run as your AGENTS.md describes.\n\n"
+              "The base works, you can get started.\n\n"
+              "You're free to act: no permission needed and no finished plan needed. Start a worker "
+              "on something small that runs early (docs\\EXAMPLES.md has a few that build cleanly), "
+              "then grow it.")
+
+#: the worker (2.0): a Claude Code project subagent. It runs in the lead's permission mode (auto),
+#: spawns no workers of its own, and reads no CLAUDE.md: its brief is the file's body
+WORKER = """---
+name: worker
+description: One specific task in this Factorio run - a design to write and build with fk, a change in the game, or something to find out. It works in this folder and reports back briefly. Give it the task, where it happens, what done looks like, and what it needs to know.
+model: {model}
+disallowedTools: Agent
+omitClaudeMd: true
+---
+
+"""
+
+
+def write_worker(run, agent, model="inherit", brief="worker-v1"):
+    """``<run>/.claude/agents/worker.md`` from ``agent/prompts/<brief>.md`` under ``agent`` (an
+    archive of the toolkit). -> the brief's md5."""
+    with open(os.path.join(agent, "prompts", f"{brief}.md"), encoding="utf-8") as fh:
+        body = fh.read()
+    folder = os.path.join(run, ".claude", "agents")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "worker.md"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(WORKER.format(model=model) + body)
+    return hashlib.md5(body.encode("utf-8")).hexdigest()
+
+
 #: a Claude Code player's goal loop, in its own window
 PLAY = """@echo off
 title Factorio player (Claude) - {name}
@@ -90,9 +131,14 @@ Git Bash.
 
 
 def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
-         host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek", notes=None):
+         host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek", notes=None,
+         workers=None, worker_model="inherit"):
     if os.path.exists(run) and os.listdir(run):
         raise SystemExit(f"new_run: {run} exists and is not empty")
+    if workers not in (None, "claude"):
+        raise SystemExit(f"new_run: --workers {workers}: only claude workers are built (DeepSeek waits)")
+    if workers and player != "claude":
+        raise SystemExit("new_run: workers are Claude Code subagents: they need --player claude")
     sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", sha], stdout=subprocess.PIPE,
                          check=True, text=True).stdout.strip()
     src = os.path.join(run, ".kit")
@@ -124,9 +170,13 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
         with open(os.path.join(run, "play.cmd"), "w", encoding="ascii", newline="\r\n") as fh:
             fh.write(PLAY.format(name=os.path.basename(os.path.abspath(run)), loop=os.path.abspath(loop),
                                  run=os.path.abspath(run)))
+    worker_md5 = None
+    if workers:
+        worker_md5 = write_worker(run, agent, worker_model)
+        os.makedirs(os.path.join(run, "reports"))
     shutil.rmtree(src)
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(LAUNCH, fh, indent=1)
+        json.dump(dict(LAUNCH, first=LEAD_FIRST) if workers else LAUNCH, fh, indent=1)
     if player == "claude":
         with open(os.path.join(run, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(CLAUDE)
@@ -135,6 +185,9 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
         md5 = hashlib.md5(fh.read()).hexdigest()
     cfg = {"prompt": prompt, "prompt_md5": md5, "toolkit_sha": sha, "player": player,
            "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if workers:
+        cfg["workers"] = {"backend": workers, "model": worker_model, "brief": "worker-v1",
+                          "brief_md5": worker_md5}
     if notes:
         cfg["notes_from"] = os.path.abspath(notes)
     if local:
@@ -150,7 +203,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("run")
-    ap.add_argument("--prompt", default="core-v1")
+    ap.add_argument("--prompt", help="the brief, agent/prompts/NAME.md (default core-v1, or "
+                                      "lead-v1 with --workers)")
     ap.add_argument("--sha", default="HEAD")
     ap.add_argument("--host", default="computah-ct")
     ap.add_argument("--host-root", default="/home/computah/factorio/v1-runs")
@@ -160,12 +214,19 @@ def main(argv=None):
     ap.add_argument("--pw-file")
     ap.add_argument("--script-output")
     ap.add_argument("--notes", help="a NOTES.md to start the run with (the last player's)")
+    ap.add_argument("--workers", choices=("none", "claude"), default="none",
+                    help="claude: the player leads, Claude Code subagents work (2.0)")
+    ap.add_argument("--worker-model", default="inherit",
+                    help="the workers' model: inherit (the lead's), sonnet, opus or a model id")
     a = ap.parse_args(argv)
+    workers = None if a.workers == "none" else a.workers
+    prompt = a.prompt or ("lead-v1" if workers else "core-v1")
     local = None
     if a.local:
         local = {"FK_RCON_PORT": a.rcon_port, "FK_RCON_PW_FILE": a.pw_file,
                  "FK_SCRIPT_OUTPUT": a.script_output}
-    cfg = make(a.run, a.prompt, a.sha, a.host, a.host_root, local, a.player, a.notes)
+    cfg = make(a.run, prompt, a.sha, a.host, a.host_root, local, a.player, a.notes, workers,
+               a.worker_model)
     print(json.dumps(cfg, indent=1))
     return 0
 

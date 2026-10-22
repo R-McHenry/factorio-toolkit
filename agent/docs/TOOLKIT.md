@@ -34,8 +34,9 @@ build uses your force's, as the last build saw it; the report's last line says w
 routed section's first line says whether its machines settled; where they did not, its numbers
 are approximate.
 
-`fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step. Each
-step writes its report to `game\out\<step>.txt`: read the one that matters
+`fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
+build at a time in a run: a second `fk build` waits for the first). Each step writes its report
+to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
 in the source: unchanged rows and routes stay where they are, and a net is routed again when one
 of its ends moves (a chest one tile over, too, or a machine added to it).

@@ -7,6 +7,10 @@ INBOX.md as notes (notes-pending.txt), and the world line (world.txt: the ghosts
 what the network lacks). After the player's next shell command this hook hands them to it as
 additional context, whatever that command's output kept (a `| head` or `| grep` cuts fk's own
 footer, not this): each note once (then kept in notes-sent.txt), the world line when it is new.
+
+2.0 (a lead player and its workers): the notes are the lead's. A tool call inside a worker (the
+hook's input names an ``agent_id``) takes nothing, so they wait for the lead's own next shell
+command, or for the Agent tool's return: the loop runs this hook after both.
 """
 import json
 import os
@@ -54,11 +58,22 @@ def take(run):
     return "\n\n".join(t for t in (notes(d), world(d)) if t)
 
 
+def in_worker(raw):
+    """True when the hook's input is a tool call inside a subagent (a worker): Claude Code names
+    the subagent in ``agent_id``."""
+    try:
+        return bool(json.loads(raw).get("agent_id"))
+    except (ValueError, AttributeError):
+        return False
+
+
 def main():
     try:
-        sys.stdin.read()
+        raw = sys.stdin.read()
     except OSError:
-        pass
+        raw = ""
+    if in_worker(raw):
+        return 0
     text = take(sys.argv[1])
     if text:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",

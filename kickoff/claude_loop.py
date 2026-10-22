@@ -1,7 +1,7 @@
 """The goal loop for a Claude Code player: launch.ps1's loop, with claude instead of dsh.
 
     python C:\\fk-player\\claude_loop.py C:\\fk-player\\runs\\<run> [--hours 24] [--rounds 500]
-           [--turn-cap 120] [--model claude-opus-5-5] [--note TEXT]
+           [--turn-cap 120] [--model claude-opus-5-5] [--note TEXT] [--fresh-at 200000]
 
 One conversation per run: its id is kept in <run>\\claude-session.txt, so starting the loop again
 continues it. Round 1 sends launch.json's first message (plus --note); every later round sends
@@ -29,6 +29,16 @@ reaches, idle robots, the research),
 rewritten when what blocks changes (at most every 2 minutes) or every 10 minutes while something
 does. claude_hook.py, a PostToolUse hook, hands over the notes and the world line when it is new;
 each round's message starts with them too.
+
+2.0 (Rory, 2026-10-21: a lead player plus worker players). With workers (new_run.py --workers
+claude) the player is a lead that hands each design or in-game action to a worker, Claude Code's
+`worker` subagent (<run>\\.claude\\agents\\worker.md), and reads back its short report. The
+workers' tool calls show indented here and in play.log, and each report as "worker done". The
+hook gives the notes to the lead only: after its own shell commands and when a worker returns.
+The conversation still grows over the hours, so when its context passes --fresh-at tokens (0:
+never) the next round asks the player to bring NOTES.md and GOAL.md up to date, and the round
+after starts a fresh conversation from them (the old ids are kept in claude-sessions.txt). The
+rounds that ran on 500-800k tokens of context were slow and cost a few dollars each.
 """
 import argparse
 import atexit
@@ -53,6 +63,19 @@ MIN_ROUND = 60                # seconds: a quicker round waits out the rest befo
 WATCH = 30                    # seconds between two reads of the game
 REMIND = 600                  # seconds: the world line again while something stays blocked
 SETTLE = 120                  # seconds: the world line changes at most this often
+FRESH_AT = 200000             # tokens of context: then a hand-over round and a fresh conversation
+FRESH_MIN = 3                 # rounds a conversation runs at least before it is handed over
+
+#: the round that hands one conversation over to the next (2.0)
+HANDOVER = ("[From the loop] This conversation has grown to about {k}k tokens of context, which "
+            "makes every round slow and costly. The next round starts you a fresh conversation "
+            "that begins from your files, so bring them up to date now: NOTES.md (what works, how "
+            "the base is laid out and what for, what is planned, what to watch for) and GOAL.md "
+            "(what's next, what's blocking, what to check first). Then end your turn.")
+#: the first message of the fresh conversation after a hand-over
+FRESH = ("[From the loop] This is a fresh conversation: the one before grew long. AGENTS.md is "
+         "your brief as before, and NOTES.md and GOAL.md are where you left off, brought up to "
+         "date for this one. Read them, then carry on from where they leave off. GOAL.md says:")
 
 #: one free read of the game: the ghosts per item (with the network's stock and whether the
 #: recipe is locked), the ghosts outside every powered roboport's construction area (the 2005
@@ -180,32 +203,71 @@ def tool_line(name, inp):
         return f"{name.lower()} {short(inp.get('pattern', ''), 120)}"
     if name in ("Agent", "Task"):
         return "agent: " + short(inp.get("description", ""), 120)
+    if name == "SubagentHandback":
+        return "handback: " + short(inp.get("message", ""), 160)
     return f"{name} {short(json.dumps(inp), 160)}"
 
 
+def context_of(usage):
+    """The tokens one API call read: its new input and what came from the prompt cache."""
+    u = usage or {}
+    return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                              "cache_creation_input_tokens"))
+
+
+def _text(body):
+    if isinstance(body, list):
+        return " ".join(x.get("text", "") for x in body if isinstance(x, dict))
+    return str(body or "")
+
+
 def feed(ev, log, state):
-    """One stream-json event: keep the session id and the result, show text and tool calls."""
+    """One stream-json event: keep the session id and the results, show text and tool calls; the
+    player's own context size, and each worker's report (2.0). A worker runs in the background
+    (Claude Code 2.1.299: the Agent tool's result only says it was launched): its report comes
+    in a ``task_notification`` event, and the lead gets it as a new message in the same process,
+    so one turn of the loop can hold several of the player's turns, each with a ``result``."""
     if ev.get("session_id"):
         state["sid"] = ev["session_id"]
     pad = "    " if ev.get("parent_tool_use_id") else ""
     t = ev.get("type")
-    if t == "assistant":
-        for c in ev.get("message", {}).get("content", []):
+    agents = state.setdefault("agents", {})
+    if t == "system" and ev.get("subtype") == "task_notification":
+        what = agents.pop(ev.get("tool_use_id"), None) or ev.get("description") or ""
+        rep = (ev.get("handback_report") or {}).get("text") or ev.get("summary") or ""
+        use = ev.get("usage") or {}
+        log(f"worker {ev.get('status', 'done')} ({short(what, 80)}; "
+            f"{int(use.get('total_tokens') or 0) // 1000}k tokens, {use.get('tool_uses', 0)} tool "
+            f"calls, {(use.get('duration_ms') or 0) / 60000:.0f} min): {short(rep, 800)}")
+    elif t == "assistant":
+        msg = ev.get("message", {})
+        if not pad and context_of(msg.get("usage")):
+            state["context"] = context_of(msg.get("usage"))
+        for c in msg.get("content", []):
             if c.get("type") == "text" and c.get("text", "").strip():
                 log(pad + "> " + short(c["text"], 500))
             elif c.get("type") == "tool_use":
                 state["tools"] += 1
                 log(pad + tool_line(c.get("name", "?"), c.get("input") or {}))
+                if not pad and c.get("name") in ("Agent", "Task"):
+                    agents[c.get("id")] = (c.get("input") or {}).get("description", "")
     elif t == "user":
         content = ev.get("message", {}).get("content", [])
         for c in content if isinstance(content, list) else []:
-            if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("is_error"):
-                body = c.get("content")
-                if isinstance(body, list):
-                    body = " ".join(x.get("text", "") for x in body if isinstance(x, dict))
+            if not (isinstance(c, dict) and c.get("type") == "tool_result"):
+                continue
+            body = _text(c.get("content"))
+            if not pad and c.get("tool_use_id") in agents and not c.get("is_error") \
+                    and not body.startswith("Async agent launched"):
+                # a worker the lead waited for (run_in_background false): its report is here
+                what = agents.pop(c["tool_use_id"])
+                log(f"worker done ({short(what, 80)}): " + short(body, 800))
+            elif c.get("is_error"):
                 log(pad + "  ! " + short(body, 200))
     elif t == "result":
         state["result"] = ev
+        if str(ev.get("result") or "").strip():
+            state.setdefault("reports", []).append(ev["result"])
 
 
 def turn(run, sid, text, model, cap_min, log, events):
@@ -214,7 +276,7 @@ def turn(run, sid, text, model, cap_min, log, events):
            "--permission-mode", "auto", "--strict-mcp-config", "--settings", settings(run)]
     if sid:
         cmd += ["--resume", sid]
-    state = {"sid": sid, "tools": 0, "result": None}
+    state = {"sid": sid, "tools": 0, "result": None, "context": 0, "agents": {}, "reports": []}
     err = open(os.path.join(run, "claude-loop-stderr.log"), "a", encoding="utf-8")
     p = subprocess.Popen(cmd, cwd=run, env=child_env(run), stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=err)
@@ -430,12 +492,13 @@ class Watch(threading.Thread):
 
 
 def settings(folder):
-    """The --settings file: claude_hook.py after every shell command."""
+    """The --settings file: claude_hook.py after every shell command, and when a worker returns
+    (the Agent tool, Task in older Claude Code)."""
     hook = os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude_hook.py")
     cmd = f'python "{hook}" "{folder}"'.replace("\\", "/")
     path = os.path.join(folder, ".loop", "settings.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"hooks": {"PostToolUse": [{"matcher": "Bash|PowerShell", "hooks": [
+        json.dump({"hooks": {"PostToolUse": [{"matcher": "Bash|PowerShell|Agent|Task", "hooks": [
             {"type": "command", "command": cmd, "timeout": 10}]}]}}, f, indent=1)
     return path
 
@@ -461,6 +524,8 @@ def main():
     ap.add_argument("--turn-cap", type=float, default=120, help="minutes")
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--note", default="", help="a paragraph added to the first message")
+    ap.add_argument("--fresh-at", type=int, default=FRESH_AT,
+                    help="tokens of context after which a fresh conversation starts (0: never)")
     a = ap.parse_args()
     run = os.path.abspath(a.run)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -481,8 +546,12 @@ def main():
     n, fails, cut = 0, 0, None
     restarted = bool(sid)  # a loop started again on a conversation: its last turn was cut
     log(f"loop start: {run}, {a.model}, conversation {sid or 'new'}; it stops on a STOP file, "
-        f"{a.rounds} rounds or {a.hours:g} h, and pauses while GOAL.md is empty")
+        f"{a.rounds} rounds or {a.hours:g} h, and pauses while GOAL.md is empty"
+        + (f"; a fresh conversation after {a.fresh_at // 1000}k tokens of context"
+           if a.fresh_at else ""))
     paused = False
+    handing, fresh = False, False     # a hand-over round asked for, and the fresh start after it
+    conv = 0                          # rounds done in this conversation (FRESH_MIN)
     while True:
         goal = open(goal_path, encoding="utf-8").read().strip() if os.path.exists(goal_path) else ""
         why = ("STOP file" if os.path.exists(stop_path) else
@@ -503,10 +572,15 @@ def main():
         if paused:
             log("resumed: GOAL.md has text again")
             paused = False
-        if sid:
+        if sid and handing:
+            text = HANDOVER.format(k=handing // 1000)
+        elif sid:
             text = (f"[GOAL.md, round {n + 1}. This message is the text of GOAL.md in your folder: "
                     f"edit that file to change what it says next time, or empty it to stop "
                     f"playing.]\n\n{goal}")
+        elif fresh:
+            text = f"{FRESH}\n\n{goal}"
+            fresh = False
         else:
             text = first
         if cut == "cap":
@@ -531,6 +605,20 @@ def main():
             with open(sid_file, "w") as f:
                 f.write(sid)
         res, mins = state["result"] or {}, (time.time() - t0) / 60
+        if handing and (cut or (res and not res.get("is_error"))):
+            # the hand-over round is over: the next one starts a fresh conversation
+            for text in state["reports"]:
+                log("turn report: " + short(text, 1500))
+            with open(os.path.join(run, "claude-sessions.txt"), "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now():%Y-%m-%dT%H:%M:%S} {sid} {handing}\n")
+            log(f"=== conversation {sid[:8]} handed over at about {handing // 1000}k tokens; "
+                "the next round starts a fresh one from NOTES.md and GOAL.md")
+            sid, handing, fresh, conv = "", False, True, 0
+            if os.path.exists(sid_file):
+                os.remove(sid_file)
+            if cut != "STOP":
+                cut = None
+                continue
         if cut:
             log(f"=== round {n} cut short ({cut}) after {mins:.0f} min, {state['tools']} tool calls")
             fails = 0
@@ -538,9 +626,13 @@ def main():
         if res and not res.get("is_error"):
             fails = 0
             log(f"=== round {n} done: {mins:.1f} min, {res.get('num_turns')} steps, "
-                f"{state['tools']} tool calls, ${res.get('total_cost_usd') or 0:.2f}")
-            if res.get("result"):
-                log("turn report: " + short(res["result"], 1500))
+                f"{state['tools']} tool calls, ${res.get('total_cost_usd') or 0:.2f}, "
+                f"context {state['context'] // 1000}k tokens")
+            for text in state["reports"]:
+                log("turn report: " + short(text, 1500))
+            conv += 1
+            if a.fresh_at and state["context"] >= a.fresh_at and conv >= FRESH_MIN:
+                handing = state["context"]
             time.sleep(max(0, MIN_ROUND - (time.time() - t0)))
             continue
         msg = short(res.get("result") or res.get("subtype") or
