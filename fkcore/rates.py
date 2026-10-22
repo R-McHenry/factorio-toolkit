@@ -391,6 +391,28 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
     return model
 
 
+def underfed(model, margin=0.05):
+    """[(net, item, can make /s, would take /s)]: a net whose drivers, at what everything else
+    lets them run, make less than its consumers would take (by more than ``margin``), so they run
+    below speed for it. Only where a shortage starts: a net whose drivers an input of theirs holds
+    back is left to that input's own line, so one short ore patch is one line, not one per step
+    down the chain. A bus pool is judged as one net.
+
+    2.0.1 (the first lead run, 2026-10-21): copper was the short plate all run, 40/min from 4
+    drills against the ~75/min red and green asked, and nothing in the design said so; the lead
+    found it from the game's stats."""
+    out = []
+    for ni, st in sorted(model.nets.items()):
+        if model.pools.get(ni, ni) != ni or st.unbounded or st.can_make == INF \
+                or st.would_take <= 0 or st.can_make >= st.would_take * (1.0 - margin):
+            continue
+        drivers = model.ends.get(ni, {}).get("drivers", ())
+        if any((model.binding.get(k) or ("",))[0] == "in" for k in drivers):
+            continue
+        out.append((ni[0], ni[1], st.can_make, st.would_take))
+    return out
+
+
 def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, unbounded):
     """The row of a net a bus pool absorbed: what its own drivers make and its own consumers take
     at the pool's utilizations, its ports passing the balance on. A load's net delivers all its

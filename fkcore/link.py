@@ -276,6 +276,34 @@ rcon.print(n)
 """
 
 
+def lua_unreached(surface, force, points):
+    """Of ``points`` [(x, y)], the indices no powered roboport's construction area covers (a cell
+    that transmits: the roboport has power), as JSON (a free read; the watcher's world line reads
+    the same for the ghosts that stand, ``claude_loop.STATUS_LUA``)."""
+    data = json.dumps([[float(x), float(y)] for x, y in points])
+    return f"""
+local s = game.get_surface({_q(surface)})
+local f = game.forces[{_q(force)}]
+local boxes = {{}}
+for _, r in pairs(s.find_entities_filtered{{type = 'roboport', force = f}}) do
+  local c = r.logistic_cell
+  if c and c.transmitting and c.construction_radius > 0 then
+    local p, d = r.position, c.construction_radius
+    boxes[#boxes + 1] = {{p.x - d, p.y - d, p.x + d, p.y + d}}
+  end
+end
+local out = {{}}
+for i, p in pairs(helpers.json_to_table({_q(data)})) do
+  local ok = false
+  for _, b in pairs(boxes) do
+    if p[1] >= b[1] and p[1] <= b[3] and p[2] >= b[2] and p[2] <= b[4] then ok = true break end
+  end
+  if not ok then out[#out + 1] = i end
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
 def lua_stock_and_ghosts(surface, force, names):
     """For each entity name: the items of it in the force's logistic networks on ``surface`` and
     its ghosts waiting there. {name: [stock, ghosts]} as JSON (a free read; ``fk fresh`` warns

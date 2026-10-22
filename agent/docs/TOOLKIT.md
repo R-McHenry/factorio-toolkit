@@ -55,6 +55,9 @@ Rebuilds keep what stands. The poles and roboports a build laid stay where they 
 new design leaves their spot free, and new ones go only where something new needs them, so power
 and the robot network keep running through a rebuild (`out\cover_power.txt` says how many were
 kept; `cover power --fresh` or `cover robots --fresh` in the build script lays them all anew).
+Switching the pole kind (`cover power --pole small-electric-pole` while medium poles are short)
+keeps the poles of the old kind the last build found standing and lays the new kind only where
+the old one never stood.
 Old poles and roboports the design no longer has stay up until the design's own stand there, and
 the first build after that takes them up.
 
@@ -220,6 +223,9 @@ Checks are report lines, never errors: the build goes on and tells you. Read the
 fixing in the source.
 
 - `UNFED` / `UNCONSUMED`: a machine's input has no net feeding it / its output goes nowhere
+- `UNDERFED` (report_rates): a net's drivers make less than its consumers would take, so they
+  run below speed; it names the net where the shortage starts (a short ore patch, not every step
+  after it) and the `fk plan` line that sizes its drivers
 - `TYPE`: a net names a machine that has no endpoint for the net's items
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
 - `CLOG`: a net of two or more items (sushi), or an unlimited chest fed two or more items by
@@ -277,6 +283,10 @@ fixing in the source.
 - `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
   in the build script joins it to the plant's grid)
+- `UNREACHED` (diff, before the paste): entities the paste lays where no powered roboport's
+  construction area reaches, counting the roboports the paste lays where robots reach: robots
+  never build them. It names power-bridge poles among them, since a roboport powered only through
+  such a bridge never gets its power
 - `NO_ROBOTS`: a logistic chest outside every logistic area of the main robot network (robots
   won't serve it), or entities outside its construction area (robots won't build them). The kit's
   roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`

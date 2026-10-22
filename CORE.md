@@ -107,7 +107,8 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
 - **Checks** (report lines, never gates unless `build.fkb` says `stop_on`): `UNFED`, `UNCONSUMED`,
   `TYPE` (a ref adds no endpoint of the net's items), `SUSHI_SINK` (a sushi net reaches a consumer
   that doesn't take every item on it), `DOUBLE` (an endpoint on two nets), `UNBOUNDED` (a source with
-  no rate), `ASSERT` (a nominal rate assert failed); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
+  no rate), `ASSERT` (a nominal rate assert failed), 2.0.1 `UNDERFED` (a net's drivers make
+  less than its consumers would take, where the shortage starts); [built: connect] `UNROUTED`, `OPEN`, `LEAK`,
   `UG_SIDELOAD` (a belt side-loads onto an underground: lane-dependent, and V1 tracks no lanes);
   [built: cover, floorplan, report_bom] `NO_POWER`, `POWER_SPLIT`, `LOW_STOCK`; [built: cover robots]
   `NO_ROBOTS`; later `BOT_SCIENCE` (a pack made from bot-fed chests); `SHARED_BELT` (the

@@ -171,6 +171,7 @@ def _hands(ctx, o):
 
 
 _FORCE_FILE = "force.json"                           # in out/: the force's hands, by diff
+_STANDING_FILE = "standing.json"                     # in out/: the poles built, by diff (2.0.1)
 
 
 def _force_hands(ctx):
@@ -205,6 +206,44 @@ def _save_hands(ctx, r):
         json.dump({"force": force, "hand": 1 + a, "bulk_hand": 1 + b}, fh)
         fh.write("\n")
     return 1 + a, 1 + b
+
+
+def _save_standing(ctx, rep):
+    """The poles the diff finds built (OK) in ``out/standing.json``, updated over the diff's
+    scope and kept elsewhere: the next build's cover step runs where there is no game link, and
+    keeps a built pole of another kind than its own (2.0.1)."""
+    path = os.path.join(ctx.out, _STANDING_FILE)
+    poles = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            poles = dict(json.load(fh).get("poles") or {})
+    for v in rep.verdicts:
+        if not v.key or not ctx.cat.has_entity(v.name) \
+                or ctx.cat.kind(v.name) != "electric-pole":
+            continue
+        if v.verdict.split()[0] == "OK":
+            poles[v.key] = v.name
+        else:
+            poles.pop(v.key, None)
+    os.makedirs(ctx.out, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"poles": dict(sorted(poles.items()))}, fh, indent=0)
+        fh.write("\n")
+
+
+def _standing(ctx, factory):
+    """The keys (``power/p3``) of ``factory``'s poles the last diff found built, or None when no
+    diff has said (then a pole of another kind is never kept, as before)."""
+    path = os.path.join(ctx.out, _STANDING_FILE)
+    if ctx.surface is None or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            poles = json.load(fh).get("poles") or {}
+    except (OSError, ValueError):
+        return None
+    head = f"{ctx.surface.name}:{factory}/"
+    return {k[len(head):] for k in poles if k.startswith(head)}
 
 
 def _factories(ctx):
@@ -369,6 +408,12 @@ def s_report_rates(ctx, args):
         for text, ok, value, target, op in model.asserts:
             if not ok and not again:
                 checks.append(Check("ASSERT", factory, f"{text}: {value * 60:.3f}/min"))
+        for net, item, can, want in ([] if again else rates.underfed(model)):
+            checks.append(Check(
+                "UNDERFED", f"{factory} net {net}",
+                f"{item}: its drivers make {can * 60:.1f}/min at most, its consumers would take "
+                f"{want * 60:.1f}/min, so they run at about {can / want:.0%} for it; "
+                f"`fk plan {item} {want * 60:.0f}/min` sizes the drivers"))
         for key, m in flat.machines.items():
             for item, r in m.makes.items():
                 made[item] = made.get(item, 0.0) + r * model.util[key]
@@ -633,9 +678,11 @@ def s_cover_power(ctx, args):
     for factory, lay in list(ctx.layouts.items()):
         keep_out = _frame_blocked(ctx, factory, lay.size)
         pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
+        standing = _standing(ctx, factory)
         _poles, rep = cover.cover_power(lay, ctx.cat, pole=o["pole"], keep_out=keep_out,
-                                        pinned=pinned)
-        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"], keep_out=keep_out, pinned=pinned)
+                                        pinned=pinned, standing=standing)
+        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"], keep_out=keep_out, pinned=pinned,
+                                standing=standing)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}"
                      + (f"; {len(keep_out)} terrain tiles kept out" if ctx.ground is not None
@@ -1051,6 +1098,10 @@ def s_diff(ctx, args):
         _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
         pass
+    try:
+        _save_standing(ctx, rep)       # for the next build's cover step, on the laptop
+    except (OSError, ValueError):
+        pass
     ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "GHOST"})
     if ghosts:
         from . import supply
@@ -1066,6 +1117,11 @@ def s_diff(ctx, args):
         lines.append(f"hand: {len(hand)} placed by hand that the apply would replace or remove:")
         lines += [f"  {line}" for line in hand]
         checks += [Check("HAND", ctx.surface.name, line) for line in hand]
+    if ctx.surface.mode != "lab":
+        far = _unreached(ctx, r, rep)
+        if far:
+            lines.append(f"  {far.msg}")
+            checks.append(far)
     pts = applymod.rip_points(rep)
     if pts and ctx.surface.mode != "lab":
         # 1.1: what the apply will take up, and how long the robots need for it (before it starts)
@@ -1080,6 +1136,57 @@ def s_diff(ctx, args):
             if warn:
                 checks.append(Check("RIP", ctx.surface.name, warn))
     return lines, checks
+
+
+#: the diff's verdicts the paste lays an entity for
+_TO_LAY = ("MISSING", "GHOST", "WRONG")
+
+
+def _unreached(ctx, r, rep, batch=80):
+    """An ``UNREACHED`` check for what the paste would lay where no powered roboport's
+    construction area reaches, or None: robots never build it. 2.0.1 (the first lead run's
+    plates worker): the coal site's power bridge ran through ground no powered roboport reached,
+    and the relay roboport that would have reached it was powered only through that bridge: its
+    poles stood as ghosts for ever. The world line says the same after the paste; this says it
+    before."""
+    from . import link
+    lay = [v for v in rep.verdicts if v.verdict.split()[0] in _TO_LAY]
+    if not lay:
+        return None
+    far = []
+    try:
+        for i in range(0, len(lay), batch):
+            part = lay[i:i + batch]
+            got = json.loads(r.lua(link.lua_unreached(ctx.surface.name, _force(ctx),
+                                                      [(v.x, v.y) for v in part])).strip() or "[]")
+            far += [part[int(k) - 1] for k in (got if isinstance(got, list) else [])]
+    except (ValueError, OSError, link.LinkError):
+        return None
+    # a roboport the paste lays where robots reach covers its own area once built (its poles
+    # come with it), and so on outward; one that stands without power covers nothing (the
+    # deadlock), and the read above already left it out
+    reach = []
+    grew = True
+    while grew and far:
+        grew = False
+        for v in [v for v in lay if v not in far and ctx.cat.kind(v.name) == "roboport"
+                  and (v.x, v.y) not in {(x, y) for x, y, _r in reach}]:
+            row = ctx.cat.entity(v.name) if ctx.cat.has_entity(v.name) else {}
+            reach.append((v.x, v.y, float(row.get("construction_radius") or 0)))
+            grew = True
+        far = [v for v in far if not any(abs(v.x - x) <= d and abs(v.y - y) <= d
+                                         for x, y, d in reach)]
+    if not far:
+        return None
+    bridge = [v for v in far if (v.key or "").split(":", 1)[-1].startswith("bridge/")]
+    shown = ", ".join(f"{v.name} {fkp.fmt(v.x)},{fkp.fmt(v.y)}" for v in far[:4])
+    msg = (f"{len(far)} of the {len(lay)} entities the paste lays stand where no powered "
+           f"roboport's construction area reaches ({shown}{' ...' if len(far) > 4 else ''}): "
+           "robots never build them until a powered roboport reaches them")
+    if bridge:
+        msg += (f"; {len(bridge)} of them are power-bridge poles, and a roboport powered only "
+                "through such a bridge never gets its power")
+    return Check("UNREACHED", ctx.surface.name, msg)
 
 
 def _force(ctx):

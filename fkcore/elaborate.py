@@ -492,8 +492,9 @@ def _group(rows):
 
 #: chests that put what reaches them into the logistic network
 _STORES = ("provider", "storage")
-#: the 1.1 check lines about limited production (tests of other things leave them out)
-ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT")
+#: the 1.1 check lines about limited production, and 2.0.1's UNDERFED (a rate fact about the
+#: design): advice that tests of other things, and fk stage check's list, leave out
+ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT", "UNDERFED")
 #: chests that take any item that reaches them
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
 

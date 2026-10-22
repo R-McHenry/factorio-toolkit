@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -199,6 +200,56 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(flow._machines_taken_up(ctx), [])
         ctx.last_diff = Rep
         self.assertEqual(flow._machines_taken_up(ctx), ["burner-mining-drill", "stone-furnace"])
+
+    def test_what_no_powered_roboport_reaches_is_said_before_the_paste(self):
+        # 2.0.1 (the first lead run's plates worker): a power bridge through ground no powered
+        # roboport reached, and the relay roboport that would have reached it was powered only
+        # through that bridge: its poles stood as ghosts for ever
+        from fkcore.sense import Verdict
+
+        class Rep:
+            verdicts = [Verdict("GHOST", "medium-electric-pole", 63.5, 34.5, "nauvis:bridge/p0"),
+                        Verdict("MISSING", "roboport", 100, 100, "nauvis:out/robots/r0"),
+                        Verdict("MISSING", "assembling-machine-1", 130.5, 100.5, "nauvis:out/a/m0"),
+                        Verdict("OK", "roboport", 57, 52, "nauvis:relay/r0")]
+
+        class Link:
+            def __init__(self, far):
+                self.far = far
+
+            def lua(self, text):
+                return json.dumps(self.far)     # the indices the live read finds unreached
+
+        ctx = flow.Ctx(self.dir, self.script, CAT, os.path.join(self.dir, "out"))
+        ctx.surface = type("S", (), {"name": "nauvis", "mode": "play", "force": "player"})()
+        # the pole and the assembler stand out of reach now; the new roboport is in reach, and
+        # its own area (55 tiles) will cover the assembler once it is built: only the pole stays
+        c = flow._unreached(ctx, Link([1, 3]), Rep)
+        self.assertEqual(c.code, "UNREACHED")
+        self.assertIn("1 of the 3 entities the paste lays", c.msg)
+        self.assertIn("medium-electric-pole 63.5,34.5", c.msg)
+        self.assertIn("1 of them are power-bridge poles", c.msg)
+        self.assertIsNone(flow._unreached(ctx, Link([]), Rep))
+
+    def test_the_diff_records_the_built_poles_for_the_cover_step(self):
+        # 2.0.1: the cover step runs where there is no game link; the diff says which poles stand
+        from fkcore.sense import Verdict
+        ctx = flow.Ctx(self.dir, self.script, CAT, os.path.join(self.dir, "out"))
+        ctx.surface = type("S", (), {"name": "nauvis"})()
+        self.assertIsNone(flow._standing(ctx, "main"))           # no diff yet: as before
+
+        class Rep:
+            verdicts = [Verdict("OK", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0"),
+                        Verdict("GHOST", "medium-electric-pole", 9.5, 0.5, "nauvis:main/power/p1"),
+                        Verdict("OK", "small-electric-pole", 1.5, 0.5, "nauvis:coal/power/p0"),
+                        Verdict("OK", "assembling-machine-1", 1.5, 1.5, "nauvis:main/a/m0")]
+        flow._save_standing(ctx, Rep)
+        self.assertEqual(flow._standing(ctx, "main"), {"power/p0"})
+        self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})
+        Rep.verdicts = [Verdict("MISSING", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0")]
+        flow._save_standing(ctx, Rep)                            # gone since: no longer standing
+        self.assertEqual(flow._standing(ctx, "main"), set())
+        self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})   # outside the scope: kept
 
     def test_the_kickoff_template_runs_through_the_routed_rates(self):
         # every new run's script (tier, then report_rates again) on its plant, a Literal with

@@ -123,6 +123,24 @@ class CoverTest(unittest.TestCase):
         self.assertTrue(all(int(p.key.rsplit("p", 1)[1]) >= len(first) for p in new))
         self.assertIn(f"{len(first)} kept where they stand", rep.summary())
 
+    def test_switching_the_pole_kind_keeps_the_built_ones(self):
+        # 2.0.1 (the first lead run: medium poles SHORT before steel; switching to small dropped
+        # every medium pole, the built ones too): a pinned pole of the other kind stays when the
+        # last diff found it built, and the new kind goes only where it never stood
+        lay = L(ROW, "12x7")
+        first, _rep = cover_power(lay, CAT)                       # medium poles
+        built = {first[0].key}
+        poles, rep = cover_power(lay, CAT, pole="small-electric-pole", pinned=first,
+                                 standing=built)
+        by = {p.key: p for p in poles}
+        self.assertEqual(by[first[0].key].name, MEDIUM)            # built: it stays, medium
+        self.assertEqual((by[first[0].key].x, by[first[0].key].y), (first[0].x, first[0].y))
+        self.assertTrue(all(p.name == "small-electric-pole" for p in poles if p.key not in built))
+        self.assertEqual(audit(lay, poles), ([], 1))
+        # without the diff's word, as before: none of the other kind stays
+        poles, _rep = cover_power(lay, CAT, pole="small-electric-pole", pinned=first)
+        self.assertTrue(all(p.name == "small-electric-pole" for p in poles))
+
     def test_a_pinned_pole_under_a_new_entity_goes(self):
         lay = L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel", "6x6")
         first, _rep = cover_power(lay, CAT)                       # power/p0 at 3.5,0.5

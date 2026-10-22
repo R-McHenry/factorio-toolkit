@@ -63,6 +63,28 @@ class RuleTest(unittest.TestCase):
         self.assertAlmostEqual(util(m, "b"), 0.5)
         self.assertEqual(rates._why(m, "a/m0"), "iron-plate short on iron")
 
+    def test_underfed_names_where_a_shortage_starts(self):
+        # 2.0.1 (the first lead run: copper short all run, and nothing in the design said so)
+        m = model_of(self.SHORT)
+        self.assertEqual(rates.underfed(m), [("iron", "iron-plate", 1.5, 3.0)])
+        # a short ore patch down a chain is one line, at the ore: the furnaces it starves don't
+        # repeat it for the plates
+        chain = model_of("""
+            mine = MinerRow<n=1, resource=copper-ore>
+            fuel = Chest<requester, item=coal, rate=5/s>
+            smelt = SmelterRow<n=8, recipe=copper-plate, fuel=coal>
+            cable = AsmRow<n=10, recipe=copper-cable>
+            box = Chest<provider>
+            net ore: mine -> smelt
+            net coal: fuel -> smelt
+            net plates: smelt -> cable
+            net wire: cable -> box
+        """)
+        short = rates.underfed(chain)
+        self.assertEqual([(n, i) for n, i, _c, _w in short], [("ore", "copper-ore")])
+        # enough, or within 5%: nothing
+        self.assertEqual(rates.underfed(model_of(self.SHORT.replace("rate=1.5/s", "rate=3/s"))), [])
+
     def test_a_consumer_limited_elsewhere_leaves_the_rest(self):
         text = self.SHORT.replace("net pipes: a, b -> sink", """
             cap = Chest<storage, rate=0.2/s>
