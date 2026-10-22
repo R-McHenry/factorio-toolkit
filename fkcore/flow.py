@@ -486,18 +486,23 @@ def s_place(ctx, args):
 
 
 def _pinned_routes(flat, new, prev, cat):
-    """Carry over the committed routes of nets whose ends did not move (route --only stale):
-    -> (layout, nets kept, {net: why it is routed again}). A net is routed again when anything
-    its route is laid to moved (``route.NetJob.signature``: belt ends, and the machines it
-    inserts into or picks from), or when the new layout takes one of its tiles."""
+    """The committed routes the router may keep (route --only stale): -> ({net: its committed
+    carriers}, {net: why it is routed again}). A net is routed again when an end its route is
+    laid to moved (``route.NetJob.moved_ends``: a belt end, or a machine it inserts into or
+    picks from), when the new layout takes one of its tiles, or (a fluid net) when its ends
+    changed at all. Every other committed route goes to the router, which keeps it as it stands,
+    patches it for the ends added and dropped, or routes the net again (``route._standing``).
+
+    2.0 (Rory, 2026-10-21): "Pin what stands and make patch changes rather than regenerating
+    the base": a consumer added to a net no longer re-lays the whole net."""
     if prev is None:
-        return new, [], {}
+        return {}, {}
     old = route.jobs(flat, prev, cat) if prev.insts else {}
     now = route.jobs(flat, new, cat)
     taken = set()
     for e in new.entities.values():
         taken |= fkp.tiles_of(cat, e)
-    kept, again = [], {}
+    pinned, again = {}, {}
     by_net = {}
     for e in prev.entities.values():
         if e.owner.startswith("~"):
@@ -505,10 +510,12 @@ def _pinned_routes(flat, new, prev, cat):
     for net, ents in sorted(by_net.items()):
         if net not in now:
             continue
-        if net not in old or old[net].signature() != now[net].signature():
-            moved = now[net].moved(old[net]) if net in old else []
-            again[net] = (f"its ends moved since the committed .fkp ({', '.join(moved)})" if moved
-                          else "its ends changed since the committed .fkp")
+        moved = now[net].moved_ends(old[net]) if net in old else []
+        if moved:
+            again[net] = f"its ends moved since the committed .fkp ({', '.join(moved)})"
+            continue
+        if net not in old or (now[net].fluid and old[net].signature() != now[net].signature()):
+            again[net] = "its ends changed since the committed .fkp"
             continue
         tiles = set()
         for e in ents:
@@ -517,10 +524,8 @@ def _pinned_routes(flat, new, prev, cat):
             again[net] = "the new layout takes some of its tiles"
             continue
         taken |= tiles
-        for e in ents:
-            new.add(fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
-        kept.append(net)
-    return new, kept, again
+        pinned[net] = [fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)) for e in ents]
+    return pinned, again
 
 
 def _one_inserter(ctx, factory, flat, lay):
@@ -552,19 +557,21 @@ def s_route(ctx, args):
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         flat = ctx.flats[factory]
-        pinned, again = [], {}
+        pinned, again = {}, {}
         if o["only"] == "stale":
-            lay, pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
+            pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
-                               hand=o["hand"])
+                               hand=o["hand"], patch=pinned)
+        again.update(r.again)
         ctx.layouts[factory] = r.layout
-        lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept "
-                     f"({len(pinned)} pinned from the committed .fkp), {len(r.failed)} failed, "
+        lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept"
+                     + (f", {len(r.patched)} patched" if r.patched else "")
+                     + f" ({len(pinned)} pinned from the committed .fkp), {len(r.failed)} failed, "
                      f"{r.passes} pass{'es' if r.passes != 1 else ''}"
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
                         else ""))
-        lines += [f"  stale     {n}: {why}; routed again" for n, why in sorted(again.items())]
+        lines += [f"  stale     {n}: routed again: {why}" for n, why in sorted(again.items())]
         lines += [f"  {l}" for l in r.lines]
         lines += _one_inserter(ctx, factory, flat, r.layout)
         checks += [Check("UNROUTED", f"{factory} net {n}", why) for n, why in r.failed.items()]

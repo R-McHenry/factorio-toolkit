@@ -16,6 +16,7 @@ gate, and the briefs stay short.
 | circuits and inserter limits in the source | its session waits to be started |
 | the lead and worker player harness, Claude workers | in |
 | `CLOG` goes in two ways only | in |
+| route patching: a net with a new end keeps its route | in |
 
 Buses (thick buses, the main bus, multi-lane nets) are a core feature of their own: release 2.1
 (Rory, 2026-10-21). What of them already landed stays, the Bus template of 1.6 as it is; no new
@@ -87,6 +88,49 @@ what its belt takes), and so is 1.7's for a net into chests that take any item (
 the belt). A products belt into one chest draws `CLOG` again, with `UNLIMITED` or `SUSHI_LIMIT`
 beside it as in 1.7.
 
+## Route patching: a net with a new end keeps its route
+
+Rory (2026-10-21): "Pin what stands and make patch changes rather than regenerating the base ...
+routing a new section into the old one, even as a bit of spaghetti, beats ripping everything
+up." 1.7 kept the poles and roboports; 2.0 keeps the routes. Before, a net with one consumer added
+was routed again as a whole, and the first lead run's players re-laid iron, coal and plates at
+once: iron stood for 20 minutes.
+
+- **Kept, patched or routed again.** `route --only stale` hands the router the committed route of
+  every net none of whose ends moved (`NetJob.moved_ends`: a belt end on another tile, or a
+  machine on other tiles; an end added or dropped is no move). `fkcore.connect` judges each one
+  against the netlist as it is now. A route that joins every driver to every consumer, leaks
+  nowhere and has no carrier that serves no end stands as it is. Any other keeps what still
+  serves, takes up what serves no end any more (a dropped end's branch), and gets one branch per
+  new end from the router's own search (`steiner`), on the router's ground:
+  - a new consumer, off where every standing driver reaches: a dead-end belt run on, a splitter
+    in place of a straight belt, or an inserter straight off a belt (or off a driver machine);
+  - a new driver, into where it reaches every consumer: side-loaded onto a belt (never a curve,
+    which a second input would straighten), into the back of a belt nothing feeds, or an
+    inserter onto a belt.
+
+  The judge checks the patch too: every pair joined, no LEAK, every tunnel paired. `out\route.txt`
+  says `patched   iron: 1 -> 5, gears2.in1: a splitter in place of ~iron/b39, 6 belts, 4
+  underground ends; 54 of 55 carriers kept`, or, when no branch fits or the judge refuses it,
+  `stale     p: routed again: <why>`, and the net is laid anew as before. Fluid nets are kept or
+  routed again, never patched.
+- **The net's ends decide, not its name.** The first lead run changed `net packs: X -> lab` to
+  `X -> px` and kept the name: the old route stood, the build said OK, and the long-handed
+  inserter still fed the lab (`full_output` on X). The pinning compared where the route's ends
+  stand, read from the new netlist on both layouts, so a sink that changed in place looked the
+  same. Now the judge reads the committed route: `stale     packs: routed again: its committed
+  route would LEAK: ~packs/i0 drops into lab/m0, which is not a consumer of packs`.
+- **Numbers.** Redgreen with a gear row added (`gears2`: a consumer of iron and a driver of
+  gear): 10 nets kept, 2 patched. Iron keeps 54 of its 55 carriers (one belt became the
+  splitter), gear all 69, with the new row's belt (41 belts, 8 underground ends) side-loaded onto
+  its trunk; 12 of 12 nets connected, no LEAK. Before, both nets were laid again, and the new
+  gear route had 146 carriers, 43 of them where the old ones stood. An unchanged rebuild keeps
+  every route in every game in `games\` (no net is patched for nothing).
+- Tests: `tests\test_route.py` `PatchTest` (an assembler added keeps all 19 carriers of its net;
+  a dropped end's branch goes; a patch that can't be laid falls back to the full route), and
+  `tests\test_flow.py` (redgreen with a row added; the same-name sink change). TOOLKIT.md,
+  "Rebuilds keep what stands", says so.
+
 ## STRATEGY.md and the versions
 
 - `docs\STRATEGY.md` is Rory's revised guide, as is: no run history, pace figures computed from
@@ -118,6 +162,4 @@ beside it as in 1.7.
 
 - Lanes, throughput and side-loading smelter arrays; circuits in the source (their sessions wait
   to be started).
-- Route patching, a named feature: a net whose ends change is still routed again as a whole (its
-  session waits to be started).
 - DeepSeek workers; daisy-chained labs and turrets.

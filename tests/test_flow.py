@@ -246,11 +246,96 @@ class FlowTest(unittest.TestCase):
         with open(os.path.join(small, "t.fk"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(src)
         route_txt, checks_txt = build()
-        self.assertIn("stale     p: its ends moved since the committed .fkp (dst.in1); routed "
-                      "again", route_txt)
+        self.assertIn("stale     p: routed again: its ends moved since the committed .fkp "
+                      "(dst.in1)", route_txt)
         self.assertIn("routed    p:", route_txt)
         self.assertNotIn("UNROUTED", checks_txt)
         self.assertIn("1 nets: 1 connected", checks_txt)
+
+    def test_a_row_added_is_patched_into_the_routes_that_stand(self):
+        # 2.0 (Rory, 2026-10-21): "routing a new section into the old one, even as a bit of
+        # spaghetti, beats ripping everything up". Before, iron and gear were laid again whole
+        # (gear: 43 of its 69 belts stood where they were, 146 laid)
+        def routes():
+            lay = fkp.load(os.path.join(self.dir, "main.fkp"))
+            out = {}
+            for e in lay.entities.values():
+                if e.owner.startswith("~"):
+                    out.setdefault(e.owner[1:], set()).add((e.name, e.x, e.y, e.dir))
+            return out
+
+        self.build()
+        first = routes()
+        src = (self.read("main.fk")
+               .replace("labs  = LabRow<n=10>", "gears2 = AsmRow<n=2, recipe=iron-gear-wheel> "
+                                                "@(60, 34)\nlabs  = LabRow<n=10>")
+               .replace("iron_smelt -> gears, circ", "iron_smelt -> gears, gears2, circ")
+               .replace("net gear:   gears -> red", "net gear:   gears, gears2 -> red"))
+        with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(src)
+        code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        route_txt = self.read("out/route.txt")
+        self.assertIn("main: 0 routed, 10 kept, 2 patched (12 pinned from the committed .fkp)",
+                      route_txt)
+        # a new consumer: a splitter in place of one straight iron belt, a branch from it
+        self.assertRegex(route_txt, r"patched   iron: 1 -> 5, gears2\.in1: a splitter in place of "
+                                    r"~iron/b\d+, \d+ belts.*; 54 of 55 carriers kept\n")
+        # a new driver: its belt side-loads onto the gear belt before its first split
+        self.assertRegex(route_txt, r"patched   gear: 2 -> 3, gears2\.out: \d+ belts.*, "
+                                    r"side-loaded onto ~gear/b\d+; 69 of 69 carriers kept\n")
+        self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 LEAK",
+                      self.read("out/report_checks.txt"))
+        now = routes()
+        self.assertEqual({n: len(first[n] & now[n]) for n in first},
+                         {n: len(first[n]) - (n == "iron") for n in first})
+
+    def test_a_net_whose_sink_changed_is_routed_again(self):
+        # the first lead run (green worker, 22:15): `net packs: X -> lab` became `X -> px` and
+        # kept its name; the route stood as it was, the build said OK, the inserter fed the lab
+        small = os.path.join(self.dir, "shop")
+        os.makedirs(small)
+        shop = ("rx  = Chest<requester, item=\"copper-plate,iron-gear-wheel\", rate=0.1/s> "
+                "@(0, 1)\n"
+                "X   = Assembler<recipe=automation-science-pack> @(2, 0)\n"
+                "px  = Chest<provider, limit=4>                  @(6, 1)\n"
+                "lab = Lab                                       @(8, 0)\n"
+                "net xin:  rx -> X\n")
+        files = {
+            "shop.fk": shop + "net packs: X -> lab\n",
+            "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+                              "place shop = shop plot 0,0 20x8\n",
+            "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
+                                "place --keep pinned\nroute --only stale\nfloorplan\n"
+                                "report_checks\nwrite_layout\n"}
+        for name, text in files.items():
+            with open(os.path.join(small, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+
+        def build():
+            code, ctx = flow.run(os.path.join(small, "nauvis.build.fkb"), cat=CAT,
+                                 echo=lambda _line: None)
+            self.assertEqual(code, 0, ctx.log)
+            with open(os.path.join(small, "out", "route.txt"), encoding="utf-8") as fh:
+                route_txt = fh.read()
+            with open(os.path.join(small, "out", "report_checks.txt"), encoding="utf-8") as fh:
+                return route_txt, fh.read()
+
+        build()
+        route_txt, _checks = build()
+        self.assertIn("kept      packs: its carriers are already laid (pinned)", route_txt)
+        with open(os.path.join(small, "shop.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(shop + "net packs: X -> px\n")
+        route_txt, checks_txt = build()
+        self.assertIn("stale     packs: routed again: its committed route would LEAK: ~packs/i0 "
+                      "drops into lab/m0, which is not a consumer of packs", route_txt)
+        self.assertIn("routed    packs: 1 -> 1, 1 inserter (direct insertion)", route_txt)
+        self.assertIn("kept      xin: its carriers are already laid (pinned)", route_txt)
+        self.assertIn("2 nets: 2 connected, 0 open, 0 unrouted; 0 LEAK", checks_txt)
+        lay = fkp.load(os.path.join(small, "shop.fkp"))
+        g = connect.graph(lay, CAT)
+        self.assertEqual([k for k, _via in g.pred.get("lab/m0", ())], [])  # nothing feeds the lab
+        self.assertEqual([k for k, _via in g.pred.get("px/c0", ())], ["~packs/i0"])
 
     def test_a_malformed_script_is_refused(self):
         with open(self.script, "a", encoding="utf-8") as fh:
