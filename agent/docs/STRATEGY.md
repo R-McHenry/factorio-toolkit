@@ -95,13 +95,13 @@ implies, roughly one and a half to two times.
 - **Inputs and output:** one iron net and one copper net in. Feed them by belt from the mall's own
   furnaces where you can, since requester chests are scarce. Out goes one products net, a sushi
   belt, into one provider chest with no slot limit. The per-item limits sit at the makers (inserter
-  conditions on each product's output).
+  conditions on each product's output: `keep=N` on each maker, LANGUAGE.md "Circuits").
 - **Fast inserters on mall machines.**
 - **A one-off crafter suits rare items.** Switch it off when it has made what you need.
 - **The belt mall is how the early friction ends.** Early one-off crafters are fiddly by design, and
   the way out is a belt-based mall, not better one-off crafters. Before logistic chests unlock you
   can only run a few one-offs anyway. When a crafter switches recipes, circuits in the game stop its
-  inserters from carrying the wrong items, not a script.
+  inserters from carrying the wrong items, not a script (`guard` on the crafter).
 
 ## Growing
 

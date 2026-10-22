@@ -8,10 +8,10 @@
 #
 # A maker whose product also feeds a neighbour stays on that link (a machine is on one net per item
 # and direction), so the products belt gets its pipes and yellow belts from makers of their own
-# (pipe, yb3). The products belt is sushi, so the build says CLOG: it runs while each product is
-# taken about as fast as it is made. The chest has no limit=: when a mixed belt's chest is full the
-# whole belt stops, so a slot limit only brings that sooner (SUSHI_LIMIT). What keeps it from
-# filling is a limit at each maker (UNLIMITED says so); with those in, `net products limited:`.
+# (pipe, yb3). The products belt is sushi. The chest has no limit=: when a mixed belt's chest is
+# full the whole belt stops, so a slot limit only brings that sooner (SUSHI_LIMIT). What keeps it
+# from filling is the limit at each maker (2.0): keep=N, the logistic network keeps N of that
+# product, and its maker's inserter waits; with those in, `net products limited:` quiets CLOG.
 #
 # In a base the plates come from your smelting or a bus tap, not from these requesters: name your
 # smelter row (or the tap) as the driver of `fe` and `cu`, and the router brings that belt to the
@@ -20,30 +20,30 @@
 # row A at y 2: belts and undergrounds, pipes and pipes-to-ground, splitters
 ga     = Assembler<recipe=iron-gear-wheel>        @(2, 2)
 yb     = Assembler<recipe=transport-belt>         @(6, 2)
-yu     = Assembler<recipe=underground-belt>       @(10, 2)
+yu     = Assembler<recipe=underground-belt, keep=50> @(10, 2)
 gx     = Assembler<recipe=iron-gear-wheel>        @(13, 2)
-yb3    = Assembler<recipe=transport-belt>         @(17, 2)
-pipe   = Assembler<recipe=pipe>                   @(20, 2)
+yb3    = Assembler<recipe=transport-belt, keep=200> @(17, 2)
+pipe   = Assembler<recipe=pipe, keep=100>         @(20, 2)
 pipe2  = Assembler<recipe=pipe>                   @(23, 2)
-ptg    = Assembler<recipe=pipe-to-ground>         @(27, 2)
+ptg    = Assembler<recipe=pipe-to-ground, keep=50> @(27, 2)
 gs     = Assembler<recipe=iron-gear-wheel>        @(30, 2)
 yb2    = Assembler<recipe=transport-belt>         @(34, 2)
-ys     = Assembler<recipe=splitter>               @(38, 2)
+ys     = Assembler<recipe=splitter, keep=20>      @(38, 2)
 cs     = Assembler<recipe=electronic-circuit>     @(42, 2)
 ks     = Assembler<recipe=copper-cable>           @(46, 2)
 
 # row B at y 9: inserters, assemblers, drills; each circuit maker between its cable maker and the
 # machine it feeds
 gc     = Assembler<recipe=iron-gear-wheel>        @(2, 9)
-ins    = Assembler<recipe=inserter>               @(6, 9)
+ins    = Assembler<recipe=inserter, keep=100>     @(6, 9)
 cb     = Assembler<recipe=electronic-circuit>     @(10, 9)
 kb     = Assembler<recipe=copper-cable>           @(14, 9)
 gd     = Assembler<recipe=iron-gear-wheel>        @(17, 9)
-asm    = Assembler<recipe=assembling-machine-1>   @(21, 9)
+asm    = Assembler<recipe=assembling-machine-1, keep=20> @(21, 9)
 cc     = Assembler<recipe=electronic-circuit>     @(25, 9)
 kc     = Assembler<recipe=copper-cable>           @(29, 9)
 ge     = Assembler<recipe=iron-gear-wheel>        @(32, 9)
-drill  = Assembler<recipe=electric-mining-drill>  @(36, 9)
+drill  = Assembler<recipe=electric-mining-drill, keep=20> @(36, 9)
 cd     = Assembler<recipe=electronic-circuit>     @(40, 9)
 kd     = Assembler<recipe=copper-cable>           @(44, 9)
 
@@ -56,7 +56,7 @@ cu     = Chest<requester, item=copper-plate, rate=2/s>   @(49, 13)
 
 net fe: fe -> ga, yb, yu, gx, yb3, pipe, pipe2, ptg, gs, yb2, ys, cs, gc, ins, cb, gd, asm, cc, ge, drill, cd
 net cu: cu -> ks, kb, kc, kd
-net products: yu, yb3, pipe, ptg, ys, ins, asm, drill -> box
+net products limited: yu, yb3, pipe, ptg, ys, ins, asm, drill -> box
 net gao:  ga -> yb
 net ybo:  yb -> yu
 net gxo:  gx -> yb3

@@ -73,7 +73,8 @@ class PlantTest(unittest.TestCase):
     def test_it_builds_plant_w3_entity_for_entity_and_wire_for_wire(self):
         ctx = self.build()
         self.assertEqual([(s, str(c)) for s, c in ctx.checks], [])
-        self.assertIn("4 kept (4 pinned from the committed .fkp)", ctx.log[3])
+        route_line, = [line for line in ctx.log if "] route " in line]
+        self.assertIn("4 kept (4 pinned from the committed .fkp)", route_line)
         lay = fkp.load(os.path.join(self.dir, "plant.fkp"))
         bp = decode(codec.fkp_to_blueprint(lay, CAT))
         self.assertEqual(len(bp["entities"]), 28)

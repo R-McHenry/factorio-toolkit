@@ -171,11 +171,17 @@ On paper: 20 nets, all routed, 17 of them single inserters; 152 belts, 18 underg
 splitters bring the iron and copper in and the products out. It uses 1 provider chest where one
 chest per product took 8: with the two plate requesters, 3 logistic chests instead of 11, and in a
 base whose plates come by belt from a smelter row or a bus tap, only the 1. The products belt is
-sushi, so the build says `CLOG`: it runs while each product is taken about as fast as it is made.
-The chest has no limit: when a mixed belt's chest is full the whole belt stops, so a slot limit
-only brings that sooner (`SUSHI_LIMIT`). What keeps it from filling is a limit at each maker
-(`UNLIMITED` says so); with those in the design, `net products limited:` says it. More products:
-another pair of rows below, the same way.
+sushi. The chest has no limit: when a mixed belt's chest is full the whole belt stops, so a slot
+limit only brings that sooner (`SUSHI_LIMIT`). What keeps it from filling is the limit at each
+maker: `ins = Assembler<recipe=inserter, keep=100>` puts a logistic condition on the inserter that
+takes its product onto the products belt, so it waits while the network holds 100 inserters. With
+every maker on the net limited, `net products limited:` quiets `CLOG`. More products: another pair
+of rows below, the same way.
+
+A one-off crafter that should stop at N: `fill=N` (its inserter into the chest waits while the
+chest holds N, then the machine stops), and `guard` if you switch its recipe (its input inserters
+take only what the recipe takes). A wire at full length is the starter reactor's fuel saver in
+`LANGUAGE.md` ("Circuits"): a red wire from the reactor's temperature to its fuel inserter.
 
 ## bus4.fk: Rory's 4-belt bus, a river of iron (54x25)
 

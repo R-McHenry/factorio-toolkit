@@ -51,6 +51,14 @@ one tile over, one more net into what stands. The design the next build keeps to
 last full build wrote (`write_layout`, just before the paste); `fk build --to diff` and `--to
 report_checks` write nothing, so try changes with them freely.
 
+Circuits come from the source (`LANGUAGE.md`, "Circuits"): the limits at the makers (`keep=`,
+`fill=`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
+before the floorplan (`out\floorplan.txt`, the `circuits` lines, says what each one set), and the
+.fkp shows them on the entity lines (`if=`, `logistic=`, `read=`, `filter=`, `signals=`) and as
+`wire` / `w` lines. Change a limit and the next build lays the inserters it touches fresh, so the
+game has the new one (`out\apply.txt`: "with new circuit settings"); no script sets them, and a
+rebuild never loses them.
+
 A build also takes back what it built before and your design no longer has: a row you replaced,
 the old ground of a plot you moved or shrank, a factory you emptied, its unbuilt ghosts too. The
 toolkit remembers what it pasted (`out\own\nauvis.json`), so this holds whatever `watch` says.
@@ -158,6 +166,15 @@ fixing in the source.
   of many items works best unlimited, with the limit at each maker
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
+- `LIMIT`: a `keep=` or `fill=` that limits nothing (no inserter takes the product into a chest,
+  or `fill=` on a maker whose output goes onto a belt: there is no chest to count)
+- `GUARD`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)
+- `SIGNAL` / `WIRE`: a condition reads a signal nothing on its wire makes, or a name that is no
+  signal / a wire nothing drives or reads
+- `WIRE_REACH` / `WIRE_LEAK`: two entities of a wire further apart than a wire reaches (9 tiles)
+  / two wires of one colour on one entity, so their signals add
+- `GATED` / `REQUIRE`: a gated net the rate model takes as always open (no `behave` cycle on its
+  wire) / a `behave` block's `require` that doesn't hold
 - `RIP`: the build takes up a lot, and the robots need minutes for it (the structures, the items
   in them, and how long: `out\diff.txt`). It goes faster if you stop what feeds it first and let
   it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a

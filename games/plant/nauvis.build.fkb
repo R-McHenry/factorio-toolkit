@@ -2,6 +2,7 @@
 # routes, poles and roboport stay where they stand; the circuits are laid from plant.fk.
 read_surface    nauvis
 elaborate
+size                                            # no n=auto rows here: it says so
 place           --keep pinned
 route           --only stale --hand inserter    # the plant's inserters are plain ones
 cover robots    --storage none
