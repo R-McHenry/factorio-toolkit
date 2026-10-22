@@ -188,6 +188,28 @@ class GameSettingsTest(unittest.TestCase):
             with self.assertRaises(codec.CodecError, msg=attrs):
                 codec.blueprint([row])
 
+    def test_entity_json_and_wire_list_are_what_blueprint_writes(self):
+        # the same rows, settings and wires either way: the pieces apply sends as single ghosts
+        fac = fkp.loads("fkp 1 factory mall\nsize 6x2\nwire w red\nw w red a/c0 ~n/i0\n"
+                        "e a/c0 iron-chest 0.5,0.5\n"
+                        "e ~n/i0 inserter 1.5,0.5 E net=n if=iron-plate<5\n")
+        s = compose.compose(fkp.loads("fkp 1 surface nauvis\nplot mall at 10,10 rot 0 size 6x2\n"),
+                            {"mall": fac}, CAT)
+        rows = s.rows() + [
+            {"src": "power/p0", "name": "small-electric-pole", "x": 0.5, "y": 5.5,
+             "direction": None, "attrs": {}},
+            {"src": "power/p1", "name": "small-electric-pole", "x": 5.5, "y": 5.5,
+             "direction": None, "attrs": {}}]
+        wires = codec.pole_wires(rows, CAT)
+        links = codec.links_of(rows, s.wires)
+        self.assertEqual(wires, [(2, 3)])
+        self.assertEqual(links, [(0, 1, 1, 1)])
+        doc = decode(codec.blueprint(rows, wires=wires, links=links))
+        self.assertEqual(doc["entities"],
+                         [codec.entity_json(row, i + 1) for i, row in enumerate(rows)])
+        self.assertEqual(codec.wire_list(rows, wires, links), [[3, 5, 4, 5], [1, 1, 2, 1]])
+        self.assertEqual(doc["wires"], codec.wire_list(rows, wires, links))
+
     def test_wires_resolve_on_a_turned_plot(self):
         lay = fkp.loads("fkp 1 surface s\nplot circuit at 10,0 rot 1 size 1x4\n")
         s = compose.compose(lay, {"circuit": fkp.loads(CIRCUIT)}, CAT)

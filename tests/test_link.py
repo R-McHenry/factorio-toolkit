@@ -27,6 +27,10 @@ class LinkLuaTest(unittest.TestCase):
                     link.lua_stats("lab", "lab", ["iron-plate", "coal"], "1h", "stats-2"),
                     link.lua_chart("lab", "lab"),
                     link.lua_say("[fk lab] transport-belt at 307.5,430.5: \"quoted\""),
+                    link.lua_ghosts("lab", "lab",
+                                    [{"entity_number": 1, "name": "transport-belt"}],
+                                    [[["transport-belt", 0.5, 0.5], 5,
+                                      ["transport-belt", 1.5, 0.5], 5]]),
                     link.lua_generate_area("lab", "lab", (480, 416, 600, 540))):
             link.assert_safe(lua)
             for line in lua.splitlines():
@@ -64,6 +68,41 @@ class LinkLuaTest(unittest.TestCase):
     def test_a_statistics_window_is_checked_before_the_call(self):
         with self.assertRaises(link.LinkError):
             link.stats(None, "lab", "lab", window="2min")
+
+
+class GhostsTest(unittest.TestCase):
+    """2.0.4 (A1): single ghosts go in RCON-sized calls, and their counts are summed."""
+
+    class Rcon:
+        def __init__(self):
+            self.calls = []
+
+        def lua(self, body):
+            self.calls.append(body)
+            return '{"n": 1, "missed": {"tags": %d}}' % len(self.calls)
+
+    def test_entities_then_wires_in_batches_are_summed(self):
+        r = self.Rcon()
+        entities = [{"entity_number": i, "name": "transport-belt"} for i in range(1, 5)]
+        wires = [[["transport-belt", 0.5, 0.5], 5, ["transport-belt", 1.5, 0.5], 5]]
+        self.assertEqual(link.ghosts(r, "lab", "lab", entities, wires, chunk=1),
+                         {"n": 5, "missed": {"tags": 15}})
+        self.assertEqual(len(r.calls), 5)           # one entity a call, then the wire
+
+    def test_luas_empty_missed_table_is_no_miss(self):
+        class R:
+            def lua(self, body):
+                return '{"n": 2, "missed": []}'
+        self.assertEqual(link.ghosts(R(), "lab", "lab",
+                                     [{"entity_number": 1, "name": "stone-furnace"}]),
+                         {"n": 2, "missed": {}})
+
+    def test_a_reply_that_is_not_json_is_a_link_error(self):
+        class R:
+            def lua(self, body):
+                return "no ghosts here"
+        with self.assertRaises(link.LinkError):
+            link.ghosts(R(), "lab", "lab", [{"entity_number": 1, "name": "stone-furnace"}])
 
 
 if __name__ == "__main__":

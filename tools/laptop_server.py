@@ -277,8 +277,10 @@ def check_ghosts():
             "e ~b/u1 underground-belt 9.5,2.5 E net=b ug=out\n"
             "e power/p0 small-electric-pole 0.5,4.5\n"
             "e power/p1 small-electric-pole 5.5,4.5\n")
+    # a ghost has no requester point, so trash_not_requested cannot ride on it: the apply must
+    # name that as a setting the ghost would not take (checked below), not lose it silently
     want = {"m/m0": {"recipe": "iron-gear-wheel"},
-            "box/c0": {"requests": "iron-plate:10-10", "trash": True, "wires": "1x1"},
+            "box/c0": {"requests": "iron-plate:10-10", "wires": "1x1"},
             "~n/i0": {"enable": True, "cond": "iron-plate<5", "wires": "1x1"},
             "~n/i1": {"use_filters": True, "filter": "iron-plate"},
             "cc/k0": {"signals": "signal-A:7"},
@@ -337,10 +339,12 @@ rcon.print(c)""").strip()
                 "rcon.print(table.concat(o, ' '))").strip()
             relaid = read(r, True).get("~n/i0", {})
     bad = judge("ghost", ghosts, True) + judge("built", built, False)
+    named = rep.alone_missed.get("request_filters.trash_not_requested")
+    print(f"  not takeable on a ghost, named in the report: trash_not_requested x{named}")
     print(f"  inserter ordered out, applied again: {again}; the new ghost's wires "
           f"{relaid.get('wires')!r}, condition {relaid.get('cond')!r}")
     ok = (charted == "0" and rep.pasted == 0 and rep.placed_alone == len(rows) and not bad
-          and "ghost:inserter" in again)
+          and named == 1 and "ghost:inserter" in again)
     print("single ghosts on uncharted ground:", "OK" if ok else "NOT as designed")
     return 0 if ok else 1
 
