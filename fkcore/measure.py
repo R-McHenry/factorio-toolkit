@@ -58,7 +58,9 @@ class Measure:
         out = [head, f"  {'instance':<26} {'item':<28} {'measured/min':>13} {'model/min':>10} "
                      f"{'ratio':>6}"]
         for r in self.rows:
-            ratio = f"{r['measured'] / r['model']:.2f}" if r["model"] else "-"
+            # a model rate that rounds to nothing is no ratio (2.0.3: a float like 1e-17 printed
+            # as a ratio of 264886835391085376)
+            ratio = f"{r['measured'] / r['model']:.2f}" if r["model"] > 1e-9 else "-"
             out.append(f"  {r['inst']:<26} {r['item']:<28} {r['measured'] * 60:>13.2f} "
                        f"{r['model'] * 60:>10.2f} {ratio:>6}")
         return out
