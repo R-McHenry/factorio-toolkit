@@ -4,8 +4,12 @@ use the game link, and only with FK_LINK=on)
 
     check FILE.fk                         netlist checks (report lines, never a gate)
     rates FILE.fk [--unbounded NET,...] [--share appetite|level] [--chain INST,...]
+          [--hand N] [--bulk-hand N]
                                           the nominal rate model and its asserts; n=auto rows
-                                          sized first, as the build's size step sizes them
+                                          sized first, as the build's size step sizes them;
+                                          then the routed rates on FILE.fkp as last laid out
+                                          (lanes and inserters: CAPACITY, LANE), when it has
+                                          routes
     plan ITEM RATE | plan ITEM --machines N [--asm A] [--furnace F] [--mining-productivity L]
          [--recipe ITEM=RECIPE,...] [--raw ITEM,...]
                                           the other way round: the machines, furnaces and
@@ -76,6 +80,7 @@ use the game link, and only with FK_LINK=on)
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -474,6 +479,8 @@ def main(argv=None):
     r.add_argument("--unbounded", default="")
     r.add_argument("--share", default="appetite", choices=("appetite", "level"))
     r.add_argument("--chain", default="")
+    r.add_argument("--hand", type=int, default=None)
+    r.add_argument("--bulk-hand", type=int, default=None)
     pl = sub.add_parser("plan", description="the machines, furnaces and drills a rate takes, "
                         "per item of its recipe tree (fkcore.plan)")
     pl.add_argument("item")
@@ -711,7 +718,45 @@ def main(argv=None):
         print("\n  checks")
         for line in flat.checks:
             print(f"  {line}")
+    _routed_rates(a, flat, model, cat)
     return 0
+
+
+def _routed_rates(a, flat, model, cat):
+    """``fk rates``' routed section (2.0, CORE-V2 "Open"): the netlist on FILE.fkp as the last
+    build laid it out, through the flow solver, as the build's second ``report_rates`` shows it.
+    The hands: ``--hand``/``--bulk-hand``, else the force's as the last diff saved them
+    (``out/force.json`` beside the file), else 1."""
+    from . import routed
+    path = _fkp_path(a.file)
+    lay = fkp.load(path) if os.path.exists(path) else None
+    if lay is None or not any(e.owner.startswith("~") for e in lay.entities.values()):
+        print(f"\n  no routed rates: {os.path.basename(path)} has no routes yet (fk build lays "
+              "them; then this shows the lanes and inserters as laid)")
+        return
+    hand, bulk, note = a.hand, a.bulk_hand, "inserter hands as given"
+    if hand is None or bulk is None:
+        saved = {}
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(a.file)), "out",
+                                   "force.json"), encoding="utf-8") as fh:
+                saved = json.load(fh)
+            note = (f"inserter hands {saved['hand']}, bulk {saved['bulk_hand']} (the force's at "
+                    "the last diff, out/force.json)")
+        except (OSError, ValueError, KeyError, TypeError):
+            saved = {}
+            note = "inserter hands 1 (no diff has saved the force's yet; --hand N sets them)"
+        hand = hand or int(saved.get("hand", 1))
+        bulk = bulk or int(saved.get("bulk_hand", 1))
+    r_ = routed.solve(flat, lay, cat, model, hand=hand, bulk_hand=bulk)
+    lines, checks = routed.report(r_)
+    print(f"\n{lines[0]}; on {os.path.basename(path)} as last laid out")
+    print("\n".join(lines[1:]))
+    if checks:
+        print("\n  routed checks")
+        for c in checks:
+            print(f"  {c}")
+    print(f"  {note}")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,8 @@ The templates:
 | kind | what | belts |
 |---|---|---|
 | `MinerRow<n, resource>` | n electric drills facing a belt between them; 3 tiles per pair, 7 tall. `drill=burner-mining-drill, fuel=coal`: n burner drills in one row (2 tiles each, 5 tall), a fuel belt north with one inserter per drill: they mine without power | the ore leaves at the row's head; a burner row's fuel comes in at its head too |
-| `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in | 2 in, 1 out |
+| `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in | 2 in (1 when the ore and fuel nets share a belt), 1 out |
+| `SmelterArray<n, recipe>` | Rory's smelter stack: n furnaces in columns, each column fed by one belt with ore on one lane and coal on the other, side-loaded at its foot; plain inserters. A unit is 11 tiles wide (two columns around their plate belt) and up to 48 furnaces (24 a column: a yellow lane of ore); more furnaces add units east, sharing the coal. `machine=steel-furnace` (12 a column), `units=K` to choose the units | per unit an ore belt in and a plate belt out at its foot; the coal in at its east end |
 | `AsmRow<n, recipe>` | n assemblers, 3 tiles each, 7 to 9 tall | up to 3 in (the third under the product belt, by long-handed inserters), 1 out |
 | `Lab`, `Lab<rate=2/min>` | one lab, its inserters laid like an Assembler's: several Labs around one multi-item requester chest each take their packs by one inserter, no belt | by inserters next to it |
 | `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up | 1 to 3 science belts in (the third by long-handed inserters) |
@@ -51,9 +52,9 @@ on a row puts plain inserters in place of the fast ones.
 
 ## Counts the build chooses: `n=auto`
 
-`n=auto` on a `MinerRow`, `SmelterRow`, `AsmRow` or `LabRow` leaves its count to the build. The
-`size` step (right after `elaborate` in the build script) gives each such row the fewest
-machines that meet:
+`n=auto` on a `MinerRow`, `SmelterRow`, `SmelterArray`, `AsmRow` or `LabRow` leaves its count to
+the build. The `size` step (right after `elaborate` in the build script) gives each such row the
+fewest machines that meet:
 
 - the surface file's `target` lines (what the whole surface makes),
 - the factory's `assert INST.rate >= R` lines,
@@ -87,8 +88,8 @@ carry: a yellow lane carries 7.5 items/s.
 
 ## Nets
 
-`net NAME: drivers -> consumers`. A net is one belt (or one pipe): the drivers put items on it,
-the consumers take them.
+`net NAME: drivers -> consumers`. A net is one belt (or one pipe; one lane of a belt two nets
+share, below): the drivers put items on it, the consumers take them.
 
 - A ref names an instance (`gears`): only the endpoints of the net's items count, so
   `net iron: smelt -> gears, circ` takes the plates of `smelt`.
@@ -105,6 +106,30 @@ the consumers take them.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the
   splitters.
+
+## Two nets on one belt: `lanes`
+
+A belt has two lanes, and a net is one lane: a row puts its products on one lane of its belt (7.5
+items/s on yellow). `lanes A | B` puts two nets on one belt, A on its left lane and B on its right
+(looking downstream):
+
+```
+net ore_: ore -> smelt
+net fuel: coal -> smelt
+lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on the right
+```
+
+- Every machine on either net gets the shared belt: one input belt instead of two, and one
+  inserter per machine takes from both lanes what the machine uses.
+- The router brings the two nets together once, at a join where each is side-loaded onto its own
+  lane (both lanes of a net side-loaded go onto one: a net from a two-sided MinerRow carries at
+  most 7.5/s there), and lays them on together to every consumer.
+- They stay two nets: a lane that backs up holds only its own item and never stops the other, so
+  a shared belt draws no `CLOG` (a sushi net, two items on one net, does).
+- A net shares a belt with one other net at most; fluids have no lanes.
+- The `.fkp` records a shared belt as `net=ore_|fuel` and its inserters as `net=ore_+fuel`.
+- `SmelterArray` shares its own feed belts: give it its ore and its fuel on two nets of their
+  own, and it side-loads them onto its lanes.
 
 ## A bus
 

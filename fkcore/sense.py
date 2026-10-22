@@ -12,7 +12,9 @@ Every layout entity in the area gets one verdict, matched to the world by positi
 - ``WRONG``: another entity stands on its tiles;
 - ``MISSING``: nothing there (never built, or destroyed: the next apply restores it).
 
-A carrier that holds an item (or a fluid) its net doesn't expect is also ``WRONG_ITEM``; when the
+A carrier that holds an item (or a fluid) its net doesn't expect is also ``WRONG_ITEM``, lane by
+lane for a belt whose ``net=`` gives each lane its nets (2.0, ``iron|copper``: copper on the left
+lane is wrong there; no leniency for the right belt in the wrong lane, CORE-V2); when the
 toolkit's record (``own``) shows it was pasted under another net, the verdict says so
 (``renet``): the next apply takes it up and lays it fresh (1.2). Where a ghost stands on an
 entity ordered for deconstruction, the ghost is the design's (the entity is being replaced).
@@ -203,9 +205,10 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             drift = _drift(e, t, cat)
             v = Verdict("DRIFT" if drift else "OK", e.name, e.x, e.y, e.key, drift)
             net = _net(e)
-            if net and net_items and net in net_items and cat.kind(e.name) in _CARRIERS:
-                wrong = sorted(set(t["items"]) - set(net_items[net]))
-                v.wrong_items = wrong
+            names = fkpmod.net_names(net)
+            if names and net_items and all(n in net_items for n in names) \
+                    and cat.kind(e.name) in _CARRIERS:
+                v.wrong_items = _wrong(net, t, net_items)
                 row = own.get((e.name, round(float(e.x), 3), round(float(e.y), 3))) if own else None
                 if row is not None and row.net and row.net != net:
                     v.renet = row.net
@@ -350,11 +353,27 @@ def _local(key):
 
 
 def _net(e):
-    """A carrier's net as the surface names it: ``<factory>/<net>`` (nets never leave a factory)."""
+    """A carrier's net as the surface names it: ``<factory>/<net>`` (nets never leave a factory;
+    a belt of two, ``<factory>/<a>|<factory>/<b>``)."""
     net = e.attrs.get("net")
     if not net:
         return None
-    return f"{e.plot}/{net}" if getattr(e, "plot", None) else net
+    plot = getattr(e, "plot", None)
+    return fkpmod.map_nets(net, lambda n: f"{plot}/{n}") if plot else net
+
+
+def _wrong(net, t, net_items):
+    """The items on a carrier that its nets don't carry: per lane where its ``net=`` gives each
+    lane its own and the scene read the lanes, else what it holds against all its nets."""
+    lanes, live = fkpmod.net_lanes(net), t.get("lanes")
+    if lanes is not None and live:
+        out = set()
+        for side, got in zip(("L", "R"), live):
+            ok = set().union(*(set(net_items[n]) for n in lanes[side]))
+            out |= set(got or {}) - ok
+        return sorted(out)
+    ok = set().union(*(set(net_items[n]) for n in fkpmod.net_names(net)))
+    return sorted(set(t["items"]) - ok)
 
 
 def _drift(e, t, cat):

@@ -20,7 +20,7 @@ release numbers.
 | release | a net is | the router | the model |
 |---|---|---|---|
 | 1.x (V1) | connected or not; one net per belt, both lanes | trees of belts, splitters and undergrounds; no side-loads | nominal, no capacity |
-| 2.0 (V2) | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; tier per connector; lays no side-loads; two nets that share a belt somewhere share it everywhere | the flow solver: flow, load, starved and blocked machines, routed rates |
+| 2.0 (V2) | one lane (half a belt), so a belt holds up to two nets; a two-sided MinerRow's ore takes both | as V1, lane-aware; tier per connector; side-loads only where two nets join to share a belt; two nets that share a belt somewhere share it everywhere | the flow solver: flow, load, starved and blocked machines, routed rates |
 | side-load-aware routing (a name, no release yet) | as 2.0 | knows side-loads: 2-to-1 merges, and lane separation (a splitter, then an underground side-load per net) | as 2.0 |
 | 2.1: buses | k lanes in one step (2, 3, ...): thick buses and the main bus | lays k-lane nets, through the bus templates | as 2.0 |
 
@@ -109,28 +109,47 @@ the numbers in `docs/LAB-LANES-20261020.md`), and every rule Rory gave holds.
   holds one or two.
 - Lanes are layout, never source: the `.fk` names no lane. A template sets lanes by its own
   geometry and enforces them at its inputs (Rory); the router records the lane its net's items
-  are on.
+  are on. [built, 2.0] The source says only which two nets share a belt, `lanes A | B` (A on the
+  left lane, B on the right: Rory, 2026-10-21, "a net is one lane, so two nets can share a
+  belt"), and the router lays them so (`fkcore/pairs.py`, below). `SmelterArray`, Rory's stack,
+  sets its own feed belts' lanes; no other template has lanes of its own yet.
 - The two-sided MinerRow stays: it is the 99.9% template (Rory). [proposed] Its ore is one net on
   both lanes, north drills on L, south drills on R.
-- `.fkp` [proposed]: a belt, underground or splitter line carries `net=iron|coal` (L|R),
-  `net=iron|` (L only) or `net=|coal`, and `net=ore+fuel|` for two nets on one lane. A V1
-  `net=iron` means both lanes, so every V1 layout stays valid and nothing in the world changes
-  until a design uses lanes. Inserters, pipes and pumps keep their `net=` (`+` for several).
-- Checks [proposed]: `LANE` when a net's items land on a lane the layout gives other nets, or nets
-  share a lane or an inserter without going to the same sink (`LEAK` at lane level).
-  `UG_SIDELOAD` goes: a side-loaded underground is a valid connection for the open-side lane and a
-  blocked one for the other (Rory). `SHARED_BELT`, the lane-pair belt check of an earlier spec
-  that was never built, goes: V2 lanes supersede that spec.
+- `.fkp` [built, 2.0: `fkcore/fkp.py` `net_names`, `net_lanes`]: a belt, underground or splitter
+  line carries `net=iron|coal` (L|R), `net=iron|` (L only) or `net=|coal`, and `net=ore+fuel|`
+  for two nets on one lane. A V1 `net=iron` means both lanes, so every V1 layout stays valid and
+  nothing in the world changes until a design uses lanes. Inserters, pipes and pumps keep their
+  `net=` (`+` for several: a shared belt's inserters are `ore+fuel`). A pair's route is owned
+  `~ore|fuel` (its nets' own parts `~ore|fuel/l*` and `/r*`), so the three parts are pinned or
+  routed again together. `connect` reads a carrier's nets from it: `ore` side-loaded onto
+  `ore|fuel` is no LEAK, `ore|fuel` into a belt of `ore` leaks the fuel.
+- Checks [built, 2.0: `fkcore/routed.py` `lane_checks`, in the routed rates]: `LANE` when the
+  design asks a lane to carry an item none of its nets carries (a pair's lanes swapped), nets
+  share a lane without going to the same sinks, or a net's items reach the closed side of a
+  side-loaded underground (`LaneGraph.closed`: they stop there). `UG_SIDELOAD` went from
+  `connect`: a side-loaded underground is a valid connection for the open-side lane and a blocked
+  one for the other (Rory), which the lane graph says and V1's graph can't. `SHARED_BELT`, the
+  lane-pair belt check of an earlier spec that was never built, goes: V2 lanes supersede that
+  spec.
 - `WRONG_LANE` goes (Rory): an item gets no leniency for being on the right belt in the wrong net.
-  An item on a lane whose nets don't carry it is `WRONG_ITEM`, per lane. The snapshot already
-  reads each lane, and only adds them up today.
+  An item on a lane whose nets don't carry it is `WRONG_ITEM`, per lane [built, 2.0:
+  `fkcore/sense.py` reads each lane of a belt whose `net=` has lanes; others as before].
 
 ## The router in 2.0 (Rory)
 
 - No side-loads. It lays none today: the routed redgreen layout has 665 belt, 77 turn and 13
-  underground edges, and not one side-load.
+  underground edges, and not one side-load. [2.0: one place, a pair's join, below.]
 - Two nets that share a belt on one connector share it on every connector: the router lays them as
-  one pair.
+  one pair. [built, 2.0: `fkcore/pairs.py`, `tests/test_lanes_pairs.py`] `lanes A | B` makes
+  them one job, `A|B`, laid in three parts: A from its drivers to the tile left of a join H, B to
+  the tile right of it, both side-loaded into H's sides (a belt fed from both sides with nothing
+  behind it takes both as 2-to-1 merges: all of A onto H's left lane, all of B onto its right,
+  as at the head of each of Rory's stack columns), then one route of both lanes from H to every
+  consumer on either net (belts, turns, undergrounds and splitters keep the lanes). The joins are
+  ranked by walking distance (A's drivers to H's left, B's to its right, ahead of H to the
+  consumers) and the first where all three parts route is laid. Every consumer on either net
+  gets the one belt of both (`fkcore.expand.belts`): a SmelterRow fed ore and coal by a pair
+  has one input belt, its fast inserters picking both lanes.
 - Otherwise one net per routed belt, on one lane. The templates own the lane joins at their inputs.
 - The tier is chosen per connector, from the model, with flags: only yellow; at most N red belts;
   minimize (the slowest tier that carries the flow) or maximize (the fastest available). [built:
@@ -245,7 +264,13 @@ the assemblers' long-handed ones (1.2 of 3).
 **Several items on one lane** share its capacity: where they meet, by the rank of their inputs
 (within what the lane can pass on), and down the lane in the shares they met with. A tighter spot
 further down cuts them in those shares, where the game would hold back the later one first: a
-limit of this first version, until a joint solve of all items.
+limit of this first version, until a joint solve of all items. [settled for 2.0] 2.0's designs
+put one item on a lane: a pair is two nets, one a lane; Rory's stack's feed belts carry ore on
+one lane and coal on the other; a row drops one product on one lane. Several items meet only in
+an inserter that takes from both lanes, whose capacity the shares split (the stack's inserters,
+ore and coal into one furnace: the solver's plates match the lab's within 2%), and on a sushi
+net's lane, where `CLOG` already warns. So the joint solve waits for a design that needs it (a
+sushi lane run near its capacity).
 
 **Later: Rory's "giga brain option".** The full matrix of driver-to-consumer paths, with a flow per
 path: for nets that share lanes toward different sinks, and for the router. A linear-algebra or
@@ -298,10 +323,13 @@ The solver delivers 7.5/s past the row's head: the first 24 furnaces run and the
   no research, then with bonuses): it holds chest to chest within 4% (the fast and bulk inserters
   make 2.5 a hand, not 2.4), and from a full moving belt up to hand 2 (fast at hand 3: 93%). Onto
   a moving belt it holds at hands 1 and 2, then falls off (fast at hand 3: 75%, bulk at hand 4:
-  60%, onto yellow). [proposed] The rate is the rule of thumb, with the measured factor when
-  dropping onto a belt at hand 3 and up.
+  60%, onto yellow). [built: `lanes.inserter_rate`] The rate is the rule of thumb, with the
+  measured factor when dropping onto a belt at hand 3 and up.
 - The prototype values (rotation 0.013 burner, 0.014 inserter, 0.02 long-handed, 0.04 fast, bulk
-  and stack) were read from the game; the catalog doesn't carry them yet.
+  and stack) were read from the game; [built, 2.0] the catalog carries them (`rotation_speed`,
+  `extension_speed`, `bulk`, `stack_size_bonus`, `filter_count` on the six inserters of
+  `fkcore/data/catalog.json`), and the lane graph rates an inserter from its catalog row, so a
+  new one in the catalog needs no table.
 - The table is big (Rory): burner, inserter, long-handed, fast, bulk and stack, with the hand size
   set by research (the force's inserter and bulk bonuses), and quality later. On paper the hand is
   1; live, it is the force's. A bulk inserter's hand is 1 + the bulk bonus, a stack inserter's
@@ -351,6 +379,23 @@ What V2 has to get right on it: the 2-to-1 side-loads (a required ratio of exact
 furnaces per column, so a 25th starves), the coal chain of splitters (an even split first, then
 each unit takes its fuel and passes the rest on), the underground pass-throughs, and two nets
 through one inserter.
+
+**The template** [built, 2.0: `SmelterArray<n, recipe>`, `fkcore/fragments.py`
+`smelter_array`, `tests/test_smelter_array.py`]: Rory's stack at any count, the feature
+"side-loading smelter arrays". At his size (2 units, 2 furnaces per column) it is his ghost entity for
+entity, but for two things: the westmost unit has no coal pass-through (his leads nowhere; the
+splitter then sends all its coal to its own furnaces) and the coal comes in at the east end by
+an underground of its own (his comes from the start of a third unit). A unit holds up to 24
+furnaces a column, as many as a yellow lane of the recipe's ore feeds (12 steel furnaces);
+`n` beyond that adds units east, the furnaces spread evenly, the extra ones west; `units=K`
+sets the units. Each unit has its own ore port and plate port at its foot, the coal one port at
+the east end; the ore and coal nets are two nets of the source, and the template side-loads
+them onto its feed belts' lanes (`net=ore|fuel` west, `fuel|ore` east). `n=auto` sizes it like
+any row. Routed from a MinerRow of 30 drills: 48 furnaces make 15 plates/s, every furnace at
+1.0 and every side-load joint at a required ratio of exactly 1.00; forced to 25 a column
+(`units=1, n=50`, 16 ore/s), 48 furnaces' worth runs and `CAPACITY` names the ore splitter's
+lanes and the plate lanes at 7.81 of 7.5 (the shortfall settles as a column's top furnace
+starved of ore and a bottom one blocked by its plate lane, half each).
 
 Rory's second benchmark is a 4-to-4 balancer (`games/v2-bench/balancer-4x4-ghosts.json`): three
 layers of two splitters flowing north, the outer belts jogging in at the middle layer and the inner
@@ -415,15 +460,15 @@ and up; a splitter with one output blocked; a machine's fluid port.
 
 ## Open
 
-1. The joint solve of several items on one lane (now: shares fixed where they meet).
+1. The joint solve of several items on one lane (now: shares fixed where they meet). [settled
+   for 2.0: "Several items on one lane", above; it waits for a design that needs it]
 2. A ring of belts (the solver caps its rounds; not tested).
-3. The `.fkp` lane notation and the `LANE` check (my proposals above).
+3. The `.fkp` lane notation and the `LANE` check. [built, 2.0: above]
 4. Multi-lane nets (2.1): steer to whole belts, or let an agent plan odd lane counts?
 5. The path matrix (the "giga brain option"): when it is worth building.
-6. The next slices: the catalog's inserter speeds (now a table in `fkcore/lanes.py`); the
-   router's tier per connector (the miner line case is a solver test already: red in the middle
-   carries 9/s, red at the ends 7.5); `fk rates` (the agent's command) showing the routed section
-   too.
+6. The next slices. [built] The catalog's inserter speeds (2.0); the router's tier per connector
+   (1.4); `fk rates` (the agent's command) showing the routed section too (2.0: on FILE.fkp as
+   the last build laid it out).
 7. V1's rate model ties a requester chest's items together the way 1.4's routed one did: a chest
    of three parts and the engine assembler it feeds are 0.000 nominal (the 2005 run's blue
    science). Found in 1.4.1; `fkcore/rates.py` is V1 and was left alone.

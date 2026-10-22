@@ -119,10 +119,10 @@ def _rename(e, prefix, nets, dx, dy, owner_cover="power"):
     """An entity of a merged factory, renamed under ``prefix`` and moved by (dx, dy)."""
     owner, local = e.key.rsplit("/", 1)
     attrs = dict(e.attrs)
-    if attrs.get("net"):
-        attrs["net"] = f"{prefix}/{attrs['net']}"
+    if attrs.get("net"):                    # each net of a belt of two (a|b: prefix/a|prefix/b)
+        attrs["net"] = fkpmod.map_nets(attrs["net"], lambda n: f"{prefix}/{n}")
     if owner.startswith("~"):
-        key = f"~{prefix}/{owner[1:]}/{local}"
+        key = f"~{fkpmod.map_nets(owner[1:], lambda n: f'{prefix}/{n}')}/{local}"
     elif owner in nets.get("covers", ()):
         key = f"{owner}/{prefix}-{local}"
     else:
@@ -307,6 +307,16 @@ def _nets_touching(mod, name):
     return [n for n in mod.nets if any(r.parts[0] == name for r in n.drivers + n.consumers)]
 
 
+def _unpaired(mod, *nets):
+    """A robot link replaces a net, and a net that shares a belt (``lanes A | B``, 2.0) would
+    leave its partner's lanes line naming nothing: refused, with what to do."""
+    for ln in getattr(mod, "lanes", ()):
+        for net in nets:
+            if net in (ln.left, ln.right):
+                raise MergeError(f"net {net} shares a belt (lanes {ln.left} | {ln.right}, line "
+                                 f"{ln.line}): take that line out first")
+
+
 def chests_to_net(game, factory, provider, requester, net="link") -> Change:
     path, text, f = _parse(game, factory)
     lines = text.split("\n")
@@ -320,6 +330,8 @@ def chests_to_net(game, factory, provider, requester, net="link") -> Change:
     if len(pnets) != 1 or len(rnets) != 1:
         raise MergeError("each chest must sit on exactly one net")
     pnet, rnet = pnets[0], rnets[0]
+    _unpaired(pmod, pnet.name)
+    _unpaired(rmod, rnet.name)
     drivers = [r for r in pnet.drivers if r.parts[0] != pinst.name]
     consumers = [r for r in rnet.consumers if r.parts[0] != rinst.name]
     if [r for r in pnet.consumers if r.parts[0] != pinst.name] or \
@@ -369,6 +381,7 @@ def net_to_chests(game, factory, net, provider, requester) -> Change:
     target = next((n for n in f.body.nets if n.name == net), None)
     if target is None:
         raise MergeError(f"no top-level net {net} in {factory}.fk")
+    _unpaired(f.body, net)
     holders_d = {r.parts[0] for r in target.drivers if len(r.parts) > 1}
     holders_c = {r.parts[0] for r in target.consumers if len(r.parts) > 1}
     if len(holders_d) != 1 or len(holders_c) != 1:
