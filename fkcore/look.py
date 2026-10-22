@@ -5,7 +5,9 @@ layout (``composed``), snapshots the area through the link (``link.snapshot``), 
 ``sense.sense`` under the surface file's watch and notify settings, and prints the verdict
 summary, every verdict that is not OK, the "changes here" list, and the live render next to the
 design render (``compose.render_scene`` of ``scene.from_capture`` and of ``scene.design_scene``;
-after a finished apply both render the same text: look parity). ``--write-marks`` writes the new
+after a finished apply both render the same text: look parity). A built underground belt with no
+partner (or with an end of the same kind, so no tunnel forms) also gets a warning line,
+``UNPAIRED``, with its position: a report line, never a gate. ``--write-marks`` writes the new
 marks into the surface ``.fkp``, as the offline ``sense`` command does, so the next look says
 ``MARKED`` for them.
 
@@ -32,7 +34,7 @@ from . import own as ownmod
 from . import surface as surfacemod
 
 __all__ = ["LookError", "Look", "composed", "net_items", "policy", "default_area", "report",
-           "side_by_side", "run"]
+           "side_by_side", "unpaired", "run"]
 
 _LAYOUT_VERDICTS = ("OK", "GHOST", "DRIFT", "WRONG", "MISSING")
 _ACTIONS = ("keep", "revert", "strict", "mark")
@@ -55,6 +57,7 @@ class Look:
     pushed: list = field(default_factory=list)
     wrote: int = 0                   # marks written into the surface .fkp
     notes: list = field(default_factory=list)
+    unpaired: list = field(default_factory=list)   # built underground ends with no partner
 
     @property
     def designed(self):
@@ -72,6 +75,8 @@ class Look:
                f"{self.ok}/{self.designed} designed entities (notify {p['notify']}; watch plots "
                f"{p['plots']}, sanctioned {p['sanctioned']})"]
         out += self.rep.lines()
+        out += [f"  UNPAIRED {u['name']} {scene.num(u['x'])},{scene.num(u['y'])} "
+                f"({u['ug']}; {u['why']})" for u in self.unpaired]
         stale = sum(1 for v in self.rep.verdicts if v.wrong_items)
         relay = sum(1 for v in self.rep.verdicts if v.wrong_items and v.renet)
         if stale > relay:
@@ -159,13 +164,68 @@ def default_area(s, cat):
     return scope_area(s.rows(), cat)
 
 
+def _ug_step(direction):
+    """The unit step of a cardinal direction, or None (scene.DIRS; 0 N, 4 E, 8 S, 12 W)."""
+    d = scene.DIRS.get(int(direction))
+    return d[1] if d else None
+
+
+def _ug_walk(t, index):
+    """The first underground end ahead of ``t`` on its line (behind it for an output), same name
+    and direction, within the tier's reach; the game's rule (CORE-V1 flow, and Factorio 2.0:
+    both ends of a pair face the flow, so an input looks ahead and an output behind)."""
+    step = _ug_step(t["direction"])
+    if step is None:
+        return None
+    dx, dy = step
+    if t["ug"] == "output":
+        dx, dy = -dx, -dy
+    x, y = float(t["x"]), float(t["y"])
+    for k in range(1, int(scene.UG_MAX.get(t["name"], 5)) + 1):
+        for other in index.get((round(x + k * dx, 2), round(y + k * dy, 2)), ()):
+            if other is not t and other["name"] == t["name"] \
+                    and int(other["direction"]) == int(t["direction"]):
+                return other
+    return None
+
+
+def unpaired(live):
+    """The built underground belts of a live scene with no partner: one dict each, with name,
+    position, its end kind and why. The game's ``pair`` is trusted when the capture has it; on a
+    capture without it the walk pairs an input ahead with an output (and an output behind with an
+    input). A ghost is never judged: a ghost pair is not built, and a ghost is no partner. This is
+    a warning in the look's report, never a gate."""
+    index = {}
+    for t in live["things"]:
+        if t["type"] == "underground-belt" and not t["ghost"] \
+                and t.get("ug") in ("input", "output"):
+            key = (round(float(t["x"]), 2), round(float(t["y"]), 2))
+            index.setdefault(key, []).append(t)
+    out = []
+    for t in live["things"]:
+        if t["type"] != "underground-belt" or t["ghost"] \
+                or t.get("ug") not in ("input", "output") or t.get("pair") is not None:
+            continue
+        other = _ug_walk(t, index)
+        if other is None:
+            why = f"no partner within {int(scene.UG_MAX.get(t['name'], 5))} tiles"
+        elif other["ug"] == t["ug"]:
+            why = (f"partner at {scene.num(other['x'])},{scene.num(other['y'])} is another "
+                   f"{other['ug']}, so it points the same way")
+        else:
+            continue                      # a capture without `pair`: the walk found the partner
+        out.append({"name": t["name"], "x": t["x"], "y": t["y"], "ug": t["ug"], "why": why})
+    return out
+
+
 def report(s, live, cat, area, pol, net_items=None, own=None) -> Look:
     """The look at ``area`` of the composed ``s`` against the ``live`` scene. Pure. ``own``: the
     toolkit's own entities (``fkcore.own``): those the design dropped read NOBODY."""
     area = tuple(int(v) for v in area)
     rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items, own=own)
     design = compose.render_scene(scene.design_scene(s, cat, list(area)), cat, area)
-    return Look(s.name, area, dict(pol), rep, design, compose.render_scene(live, cat, area))
+    return Look(s.name, area, dict(pol), rep, design, compose.render_scene(live, cat, area),
+                unpaired=unpaired(live))
 
 
 def _rows(text, w, h):

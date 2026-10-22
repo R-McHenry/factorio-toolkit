@@ -34,6 +34,13 @@ class LinkLuaTest(unittest.TestCase):
                 # RCON joins the Lua into one line, so a -- comment may only fill a whole line
                 self.assertFalse("--" in code and not code.startswith("--"), code)
 
+    def test_the_snapshot_reads_an_underground_pair_for_unpaired(self):
+        lua = link.lua_snapshot("lab", (0, 0, 10, 10))
+        self.assertIn("e.belt_to_ground_type", lua)
+        self.assertIn("e.neighbours", lua)
+        self.assertIn("row.pair", lua)
+        link.assert_safe(lua)
+
     def test_the_link_is_on_only_with_fk_link_on(self):
         with mock.patch.dict(os.environ, {"FK_LINK": "off"}):
             self.assertEqual(link.open_from_env(),

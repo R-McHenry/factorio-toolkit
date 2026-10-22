@@ -6,8 +6,10 @@ The Lua sent here only reads, or builds through a blueprint paste, or (lab only)
 save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
 
 - ``snapshot(surface, area)``: every entity in the area as v4's capture rows (n, t, x, y, d, g,
-  dc, force, hp, st, rc, it, ug, u, box) plus ``lu``, its last_user (``it``: what a belt or chest
-  holds, and the fluid in a pipe or pump, 1.2); not the ground (resources:
+  dc, force, hp, st, rc, it, ug, pair, u, box) plus ``lu``, its last_user (``it``: what a belt or
+  chest holds, and the fluid in a pipe or pump, 1.2); ``ug``/``pair``: an underground belt's end
+  kind and its built partner (None when the game pairs it with nothing, 2.0.4); not the ground
+  (resources:
   the terrain read has those), characters, corpses, items on the ground or effects, which no
   design owns and the diff never judges. The rows go through
   ``helpers.write_file`` into script-output and are read back from disk, so a big area never
@@ -181,7 +183,13 @@ for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, type = {_SKIP}
     local ok, r = pcall(e.get_recipe)
     if ok and r then row.rc = r.name end
   end
-  if t == 'underground-belt' then row.ug = e.belt_to_ground_type end
+  if t == 'underground-belt' then
+    row.ug = e.belt_to_ground_type
+    if not g then
+      local ok, nb = pcall(function() return e.neighbours end)
+      if ok and nb then row.pair = {{nb.position.x, nb.position.y}} end
+    end
+  end
   if not g and (t == 'transport-belt' or t == 'underground-belt' or t == 'splitter') then
     local it = {{}}
     for i = 1, e.get_max_transport_line_index() do

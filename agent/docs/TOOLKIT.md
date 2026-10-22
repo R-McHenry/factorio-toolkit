@@ -16,7 +16,15 @@ fk build --to diff               a dry run: the design against the world and wha
                                  take up; nothing written, nothing pasted
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
+fk wait built [AREA] --max 5m    poll until no ghosts are left there (or --name ENTITY's):
+                                 one line at the end; 0 clear, 1 the bound expired
 ```
+
+`fk wait built` is the bounded wait: it reads the world (as a look does) until the area has no
+ghosts left, or the named entity's ghosts are gone (`--name transport-belt`), and stops at `--max`
+(default 5m; `90s`, `5m`, `1h`) with one line saying what is left by name. Exit 0 when clear, 1
+when the bound ran out with ghosts left, 2 on a link error. A GHOST SHORT or LOCKED never builds
+by waiting: fix the item first.
 
 One thing `fk rates` gets wrong: it shares a short net in proportion to what each machine wants,
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
@@ -238,6 +246,9 @@ Every designed entity in the area gets a verdict:
 - `MISSING`: nothing there (destroyed, or never built; the next build restores it)
 - `WRONG`: something else stands on its tiles
 - `DRIFT`: there but turned, or with another recipe
+- `UNPAIRED`: a built underground belt with no partner in reach, or with another end of the same
+  kind (two outputs) so no tunnel forms; the line gives its position. A ghost pair is not built
+  and is not reported
 - `WRONG_ITEM`: a belt or pipe holds an item or fluid its net doesn't (old items from a
   rebuild); on a belt two nets share, lane by lane (copper on the iron lane is wrong there). One
   the build laid under another net says so, and the next build renews it by itself; for the
