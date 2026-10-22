@@ -33,8 +33,8 @@ repeating.
 - `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them: a
   good place to start
 - `docs\LANGUAGE.md` describes the factory language
-- `docs\STRATEGY.md` is what worked in earlier runs (the turning points, the mall, growing,
-  power, rebuilds): advice with reasons, use what fits your map
+- `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
+  growing, power, rebuilds): reasons, not rules, so use what fits your map
 - `game\nauvis.surface` says where each factory goes on the map
 
 The nuclear plant is already in your surface file (`plant`) and the starter kit is a claim: build
