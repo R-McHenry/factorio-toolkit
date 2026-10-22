@@ -1,0 +1,42 @@
+fkp 1 factory plant
+size 39x46
+inst cells Chest item=uranium-fuel-cell max=50 rate=0.005 request=20 requester=true trash=true at 0,6 rot 0 sig 61565a40ca
+inst hx HeatExchanger at 7,6 rot 1 sig 322e62a668
+inst link Literal box=-22,-22,7,9 file=plant-w3.json at 11,16 rot 0 sig 72f83111cb
+inst pump OffshorePump at 7,0 rot 0 sig a632356411
+inst reactor Reactor read=temperature signal=temp at 2,5 rot 0 sig 1ac4f3b95a
+inst spent Chest chest=iron-chest plain=true at 0,5 rot 0 sig c583941b9f
+inst t1 SteamTurbine at 10,4 rot 1 sig 0184071e94
+inst t2 SteamTurbine at 10,7 rot 1 sig 0184071e94
+cover power power pole=medium-electric-pole
+cover robots robots roboport=roboport
+wire fuel_ctl red
+w fuel_ctl red reactor/m0 ~fuel/i0
+e cells/c0 requester-chest 0.5,6.5 config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":20,"index":1,"max_count":50,"name":"uranium-fuel-cell","quality":"normal"}],"index":1}],"trash_not_requested":true}}' item=uranium-fuel-cell rate=0.005 role=requester
+e hx/m0 heat-exchanger 8,7.5 E rate=103.09278350515464
+e link/medium-electric-pole0 medium-electric-pole 11.5,16.5 N
+e link/medium-electric-pole1 medium-electric-pole 16.5,21.5 N
+e link/medium-electric-pole2 medium-electric-pole 21.5,26.5 N
+e link/medium-electric-pole3 medium-electric-pole 26.5,31.5 N
+e link/medium-electric-pole4 medium-electric-pole 31.5,36.5 N
+e link/medium-electric-pole5 medium-electric-pole 36.5,41.5 N
+e link/medium-electric-pole6 medium-electric-pole 38.5,45.5 N
+e power/p0 medium-electric-pole 4.5,4.5
+e power/p1 medium-electric-pole 9.5,9.5
+e pump/m0 offshore-pump 7.5,0.5 N rate=1200
+e reactor/m0 nuclear-reactor 4.5,7.5 fuel=uranium-fuel-cell rate=0.005 read=temperature signal=signal-T
+e robots/r0 roboport 11,12
+e spent/c0 iron-chest 0.5,5.5 role=plain
+e t1/m0 steam-turbine 12.5,5.5 E role=turbine
+e t2/m0 steam-turbine 12.5,8.5 E role=turbine
+e ~fuel/i0 inserter 1.5,6.5 W net=fuel if=signal-T<550
+e ~spent_cells/i0 inserter 1.5,5.5 E net=spent_cells
+e ~steam/p0 pipe 9.5,8.5 net=steam
+e ~steam/p1 pipe 9.5,7.5 net=steam
+e ~steam/p2 pipe 9.5,5.5 net=steam
+e ~steam/p3 pipe 9.5,6.5 net=steam
+e ~water/p0 pipe 7.5,5.5 net=water
+e ~water/p1 pipe 7.5,4.5 net=water
+e ~water/p2 pipe 7.5,3.5 net=water
+e ~water/p3 pipe 7.5,2.5 net=water
+e ~water/p4 pipe 7.5,1.5 net=water

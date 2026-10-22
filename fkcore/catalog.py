@@ -23,7 +23,8 @@ import os
 from collections import namedtuple
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
-           "MINING_RADIUS", "STEAM_PER_S", "FluidBox", "PipeConn"]
+           "MINING_RADIUS", "STEAM_PER_S", "HEAT_W", "REACTOR_FUEL_S", "CIRCUIT_WIRE_REACH",
+           "FluidBox", "PipeConn"]
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
@@ -39,7 +40,31 @@ FUEL_VALUE_J = {"coal": 4e6, "wood": 2e6, "solid-fuel": 12e6, "rocket-fuel": 100
 MINING_TIME = {"iron-ore": 1.0, "copper-ore": 1.0, "coal": 1.0, "stone": 1.0, "uranium-ore": 2.0}
 #: Steam per second: a boiler makes it from as much water (1.8 MW at 30 kJ a unit, 165 C), a steam
 #: engine uses it at full power (fluid_usage_per_tick 0.5, read from the game: 900 kW).
-STEAM_PER_S = {"boiler": 60.0, "steam-engine": 30.0}
+STEAM_PER_S = {"boiler": 60.0, "steam-engine": 30.0,
+               # 2.0 (the starter reactor): 10 MW into 500 C steam at 0.2 kJ a unit per degree
+               # from 15 C, 103.09/s; a turbine takes 60/s (5.82 MW)
+               "heat-exchanger": 10e6 / (485 * 200.0), "steam-turbine": 60.0}
+#: Heat in watts (2.0, the starter reactor): a reactor makes 40 MW while a cell burns (200 s, 8 GJ)
+#: whatever is drawn; an exchanger takes 10 MW. The netlist carries heat as the item ``heat`` in MW.
+HEAT_W = {"nuclear-reactor": 40e6, "heat-exchanger": 10e6}
+#: Seconds one fuel item burns in a reactor.
+REACTOR_FUEL_S = {"uranium-fuel-cell": 200.0}
+
+#: 2.0: the combinators the measured fixture lacks (it was read before circuits were in the
+#: source), with the base game's prototype sizes: a constant combinator 1x1, a decider or an
+#: arithmetic one 1x2 standing north. Not measured on the game; they need no power but the
+#: decider and the arithmetic, which ``is_electric`` leaves to the grid.
+_COMBINATORS = (
+    {"name": "constant-combinator", "type": "constant-combinator", "tile_width": 1,
+     "tile_height": 1, "collision_box": [-0.35, -0.35, 0.35, 0.35]},
+    {"name": "decider-combinator", "type": "decider-combinator", "tile_width": 1,
+     "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
+    {"name": "arithmetic-combinator", "type": "arithmetic-combinator", "tile_width": 1,
+     "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
+)
+#: How far a red or green wire reaches between two entities that are not poles (the game's
+#: default_circuit_wire_max_distance; fnet's WIRE_REACH).
+CIRCUIT_WIRE_REACH = 9.0
 
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 
@@ -64,7 +89,8 @@ MINING_RADIUS = {"electric-mining-drill": 2.49, "burner-mining-drill": 0.99,
 # and electric prototypes alike, so there the burners are named: every other inserter, drill
 # (pumpjack, big drill) and furnace (electric furnace, recycler) runs on the grid.
 _ELECTRIC_TYPES = frozenset({"assembling-machine", "lab", "roboport", "beacon", "radar", "lamp",
-                             "electric-turret", "pump"})
+                             "electric-turret", "pump", "decider-combinator",
+                             "arithmetic-combinator"})
 _MIXED_TYPES = frozenset({"inserter", "mining-drill", "furnace"})
 _BURNERS = frozenset({"burner-inserter", "burner-mining-drill", "stone-furnace", "steel-furnace"})
 
@@ -84,6 +110,9 @@ class Catalog:
                 self._entities[name] = {"name": name, "type": row["type"], "tile_width": w,
                                         "tile_height": h,
                                         "collision_box": row.get("collision_box")}
+        for row in _COMBINATORS:
+            self._entities.setdefault(row["name"], dict(row))
+        self._items = None
 
     # -- construction ---------------------------------------------------------------------
     @classmethod
@@ -358,6 +387,25 @@ class Catalog:
 
     def pole_reach(self, name) -> float:
         return self.entity(name)["max_wire_distance"]
+
+    def circuit_reach(self, name) -> float:
+        """How far a red or green wire from ``name`` reaches: a pole's wire reach, else the
+        game's default (2.0)."""
+        row = self.entity(name)
+        if row.get("type") == "electric-pole" and row.get("max_wire_distance"):
+            return float(row["max_wire_distance"])
+        return float(row.get("circuit_wire_max_distance") or CIRCUIT_WIRE_REACH)
+
+    def is_item(self, name) -> bool:
+        """An item: an entity's or a recipe's item (2.0, for item signals in circuit conditions)."""
+        if self._items is None:
+            names = set(self._entities)
+            for rec in self._recipes.values():
+                for row in list(rec.get("ingredients") or ()) + list(rec.get("products") or ()):
+                    if row.get("type", "item") == "item":
+                        names.add(row["name"])
+            self._items = frozenset(names)
+        return name in self._items and not self.is_fluid(name)
 
 
 def _is_integer(value) -> bool:

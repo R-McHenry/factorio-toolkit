@@ -13,7 +13,7 @@ gate, and the briefs stay short.
 | lanes: a net is one lane, so two nets can share a belt | its session runs |
 | throughput players lean on (`CAPACITY`) | the same session |
 | side-loading smelter arrays | the same session |
-| circuits and inserter limits in the source | its session runs |
+| circuits and inserter limits in the source | in |
 | the lead and worker player harness, Claude workers | in |
 | the lead plans ahead: `fk stage`, the horizon, Rory's 5-minute wait | in |
 | `CLOG` goes in two ways only | in |
@@ -192,6 +192,49 @@ once: iron stood for 20 minutes.
   "side-load-aware routing" a name; `SHARED_BELT` (an earlier spec's lane-pair check, never
   built) is superseded by V2 lanes, in CORE.md too.
 
+## Circuits in the source
+
+Rory (2026-10-21): "circuit wiring in the source, with all circuit and logic conditions in the .fk
+code, inserter limits included", and "Recipe-switch smarts (inserters that don't carry the wrong
+item) belong in circuits in the game, not in scripted toolkit actions". The draft was
+`drafts\reactor-1.1` (CIRCUITS-1.1.md, plant.fk), with fnet's rules: one wire net is one colour,
+a signal is declared (pinned or left to the build), checks warn and never gate. `LANGUAGE.md`,
+"Circuits", has the syntax; `fkcore.circuits` is the code.
+
+- **Limits at the makers replace the mall scripts.** Both lead runs set their mall's limits by Lua
+  after every rebuild (`malllimits.lua`, 2005 and 2039), and the 2039 one fixed chest bars by hand
+  ("a limit change is not re-pasted"). Now `keep=N` on a maker puts a logistic condition (the
+  network holds fewer than N of the product) on every inserter that takes its product into a
+  chest or onto a belt that ends in one; `fill=N` counts in the chest it fills straight, by a red
+  wire. They are real limits and quiet no `CLOG`: `limited` still does that, written separately.
+  `fill=N` is also the one-off crafter's stop at N the 2039 worker asked for (`count=N`: 86 gears
+  for 50, 38 furnaces for 8).
+- **Recipe-switch safety in the game.** `guard` on a crafter: it reads its recipe's ingredients
+  onto a red wire to its input inserters, which set their filters from them, so a recipe switched
+  in the game changes what they carry (the 2039 run's inserters held the old item and stalled a
+  switched crafter many times).
+- **Wires, signals, conditions.** `signal`, `wire NAME red|green: drivers -> consumers`, `when` on
+  a net (every inserter and pump of its route) or on a machine, reading a wire, `network.ITEM` or
+  an instance's own signals; `Constant<signals=...>`; a chest's contents and a belt's reading;
+  `behave` blocks (`require` checked with catalog numbers, `GATED` without a cycle). New checks:
+  `SIGNAL`, `WIRE`, `WIRE_REACH`, `WIRE_LEAK`, `GATED`, `REQUIRE`, `LIMIT`, `GUARD`.
+- **The record.** The .fkp's entity lines carry `if=`, `logistic=`, `read=`, `filter=`,
+  `signals=`, and `wire` / `w` lines its wires (the draft's format); the codec writes them as the
+  blueprint's `control_behavior` and wires and reads them back exactly. They are laid again from
+  the source on every build, just before the floorplan.
+- **A changed setting reaches the world.** The record of what the applies pasted (`out\own`)
+  keeps a signature of each entity's circuit settings and chest bar; an apply orders out an
+  entity whose settings changed, and the paste lays it fresh with the new ones. A record from
+  before 2.0 has none, so nothing is laid fresh until the next apply writes them.
+- **The worked example.** `games\plant`: plant.fk (the starter reactor and its fuel saver, with
+  `Reactor`, `HeatExchanger`, `SteamTurbine`, `Chest<plain>`, a heat net by contact) builds
+  offline, entity for entity and wire for wire, into plant-w3.json, the blueprint the kickoff
+  pastes: 28 entities, 9 wires (`tests\test_plant.py`).
+- **Not checked in the game yet:** the 2.0 blueprint keys for a logistic condition, set filters
+  and read ingredients, and the game's comparators for `<=` / `>=` / `!=` (written as the
+  blueprint string format has them). The reactor's and the plain inserter's settings are exactly
+  plant-w3.json's. A lab check on a laptop server settles the rest.
+
 ## From the first lead run's FRICTION.md and RETRO.md
 
 - **`fk merge` keeps a module file other plots still place.** Merging `relay` into `south` took
@@ -218,6 +261,8 @@ once: iron stood for 20 minutes.
 
 ## Not in 2.0 yet
 
-- Lanes, throughput and side-loading smelter arrays; circuits in the source (their sessions wait
-  to be started).
+- Lanes, throughput and side-loading smelter arrays (their session runs).
+- From circuits: combinators beyond the constant one (fnet modules, a named feature), wires
+  routed through poles, `behave` states in `fk look` (EXPECTED), a gated net's cycle in the rate
+  model, a storage chest's filter, a first load of fuel for self-fuelling burner drills.
 - DeepSeek workers; daisy-chained labs and turrets.

@@ -34,11 +34,13 @@ The templates:
 | `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up | 1 to 3 science belts in (the third by long-handed inserters) |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
-| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>` | a logistic chest: the robots' end of a net. `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said TYPE). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
+| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said TYPE). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
 | `OffshorePump<rate=1200/s>` | water from the lake: it stands on the shore, open to the water (rot 3 faces west, water west of it) | pipes |
 | `Boiler<fuel=coal>` | one boiler, 3x2: water in and out at its short ends, steam out of its long north side (rot 0), coal by an inserter beside it; 60 steam/s on 0.45 coal/s | pipes |
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
 | `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines | pipes |
+| `Reactor<read=temperature, signal=S>`, `HeatExchanger`, `SteamTurbine` | nuclear power: a reactor heats the exchangers it touches (`net heat items heat: reactor -> hx`, no route), 10 MW each, 103 steam/s for 1.7 turbines | pipes, an inserter for the cells |
+| `Constant<signals="S=N, T=M">` | a constant combinator (Circuits, below) | wires |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. Its frame is its entities' box, so a lone roboport needs a pole of its own beside it | |
 | `Bus<belts=4, length, item, load=s11, tap=n26\|s33>` | Rory's bus: `belts` belts of one item, `length` tiles, running east at rot 0. Its loads and taps are ports (below) | one belt per port, beside the bus |
 
@@ -100,7 +102,8 @@ the consumers take them.
   chest goes best without `limit=`, since a full chest stops the whole belt (`SUSHI_LIMIT`), and
   the limit belongs at each maker.
 - `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
-  on the net. It only quiets `CLOG` and `UNLIMITED` for it: it limits nothing itself.
+  on the net. It only quiets `CLOG` and `UNLIMITED` for it: it limits nothing itself. The limits
+  are `keep=` on each maker (Circuits, below).
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the
@@ -136,6 +139,89 @@ order: `bus.load1`, `bus.tap1`, `bus.tap2`.
   a lane is full. Grow a bus longer and add ports; a second item is a second bus beside it (a
   gap row between them), and a net crosses a 4-belt bus by an underground from one of its outer
   rows to the other.
+
+## Circuits
+
+Circuit wires, conditions and limits are written in the source like nets; the build lays them
+(inserter conditions, readings, filters, the red and green wires) and pastes them with the rest.
+Change one and the next build lays the changed entities fresh: no script sets them.
+
+### Limits at the makers
+
+```
+belt = Assembler<recipe=transport-belt, keep=200>    # the network keeps 200 belts
+ins  = Assembler<recipe=inserter, fill=50>           # its chest holds at most 50 inserters
+pipe = AsmRow<n=2, recipe=pipe, keep=100>
+```
+
+- `keep=N` on a maker (any machine or row): every inserter that takes its product out into a
+  chest, straight in or onto the belt of a net that ends in a chest, runs while the logistic
+  network holds fewer than N of it (a logistic condition; no wire). This is the mall's limit: on
+  a products belt into one chest, each maker keeps its own item, and the chest stays unlimited.
+  The maker's inserters must be in a logistic network (a roboport's orange area).
+- `fill=N`: every inserter that takes its product straight into a chest runs while that chest
+  holds fewer than N (a red wire from the chest and a circuit condition). It needs no robots, and
+  it stops a one-off crafter at N in its chest: its inserter stops, then the machine.
+- A limit where nothing goes into a chest (gears that feed machines only) is a `LIMIT` line.
+- A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
+  `limited` (once each maker on it has its limit).
+
+### A crafter that switches recipes: `guard`
+
+```
+x = Assembler<recipe=iron-gear-wheel, guard>   @(10, 4)
+```
+
+`guard`: the machine puts its recipe's ingredients on a red wire to every inserter that feeds it,
+and they take only those (their filters come from the wire). Switch the recipe and what they
+carry follows in the game, so no hand is left holding the old item. A plain `inserter` can't
+filter (`GUARD` says so); the fast inserters the router lays can.
+
+### Wires, signals and conditions
+
+```
+signal temp = signal-T                            # a signal, pinned to a game signal
+signal stop                                       # or left to the build (it says which)
+reactor = Reactor<read=temperature, signal=temp>  @(2, 5)
+k       = Constant<signals="stop=1, iron-plate=50"> @(0, 0)
+wire fuel_ctl red: reactor -> fuel                # drivers -> consumers; red or green
+net fuel: cells -> reactor  when fuel_ctl.temp < 550       # a gated net
+gears = Assembler<recipe=iron-gear-wheel> @(9, 0) when network.iron-gear-wheel < 400
+```
+
+- `wire NAME red|green: drivers -> consumers`: one network of one colour. A driver puts signals
+  on it: a chest its contents, `Reactor<read=temperature, signal=S>` its temperature,
+  `Constant<signals="S=N, T=M">` its signals, a net (one of its belts reads what is on it).
+- `when A < N` on a net gates it: every inserter and pump of its route moves items only while it
+  holds. On an instance, it enables the machine itself. `A` is `WIRE.SIGNAL` (that wire),
+  `network.ITEM` (the logistic network's count, no wire) or `INSTANCE.SIGNAL` (what that chest
+  or machine puts out, on a red wire of its own). The comparisons are `<`, `>`, `<=`, `>=`, `=`
+  and `!=`, against a whole number or another signal on the same wire.
+- Signals are virtual signals (`signal-A`, `signal-T`), items or fluids, by name, or the names
+  you declare with `signal`.
+- The build wires each wire net's entities by the shortest wires; a wire reaches 9 tiles
+  (`WIRE_REACH` when two are further apart). Two wires of one colour on one entity are one
+  network in the game and their signals add (`WIRE_LEAK`).
+- `SIGNAL` says a condition reads a signal nothing on its wire makes, or a name that is no
+  signal; `WIRE` a wire nothing drives or reads.
+
+### What a loop is meant to do: `behave`
+
+```
+behave fuel_saver on fuel_ctl {
+    state coasting: T >= 550 and not reactor.burning
+    require 550 > hx.min_temperature
+    expect reactor.status = no_fuel in coasting
+    cycle full_load: burning 200 s, coasting 450 s, cells 1 per 650 s
+    fails dark: T < 500 and not reactor.burning
+}
+```
+
+A control loop makes states a rate model can't show, such as a hot reactor with no fuel. A
+`behave` block names them where you will look: `require` lines with numbers the catalog knows are
+checked (`REQUIRE`), and a gated net whose wire has no `cycle` is a `GATED` line (the rate model
+takes it as always open). The fuel saver above is the starter plant's: the reactor loads a cell
+only below 550 C, so its fuel slot is empty while it coasts, and that is normal.
 
 ## Checks on paper
 

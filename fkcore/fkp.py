@@ -7,6 +7,8 @@
     plot <factory> at <x>,<y> rot <r> size <W>x<H> [k=v ...]
     claim <name> box <x0>,<y0> <x1>,<y1> [until <tick>] ["reason"]
     mark <actor@tick> tiles <x>,<y> ... [until <tick>]
+    wire <name> red|green                               a wire net (2.0, circuits)
+    w <net> red|green <key>[.in|.out] <key>[.in|.out]  one circuit wire between two entities
     e <key> <prototype> <x>,<y> [<DIR>] [k=v ...]       one entity; DIR is N, NNE, NE ... NNW
 
 A key is ``<owner>/<local>``; the owner is an inst path, ``~<net>`` or a cover name. The
@@ -16,6 +18,14 @@ tool-written. ``loads(dumps(x)) == x`` and ``dumps(loads(t)) == t`` for canonica
 A ``k=v`` value with whitespace, a quote, a backslash or ``#`` in it (a Literal's ``config=`` JSON)
 is written in shell-style single quotes, and a line is read the shell way, so a quoted ``#`` is
 data, not a comment.
+
+Circuits (2.0, drafts\\reactor-1.1\\CIRCUITS-1.1.md §3): a ``wire`` line is a wire net, a ``w``
+line one physical wire of it between two entities of the layout (``.in`` / ``.out`` name a
+combinator's input or output connectors; without, a red wire takes connector 1 and a green one
+2). The entity
+lines carry the settings (``if=``, ``logistic=``, ``read=``, ``filter=``, ``signals=``: see
+``fkcore.codec``). Copper wires are not recorded: the codec derives them. The ``w`` lines are
+canonical with their two ends in natural key order, sorted by net and ends.
 
 :func:`invariants` lists what makes a layout malformed: two entities on a tile, an entity outside
 the factory's size, an owner that does not resolve, a carrier with no net or two nets. The writer
@@ -28,8 +38,8 @@ import shlex
 from dataclasses import dataclass, field
 
 __all__ = ["FkpError", "InvariantError", "Entity", "Inst", "Cover", "Plot", "Claim", "Mark",
-           "Layout", "loads", "dumps", "load", "save", "invariants", "tiles_of", "DIRS",
-           "CARRIER_TYPES", "natural_key", "fmt"]
+           "WireNet", "Wire", "Layout", "loads", "dumps", "load", "save", "invariants", "tiles_of",
+           "DIRS", "CARRIER_TYPES", "COLOURS", "natural_key", "fmt", "split_end"]
 
 DIRS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
         "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
@@ -38,6 +48,10 @@ _DIR = {d: i for i, d in enumerate(DIRS)}
 #: Entity types that move a net's items: each must carry exactly one net (CORE.md invariants).
 CARRIER_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "inserter", "pipe",
                            "pipe-to-ground", "pump", "loader", "loader-1x1", "linked-belt"})
+#: the colours of a circuit wire (copper is the codec's, derived)
+COLOURS = ("red", "green")
+#: the connector a ``w`` end may name: a combinator's input or output side
+_PORTS = ("in", "out")
 
 
 class FkpError(ValueError):
@@ -121,6 +135,34 @@ class Mark:
 
 
 @dataclass
+class WireNet:
+    name: str
+    colour: str                                   # "red" | "green"
+
+
+@dataclass(frozen=True)
+class Wire:
+    net: str
+    colour: str
+    a: str                                        # an entity key, maybe with ".in" / ".out"
+    b: str
+
+    def canonical(self):
+        """The same wire with its ends in natural key order."""
+        if natural_key(self.b) < natural_key(self.a):
+            return Wire(self.net, self.colour, self.b, self.a)
+        return self
+
+
+def split_end(end):
+    """A ``w`` end -> (entity key, "in" | "out" | None)."""
+    key, dot, port = end.rpartition(".")
+    if dot and port in _PORTS and "/" in key:
+        return key, port
+    return end, None
+
+
+@dataclass
 class Layout:
     level: str                                    # "factory" | "surface"
     name: str
@@ -131,6 +173,8 @@ class Layout:
     claims: dict = field(default_factory=dict)
     marks: dict = field(default_factory=dict)
     entities: dict = field(default_factory=dict)  # key -> Entity
+    wirenets: dict = field(default_factory=dict)  # name -> WireNet (2.0, circuits)
+    wires: list = field(default_factory=list)     # [Wire], canonical
 
     def add(self, e: Entity):
         if e.key in self.entities:
@@ -268,6 +312,14 @@ def loads(text, path="<fkp>") -> Layout:
                     until, rest = _int(rest[i + 1], where), rest[:i]
                 tiles = [_pair(p, where) for p in rest]
                 _put(lay.marks, t[1], Mark(t[1], tiles, until), where)
+            elif head == "wire":
+                if len(t) != 3 or t[2] not in COLOURS:
+                    raise FkpError(where, "wire <name> red|green")
+                _put(lay.wirenets, t[1], WireNet(t[1], t[2]), where)
+            elif head == "w":
+                if len(t) != 5 or t[2] not in COLOURS:
+                    raise FkpError(where, "w <net> red|green <key> <key>")
+                lay.wires.append(Wire(t[1], t[2], t[3], t[4]).canonical())
             elif head == "e":
                 x, y = _pair(t[3], where)
                 rest, d = t[4:], None
@@ -283,7 +335,14 @@ def loads(text, path="<fkp>") -> Layout:
             raise FkpError(where, f"incomplete {head} line") from None
     if lay is None:
         raise FkpError(path, "empty file: the first line must be: fkp 1 factory|surface <name>")
+    lay.wires = sort_wires(lay.wires)
     return lay
+
+
+def sort_wires(wires):
+    """``w`` records in canonical order, each once."""
+    return sorted({w.canonical() for w in wires},
+                  key=lambda w: (natural_key(w.net), natural_key(w.a), natural_key(w.b), w.colour))
 
 
 def _put(table, key, rec, where):
@@ -323,6 +382,10 @@ def record_lines(lay: Layout) -> list:
         if m.until is not None:
             parts += ["until", str(m.until)]
         out.append(" ".join(parts))
+    for name in sorted(lay.wirenets, key=natural_key):
+        out.append(f"wire {name} {lay.wirenets[name].colour}")
+    for w in sort_wires(lay.wires):
+        out.append(f"w {w.net} {w.colour} {w.a} {w.b}")
     return out
 
 
@@ -404,4 +467,13 @@ def invariants(lay: Layout, cat, nets=None) -> list:
             if lay.size is not None and not (0 <= t[0] < lay.size[0] and 0 <= t[1] < lay.size[1]):
                 problems.append(f"{key}: tile {t[0]},{t[1]} is outside the factory's "
                                 f"{lay.size[0]}x{lay.size[1]} frame")
+    for w in lay.wires:
+        for end in (w.a, w.b):
+            if split_end(end)[0] not in lay.entities:
+                problems.append(f"w {w.net}: {end} is not an entity of the layout")
+        net = lay.wirenets.get(w.net)
+        if net is None:
+            problems.append(f"w {w.net}: no wire line names {w.net}")
+        elif net.colour != w.colour:
+            problems.append(f"w {w.net}: a {w.colour} wire on the {net.colour} wire net {w.net}")
     return problems

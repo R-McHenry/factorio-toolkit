@@ -1,0 +1,13 @@
+# nauvis.build.fkb: the plant's build, offline. Its layout is Rory's arrangement (plant.fkp), so the
+# routes, poles and roboport stay where they stand; the circuits are laid from plant.fk.
+read_surface    nauvis
+elaborate
+size                                            # no n=auto rows here: it says so
+place           --keep pinned
+route           --only stale --hand inserter    # the plant's inserters are plain ones
+cover robots    --storage none
+cover power     --pole medium-electric-pole
+floorplan
+report_checks
+write_layout
+stop_on         invariant

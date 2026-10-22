@@ -99,7 +99,8 @@ class FormatTest(unittest.TestCase):
         for text, msg in (("fkp 2 factory x\n", "first line"),
                           ("fkp 1 factory x\ne a/b transport-belt 1,1 E net=x\n"
                            "e a/b transport-belt 2,1 E net=x\n", "duplicate key"),
-                          ("fkp 1 factory x\nwire a b\n", "unknown line"),
+                          ("fkp 1 factory x\nbogus a b\n", "unknown line"),
+                          ("fkp 1 factory x\nwire a b\n", "wire <name> red|green"),
                           ("fkp 1 factory x\nplot a at 0,0 rot 0 size 2x2\n", "surfaces only"),
                           ("fkp 1 factory x\ne a/b transport-belt 1;1 E\n", "expected x,y")):
             with self.assertRaises(fkp.FkpError) as cm:

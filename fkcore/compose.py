@@ -7,6 +7,9 @@ turned frame's top-left tile lands on (X, Y): rotating never moves the corner yo
 become ``<surface>:<factory>/<owner>/<local>``; the surface's own entities are
 ``<surface>:<owner>/<local>``.
 
+Circuit wires (2.0): each factory's ``w`` records come along with their ends' composed keys and
+the net named ``<factory>/<net>``, as carriers' nets are; the surface's own keep theirs.
+
 Composition reports the invariants it finds (two entities on a tile across plots, two plots
 overlapping, an entity outside its plot, a plot with no factory, shared infrastructure inside a
 plot, plus each factory's own) rather than raising: the caller decides; a writer refuses.
@@ -47,6 +50,7 @@ class Surface:
     claims: dict = field(default_factory=dict)
     marks: dict = field(default_factory=dict)
     problems: list = field(default_factory=list)
+    wires: list = field(default_factory=list)          # [fkp.Wire], composed keys (2.0)
 
     def whose(self, x, y):
         """(verdict, detail) for tile (x, y) (a position works too: it is floored): entity, claim,
@@ -133,6 +137,8 @@ def compose(surface: fkpmod.Layout, factories: dict, cat) -> Surface:
             x, y, d = turn(float(e.x), float(e.y), e.dir, p.rot, fac.size)
             place(f"{surface.name}:{name}/{key}", e, _clean(x + p.x), _clean(y + p.y), d, name,
                   p.box())
+        s.wires += [fkpmod.Wire(f"{name}/{w.net}", w.colour, f"{surface.name}:{name}/{w.a}",
+                                f"{surface.name}:{name}/{w.b}") for w in fac.wires]
     s.problems.extend(f"{surface.name}: {msg}" for msg in fkpmod.invariants(surface, cat))
     for key in sorted(surface.entities, key=fkpmod.natural_key):
         e = surface.entities[key]
@@ -144,6 +150,9 @@ def compose(surface: fkpmod.Layout, factories: dict, cat) -> Surface:
                 if x0 <= t[0] < x1 and y0 <= t[1] < y1:
                     s.problems.append(f"{full}: shared infrastructure inside plot {p.factory}")
                     break
+    s.wires += [fkpmod.Wire(w.net, w.colour, f"{surface.name}:{w.a}", f"{surface.name}:{w.b}")
+                for w in surface.wires]
+    s.wires = fkpmod.sort_wires(s.wires)
     return s
 
 

@@ -26,19 +26,43 @@ deterministic serialisation (sorted keys, compact separators, zlib level 9, base
   electric networks. Reading a blueprint drops copper wires again (a power switch's too: V1
   has none), so the round trip holds.
 
+Circuits (2.0, Rory 2026-10-21: circuit wiring and every condition in the source; written by
+``fkcore.circuits``): an entity's typed circuit settings become its ``control_behavior`` (and an
+inserter's filters), and the layout's ``w`` records become the blueprint's ``wires``:
+
+- ``if=S<N`` (or ``S>=T``, another signal): enabled while the condition holds (``circuit_enabled``,
+  ``circuit_condition``); ``logistic=S<N``: the same against the logistic network's count
+  (``connect_to_logistic_network``, ``logistic_condition``);
+- ``read=temperature`` with ``signal=S`` (a reactor), ``read=hold|pulse`` (a belt's contents),
+  ``read=hand`` (an inserter's hand), ``read=ingredients`` or ``read=contents`` (a crafter);
+- ``filter=circuit``: an inserter's filters are set by the signals on its wire (the guard: a
+  crafter that reads its ingredients tells its input inserters what to carry), ``filter=a|b``
+  a fixed whitelist;
+- ``signals=S:N|T:M``: a constant combinator's output (each filter with its quality, else it
+  sends nothing: fnet's CLAUDE.md gotcha).
+
+A signal is typed by its name: a virtual signal (fnet's list), a fluid, else an item. The
+comparators are the game's (``>=`` is ``≥``). The typed settings also ride in ``tags.fkp``, so a
+blueprint read back gives them back and drops the ``control_behavior`` they make; a blueprint
+without them (an imported Literal) keeps it in ``config``. A ``w`` record is ``[a, c, b, c]`` with
+red 1 and green 2, a combinator's output 3 and 4 (fnet's connector table); reading a blueprint
+that carries its records leaves the wires they explain out of the ``wire`` attrs.
+
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
 import base64
 import json
+import re
 import zlib
 
 from . import fkp as fkpmod
 
 __all__ = ["CodecError", "BLUEPRINT_VERSION", "rows_of", "blueprint", "read_blueprint",
            "parse_blueprint", "fkp_to_blueprint", "blueprint_to_fkp", "pole_wires",
-           "circuit_wires", "wire_attrs", "POLE_COPPER"]
+           "circuit_wires", "wire_attrs", "POLE_COPPER", "CIRCUIT_ATTRS", "control_behavior",
+           "parse_condition", "signal_type", "connector", "links_of", "VIRTUAL_SIGNALS"]
 
 #: defines.wire_connector_id.pole_copper (read from the game, 2.0.77)
 POLE_COPPER = 5
@@ -56,6 +80,38 @@ _UG_BACK = {v: k for k, v in _UG.items()}
 #: blueprint entity fields the codec writes from the row itself; ``config`` holds every other one
 _OWN = ("entity_number", "name", "position", "direction", "tags")
 
+#: an entity's typed circuit settings (2.0), in the order the .fkp writes them
+CIRCUIT_ATTRS = ("if", "logistic", "read", "signal", "filter", "signals")
+#: the entity fields the typed settings make (dropped on reading when ``tags.fkp`` has them)
+_CIRCUIT_FIELDS = ("control_behavior", "use_filters", "filters")
+#: the source's comparators -> the game's
+_COMPARATOR = {"<": "<", ">": ">", "=": "=", "<=": "≤", ">=": "≥", "!=": "≠"}
+_CONDITION = re.compile(r"^(?P<a>[A-Za-z0-9_\-]+?)(?P<op><=|>=|!=|<|>|=)"
+                        r"(?P<b>-?\d+|[A-Za-z][A-Za-z0-9_\-]*)$")
+#: the game's fluids (the catalog's, 2.0.77 with Space Age): a signal of one is typed fluid
+_FLUIDS = frozenset((
+    "ammonia", "ammoniacal-solution", "crude-oil", "electrolyte", "fluorine", "fluoroketone-cold",
+    "fluoroketone-hot", "heavy-oil", "holmium-solution", "lava", "light-oil", "lithium-brine",
+    "lubricant", "molten-copper", "molten-iron", "petroleum-gas", "steam", "sulfuric-acid",
+    "thruster-fuel", "thruster-oxidizer", "water"))
+#: belt reading modes (2.0 ``read_contents_mode``)
+_BELT_READ = {"pulse": 0, "hold": 1}
+#: the virtual signals of the game (fnet's signal_space.VIRTUAL_SIGNALS, copied 2026-10-22)
+VIRTUAL_SIGNALS = frozenset(
+    [f"signal-{i}" for i in range(10)] + [f"signal-{chr(65 + i)}" for i in range(26)] + [
+        "down-arrow", "down-left-arrow", "down-right-arrow", "left-arrow", "right-arrow",
+        "shape-circle", "shape-corner", "shape-cross", "shape-curve", "shape-diagonal",
+        "shape-diagonal-cross", "shape-horizontal", "shape-t", "shape-vertical",
+        "signal-any-quality", "signal-anything", "signal-black", "signal-blue", "signal-check",
+        "signal-cyan", "signal-deny", "signal-dot", "signal-each", "signal-everything",
+        "signal-fluid-parameter", "signal-fuel-parameter", "signal-ghost", "signal-green",
+        "signal-grey", "signal-heart", "signal-info", "signal-item-parameter", "signal-pink",
+        "signal-red", "signal-signal-parameter", "signal-skull", "signal-stack-size",
+        "signal-unknown", "signal-white", "signal-yellow", "up-arrow", "up-left-arrow",
+        "up-right-arrow"])
+#: connector ids by colour: (entity or combinator input, combinator output)
+_CONNECTOR = {"red": (1, 3), "green": (2, 4)}
+
 
 class CodecError(ValueError):
     """A malformed blueprint string."""
@@ -69,6 +125,106 @@ def rows_of(lay):
         out.append({"src": e.key, "name": e.name, "x": e.x, "y": e.y, "direction": e.dir,
                     "attrs": dict(e.attrs)})
     return out
+
+
+def signal_type(name):
+    """A signal's type by its name: ``virtual``, ``fluid`` or ``item``."""
+    if name in VIRTUAL_SIGNALS:
+        return "virtual"
+    return "fluid" if name in _FLUIDS else "item"
+
+
+def _signal(name):
+    return {"type": signal_type(name), "name": name}
+
+
+def parse_condition(text, where="condition"):
+    """``S<N`` / ``S>=T`` -> (signal, source comparator, number or signal)."""
+    m = _CONDITION.match(str(text))
+    if not m:
+        raise CodecError(f"{where}: a condition is SIGNAL<op>NUMBER or SIGNAL<op>SIGNAL "
+                         f"(op one of {', '.join(_COMPARATOR)}), got {text!r}")
+    b = m.group("b")
+    return m.group("a"), m.group("op"), int(b) if re.fullmatch(r"-?\d+", b) else b
+
+
+def _condition(text, where):
+    a, op, b = parse_condition(text, where)
+    out = {"first_signal": _signal(a), "comparator": _COMPARATOR[op]}
+    if isinstance(b, int):
+        out["constant"] = b
+    else:
+        out["second_signal"] = _signal(b)
+    return out
+
+
+def control_behavior(attrs, where="entity"):
+    """The entity fields an entity's typed circuit settings make: ``control_behavior`` and an
+    inserter's ``use_filters`` / ``filters`` ({} when it has none)."""
+    cb, fields = {}, {}
+    if attrs.get("if"):
+        cb["circuit_enabled"] = True
+        cb["circuit_condition"] = _condition(attrs["if"], f"{where} if")
+    if attrs.get("logistic"):
+        cb["connect_to_logistic_network"] = True
+        cb["logistic_condition"] = _condition(attrs["logistic"], f"{where} logistic")
+    read = attrs.get("read")
+    if read == "temperature":
+        cb["read_temperature"] = True
+        if attrs.get("signal"):
+            cb["temperature_signal"] = _signal(attrs["signal"])
+    elif read in _BELT_READ:
+        cb["read_contents"] = True
+        cb["read_contents_mode"] = _BELT_READ[read]
+    elif read == "hand":
+        cb["circuit_read_hand_contents"] = True
+    elif read == "ingredients":
+        cb["read_ingredients"] = True
+    elif read == "contents":
+        cb["read_contents"] = True
+    elif read is not None:
+        raise CodecError(f"{where}: read={read}: temperature, hold, pulse, hand, ingredients or "
+                         "contents")
+    flt = attrs.get("filter")
+    if flt == "circuit":
+        cb["circuit_set_filters"] = True
+        fields["use_filters"] = True
+    elif flt:
+        fields["use_filters"] = True
+        fields["filters"] = [{"index": k + 1, "name": it, "quality": "normal", "comparator": "="}
+                             for k, it in enumerate(str(flt).split("|"))]
+    if attrs.get("signals"):
+        rows = []
+        for k, part in enumerate(str(attrs["signals"]).split("|")):
+            name, _colon, count = part.rpartition(":")
+            if not name or not re.fullmatch(r"-?\d+", count):
+                raise CodecError(f"{where}: signals= is S:N|T:M, got {attrs['signals']!r}")
+            rows.append(dict(_signal(name), index=k + 1, quality="normal", comparator="=",
+                             count=int(count)))
+        cb["sections"] = {"sections": [{"index": 1, "filters": rows}]}
+    if cb:
+        fields["control_behavior"] = cb
+    return fields
+
+
+def connector(colour, port=None):
+    """The ``defines.wire_connector_id`` of a ``w`` end: red 1, green 2; a combinator's output
+    side 3, 4."""
+    return _CONNECTOR[colour][1 if port == "out" else 0]
+
+
+def links_of(rows, wires):
+    """[(i, ci, j, cj)] row indices for the ``w`` records ``wires`` whose two ends are among
+    ``rows`` (by ``src``), the lower end first; a record with an end outside them is left out."""
+    index = {r["src"]: i for i, r in enumerate(rows) if r.get("src") is not None}
+    out = set()
+    for w in wires:
+        (ka, pa), (kb, pb) = fkpmod.split_end(w.a), fkpmod.split_end(w.b)
+        if ka in index and kb in index:
+            a = (index[ka], connector(w.colour, pa))
+            b = (index[kb], connector(w.colour, pb))
+            out.add(min(a, b) + max(a, b))
+    return sorted(out)
 
 
 def _entity_json(row, number):
@@ -89,6 +245,8 @@ def _entity_json(row, number):
             raise CodecError(f"{row.get('src')}: ug must be in or out, got {ug!r}")
         entity["type"] = _UG[ug]
     attrs.pop("wire", None)                    # blueprint() writes it into the wires
+    # the typed circuit settings make game fields, and stay in tags.fkp to come back as written
+    entity.update(control_behavior(attrs, row.get("src")))
     config = attrs.pop("config", None)
     if config is not None:
         entity.update(_config(row, config, entity))
@@ -210,15 +368,18 @@ def pole_wires(rows, cat):
     return out
 
 
-def blueprint(rows, description=None, label=None, wires=None) -> str:
+def blueprint(rows, description=None, label=None, wires=None, links=None) -> str:
     """Rows -> a blueprint string; ``entity_number`` follows row order. ``wires``: [(i, j)] row
     indices of poles to join by copper wire (see :func:`pole_wires`); the rows' own circuit wires
-    (``wire`` attrs, see :func:`circuit_wires`) follow them. Deterministic."""
+    (``wire`` attrs, see :func:`circuit_wires`) follow them, then ``links`` (2.0): [(i, ci, j, cj)]
+    the layout's ``w`` records as row indices (:func:`links_of`). Deterministic."""
     rows = list(rows or [])
     entities = [_entity_json(row, i + 1) for i, row in enumerate(rows)]
     bp = {"item": "blueprint", "entities": entities, "version": BLUEPRINT_VERSION}
     out = [[i + 1, POLE_COPPER, j + 1, POLE_COPPER] for i, j in wires or ()]
-    out += [[i + 1, ci, j + 1, cj] for i, ci, j, cj in circuit_wires(rows)]
+    own = circuit_wires(rows)
+    out += [[i + 1, ci, j + 1, cj] for i, ci, j, cj in own]
+    out += [[i + 1, ci, j + 1, cj] for i, ci, j, cj in sorted(set(links or ()) - set(own))]
     if out:
         bp["wires"] = out
     if description:
@@ -275,6 +436,9 @@ def parse_blueprint(s):
             attrs["net"] = tags["net"]
         if extra.get("type") in _UG_BACK:
             attrs["ug"] = _UG_BACK[extra.pop("type")]
+        if any(k in (tags.get("fkp") or {}) for k in CIRCUIT_ATTRS):
+            for f in _CIRCUIT_FIELDS:              # made by the typed settings: they come back
+                extra.pop(f, None)
         if extra:
             attrs["config"] = config_text(extra)
         attrs.update(tags.get("fkp") or {})
@@ -299,17 +463,23 @@ def _num(v):
 
 
 def fkp_to_blueprint(lay, cat=None) -> str:
-    """With ``cat``, the poles are wired (derived wires; reading drops them again)."""
+    """With ``cat``, the poles are wired (derived wires; reading drops them again). The layout's
+    ``w`` records are its circuit wires."""
     rows = rows_of(lay)
     return blueprint(rows, description="\n".join(fkpmod.record_lines(lay)),
-                     label=f"{lay.level} {lay.name}", wires=pole_wires(rows, cat) if cat else None)
+                     label=f"{lay.level} {lay.name}", wires=pole_wires(rows, cat) if cat else None,
+                     links=links_of(rows, lay.wires))
 
 
 def blueprint_to_fkp(s, path="<blueprint>"):
-    rows, description = read_blueprint(s)
+    rows, description, wires = parse_blueprint(s)
     if not description:
         raise CodecError("the blueprint carries no .fkp records in its description")
     lay = fkpmod.loads(description, path)
+    explained = set(links_of(rows, lay.wires))
+    for i, text in wire_attrs([r["src"] for r in rows],
+                              [w for w in wires if w not in explained]).items():
+        rows[i]["attrs"]["wire"] = text
     for row in rows:
         if row["src"] is None:
             raise CodecError(f"{row['name']} at {row['x']},{row['y']} has no tags.src key")

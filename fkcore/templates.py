@@ -16,16 +16,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .catalog import FUEL_USE_W, FUEL_VALUE_J, MINING_TIME, STEAM_PER_S
+from .catalog import FUEL_USE_W, FUEL_VALUE_J, HEAT_W, MINING_TIME, REACTOR_FUEL_S, STEAM_PER_S
 from .fragments import FragmentError, bus_check, bus_ports
 
-__all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "machines", "science_packs",
-           "literal_machines"]
+__all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "CIRCUIT_PARAMS", "CONTACT",
+           "machines", "science_packs", "literal_machines"]
 
 INF = float("inf")
 
+#: 2.0, circuits in the source (``fkcore.circuits``): a maker's limits and a crafter's guard.
+#: ``keep=N``: the logistic network keeps N of its product; ``fill=N``: each chest it fills
+#: straight holds at most N; ``guard``: its input inserters carry only what its recipe takes.
+CIRCUIT_PARAMS = ("keep", "fill", "guard")
 #: Parameters every instance may carry; the elaborator reads them, the templates ignore them.
-COMMON_PARAMS = ("duty", "inserter")
+COMMON_PARAMS = ("duty", "inserter") + CIRCUIT_PARAMS
+#: Items that pass by contact, with no carrier (2.0): a reactor heats the exchanger it touches.
+#: A net of only these has no route; it is connected when its machines touch.
+CONTACT = frozenset({"heat"})
 
 
 class TemplateError(ValueError):
@@ -230,6 +237,48 @@ def steam_engine(params, cat):
                   frozenset({"steam"}), extra={"role": "engine"})]
 
 
+def steam_turbine(params, cat):
+    """``SteamTurbine``: 500 C steam in at full power (60/s, 5.82 MW; 2.0, the starter reactor)."""
+    _only(params, ())
+    return [MSpec("m0", "steam-turbine", None, {"steam": STEAM_PER_S["steam-turbine"]}, {},
+                  frozenset({"steam"}), extra={"role": "turbine"})]
+
+
+def reactor(params, cat):
+    """``Reactor<fuel=uranium-fuel-cell, read=temperature, signal=>`` (2.0, the starter reactor,
+    drafts\\reactor-1.1): one nuclear reactor. A loaded cell burns 200 s at the full 40 MW whatever
+    is drawn, so it needs a cell per 200 s while it burns and makes as many used cells, and heat
+    (MW) for the exchangers it touches. ``read=temperature`` puts its temperature on a wire as
+    ``signal`` (a declared signal or a game one), a circuit setting (``fkcore.circuits``)."""
+    _only(params, ("fuel", "read", "signal"))
+    fuel = _word(params, "fuel", "uranium-fuel-cell")
+    if fuel not in REACTOR_FUEL_S:
+        raise TemplateError(f"{fuel} is no reactor fuel")
+    if params.get("read") not in (None, "temperature"):
+        raise TemplateError(f"read={params['read']}: a reactor reads its temperature")
+    per = 1.0 / REACTOR_FUEL_S[fuel]
+    spent = "used-up-" + fuel
+    return [MSpec("m0", "nuclear-reactor", None, {fuel: per},
+                  {spent: per, "heat": HEAT_W["nuclear-reactor"] / 1e6}, frozenset({fuel}),
+                  extra={"fuel": fuel})]
+
+
+def heat_exchanger(params, cat):
+    """``HeatExchanger``: heat (10 MW) and water in, 500 C steam out (103/s; 2.0). It needs 500 C
+    to make steam."""
+    _only(params, ())
+    rate = STEAM_PER_S["heat-exchanger"]
+    needs = {"heat": HEAT_W["heat-exchanger"] / 1e6, "water": rate}
+    return [MSpec("m0", "heat-exchanger", None, needs, {"steam": rate}, frozenset(needs))]
+
+
+def constant(params, cat):
+    """``Constant<signals="signal-A=1, iron-plate=100">`` (2.0): a constant combinator, the
+    signals it puts on its wires (``fkcore.circuits`` reads them). It moves no items."""
+    _only(params, ("signals",))
+    return [MSpec("m0", "constant-combinator", None, {}, {}, frozenset(), extra={"circuit": True})]
+
+
 def infinity_pipe(params, cat):
     """``InfinityPipe<fluid, rate=>``: a lab-only source of ``fluid`` (the lab's free materials).
     Without a rate it is unbounded (an UNBOUNDED check line)."""
@@ -265,12 +314,12 @@ def lab(params, cat):
 
 
 _CHEST = {"provider": "passive-provider-chest", "storage": "storage-chest",
-          "requester": "requester-chest", "buffer": "buffer-chest"}
+          "requester": "requester-chest", "buffer": "buffer-chest", "plain": "iron-chest"}
 
 
 def chest(params, cat):
-    """``Chest<provider | storage | requester | buffer, item=, rate=, request=, limit=, chest=>``:
-    a boundary.
+    """``Chest<provider | storage | requester | buffer | plain, item=, rate=, request=, max=,
+    limit=, chest=>``: a boundary.
 
     provider / storage (the default is provider): the end of a net into the logistic network, a
     sink for whatever reaches it, up to ``rate``. requester: the logistic network feeding a net with
@@ -282,12 +331,15 @@ def chest(params, cat):
     when full, so what feeds it stops too: limited production (no UNLIMITED or SHARED_SINK line).
     ``trash`` (1.4.2, a requester): the game's "trash unrequested", so items it no longer asks
     for go back to the network (the 2005 player's stone requester kept 101 copper plates).
+    2.0: ``max`` (a requester) is the request's upper bound, as the starter plant's requester asks
+    for 20 cells and takes at most 50; ``plain`` is a chest off the logistic network (an iron
+    chest unless ``chest=`` says otherwise): robots neither fill nor empty it.
     """
     roles = [r for r in _CHEST if params.get(r) is True]
     if len(roles) > 1:
         raise TemplateError("one role only: " + ", ".join(roles))
     role = roles[0] if roles else "provider"
-    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "limit", "trash"))
+    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "max", "limit", "trash"))
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
     limit = _int(params, "limit") if params.get("limit") is not None else None
@@ -300,6 +352,8 @@ def chest(params, cat):
             extra["limit"] = limit
         if params.get("request") is not None:
             extra["request"] = int(float(params["request"]))
+        if params.get("max") is not None:
+            extra["max"] = _int(params, "max")
         if params.get("trash") not in (None, False, "no", "false", "0"):
             extra["trash"] = True
         return [MSpec("c0", proto, None, {}, {it: INF if rate is None else rate for it in items},
@@ -356,6 +410,10 @@ TEMPLATES = {
     "ChemPlant": chem_plant,
     "Boiler": boiler,
     "SteamEngine": steam_engine,
+    "SteamTurbine": steam_turbine,
+    "Reactor": reactor,
+    "HeatExchanger": heat_exchanger,
+    "Constant": constant,
     "InfinityPipe": infinity_pipe,
     "LabRow": lab_row,
     "Lab": lab,
