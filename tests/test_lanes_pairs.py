@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from fkcore import __main__ as cli
 from fkcore import compose, connect, expand, fkp, flow, lang, lanes, merge, route, routed, sense
@@ -280,6 +281,91 @@ class ModuleTest(unittest.TestCase):
                                      {"net": "ore_|fuel"}), "south", {}, 0, 0)
         self.assertEqual((e.key, e.net), ("~south/ore_|south/fuel/b0", "south/ore_|south/fuel"))
         self.assertEqual(e.owner[1:], next(iter(flat.pairs)))
+
+
+SMELT2 = "smelt2 = SmelterRow<n=2, recipe=iron-plate> @(22, 12)\npipes = AsmRow"
+
+
+def committed(r):
+    out = {}
+    for e in r.layout.entities.values():
+        if e.owner.startswith("~"):
+            out.setdefault(e.owner[1:], []).append(e)
+    return out
+
+
+class PatchPairTest(unittest.TestCase):
+    """2.0.2: a lane pair whose ends were only added or dropped is patched like one net (route
+    patching, Rory 2026-10-21: "Pin what stands and make patch changes rather than regenerating
+    the base"), each new end on its own net's lane; 2.0.1 routed a changed pair again whole."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.flat, cls.r = routed_layout()
+        cls.old = committed(cls.r)
+
+    def patched(self, text, old=None):
+        flat = flat_of(text)
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT, patch=old or self.old)
+        self.assertEqual(fkp.invariants(r.layout, CAT, nets=flat.nets), [])
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        self.assertEqual({n: x.status for n, x in rep.nets.items()},
+                         {n: "connected" for n in flat.nets})
+        self.assertEqual(rep.checks, [])                               # no LEAK
+        self.assertEqual(routed.lane_checks(routed.solve(flat, r.layout, CAT)), [])  # no LANE
+        return r
+
+    def new_carriers(self, r):
+        was = {(e.name, e.x, e.y, e.dir, e.net) for e in self.old[PAIR]}
+        return [e for k, e in r.layout.entities.items() if k.startswith(f"~{PAIR}/")
+                and (e.name, e.x, e.y, e.dir, e.net) not in was]
+
+    def test_a_consumer_of_the_pair_branches_off_both_lanes(self):
+        r = self.patched(SMELT.replace("pipes = AsmRow", SMELT2)
+                         .replace("ore -> smelt", "ore -> smelt, smelt2")
+                         .replace("coal -> smelt", "coal -> smelt, smelt2"))
+        self.assertEqual((r.routed, r.again), ([], {}))
+        # 28 of the pair's 29 carriers stand; the 29th, a straight belt of both lanes, became the
+        # splitter, and the branch to smelt2 carries both lanes (a splitter keeps each on its own)
+        self.assertRegex(r.patched[PAIR], r"^2 -> 2, smelt2\.in1: a splitter in place of "
+                                          r"~ore_\|fuel/b\d+, \d+ belts; 28 of 29 carriers kept$")
+        self.assertEqual({e.net for e in self.new_carriers(r)}, {PAIR})
+
+    def test_a_driver_of_one_net_joins_its_own_lane(self):
+        r = self.patched(SMELT.replace("pipes = AsmRow", "ore2  = MinerRow<n=1, resource=iron-ore>"
+                                                         "   @(32, 0, rot 2)\npipes = AsmRow")
+                         .replace("net ore_:   ore -> smelt", "net ore_:   ore, ore2 -> smelt"))
+        # ore_ is the left lane: its new miner side-loads onto the pair's belt from the left
+        self.assertRegex(r.patched[PAIR], r"^3 -> 1, ore2\.out: \d+ belts.*, side-loaded onto the "
+                                          r"left lane of ~ore_\|fuel/b\d+; 29 of 29 carriers kept$")
+        new = self.new_carriers(r)
+        self.assertEqual({e.net for e in new}, {"ore_"})
+        self.assertTrue(all(e.key.split("/")[-1].startswith("l") for e in new))
+        r = self.patched(SMELT.replace("pipes = AsmRow", "coal2 = MinerRow<n=1, resource=coal>"
+                                                         "       @(32, 0, rot 2)\npipes = AsmRow")
+                         .replace("net fuel:   coal -> smelt", "net fuel:   coal, coal2 -> smelt"))
+        self.assertIn("29 of 29 carriers kept", r.patched[PAIR])
+        self.assertEqual({e.net for e in self.new_carriers(r)}, {"fuel"})
+
+    def test_a_dropped_consumer_takes_its_branch_up(self):
+        both = (SMELT.replace("pipes = AsmRow", SMELT2)
+                .replace("ore -> smelt", "ore -> smelt, smelt2")
+                .replace("coal -> smelt", "coal -> smelt, smelt2"))
+        _flat, r = routed_layout(both)
+        r = self.patched(SMELT.replace("pipes = AsmRow", SMELT2), committed(r))
+        self.assertRegex(r.patched[PAIR], r"^2 -> 1, \d+ carriers taken up \(no end of the net "
+                                          r"needs them now\); \d+ of \d+ carriers kept$")
+
+    def test_a_pair_that_cannot_be_patched_is_routed_again(self):
+        text = (SMELT.replace("pipes = AsmRow", SMELT2)
+                .replace("ore -> smelt", "ore -> smelt, smelt2")
+                .replace("coal -> smelt", "coal -> smelt, smelt2"))
+        with mock.patch.object(route._Patch, "add_consumer", return_value=None):
+            r = self.patched(text)
+        self.assertEqual((r.routed, r.patched), ([PAIR], {}))
+        self.assertIn("patching it failed: no branch from the standing route reaches smelt2.in1",
+                      r.again[PAIR])
 
 
 class WrongLaneTest(unittest.TestCase):
