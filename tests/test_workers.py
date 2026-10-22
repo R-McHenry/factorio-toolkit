@@ -158,6 +158,21 @@ class WatchTest(unittest.TestCase):
         self.assertIn("pipe at 1.5,2.5", notes)
         self.assertNotIn("78.5,46", notes)
 
+    def test_no_research_is_a_note_once_each_time(self):
+        # the first lead run (2026-10-21): the queue ran out twice while the lead waited
+        status = {"ghosts": [], "research": None}
+        self.watch.cfg = {"host": "computah-ct"}
+        with mock.patch.object(claude_loop, "host_status", lambda *a: dict(status)):
+            self.watch.check()
+            self.assertIn("[The labs stand idle: nothing researches.", self.watch.take_notes())
+            self.watch.check()
+            self.assertEqual(self.watch.take_notes(), "")         # once while it lasts
+            status["research"] = {"name": "concrete", "pct": 4}
+            self.watch.check()
+            status["research"] = None
+            self.watch.check()
+            self.assertIn("nothing researches", self.watch.take_notes())   # again, a new gap
+
     def test_a_waiting_lead_gets_notes_not_the_world_line(self):
         self.watch.world("no ghosts wait")
         self.watch.note("[Rory_618 in game chat] hi")

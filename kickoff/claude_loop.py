@@ -508,6 +508,7 @@ class Watch(threading.Thread):
         # no cursor yet: the chat so far is not news, the first read only sets the cursor
         self.cursor = int(open(self.cursor_file).read()) if os.path.exists(self.cursor_file) else None
         self.key, self.said = None, 0.0
+        self.no_research = False
         self.mutex = threading.Lock()
 
     def note(self, text):
@@ -601,6 +602,15 @@ class Watch(threading.Thread):
                 with open(self.cursor_file, "w") as f:
                     f.write(str(self.cursor))
             line, key = status_line(st)
+            # no research is the one world fact that is also a note, so it wakes a lead that
+            # waits on its workers, once each time it starts (2.0, the first lead run: the queue
+            # ran out while the lead waited, 21:40-22:13 and 23:24-23:33 on 2026-10-21)
+            none = "research:none" in key.split(",")
+            if none and not self.no_research:
+                self.note("[The labs stand idle: nothing researches. `fk research` queues the next "
+                          "techs.]")
+                self.log("note: nothing researches")
+            self.no_research = none
             since = time.time() - self.said
             due = (key != self.key and since > SETTLE) or (key and since > REMIND)
             if world or (due and (key or self.key)):

@@ -55,7 +55,10 @@ conversations had grown to 500-800k tokens of context, so a round was slow and c
   still gets notes at once (the first lead run: such tasks marked it busy, and INBOX.md waited
   for the worker's report). A round past `--turn-cap` (120 min) ends at its next quiet moment
   instead of being stopped with its workers mid-task; the lead hears once that the round is
-  past its cap, and only a round still busy `GRACE` (60) minutes later is stopped.
+  past its cap, and only a round still busy `GRACE` (60) minutes later is stopped. No research
+  (nothing queued) is the one world fact that is also a note, so it wakes a lead that waits on
+  its workers, once each time it starts (the first lead run's queue ran out twice while the lead
+  waited: 33 and 9 minutes of idle labs).
 - **The hook** keeps Rory's chat, INBOX.md and the world line for the lead: inside a worker (its
   hook input names an `agent_id`) it takes nothing; the lead gets them at its own next shell
   command or Agent call.
