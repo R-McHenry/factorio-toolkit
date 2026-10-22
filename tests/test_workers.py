@@ -158,6 +158,20 @@ class WatchTest(unittest.TestCase):
         self.assertIn("pipe at 1.5,2.5", notes)
         self.assertNotIn("78.5,46", notes)
 
+    def test_every_inbox_file_is_a_note_once(self):
+        # 2026-10-21 23:33: two writers within a minute, and one INBOX.md replaced the other
+        for name, text in (("INBOX.md", "from the lead engineer"),
+                           ("INBOX-supervisor.md", "from the supervisor")):
+            with open(os.path.join(self.run, name), "w", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        self.watch.check()
+        notes = self.watch.take_notes()
+        self.assertIn("[A message for you, from INBOX.md]\nfrom the lead engineer", notes)
+        self.assertIn("[A message for you, from INBOX-supervisor.md]\nfrom the supervisor", notes)
+        self.assertFalse([n for n in os.listdir(self.run) if n.startswith("INBOX")])
+        self.watch.check()
+        self.assertEqual(self.watch.take_notes(), "")
+
     def test_no_research_is_a_note_once_each_time(self):
         # the first lead run (2026-10-21): the queue ran out twice while the lead waited
         status = {"ghosts": [], "research": None}

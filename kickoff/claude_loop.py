@@ -25,10 +25,10 @@ waits for an answer). No MCP servers. This window and <run>\\play.log show what 
 What the player must not miss reaches it after its next shell command, whatever that command's
 output kept (the 0534 player cut fk's footer off 199 of 245 times and never saw Rory's chat): a
 watcher reads the game every 30 s and notes game chat and <run>\\INBOX.md (a message for the
-player: the file is taken and moved into .loop), each once; and it keeps the world line in
-.loop\\world.txt (the ghosts that wait and what the network lacks, ghosts no powered roboport
-reaches, idle robots, the research),
-rewritten when what blocks changes (at most every 2 minutes) or every 10 minutes while something
+player: the file is taken and moved into .loop; INBOX-<name>.md too, one per writer), each
+once; and it keeps the world line in .loop\\world.txt (the ghosts that wait and what the network
+lacks, ghosts no powered roboport reaches, idle robots, the research), rewritten when what blocks
+changes (at most every 2 minutes) or every 10 minutes while something
 does. claude_hook.py, a PostToolUse hook, hands over the notes and the world line when it is new;
 each round's message starts with them too.
 
@@ -575,13 +575,21 @@ class Watch(threading.Thread):
     def check(self, world=False):
         """One read; ``world``: note the world line whatever it says (a round's start)."""
         with self.mutex:
-            inbox = os.path.join(self.folder, "INBOX.md")
-            if os.path.exists(inbox):
-                with open(inbox, encoding="utf-8") as f:
+            # INBOX.md and INBOX-<anything>.md, one file per writer if they like; each is moved
+            # before it is read, so a note written meanwhile lands in a new file (2026-10-21
+            # 23:33: the supervisor's and the lead engineer's notes came within a minute and one
+            # write replaced the other before the watcher read it)
+            for inbox in sorted(glob.glob(os.path.join(self.folder, "INBOX*.md"))):
+                name = os.path.basename(inbox)
+                kept = os.path.join(self.dir, f"inbox-{datetime.now():%Y%m%d-%H%M%S}-{name}")
+                try:
+                    os.replace(inbox, kept)
+                except OSError:
+                    continue                   # its writer still holds it: next time
+                with open(kept, encoding="utf-8") as f:
                     text = f.read().strip()
-                os.replace(inbox, os.path.join(self.dir, f"inbox-{datetime.now():%Y%m%d-%H%M%S}.md"))
                 if text:
-                    self.note(f"[A message for you, from INBOX.md]\n{text}")
+                    self.note(f"[A message for you, from {name}]\n{text}")
                     self.log("inbox: " + short(text, 300))
             self.hand()
             if not self.cfg:
