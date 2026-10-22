@@ -31,4 +31,5 @@ how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
 ## The lab
 
 On a lab surface (`/lab`), none of this applies: materials are free, building is direct, and
-watching and measuring are global. The rules above are for the real game.
+watching and measuring are global. The rules above are for the real game. `fk lab` builds and
+measures a design there (`docs\TOOLKIT.md`, "The lab").

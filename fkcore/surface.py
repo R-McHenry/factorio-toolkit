@@ -186,11 +186,14 @@ def load(path) -> SurfaceFile:
 
 
 def load_game(game_dir) -> SurfaceFile:
-    """The surface file of a game codebase: its first ``*.surface`` (one surface per codebase)."""
+    """The surface file of a game codebase: its play-mode ``*.surface``, else its first (one
+    surface per codebase; 2.0.3: a lab.surface copied in beside nauvis.surface came first
+    alphabetically and every command read the lab's)."""
     names = sorted(f for f in os.listdir(game_dir) if f.endswith(".surface"))
     if not names:
         raise SurfaceError(f"no .surface file in {game_dir}")
-    return load(os.path.join(game_dir, names[0]))
+    files = [load(os.path.join(game_dir, n)) for n in names]
+    return next((sf for sf in files if sf.mode == "play"), files[0])
 
 
 def floorplan(sf: SurfaceFile, infra=None) -> fkpmod.Layout:

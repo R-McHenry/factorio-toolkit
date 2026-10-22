@@ -56,6 +56,9 @@ use the game link, and only with FK_LINK=on)
   with the game link (FK_LINK=on, on the game host):
     measure GAME_DIR --area X0,Y0,X1,Y1 [--seconds 30]
                                           what the machines there make, against the model
+    lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
+                                          a factory (or a stage's) built on its own lab slot,
+                                          powered and stocked; then what it really makes
     fresh GAME_DIR --area X0,Y0,X1,Y1     belts there that carry items their net doesn't are
                                           taken up by robots; the next build lays them fresh
     adopt GAME_DIR X,Y[;X,Y...] --into FACTORY/NET
@@ -369,6 +372,33 @@ def _measure(a, cat):
     return 0
 
 
+def _lab(a, cat):
+    """fk lab (2.0.3): a design built and measured on the lab surface (fkcore.lab)."""
+    from . import lab
+    if a.list or not a.name:
+        held = lab.slots(a.game)
+        print("lab slots: " + (", ".join(f"{n} at {x},{y}" for n, (x, y) in sorted(held.items()))
+                               or "none in use"))
+        return 0
+    r = _game_link("lab")
+    if r is None:
+        return 2
+    size = tuple(int(v) for v in a.size.lower().split("x")) if a.size else None
+    try:
+        with r:
+            if a.clear:
+                lines = lab.clear(r, a.game, a.name)
+            elif a.measure is not None:
+                lines = lab.measure_lab(r, a.game, a.name, a.measure, cat)
+            else:
+                lines = lab.build(r, a.game, a.name, a.src, size, cat)
+    except lab.LabError as exc:
+        print(f"lab: {exc}", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    return 0
+
+
 def _adopt(a, cat):
     import math
     from . import adopt, link, scene
@@ -572,6 +602,14 @@ def main(argv=None):
     me.add_argument("game")
     me.add_argument("--area", required=True)
     me.add_argument("--seconds", type=float, default=30.0)
+    lb = sub.add_parser("lab")
+    lb.add_argument("game")
+    lb.add_argument("name", nargs="?")
+    lb.add_argument("--from", dest="src")
+    lb.add_argument("--size")
+    lb.add_argument("--measure", type=float)
+    lb.add_argument("--clear", action="store_true")
+    lb.add_argument("--list", action="store_true")
     ad = sub.add_parser("adopt")
     ad.add_argument("game")
     ad.add_argument("tiles")
@@ -624,6 +662,8 @@ def main(argv=None):
         return _rewire(a)
     if a.cmd == "measure":
         return _measure(a, cat)
+    if a.cmd == "lab":
+        return _lab(a, cat)
     if a.cmd == "adopt":
         return _adopt(a, cat)
 

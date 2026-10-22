@@ -193,6 +193,38 @@ is young and changes fast.
 The plan's repository is `.stage\` and its folders are `stages\`, both in the run folder, outside
 `game\`. `fk stage` changes `game\` only with `next --apply`.
 
+## The lab: `fk lab`
+
+The game has a second surface, the lab, where you try a design for real before it goes into the
+base: its own force with the research done, building at once, free materials, and none of the
+fair-play rules (`docs\FAIR-PLAY.md`, "The lab"). Rory watches it with `/lab`. While your
+builders work and there seems to be nothing to do, the lab and planning (`fk stage`) are the two
+things worth doing, and workers can do most of the lab work.
+
+```
+fk lab NAME                      NAME (a factory game\nauvis.surface places, or NAME.fk) built on
+                                 its own lab slot: powered, its requester chests filled, burners
+                                 given a first load of coal; says where Rory sees it
+fk lab NAME --from stages\4      the same from a stage's folder (or a scratch copy of game\)
+fk lab NAME --size 60x40         its plot size, when no surface file places it (default 100x100)
+fk lab NAME --measure 60         what its machines really make over 60 s, against the rate model
+fk lab NAME --clear              its slot emptied and freed
+fk lab --list                    the slots in use
+```
+
+- Each factory gets its own slot of 200 x 200 tiles inside the lab (the lab is 2048 tiles square)
+  and keeps it; building it again empties the slot first. Its workspace is `lab\NAME` in the run
+  folder, never `game\`.
+- Drill rows get their ore seeded under them, so a smelting block runs as designed. A requester
+  chest is filled with what it asks for, so the machines run as fast as they can: the measure
+  shows what the machines do when their inputs keep up, where the rate model counts the
+  `rate=` you wrote (the gears example: 120 gears a minute in the lab, 37.5 on paper at
+  `rate=1.25/s`).
+- Let it run a minute or two before `--measure`: a backlog that piled up while it started reads as
+  speed. `--measure 60` takes a minute; it tops the requesters up first.
+- A good worker task: "Try stage 4's mall in the lab (`fk lab mall --from stages\4`), let it run
+  two minutes, measure it, and report what each maker makes and what it waits for."
+
 ## What `fk look` says
 
 Every designed entity in the area gets a verdict:
@@ -318,6 +350,8 @@ fk build --to size               the counts of your n=auto rows and what each on
 fk stage list                    the plan: the stages after what is built, and how far it reaches
                                  ("Planning ahead")
 fk stage check N                 a planned stage built on paper in its own folder, stages\N
+fk lab NAME --from stages\N      that stage built for real on its own lab slot; then
+                                 fk lab NAME --measure 60 for what it really makes ("The lab")
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
 fk build --to diff               what the next build would take up, and how long the robots need
                                  (a dry run: nothing written, nothing pasted)

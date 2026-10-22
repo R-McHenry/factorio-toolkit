@@ -79,6 +79,11 @@ build, design the stages after theirs, and adjust the plan as their reports come
   settle.
 - `fk stage list` shows the horizon: the planned base against the built one, in plates per minute.
   About 1.5 to 2 times reaches far enough; below that, planning is your next job.
+- The lab tries a stage for real before it goes into the base (`docs\TOOLKIT.md`, "The lab"):
+  `fk lab NAME --from stages\N` builds it on its own lab slot, powered and stocked, and
+  `fk lab NAME --measure 60` says what its machines really make. Rory: "the lead should be
+  using the lab and planning rather than waiting if there is seemingly nothing to do", and
+  "the lead can send workers to do most of the lab work too".
 - Rory's longest wait is 5 minutes: don't wait on a worker or the game longer than that without
   designing, planning or measuring something. The loop tells you when 5 minutes have passed, with
   each worker's progress (`.loop\workers.txt` has it any time).

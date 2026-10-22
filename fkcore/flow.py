@@ -89,6 +89,7 @@ class Ctx:
     checks: list = field(default_factory=list)       # [(step, Check)] of every step run so far
     link: object = None                              # the game link (fkcore.link.Rcon), on use
     link_error: str | None = None
+    link_lent: bool = False                          # the caller's link: not closed here
     last_diff: object = None                         # the last diff's SenseReport this run
     hands: tuple | None = None                       # the force's (hand, bulk hand, note), read once
     rates_runs: int = 0                              # report_rates steps run so far
@@ -1280,13 +1281,16 @@ def _load_checkpoint(ctx, step):
         ctx.layouts[p.factory] = fkp.load(path)
 
 
-def run(script, frm=None, to=None, cat=None, echo=print) -> tuple:
+def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
-    stopped by a stop_on check, 2 = malformed script or source."""
+    stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
+    steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes."""
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
         lines = parse(fh.read(), script)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
+    if link is not None:
+        ctx.link, ctx.link_lent = link, True
     ctx.steps = [ln.cmd for ln in lines]
     for ln in lines:
         if ln.cmd == "stop_on":
@@ -1363,6 +1367,6 @@ def _at(names, spec):
 
 
 def _close(ctx):
-    if ctx.link is not None:
+    if ctx.link is not None and not ctx.link_lent:
         ctx.link.close()
         ctx.link = None

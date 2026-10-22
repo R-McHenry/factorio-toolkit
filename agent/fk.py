@@ -30,6 +30,10 @@ argument, so a 13 kB chunk arrived cut, and its open single quote stopped the ho
 ``fk stage`` (2.0) is the staged plan, all of it here: its repository is ``<run>\\.stage`` (game\\
 is its work tree, so no sync carries it) and its stage folders ``<run>\\stages\\N``.
 
+``fk lab NAME`` (2.0.3) builds a factory on its own slot of the lab surface and ``fk lab NAME
+--measure S`` measures it there (``fkcore.lab``), on the host; ``--from DIR`` (a stage folder, a
+scratch copy) sends that folder to the host's copy of the run first, beside game\\.
+
 A run whose ``run.json`` says ``"host": "local"`` plays a game on this machine (a laptop test
 server, ``tools/laptop_server.py``): nothing is copied, and the game steps run here with the
 link settings in ``run.json``'s ``env`` (FK_RCON_PORT, FK_RCON_PW_FILE, FK_SCRIPT_OUTPUT).
@@ -41,6 +45,8 @@ import hashlib
 import io
 import json
 import os
+import posixpath
+import re
 import shlex
 import subprocess
 import sys
@@ -271,9 +277,22 @@ def footer(cfg):
 
 
 def _script():
+    """The run's build script: ``<surface>.build.fkb`` of the play-mode surface file in game\\,
+    else the first. 2.0.3: the first alone let a ``lab.build.fkb`` copied into game\\ take every
+    ``fk build`` of nauvis (it comes first alphabetically)."""
     found = sorted(f for f in os.listdir(GAME) if f.endswith(".build.fkb"))
     if not found:
         sys.exit("fk: no <surface>.build.fkb in game\\")
+    for f in sorted(os.listdir(GAME)):
+        if not f.endswith(".surface") or f[:-len(".surface")] + ".build.fkb" not in found:
+            continue
+        try:
+            with open(os.path.join(GAME, f), encoding="utf-8") as fh:
+                m = re.search(r"^\s*mode\s+(\w+)", fh.read(), re.M)
+        except OSError:
+            continue
+        if (m.group(1) if m else "play") == "play":
+            return f[:-len(".surface")] + ".build.fkb"
     return found[0]
 
 
@@ -362,6 +381,21 @@ def main(argv):
         code = local(cfg, ["stage", "."] + rest)
         footer(cfg)
         return code
+    if cmd == "lab":
+        if "-h" in rest or "--help" in rest:
+            print("fk lab NAME [--from DIR] [--size WxH]: NAME (a factory of game\\, or of DIR: a "
+                  "stage folder, a scratch copy) built on its own slot of the lab surface, powered "
+                  "and stocked; fk lab NAME --measure 60: what it makes there; fk lab NAME --clear; "
+                  "fk lab --list (docs\\TOOLKIT.md, \"The lab\")")
+            return 0
+        if "--from" in rest and cfg["host"] != "local":
+            i = rest.index("--from")
+            if i + 1 >= len(rest) or not _ship(cfg, rest[i + 1]):
+                return 2
+        push(cfg)
+        code = remote(cfg, ["lab", "."] + rest)
+        pull(cfg)
+        return code
     if cmd in LOCAL:
         code = local(cfg, [cmd] + rest)
         push(cfg)
@@ -379,6 +413,35 @@ def main(argv):
         return code
     print(f"fk: unknown command {cmd!r} (fk --help)", file=sys.stderr)
     return 2
+
+
+#: run folders ``fk lab --from`` never sends (they are the run's own, or the host's)
+_NOT_SENT = ("game", "lab", "bin", ".toolkit", ".loop", ".stage", ".claude", "reports")
+
+
+def _ship(cfg, rel):
+    """``fk lab --from DIR``: DIR (inside the run) to the host's copy of the run, so the lab
+    builds what is here. It replaces the host's copy of DIR and nothing else."""
+    src = os.path.normpath(os.path.join(RUN, rel))
+    parts = os.path.relpath(src, RUN).replace("\\", "/").split("/")
+    if os.path.commonpath([src, RUN]) != RUN or parts[0] in (".", "..") + _NOT_SENT \
+            or not os.path.isdir(src):
+        print(f"fk lab: --from {rel}: a folder of the run with your design in it, such as "
+              f"stages\\3 or scratch\\mall (not {parts[0]})", file=sys.stderr)
+        return False
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for root, dirs, files in os.walk(src):
+            dirs[:] = sorted(d for d in dirs if d not in ("out", ".git"))
+            for f in sorted(files):
+                full = os.path.join(root, f)
+                tar.add(full, arcname=os.path.relpath(full, src).replace("\\", "/"))
+    dst = posixpath.join(posixpath.dirname(cfg["host_game"].rstrip("/")), "/".join(parts))
+    q = shlex.quote(dst)
+    r = _ssh(cfg, f"rm -rf {q} && mkdir -p {q} && tar -xf - -C {q}", data=buf.getvalue())
+    if r.returncode:
+        print(f"fk lab: sending {rel} to {cfg['host']} failed", file=sys.stderr)
+    return r.returncode == 0
 
 
 def lua(cfg, rest):
