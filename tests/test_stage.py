@@ -166,6 +166,28 @@ class StageTest(unittest.TestCase):
         self.fk("check", "1")
         self.assertRegex(self.fk("list"), r"stage 1  next  gears: 60 plates/min; checked: ")
 
+    def test_check_draws_the_stage_and_knows_the_last_builds_stock(self):
+        # the first lead run: a design worker wrote a script to read out\floorplan, since fk look
+        # --design draws the committed layouts; and a bill in a copy had no stock to compare
+        self.write("game/out/report_bom.txt",
+                   "STOCK: robots can build 1 of 2 kinds now\n"
+                   "  assembling-machine-1         need     2  network      3\n"
+                   "  requester-chest              need     1  network      0  LOCKED\n")
+        self.fk("insert", "gears")
+        self.add_gears(1)
+        out = self.fk("check", "1", "--render")
+        self.assertIn("the design as this check laid it out, plot gears:", out)
+        drawn = out.split("plot gears:\n", 1)[1].splitlines()[:16]
+        self.assertEqual(len(drawn), 16)                       # the gears plot is 16x16
+        self.assertTrue(all(len(line) == 16 for line in drawn), drawn)
+        self.assertIn("+2 assembling-machine-1: no maker before it: from stock, the shop, or a "
+                      "stage that makes it; the network held 3", out)
+        self.assertIn("+1 requester-chest: no maker before it: from stock, the shop, or a stage "
+                      "that makes it; the network held 0, LOCKED", out)
+        self.assertIn("as game\\'s last build read it", out)
+        self.assertIn("stages\\1\\out\\render.txt draws it", self.fk("check", "1"))
+        self.assertIn("area 0,0,4,2:", self.fk("check", "1", "--render", "0,0,4,2"))
+
     def test_the_bill_counts_from_the_stage_before_it_and_names_its_makers(self):
         self.fk("insert", "gears")
         self.add_gears(1)

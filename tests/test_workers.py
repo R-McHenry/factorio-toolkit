@@ -238,7 +238,7 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(lines[-1], "    background task completed: Poll belts to 200")
         self.assertEqual(state["agents"], {"t1": "w"})            # the worker still runs
 
-    def run_round(self, script, cap_min=1):
+    def run_round(self, script, cap_min=1, horizon=None):
         """turn() on a fake claude process and a fake clock: ``script`` is [(at seconds, event)],
         each event sent once the clock reaches it. -> (state, cut, the messages written in, log,
         the commands run, the clock at the end)."""
@@ -299,7 +299,9 @@ class StreamTest(unittest.TestCase):
                                   lambda *a, **kw: procs.append(Proc()) or procs[0]), \
                 mock.patch.object(claude_loop.subprocess, "run", run):
             state, rc, cut = claude_loop.turn(d, "sid", "go", "m", cap_min, lines.append,
-                                              io.StringIO(), take=lambda: "")
+                                              io.StringIO(), take=lambda: "", horizon=horizon)
+        with open(os.path.join(d, ".loop", "workers.txt"), encoding="utf-8") as fh:
+            self.workers_txt = fh.read()
         return state, cut, written, lines, ran, clock[0]
 
     LAUNCH = [(0, {"type": "assistant", "message": {"content": [
@@ -332,6 +334,42 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(cut, "cap")
         self.assertTrue([c for c in ran if c[0] == "taskkill"])
         self.assertGreater(end, (1 + claude_loop.GRACE) * 60)
+
+    def test_a_lead_that_waits_five_minutes_hears_so_once_per_wait(self):
+        # Rory (2026-10-22): the first lead run's lead waited about 35 minutes on each of two
+        # builders; his longest wait is 5 minutes
+        script = self.LAUNCH + [
+            (40, {"type": "assistant", "parent_tool_use_id": "t1", "message": {"content": [
+                {"type": "tool_use", "id": "w1", "name": "Bash",
+                 "input": {"command": "fk build"}}]}}),
+            (320, {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}}),
+            (321, {"type": "result", "result": "designed stage 4"}),
+            (500, {"type": "system", "subtype": "task_notification", "task_id": "a1",
+                   "tool_use_id": "t1", "status": "completed", "summary": "labs stand"}),
+            (501, {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}),
+            (502, {"type": "result", "result": "done"})]
+        state, cut, written, lines, ran, end = self.run_round(
+            script, cap_min=120, horizon=lambda: "the plan: 2 stages ahead; horizon 1.20x")
+        self.assertIsNone(cut)
+        self.assertEqual(len(written), 2)                  # one note: the second wait was short
+        note = written[1]
+        self.assertTrue(note.startswith("[From the loop] You have waited 5 minutes while your "
+                                        "workers run, Rory's longest wait."), note)
+        self.assertIn("- build the labs: 5 min, 1 tool calls, last: $ fk build", note)
+        self.assertTrue(note.endswith("The plan: 2 stages ahead; horizon 1.20x"), note)
+        self.assertEqual(self.workers_txt.splitlines()[1:], ["no worker runs"])
+
+    def test_the_wait_note_without_a_plan_points_to_fk_stage(self):
+        note = claude_loop.waited_note({"agents": {}})
+        self.assertIn("No staged plan yet: fk stage insert starts one", note)
+        self.assertNotIn("Your workers now", note)
+        self.assertEqual(claude_loop.plan_horizon(tempfile.gettempdir()), "")   # no .stage
+
+    def test_the_workers_line_while_one_runs(self):
+        state = {"agents": {"t1": "build the red block"},
+                 "progress": {"t1": {"calls": 12, "since": 1000.0, "last": "$ fk look 0,0,9,9"}}}
+        self.assertEqual(claude_loop.workers_now(state, now=1000.0 + 34 * 60),
+                         ["build the red block: 34 min, 12 tool calls, last: $ fk look 0,0,9,9"])
 
     def test_past_the_cap_with_nothing_running_the_round_just_ends(self):
         script = [(0, {"type": "assistant", "message": {"content": [{"type": "text", "text": "hm"}]}}),

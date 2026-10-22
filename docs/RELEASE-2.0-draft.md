@@ -100,8 +100,12 @@ I don't want the lead waiting so much", with an absolute maximum wait of 5 minut
   plates and science per minute against the stage before it, the spec's expected rates on paper,
   and the bill: what the stage builds beyond the stage before it (its last check, else the built
   base), each item with the rate the base before it makes it at ("made at 15/min before it (27 min
-  of it)", or "no maker before it"). A folder's own edits survive plan changes (a three-way merge)
-  until `edit N` takes them in.
+  of it)", or "no maker before it") and the network's stock as game\'s last build read it
+  (`out\report_bom.txt`; a check reads no game). `--render` draws the design the check laid out,
+  the plots the stage changes or an area, and `stages\N\out\render.txt` keeps it (`fk look
+  --design` draws the committed layouts; the run's design worker wrote a script to read
+  `out\floorplan` instead). A folder's own edits survive plan changes (a three-way merge) until
+  `edit N` takes them in.
 - **The horizon is multiplicative** (Rory's decision 4): `fk stage list` shows the planned base
   against the built one in plates per minute, iron plus copper, the rate model's furnaces at their
   utilization (requester chests aside). Plates rather than science per minute: plates grow from the

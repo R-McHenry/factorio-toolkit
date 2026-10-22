@@ -124,10 +124,13 @@ fk stage insert "oil plant" --goal "..." --needs "..." --rates "plastic-bar 30/m
                                  stages\N: game\ as the stages before it leave it
 fk stage edit N [--goal ...]     stages\N's .fk, surface and build script (and the spec given) into
                                  the plan; the stages after it replay onto it
-fk stage check N                 stage N built in stages\N through report_checks: its check lines,
+fk stage check N [--render [X0,Y0,X1,Y1]]
+                                 stage N built in stages\N through report_checks: its check lines,
                                  its rates against the stage before it and against its spec, and
-                                 what it builds, with what the base before it makes of each item;
-                                 nothing touches the world
+                                 what it builds, with what the base before it makes of each item
+                                 and the stock game\'s last build saw; nothing touches the world.
+                                 --render draws the design it laid out (the plots it changes, or
+                                 the area); stages\N\out\render.txt keeps it
 fk stage next [--apply]          the next stage's spec and its diff; --apply puts it into game\
 fk stage done [N]                game\ as it stands becomes main, with stage N done; the rest of
                                  the plan replays onto it

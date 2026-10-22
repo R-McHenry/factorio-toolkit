@@ -1149,16 +1149,32 @@ def cmd_check(p, a, out):
     elif not adds:
         out(f"  bill: nothing to build beyond {base_what}")
     else:
-        out(f"  bill: what it builds beyond {base_what}, and what the base before it makes:")
+        stock, when = last_stock(p.game)
+        out(f"  bill: what it builds beyond {base_what}, and what the base before it makes"
+            + (f" (the network's stock as game\\'s last build read it, {when}, where it had "
+               "the item)" if stock else "") + ":")
         for name in sorted(adds, key=lambda k: (-adds[k], k)):
             k = adds[name]
             if k < 0:
                 out(f"    {k:>6} {name} (taken up)")
                 continue
             rate = before["made"].get(name, 0.0)
+            held = stock.get(name)
             out(f"    {'+' + str(k):>6} {name}: "
                 + (f"made at {per_min(rate)}/min before it ({k / rate:.0f} min of it)" if rate
-                   else "no maker before it: from stock, the shop, or a stage that makes it"))
+                   else "no maker before it: from stock, the shop, or a stage that makes it")
+                + ("" if held is None else f"; the network held {held[0]}"
+                   + (", LOCKED" if held[1] else "")))
+    render = _render(p, st, ctx, a.render)
+    if render:
+        with open(os.path.join(path, OUT, "render.txt"), "w", encoding="utf-8") as fh:
+            fh.write(render[1] + "\n")
+        if a.render:
+            out(f"  the design as this check laid it out, {render[0]}:")
+            out(render[1])
+        else:
+            out(f"  stages\\{st.n}\\out\\render.txt draws it as this check laid it out "
+                f"({render[0]}; --render prints it)")
     built = p.measure(p.ref("main"))["plates"]
     if built > 1e-9:
         out(f"  this stage reaches {got['plates'] / built:.2f}x the built base's plates")
@@ -1169,6 +1185,51 @@ def cmd_check(p, a, out):
     with open(os.path.join(path, OUT, "stage-check.json"), "w", encoding="utf-8") as fh:
         json.dump(rec, fh, indent=1)
     return 0
+
+
+def last_stock(game):
+    """({item: (count, locked)}, when) from game\\'s last live bill (out\\report_bom.txt, written by
+    a build's report_bom --stock live): the network's stock of the items that build needed. A
+    check reads no game, so this is the stock it knows."""
+    path = os.path.join(game, OUT, "report_bom.txt")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return {}, None
+    found = {m.group(1): (int(m.group(2)), bool(m.group(3))) for m in re.finditer(
+        r"^\s+(\S+)\s+need\s+\d+\s+network\s+(\d+)(\s+LOCKED)?\s*$", text, re.M)}
+    return found, time.strftime("%H:%M", time.localtime(os.path.getmtime(path)))
+
+
+def _render(p, st, ctx, area):
+    """(what it shows, the ASCII) of the design the check just laid out: ``area``
+    (X0,Y0,X1,Y1), else the plots of the factories whose module the stage changes, else them all.
+    ``fk look --design`` draws the committed layouts; this is the stage's (the first lead run's
+    design worker wrote a script to read out\\floorplan for it)."""
+    from . import compose
+    s = ctx.composed
+    if s is None:
+        return None
+    if area and area != "auto":
+        try:
+            box = tuple(int(v) for v in area.split(","))
+            if len(box) != 4:
+                raise ValueError(area)
+        except ValueError:
+            return "--render takes X0,Y0,X1,Y1", ""
+        return f"area {area}", compose.render(s, p.cat(), box)
+    changed = {f[:-3] for f in p.changed(st.parent, st.commit) + p.folder_edits(st)
+               if f.endswith(".fk")}
+    places = ctx.surface.places if ctx.surface is not None else {}
+    plots = [s.plots[pl.factory] for pl in places.values()
+             if pl.module in changed and pl.factory in s.plots]
+    if not plots:
+        return "every plot", compose.render(s, p.cat())
+    box = (min(q.x for q in plots), min(q.y for q in plots),
+           max(q.x + q.w for q in plots), max(q.y + q.h for q in plots))
+    names = sorted(pl.factory for pl in places.values() if pl.module in changed)
+    return f"plot{'s' if len(names) > 1 else ''} {', '.join(names)}", compose.render(s, p.cat(), box)
 
 
 def _base_counts(p, st, stages):
@@ -1233,6 +1294,8 @@ def main(game, argv):
     c = sub.add_parser("check", help="stage N built in stages\\N through report_checks, its "
                        "rates and bill; nothing touches the world")
     c.add_argument("n", type=int, nargs="?", help="the stage (default: the next one)")
+    c.add_argument("--render", nargs="?", const="auto", metavar="X0,Y0,X1,Y1",
+                   help="print the design as laid out: the area, else the plots it changes")
     nx = sub.add_parser("next", help="the next stage's spec and the diff a worker builds")
     nx.add_argument("--apply", action="store_true", help="put its changes into game\\")
     d = sub.add_parser("done", help="game\\ as it stands becomes main, with stage N done; the "
