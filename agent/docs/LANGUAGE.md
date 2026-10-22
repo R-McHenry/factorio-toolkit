@@ -94,11 +94,11 @@ the consumers take them.
   `net iron: smelt -> gears, circ` takes the plates of `smelt`.
 - `net NAME items a, b: ...` declares the items; otherwise they are what the drivers make.
 - Two or more items on one net is a **sushi** net. It runs while each item comes no faster than
-  it is used; one that piles up fills the belt and stops the others (`CLOG` says where that can
-  happen). Into a machine it must take every item (else `SUSHI_SINK`). Into one chest that takes
-  any item (a mall's products belt) nothing waits behind another item; the chest goes best
-  without `limit=`, since a full chest stops the whole belt (`SUSHI_LIMIT`), and the limit
-  belongs at each maker.
+  it is used; one that piles up fills the belt and stops the others (`CLOG`). Into a machine it
+  must take every item (else `SUSHI_SINK`). One inserter from the source straight into each sink
+  can't clog: it takes only what its sink accepts. A mall's products belt into one chest: the
+  chest goes best without `limit=`, since a full chest stops the whole belt (`SUSHI_LIMIT`), and
+  the limit belongs at each maker.
 - `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
   on the net. It only quiets `CLOG` and `UNLIMITED` for it: it limits nothing itself.
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.

@@ -72,14 +72,19 @@ What changed:
   Recipe-switch smarts beyond that belong in circuits in the game, not in toolkit scripts.
 - **Labs from a chest**: `Lab<rate=>` is one lab whose inserters the router lays, so labs around
   one multi-item requester take their packs by one inserter each (`sci: 1 -> 3, 3 inserters
-  (direct insertion)`, no belt). One inserter into an all-accepting multi-sink raises no `CLOG`:
-  a sushi net whose every consumer is a chest that takes any item. Into machines, or labs on a
-  mixed belt, it still does. Daisy-chained labs and turrets wait.
+  (direct insertion)`, no belt). Daisy-chained labs and turrets wait.
+- **CLOG goes in two ways only** (Rory, 2026-10-21: no tool can tell whether a source is
+  limited). One: the route is one inserter from the source straight into each sink, which takes
+  only what that sink accepts (`connect.one_inserter`); the route step clears the line and says
+  "one hand". A belt in between or a second inserter (a chain, a hub chest) keeps it. Two: the
+  source writes the net `limited`, which only silences it. Nothing else: 1.1's exemption for a
+  net only requester chests drive is gone (a requester refills what its belt takes), and so is
+  the first draft's for a products belt into chests (a full chest stops the belt).
 - **Mixed chests** (assessment decision 7): `SUSHI_LIMIT` for a `limit=` on a chest a mixed belt
   of makers feeds (a full chest stops the whole belt; the limit belongs at each maker); such a
   chest gets its own `UNLIMITED` line instead of the plain one that told the player to add that
-  limit; `net NAME limited:` says the source limits each maker, which silences `CLOG` and
-  `UNLIMITED` for it and implements no limit. The compact-mall example loses its `limit=16`.
+  limit; `net NAME limited:` (above) silences `UNLIMITED` too. The compact-mall example loses
+  its `limit=16`.
 - **Helpers** (`kickoff/template/helpers` -> `<run>\helpers`): a README (what goes there, fair
   play), `python -m helpers [FEATURE]`, `game.lua()` through the run's own `fk lua`, and four seed
   probes the first players wrote again and again: grids, machines, stock, labs.

@@ -523,6 +523,21 @@ def _pinned_routes(flat, new, prev, cat):
     return new, kept, again
 
 
+def _one_inserter(ctx, factory, flat, lay):
+    """2.0 (Rory, 2026-10-21): a sushi net laid as one inserter from its source straight into
+    each sink can't clog (the inserter takes only what the sink accepts), so its ``CLOG`` line
+    from elaborate goes; on any other route it stays. -> the report lines that say so."""
+    sushi = {n: e for n, e in connect.endpoints(flat).items()
+             if flat.nets[n].sushi and not flat.nets[n].limited}
+    if not sushi:
+        return []
+    clear = connect.one_inserter(lay, ctx.cat, sushi)
+    where = {f"{factory} net {n}" for n in clear}
+    ctx.checks = [(s, c) for s, c in ctx.checks if not (c.code == "CLOG" and c.where in where)]
+    return [f"  one hand  {n}: one inserter from its source straight into each sink, which takes "
+            "only what the sink accepts: no CLOG" for n in sorted(clear)]
+
+
 def _frame_blocked(ctx, factory, size):
     """The terrain's blocked tiles in ``factory``'s frame (empty on a paper surface)."""
     if ctx.ground is None or ctx.surface is None or factory not in ctx.surface.places:
@@ -551,6 +566,7 @@ def s_route(ctx, args):
                         else ""))
         lines += [f"  stale     {n}: {why}; routed again" for n, why in sorted(again.items())]
         lines += [f"  {l}" for l in r.lines]
+        lines += _one_inserter(ctx, factory, flat, r.layout)
         checks += [Check("UNROUTED", f"{factory} net {n}", why) for n, why in r.failed.items()]
         checks += [Check("UNROUTED", f"{factory} net {l.split(':')[0].split()[-1]}",
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]

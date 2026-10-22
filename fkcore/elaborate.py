@@ -455,13 +455,16 @@ def _clog_checks(flat, in_hold, fed):
     lines say what can happen, not how to build: mixed belts and chests are fine where production
     is limited (a one-off crafter on single inserters and a requester chest is).
 
-    - ``CLOG``: a sushi net that machines drive (requester chests only ask for what they are set
-      to, so a net they alone drive is limited), or an unlimited chest fed two or more items by
-      separate nets: an item that comes faster than it is used can fill the belt or the chest and
-      stop the others. 2.0 (Rory, 2026-10-21: one inserter into an all-accepting multi-sink
-      raises no CLOG): a sushi net whose every consumer is a chest that takes any item (a
-      products belt into one provider chest) takes whatever reaches it, so nothing waits behind
-      another item; when the chest is full everything stops, which is limited production.
+    - ``CLOG``: a sushi net, or an unlimited chest fed two or more items by separate nets: an
+      item that comes faster than it is used can fill the belt or the chest and stop the others.
+      2.0 (Rory, 2026-10-21): no tool can tell in general whether a source is limited, so a sushi
+      net's CLOG goes away in exactly two ways. (A) Its route is one inserter from the source
+      straight into each sink, which takes only what the sink accepts: the route step clears the
+      line when it lays one (``connect.one_inserter``); a belt or a second inserter in between
+      loses that. (B) The source writes the net ``limited``. Nothing else: 1.1 counted a net that
+      only requester chests drive as limited, and the first 2.0 draft a net into chests that take
+      anything; both went, a requester refills what its belt takes and a full chest stops the
+      belt.
     - ``UNLIMITED``: provider or storage chests without ``limit=`` (one line per factory): what
       reaches them goes into the logistic network without end (the 0534 run's network held 4800
       iron and 5300 copper plates). 2.0 (Rory, 2026-10-21: a multi-item sink chest should
@@ -480,16 +483,13 @@ def _clog_checks(flat, in_hold, fed):
     sushi_in = {}                          # chest key -> the mixed nets of makers it takes
     for name, net in flat.nets.items():
         made = any(flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
-        takes_all = bool(net.consumers) and all(
-            flat.machines[k].sink and flat.machines[k].takes is None
-            and flat.machines[k].extra.get("role") in _TAKE_ALL
-            for k, _i in net.consumers)
-        if net.sushi and made and not takes_all and not net.limited:
+        if net.sushi and net.drivers and net.consumers and not net.limited:
             flat.checks.append(Check(
                 "CLOG", f"net {name}",
                 f"{', '.join(net.items)} share one belt: one that comes faster than it is used can "
-                "fill it and stop the others. It runs while each comes no faster than it is used",
-                net.line))
+                "fill it and stop the others. Not where one inserter takes from the source "
+                "straight into each sink (the route step says so when it lays that), or where "
+                "your design limits what goes on it (`net NAME limited:`)", net.line))
         if not (net.sushi and made):
             continue
         for k, _i in net.consumers:

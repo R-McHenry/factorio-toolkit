@@ -138,8 +138,10 @@ e robots/r0 roboport 60,30                                    # shared infra, ow
   stale; `cover robots` counts the surface's network and puts a storage chest beside each
   roboport it places; `floorplan --bridge-power` lays a bridge again around a plot laid over it;
   `fk lua` takes any chunk (stdin over ssh, its lines kept). See docs/RELEASE-1.2.md.
-  2.0 [built] (Rory, 2026-10-21): `CLOG` is not raised for a sushi net into chests that take any
-  item (one inserter into an all-accepting multi-sink); `SUSHI_LIMIT` (a `limit=` on a chest a
+  2.0 [built] (Rory, 2026-10-21): no tool can tell whether a source is limited, so a sushi net's
+  `CLOG` goes in exactly two ways: its route is one inserter from the source straight into each
+  sink (`connect.one_inserter`; the route step clears the line), or the source writes the net
+  `limited`. 1.1's requester-driven exemption is gone. `SUSHI_LIMIT` (a `limit=` on a chest a
   mixed belt of makers feeds: a full chest stops the whole belt, the limit belongs at each
   maker), and such a chest's own `UNLIMITED` line; `fk fresh` also takes up a crafter whose output
   holds what its recipe no longer makes, and a chest its crafters fill with what none of them

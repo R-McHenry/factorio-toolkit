@@ -141,13 +141,13 @@ fixing in the source.
 - `UNFED` / `UNCONSUMED`: a machine's input has no net feeding it / its output goes nowhere
 - `TYPE`: a net names a machine that has no endpoint for the net's items
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
-- `CLOG`: a mixed belt that machines feed, or an unlimited chest fed two or more items by
-  separate nets: an item that comes faster than it is used can fill it and stop the others.
-  Mixed belts and chests are fine where nothing comes faster than it is used (a one-off crafter
-  on a requester chest is), and a mixed belt into chests that take any item never draws it (a
-  products belt into one provider chest: when the chest is full everything stops, which is a
-  limit, not a clog). Labs on a mixed belt still can clog: a lab full of one pack lets the next
-  wait behind it; one inserter from a multi-item chest into a lab can't (`Lab` beside the chest)
+- `CLOG`: a net of two or more items (sushi), or an unlimited chest fed two or more items by
+  separate nets: an item that comes faster than it is used can fill it and stop the others. No
+  tool can tell whether what feeds a mixed net is limited, so its line goes in two ways only. One:
+  the route is one inserter from the source straight into each sink, which takes only what that
+  sink accepts (a requester beside a one-off crafter, `Lab`s around a chest of packs); the route
+  step says so. A belt in between, or a second inserter, and it can clog again. Two: your design
+  says it limits what goes on the net (`net NAME limited:`), which limits nothing itself
 - `UNLIMITED`: provider or storage chests without `limit=`: what reaches them goes into the
   network without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops when it
   is full. A chest a mixed belt of makers feeds gets a line of its own: it fills unless each maker

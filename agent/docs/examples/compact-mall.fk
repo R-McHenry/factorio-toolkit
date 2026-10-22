@@ -8,10 +8,10 @@
 #
 # A maker whose product also feeds a neighbour stays on that link (a machine is on one net per item
 # and direction), so the products belt gets its pipes and yellow belts from makers of their own
-# (pipe, yb3). The products belt is sushi and ends in one chest that takes every item, so nothing on
-# it waits behind another item (no CLOG). The chest has no limit=: when a mixed belt's chest is full
-# the whole belt stops, so a slot limit only brings that sooner (SUSHI_LIMIT). What keeps it from
-# filling is a limit at each maker, and the build's UNLIMITED line says so until there is one.
+# (pipe, yb3). The products belt is sushi, so the build says CLOG: it runs while each product is
+# taken about as fast as it is made. The chest has no limit=: when a mixed belt's chest is full the
+# whole belt stops, so a slot limit only brings that sooner (SUSHI_LIMIT). What keeps it from
+# filling is a limit at each maker (UNLIMITED says so); with those in, `net products limited:`.
 #
 # In a base the plates come from your smelting or a bus tap, not from these requesters: name your
 # smelter row (or the tap) as the driver of `fe` and `cu`, and the router brings that belt to the

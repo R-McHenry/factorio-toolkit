@@ -76,7 +76,7 @@ from .elaborate import Check
 from .fkp import CARRIER_TYPES, natural_key
 
 __all__ = ["Node", "Graph", "Leak", "NetReport", "Report", "graph", "connect", "endpoints",
-           "endpoint_box", "HOLDER_TYPES", "REACH"]
+           "endpoint_box", "one_inserter", "HOLDER_TYPES", "REACH"]
 
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 _BELTS = frozenset({"transport-belt", "underground-belt", "splitter"})
@@ -673,6 +673,39 @@ def _status_line(r):
     if r.missing:
         msg += f"; not in the layout: {', '.join(r.missing)}"
     return Check("UNROUTED" if r.reached == 0 else "OPEN", f"net {r.name}", msg)
+
+
+def one_inserter(ents, cat, nets):
+    """The nets of ``nets`` ({net: (drivers, consumers)}, :func:`endpoints`) laid as one inserter
+    from source to sink: every carrier of the net an inserter that picks from one of its drivers
+    and drops straight into one of its consumers, and every consumer reached that way. -> {net}.
+
+    2.0 (Rory, 2026-10-21): the only route on which a mixed net can't clog. An inserter takes only
+    what its sink accepts, but only when the multi-item source and the sink both touch it; a belt
+    in between, or a second inserter (a chain, a hub chest), loses that."""
+    g = ents if isinstance(ents, Graph) else graph(ents, cat)
+    carried = {}
+    for key, n in g.nodes.items():
+        if n.carrier and n.net is not None:
+            carried.setdefault(n.net, []).append(key)
+    out = set()
+    for net, (drivers, consumers) in nets.items():
+        drivers, consumers = set(_keys(drivers)), set(_keys(consumers))
+        keys = carried.get(net)
+        if not keys or not drivers or not consumers:
+            continue
+        reached = set()
+        for key in keys:
+            src = [m for m, via in g.pred.get(key, ()) if via == "pickup"]
+            dst = [m for m, via in g.succ.get(key, ()) if via == "drop"]
+            if g.nodes[key].kind != "inserter" or len(src) != 1 or len(dst) != 1 \
+                    or src[0] not in drivers or dst[0] not in consumers:
+                break
+            reached.add(dst[0])
+        else:
+            if reached == consumers:
+                out.add(net)
+    return out
 
 
 def connect(ents, cat, nets=None) -> Report:

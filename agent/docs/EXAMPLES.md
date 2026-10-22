@@ -171,11 +171,11 @@ On paper: 20 nets, all routed, 17 of them single inserters; 152 belts, 18 underg
 splitters bring the iron and copper in and the products out. It uses 1 provider chest where one
 chest per product took 8: with the two plate requesters, 3 logistic chests instead of 11, and in a
 base whose plates come by belt from a smelter row or a bus tap, only the 1. The products belt is
-sushi and ends in one chest that takes every item, so nothing on it waits behind another item (no
-`CLOG`). The chest has no limit: when a mixed belt's chest is full the whole belt stops, so a slot
-limit only brings that sooner (`SUSHI_LIMIT`). What keeps it from filling is a limit at each
-maker, and the build's `UNLIMITED` line says so until the design has one. More products: another
-pair of rows below, the same way.
+sushi, so the build says `CLOG`: it runs while each product is taken about as fast as it is made.
+The chest has no limit: when a mixed belt's chest is full the whole belt stops, so a slot limit
+only brings that sooner (`SUSHI_LIMIT`). What keeps it from filling is a limit at each maker
+(`UNLIMITED` says so); with those in the design, `net products limited:` says it. More products:
+another pair of rows below, the same way.
 
 ## bus4.fk: Rory's 4-belt bus, a river of iron (54x25)
 
