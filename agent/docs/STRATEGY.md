@@ -182,7 +182,8 @@ implies, roughly one and a half to two times.
   take a while.
 - **Moving a factory:** robots take its machines to other ghosts first. Free what the move needs
   before you start.
-- **Grow in steps.** Adding a consumer re-routes its whole net, so change one net at a time.
+- **Grow in steps.** A new consumer is patched into its net's standing route, but changing many
+  nets at once still re-lays more than it needs to.
 
 ## Defense (on maps with biters)
 
