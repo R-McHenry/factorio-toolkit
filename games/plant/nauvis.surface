@@ -1,0 +1,9 @@
+# nauvis.surface: the worked example of circuits in the source (2.0). One factory, the starter
+# nuclear plant of world 3, on the plot the kickoff pastes it on (its frame's origin is -33,-38),
+# so its build is entity for entity plant-w3.json (tests/test_plant.py).
+surface  nauvis
+mode     play
+terrain  none                                   # a paper surface: no ore, water or cliffs yet
+catalog  base
+
+place plant = plant plot -33,-38 39x46          # the reactor plant, with its pole chain

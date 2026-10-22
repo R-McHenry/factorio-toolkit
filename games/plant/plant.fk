@@ -1,0 +1,73 @@
+# plant.fk: the starter nuclear plant (world 3) as one factory, with its circuit: the worked example
+# of circuits in the source (2.0; the draft is drafts\reactor-1.1\plant.fk and CIRCUITS-1.1.md).
+#
+# Its layout (plant.fkp) is Rory's arrangement, captured 2026-10-18 in plant-w3.json, which the
+# kickoff pastes: the build keeps its pipes, inserters, poles and roboport where they stand, and
+# lays the circuit from this file. The result is entity for entity and wire for wire plant-w3.json
+# (28 entities, 9 wires: 8 copper between the poles, 1 red for the fuel saver).
+#
+# What it is. One reactor heats one heat exchanger by contact. The exchanger boils water from the
+# offshore pump, and its steam drives two turbines. Robots bring fuel cells to a requester chest; an
+# inserter loads the reactor, another takes the used cells out to an iron chest. A red wire carries
+# the reactor's temperature to the loading inserter: that is the FUEL SAVER (behave fuel_saver,
+# below), and it is why the reactor's fuel slot is empty almost all the time.
+#
+# Capacity. The one exchanger is the limit: it takes 10 MW of heat and makes ~103 steam/s, enough
+# for 1.7 turbines (60 steam/s and 5.8 MW each), so the plant delivers at most 10 MW. The reactor
+# makes 40 MW while a cell burns, four times what the exchanger can take, so here it is mostly a
+# heat battery: 10 MJ per degree, max 1000 C.
+
+signal temp = signal-T                            # pinned (fnet's rule: a signal is a decision)
+
+reactor = Reactor<read=temperature, signal=temp>  @(2, 5)       # its temperature on its wire as T
+hx      = HeatExchanger                           @(7, 6, rot 1)   # needs 500 C to make steam
+t1      = SteamTurbine                            @(10, 4, rot 1)
+t2      = SteamTurbine                            @(10, 7, rot 1)
+pump    = OffshorePump                            @(7, 0)
+cells   = Chest<requester, item=uranium-fuel-cell, rate=0.005/s, request=20, max=50, trash> @(0, 6)
+spent   = Chest<plain, chest=iron-chest>          @(0, 5)       # off the network: robots never empty it
+link    = Literal<file="plant-w3.json", box="-22,-22,7,9"> @(11, 16)   # the pole chain to spawn
+
+net water:       pump -> hx
+net steam:       hx -> t1, t2
+net heat items heat: reactor -> hx                # by contact: no route
+net fuel:        cells -> reactor   when fuel_ctl.temp < 550        # gated: the fuel saver
+net spent_cells items used-up-uranium-fuel-cell: reactor -> spent   # its burnt result
+
+wire fuel_ctl red: reactor -> fuel                # T from the reactor drives the fuel net's gate
+
+power grid: cover all                             # poles; link is the chain to the spawn grid
+robots port: cover all
+
+behave fuel_saver on fuel_ctl {
+    # A Factorio reactor never throttles: a loaded cell burns at the full 40 MW for 200 s, used or
+    # not. Loading only when the stored heat runs low turns that fixed burn into load-following.
+    state burning:  reactor.burning                     # T climbs; the gate may still be open
+    state coasting: T >= 550 and not reactor.burning    # gate shut; turbines run on stored heat
+    state refuel:   T < 550                             # gate open: one cell goes in and burns
+
+    require 550 > hx.min_temperature                    # 500: power is still on when it loads
+    require cells.stock > 0                             # robots keep the requester filled
+
+    expect reactor.status = no_fuel   in coasting       # look renders EXPECTED fuel_saver/coasting
+    expect reactor.fuel = 0           in coasting       # a loaded cell goes straight to the burner
+    expect reactor.fuel <= 1          in burning        # a second cell can slip in on the refill
+    expect fuel.gate = shut           in coasting       # the loading inserter idles
+
+    # Full load (10 MW drawn): a cell burns 200 s and adds a net 30 MW, so T goes 550 -> 1000 in
+    # 150 s and the last 50 s are wasted at the cap; then 1000 -> 550 at 10 MW takes 450 s. One
+    # cell per ~650 s instead of one per 200 s. At low load the coast is far longer, which is why
+    # an idle base sees a hot reactor with no fuel for hours.
+    cycle full_load: burning 200 s, coasting 450 s, cells 1 per 650 s
+
+    # The one way it dies: T below 500 with no cell burning. No steam -> no power -> the electric
+    # loader can't swing -> it stays dark. Causes: the requester ran dry, or the grid was drained
+    # to zero while coasting. Restart needs a cell delivered by robot or hand into the reactor
+    # (the kickoff's starter_fuel: 5 cells straight into the fuel slot).
+    fails dark: T < 500 and not reactor.burning
+}
+
+# A finite sink: the iron chest holds 32 x 50 = 1600 used cells, about 289 h at full load with the
+# saver. When it is full the spent inserter stops, the reactor's used-cell slot fills, and the
+# reactor can no longer start a cell: the plant goes dark.
+expect spent.fill < 1 within 289 h at full_load

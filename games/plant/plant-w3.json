@@ -1,0 +1,234 @@
+{
+ "bp": "0eNqdlttuozAQht/F16YCc8hBu2+xd1GFHDJpLIFNjd1tFfHuO4YATWWaem+SycT+5vcwM+ZKjrWFVgtpyP5KRKVkR/aHK+nEi+S180neANmTzgBvImP1UUggPSVCnuCd7JOeelZrdVSt0ubTQtY/UwLSCCNgjDH8+CilbY6gkUSn3ep87i5KQ9TapiWUtKrDXUq6AEiKWP6UU/KBVrp5ynun4AuLzaxWtPA9ovAj0gBE7kdkAYjMj8hnhNBKRtUFOuMBpWwGMT+oWECyA23Q58EkdxhKTkJDNa7IPNDNDG3gJGwTQY3LtaiiVtXeA2/nAKlf5zYgZyuIXQBiJVtJ/JCRPmQsBX3fPB5YHJb3ZKlvDa8WawL0T2ojGeC3LeVZ1Livc+u6MdrYl1NnUzKvuPPeIlvNpXvmZwt1VEFdY+xXy2sUiv9KpRvuXJVqWq65Uaib/B4c1k0bhilu+Ht5+5nH/bObEEbz7lJKZcrpZCeyN9qCN8VpYFUnX7PrMolDz2hVl0e48DfhdF5JJXRlhSlB8mM9SaCzG7ec5hhnoTGbyww0H61T9Ca0sUMKpioYVkR/3FB0g9bw4eB5/CVJv0jvPewyTqStauA60sArt+fbRouHM/sOidtPpYGmBQxtNUyn/OQKOpZX9TLBLsBNBO/VhcsX74Ni95IfNUER0KPJSo9uAhjxCmMbPAVnpntMXubu57rYbuUOjP9j/gywh6lnyxSYb3oPld2YRcDQwSngC8iCczw3PVt59iwNZSbFxExWXhpYFsycdSZrOvNQ5ixzTWURrHIWuUIMfROYqnflCmehPTXd6MP7IF4jf7GAXWEdNjSn2KH5Mz3gbZFQnKKJs9FFsaqc331RrIbBTp2djXbm7Hy0c2cXo104ezPajs8cH4MKHJyoeHmlpuQNa31QmRdsl+12+TYrNvjR9/8AmJewcA==",
+ "entities": [
+  {
+   "name": "offshore-pump",
+   "bx": -25.5,
+   "by": -37.5,
+   "wx": -25.5,
+   "wy": -37.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -25.5,
+   "by": -36.5,
+   "wx": -25.5,
+   "wy": -36.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -25.5,
+   "by": -35.5,
+   "wx": -25.5,
+   "wy": -35.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -25.5,
+   "by": -34.5,
+   "wx": -25.5,
+   "wy": -34.5,
+   "d": 0
+  },
+  {
+   "name": "iron-chest",
+   "bx": -32.5,
+   "by": -32.5,
+   "wx": -32.5,
+   "wy": -32.5,
+   "d": 0
+  },
+  {
+   "name": "inserter",
+   "bx": -31.5,
+   "by": -32.5,
+   "wx": -31.5,
+   "wy": -32.5,
+   "d": 4
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -28.5,
+   "by": -33.5,
+   "wx": -28.5,
+   "wy": -33.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -25.5,
+   "by": -33.5,
+   "wx": -25.5,
+   "wy": -33.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -25.5,
+   "by": -32.5,
+   "wx": -25.5,
+   "wy": -32.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -23.5,
+   "by": -32.5,
+   "wx": -23.5,
+   "wy": -32.5,
+   "d": 0
+  },
+  {
+   "name": "steam-turbine",
+   "bx": -20.5,
+   "by": -32.5,
+   "wx": -20.5,
+   "wy": -32.5,
+   "d": 4
+  },
+  {
+   "name": "requester-chest",
+   "bx": -32.5,
+   "by": -31.5,
+   "wx": -32.5,
+   "wy": -31.5,
+   "d": 0
+  },
+  {
+   "name": "inserter",
+   "bx": -31.5,
+   "by": -31.5,
+   "wx": -31.5,
+   "wy": -31.5,
+   "d": 12
+  },
+  {
+   "name": "nuclear-reactor",
+   "bx": -28.5,
+   "by": -30.5,
+   "wx": -28.5,
+   "wy": -30.5,
+   "d": 0
+  },
+  {
+   "name": "heat-exchanger",
+   "bx": -25,
+   "by": -30.5,
+   "wx": -25,
+   "wy": -30.5,
+   "d": 4
+  },
+  {
+   "name": "pipe",
+   "bx": -23.5,
+   "by": -31.5,
+   "wx": -23.5,
+   "wy": -31.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -23.5,
+   "by": -30.5,
+   "wx": -23.5,
+   "wy": -30.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -23.5,
+   "by": -28.5,
+   "wx": -23.5,
+   "wy": -28.5,
+   "d": 0
+  },
+  {
+   "name": "pipe",
+   "bx": -23.5,
+   "by": -29.5,
+   "wx": -23.5,
+   "wy": -29.5,
+   "d": 0
+  },
+  {
+   "name": "steam-turbine",
+   "bx": -20.5,
+   "by": -29.5,
+   "wx": -20.5,
+   "wy": -29.5,
+   "d": 4
+  },
+  {
+   "name": "roboport",
+   "bx": -22,
+   "by": -26,
+   "wx": -22,
+   "wy": -26,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -21.5,
+   "by": -21.5,
+   "wx": -21.5,
+   "wy": -21.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -16.5,
+   "by": -16.5,
+   "wx": -16.5,
+   "wy": -16.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -11.5,
+   "by": -11.5,
+   "wx": -11.5,
+   "wy": -11.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -6.5,
+   "by": -6.5,
+   "wx": -6.5,
+   "wy": -6.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": -1.5,
+   "by": -1.5,
+   "wx": -1.5,
+   "wy": -1.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": 3.5,
+   "by": 3.5,
+   "wx": 3.5,
+   "wy": 3.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "bx": 5.5,
+   "by": 7.5,
+   "wx": 5.5,
+   "wy": 7.5,
+   "d": 0
+  }
+ ],
+ "paste_at": [
+  -14,
+  -15
+ ],
+ "note": "Rory's world-3 nuclear plant (captured 2026-10-18, two dead stub pipes left out) plus the plant roboport and the pole chain to the spawn grid. entities: world positions. bp: the blueprint. paste_at: where build_blueprint must be called so the entities land on their world positions (the game centres a pasted blueprint on its bounding box; measured: pasting at 0,0 put the reactor at -14.5,-15.5). Pole wires rewritten 2026-10-18 as the explicit chain pump-side pole -> (5.5,7.5)."
+}
