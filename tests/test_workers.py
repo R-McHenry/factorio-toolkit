@@ -64,6 +64,8 @@ class RunSetupTest(unittest.TestCase):
             "Lead the Factorio run"))
         self.assertTrue(os.path.isdir(os.path.join(self.run_dir, "reports")))
         self.assertTrue(os.path.exists(os.path.join(self.run_dir, "play.cmd")))
+        for name in new_run.LOOP:                    # 2.0.12: the watchdog the loop starts too
+            self.assertTrue(os.path.exists(os.path.join(self.run_dir, ".toolkit", name)), name)
 
     def test_the_workers_model_can_be_named(self):
         self.make(prompt="lead-v1", player="claude", workers="claude", worker_model="sonnet",
@@ -210,6 +212,31 @@ class WatchTest(unittest.TestCase):
             status["research"] = None
             self.watch.check()
             self.assertIn("nothing researches", self.watch.take_notes())   # again, a new gap
+
+    def test_a_dead_base_and_the_reactors_fuel_are_notes_once_each_time(self):
+        # 2.0.12, the solo run: the base stood dead 13:55-16:09 while the player watched research
+        dead = {"iron-plate": {"min": 0, "ever": 9}, "copper-plate": {"min": 0, "ever": 9}}
+        alive = {"iron-plate": {"min": 300, "ever": 9}, "copper-plate": {"min": 0, "ever": 9}}
+        status = {"ghosts": [], "research": {"name": "robotics", "pct": 48},
+                  "health": {"plates": alive, "fuel": {"reactor": {"n": 1, "out": 0, "min": 12}}}}
+        self.watch.cfg = {"host": "computah-ct"}
+        with mock.patch.object(claude_loop, "host_status", lambda *a: status):
+            self.watch.check()
+            self.assertEqual(self.watch.take_notes(),
+                             "[The reactor's fuel is low: under 30 minutes at full burn.]")
+            status["health"] = {"plates": dead, "fuel": {"reactor": {"n": 1, "out": 1}}}
+            self.watch.check()
+            notes = self.watch.take_notes()
+            self.assertIn("[The base is dead: no iron or copper plates in the last minute.]", notes)
+            self.assertIn("[The reactor is out of fuel.]", notes)
+            self.watch.check()
+            self.assertEqual(self.watch.take_notes(), "")         # once while it lasts
+            status["health"] = {"plates": alive}
+            self.watch.check()
+            status["health"] = {"plates": dead}
+            self.watch.check()
+            self.assertEqual(self.watch.take_notes(),               # again, a new death
+                             "[The base is dead: no iron or copper plates in the last minute.]")
 
     def test_a_waiting_lead_gets_notes_not_the_world_line(self):
         self.watch.world("no ghosts wait")

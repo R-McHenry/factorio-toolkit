@@ -23,7 +23,9 @@ RUN_DIR gets:
                        folder (it reads CLAUDE.md, not AGENTS.md; Rory, 2026-10-20: an Opus agent
                        plays directly, no DeepSeek)
   play.cmd             with --player claude: starts the goal loop (.toolkit/claude_loop.py and
-                       its hook claude_hook.py, from SHA) for this folder; kickoff-v1.ps1 opens it
+                       its hook claude_hook.py, from SHA) for this folder; kickoff-v1.ps1 opens it.
+                       The loop starts .toolkit/watchdog.py, which opens it again when the loop
+                       dies (2.0.12)
   NOTES.md             with --notes FILE: what the players before wrote down for the next one
                        (kickoff-v1.ps1 passes the newest run's NOTES.md)
   .claude/agents/worker.md
@@ -109,6 +111,10 @@ def write_worker(run, agent, model="inherit", brief="worker-v1"):
     return hashlib.md5(body.encode("utf-8")).hexdigest()
 
 
+#: a Claude Code player's goal loop and what it runs, copied into the run's .toolkit: its hooks,
+#: and (2.0.12) the watchdog the loop starts, which starts play.cmd again when the loop dies
+LOOP = ("claude_loop.py", "claude_hook.py", "wait_hook.py", "watchdog.py")
+
 #: a Claude Code player's goal loop, in its own window
 PLAY = """@echo off
 title Factorio player (Claude) - {name}
@@ -143,8 +149,7 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
                          check=True, text=True).stdout.strip()
     src = os.path.join(run, ".kit")
     _archive(sha, src, ("agent", "kickoff/template")
-             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py", "kickoff/wait_hook.py")
-                if player == "claude" else ()))
+             + (tuple(f"kickoff/{name}" for name in LOOP) if player == "claude" else ()))
     agent = os.path.join(src, "agent")
     brief = os.path.join(agent, "prompts", f"{prompt}.md")
     if not os.path.exists(brief):
@@ -165,8 +170,7 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
                     os.path.join(run, "helpers"), ignore=shutil.ignore_patterns("__pycache__"))
     if player == "claude":
         loop = os.path.join(run, ".toolkit", "claude_loop.py")
-        shutil.copy(os.path.join(src, "kickoff", "claude_loop.py"), loop)
-        for name in ("claude_hook.py", "wait_hook.py"):
+        for name in LOOP:
             shutil.copy(os.path.join(src, "kickoff", name), os.path.join(run, ".toolkit", name))
         with open(os.path.join(run, "play.cmd"), "w", encoding="ascii", newline="\r\n") as fh:
             fh.write(PLAY.format(name=os.path.basename(os.path.abspath(run)), loop=os.path.abspath(loop),

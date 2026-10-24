@@ -28,6 +28,8 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
   has it keeps its own. The host's toolkit must be 1.7 too: it runs `write_layout` now.
 - 2.0 (in progress): a run with workers (run.json `workers`) gets the new worker brief in
   `.claude\\agents\\worker.md` (the old one kept in `.upgrade-<old sha>\\`).
+- 2.0.12: the build script gets the template's `stop_on UNROUTED NO_SINK` (the stops it lacks),
+  and a Claude player's `.toolkit` the loop's watchdog (watchdog.py), which the loop starts.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -47,7 +49,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-from new_run import CLAUDE, LAUNCH, LEAD_FIRST, write_worker  # noqa: E402
+from new_run import CLAUDE, LAUNCH, LEAD_FIRST, LOOP, write_worker  # noqa: E402
 
 REPLACED = (".toolkit", "bin", "docs", "AGENTS.md", "CLAUDE.md", "launch.json")
 
@@ -108,6 +110,28 @@ def _write_last(text):
     return "".join(lines)
 
 
+#: the template's second stop_on line (2.0.12): no paste with a net unrouted, or a maker whose
+#: product reaches no sink
+STOPS = ("UNROUTED", "NO_SINK")
+
+
+def _stops(text):
+    """The build script with a ``stop_on`` line for the template's stops it lacks (2.0.12), after
+    its last stop_on line or at its end (None: nothing to change)."""
+    lines = text.splitlines(True)
+    steps = [line.split("#")[0].split() for line in lines]
+    have = {a.upper() for s in steps if s[:1] == ["stop_on"] for a in s[1:]}
+    need = [c for c in STOPS if c not in have]
+    if not need:
+        return None
+    at = max([i for i, s in enumerate(steps) if s[:1] == ["stop_on"]] or [len(lines) - 1])
+    if lines and not lines[at].endswith("\n"):
+        lines[at] += "\n"
+    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need):<26}# and no paste with a net unrouted, "
+                         "or a maker whose product reaches no sink\n")
+    return "".join(lines)
+
+
 def _hand(text):
     """The build script with ``--hand inserter`` on its route line (None: nothing to change)."""
     lines = text.splitlines(True)
@@ -152,6 +176,10 @@ def upgrade(run, sha, dry=False):
         if last:
             new_script = last
             changes.append("write_layout just before apply (--to diff writes nothing)")
+        stops = _stops(new_script or text)
+        if stops:
+            new_script = stops
+            changes.append("stop_on UNROUTED NO_SINK (no paste with a net unrouted)")
         if _plain_hands(run):
             hand = _hand(new_script or text)
             if hand:
@@ -171,7 +199,7 @@ def upgrade(run, sha, dry=False):
     src = os.path.join(run, f".kit-{sha}")
     claude = cfg.get("player") == "claude"
     _archive(sha, src, ("agent", "fkcore")
-             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py", "kickoff/wait_hook.py") if claude else ())
+             + (tuple(f"kickoff/{name}" for name in LOOP) if claude else ())
              + (("kickoff/template/helpers",) if helpers else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
@@ -183,7 +211,7 @@ def upgrade(run, sha, dry=False):
     os.makedirs(os.path.join(run, ".toolkit"))
     shutil.copytree(os.path.join(src, "fkcore"), os.path.join(run, ".toolkit", "fkcore"))
     if claude:
-        for name in ("claude_loop.py", "claude_hook.py", "wait_hook.py"):
+        for name in LOOP:
             shutil.copy(os.path.join(src, "kickoff", name), os.path.join(run, ".toolkit", name))
     os.makedirs(os.path.join(run, "bin"))
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))

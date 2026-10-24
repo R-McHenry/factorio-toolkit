@@ -328,7 +328,12 @@ fixing in the source.
   belt side-loaded onto an underground: only the lane on its open side gets through, and the other
   stops there
 - `UNROUTED`: no belt route was found for a net (the reason follows: often a row is boxed in;
-  leave a few tiles free around a row's head, where its belts attach)
+  leave a few tiles free around a row's head, where its belts attach). The default build script
+  stops on it, so nothing is pasted
+- `NO_SINK` (report_checks): a maker whose product reaches none of the consumers of its net, so
+  what it makes has nowhere to go. The default build script stops on it too; report_checks'
+  `sinks` line counts the makers that reach a sink
+- `UNUSED`: a declared net that no machine and no belt uses
 - `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
   in the build script joins it to the plant's grid)
@@ -459,10 +464,11 @@ its poles, and `floorplan --bridge-power` lays the bridge again around the plots
 ## The build script
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
-what the steps before it made. Keep it, or tweak it: leave `apply` out while you design, or add
-`stop_on UNFED` before a big paste so a check stops the build (`stop_on LOW_STOCK` holds the
-paste until the network has what it lays: report_bom says when a paste would take up running
-machines while their replacements are short). `size`, after `elaborate`, counts
+what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
+`stop_on UNROUTED NO_SINK` holds a paste with a net unrouted or a maker whose product reaches no
+sink; add `stop_on UNFED` before a big paste so that check stops it too (`stop_on LOW_STOCK`
+holds the paste until the network has what it lays: report_bom says when a paste would take up
+running machines while their replacements are short). `size`, after `elaborate`, counts
 the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --to
 report_checks` runs part of it (`report_rates:2` names the second `report_rates`). It starts
 from the layout the last build left, or lays it out again when a source file changed since (and

@@ -398,5 +398,61 @@ class RedgreenTest(unittest.TestCase):
                          {n: (r.segments, r.carriers, r.pairs) for n, r in self.rep.nets.items()})
 
 
+class SinkTest(unittest.TestCase):
+    """2.0.12: each maker's product reaches a sink (the solo run's Mall4 went out with its
+    products belt unrouted, 2026-10-23 23:23), and a net nothing uses is UNUSED, not UNROUTED (the
+    build script stops on UNROUTED by default now)."""
+
+    MAKERS = """
+        e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel
+        e x/i0 fast-inserter 3.5,1.5 W net=g
+        e m/k wooden-chest 4.5,1.5
+        e m/z assembling-machine-1 1.5,8.5 recipe=iron-gear-wheel"""
+    NETS = {"g": ([("m/a", "iron-gear-wheel"), ("m/z", "iron-gear-wheel")],
+                  [("m/k", "iron-gear-wheel")])}
+
+    def test_a_maker_cut_off_from_its_sink(self):
+        from fkcore.connect import cut_off
+        rep = connect(L(self.MAKERS), CAT, self.NETS)
+        self.assertEqual(rep.nets["g"].status, "open")
+        self.assertEqual(cut_off(rep, {"m/a", "m/z"}), [("m/z", "g", 1)])
+        self.assertEqual(cut_off(rep, {"m/a"}), [])          # only the makers asked about
+
+    def test_the_report_line_and_no_sink(self):
+        from types import SimpleNamespace
+        from fkcore import flow
+        from fkcore.elaborate import Machine
+
+        def machine(key, proto, makes, source=False):
+            return Machine(key, key.split("/")[0], "Asm", proto, None, {}, makes, None, False,
+                           None, source, 1.0)
+        flat = SimpleNamespace(machines={
+            "m/a": machine("m/a", "assembling-machine-1", {"iron-gear-wheel": 1}),
+            "m/z": machine("m/z", "assembling-machine-1", {"iron-gear-wheel": 1}),
+            "m/k": machine("m/k", "wooden-chest", {})})
+        ctx = SimpleNamespace(cat=CAT)
+        lines, checks = flow._sinks(ctx, "mall", flat, connect(L(self.MAKERS), CAT, self.NETS))
+        self.assertEqual(lines, ["  sinks     1 of 2 makers on a net reach a sink with what they "
+                                 "make; none reached: m/z (net g)"])
+        self.assertEqual([str(c) for c in checks],
+                         ["NO_SINK     mall m/z: what it makes reaches none of the 1 consumer of "
+                          "net g: it has nowhere to go"])
+        # a net none of whose pairs connect: its UNROUTED line says it, the report line too
+        lines, checks = flow._sinks(ctx, "mall", flat, connect(L(self.MAKERS.replace(
+            "e x/i0 fast-inserter 3.5,1.5 W net=g", "")), CAT, self.NETS))
+        self.assertIn("0 of 2 makers on a net reach a sink", lines[0])
+        self.assertEqual(checks, [])
+
+    def test_a_net_nothing_uses_is_unused(self):
+        rep = connect(L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel"), CAT,
+                      {"coalin": ([], [])})
+        self.assertEqual([str(c) for c in rep.checks],
+                         ["UNUSED      net coalin: no driver->consumer pair to connect (0 drivers, "
+                          "0 consumers); 0 segments, 0 carriers"])
+        rep = connect(L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel"), CAT,
+                      {"g": ([("m/a", "iron-gear-wheel")], [])})
+        self.assertEqual([c.code for c in rep.checks], ["UNROUTED"])     # it makes, nothing takes
+
+
 if __name__ == "__main__":
     unittest.main()

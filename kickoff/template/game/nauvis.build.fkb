@@ -19,3 +19,4 @@ report_bom      --stock live              # still to build vs the network's stoc
 write_layout                              # write the .fkp files: the design the next build keeps to (--to diff writes nothing)
 apply           --scope stale             # the paste: ghosts, robots build them (the game)
 stop_on         invariant                 # the default: only malformed data stops the run
+stop_on         UNROUTED NO_SINK          # and no paste with a net unrouted, or a maker whose product reaches no sink

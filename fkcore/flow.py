@@ -1034,6 +1034,9 @@ def s_report_checks(ctx, args):
         rep = connect.connect(lay, ctx.cat, connect.endpoints(flat))
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
+        sink_lines, sink_checks = _sinks(ctx, factory, flat, rep)
+        lines += sink_lines
+        checks += sink_checks
         checks += _invariant_checks(factory, fkp.invariants(lay, ctx.cat, nets=flat.nets))
         seen = {c.where for _step, c in ctx.checks if c.code == "BOOTSTRAP"}
         checks += [c for c in _bootstrap_checks(ctx, factory, flat, lay) if c.where not in seen]
@@ -1047,6 +1050,38 @@ def s_report_checks(ctx, args):
                                              or "none"))
     lines += [f"  {step:<13} {c}" for step, c in run]
     return lines, checks
+
+
+#: the machines that make something for a net (2.0.12, NO_SINK)
+_MAKERS = ("assembling-machine", "furnace", "mining-drill")
+
+
+def _sinks(ctx, factory, flat, rep):
+    """2.0.12: does each maker's product reach a sink? One report line, and ``NO_SINK`` for a
+    maker whose product reaches none of the consumers of a net it drives while the net's other
+    pairs connect (a net none of whose pairs connect has its UNROUTED line). The solo run's Mall4
+    went out with its products belt unrouted and its makers had no output (2026-10-23 23:23)."""
+    def maker(m):
+        try:
+            return bool(m.makes) and not m.source and ctx.cat.kind(m.prototype) in _MAKERS
+        except KeyError:
+            return False
+    makers = {k for k, m in flat.machines.items() if maker(m)}
+    feeding = {d for r in rep.nets.values() if r.consumers for d in r.drivers if d in makers}
+    if not feeding:
+        return [], []
+    cut = connect.cut_off(rep, makers)
+    keys = sorted({k for k, _n, _c in cut}, key=fkp.natural_key)
+    line = (f"  sinks     {len(feeding) - len(keys)} of {len(feeding)} makers on a net reach a sink "
+            "with what they make")
+    if cut:
+        line += ("; none reached: " + ", ".join(f"{k} (net {n})" for k, n, _c in cut[:4])
+                 + (f" ... {len(cut) - 4} more" if len(cut) > 4 else ""))
+    checks = [Check("NO_SINK", f"{factory} {k}",
+                    f"what it makes reaches none of the {c} consumer{'s' if c != 1 else ''} of net "
+                    f"{n}: it has nowhere to go")
+              for k, n, c in cut if rep.nets[n].reached]
+    return [line], checks
 
 
 def _to_build(ctx):

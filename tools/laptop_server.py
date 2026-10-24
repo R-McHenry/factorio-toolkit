@@ -23,6 +23,9 @@ Checks it can run on its own (each starts a server, checks, stops it):
                                             inserter and a splitter standing turned (or the other
                                             end) on the design's tiles are ordered out and laid
                                             fresh as designed; the next apply finds none
+    python tools/laptop_server.py health    2.0.12: the loop's world-line read on a small base:
+                                            reactor fuel (with its feeding chest), robots and
+                                            items in chests, stalled makers, plates made
 """
 from __future__ import annotations
 
@@ -457,7 +460,82 @@ rcon.print(n)""")
     return 0 if ok else 1
 
 
+def check_health():
+    """2.0.12: the loop's world-line read (kickoff/claude_loop.STATUS_LUA) on a small base: a
+    reactor with 2 fuel cells and 3 more in the chest its inserter takes from (5 x 8 GJ at 40 MW:
+    about 17 minutes, LOW), 5 logistic robots in a storage chest beside an unpowered roboport,
+    500 plastic and 401 sulfur in a wooden chest far from it (and the 3 cells: no network reaches
+    the reactor's chest), an unpowered assembler, a boiler with no fuel, and 100 iron plates in
+    the production statistics."""
+    import json
+    sys.path.insert(0, os.path.join(ROOT, "kickoff"))
+    import claude_loop
+    setup = """
+local s, f = game.surfaces.nauvis, game.forces.player
+s.request_to_generate_chunks({0, 0}, 5)
+s.force_generate_chunk_requests()
+local tiles = {}
+for x = -10, 120 do for y = -10, 120 do tiles[#tiles + 1] = {name = 'landfill', position = {x, y}} end end
+s.set_tiles(tiles)
+for _, e in pairs(s.find_entities_filtered{area = {{-10, -10}, {120, 120}}}) do
+  if e.valid and e.type ~= 'character' then e.destroy() end
+end
+local r = s.create_entity{name = 'nuclear-reactor', position = {12.5, 12.5}, force = f}
+r.get_fuel_inventory().insert{name = 'uranium-fuel-cell', count = 2}
+local c = s.create_entity{name = 'iron-chest', position = {16.5, 12.5}, force = f}
+c.insert{name = 'uranium-fuel-cell', count = 3}
+local i = s.create_entity{name = 'inserter', position = {15.5, 12.5}, force = f, direction = defines.direction.east}
+if i.drop_position.x > 15.5 then i.direction = defines.direction.west end
+s.create_entity{name = 'roboport', position = {40, 40}, force = f}
+local st = s.create_entity{name = 'storage-chest', position = {43.5, 40.5}, force = f}
+st.insert{name = 'logistic-robot', count = 5}
+local w = s.create_entity{name = 'wooden-chest', position = {110.5, 110.5}, force = f}
+w.insert{name = 'plastic-bar', count = 500}
+w.insert{name = 'sulfur', count = 401}
+local a = s.create_entity{name = 'assembling-machine-2', position = {20.5, 30.5}, force = f}
+a.set_recipe('iron-gear-wheel')
+s.create_entity{name = 'boiler', position = {30.5, 60}, force = f}
+f.get_item_production_statistics(s).on_flow('iron-plate', 100)
+rcon.print(string.format('drop %.1f,%.1f pickup %.1f,%.1f', i.drop_position.x, i.drop_position.y,
+                         i.pickup_position.x, i.pickup_position.y))
+"""
+    with LaptopServer("health", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            print("setup, the inserter (the reactor west of it, the chest east):",
+                  r.lua(setup).strip())
+            r.lua("rcon.print(game.tick)")
+            t0 = time.time()
+            out = r.lua(claude_loop.STATUS_LUA.replace("CURSOR", "0"))
+            took = time.time() - t0
+            # then a game minute and more with nothing made: the base is dead
+            tick = int(r.lua("game.speed = 30 rcon.print(game.tick)").strip())
+            while int(r.lua("rcon.print(game.tick)").strip()) < tick + 75 * 60 \
+                    and time.time() - t0 < 60:
+                time.sleep(0.5)
+            r.lua("game.speed = 1 rcon.print(1)")
+            later = r.lua(claude_loop.STATUS_LUA.replace("CURSOR", "0"))
+    st = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    dead_line, dead_key = claude_loop.status_line(
+        json.loads([ln for ln in later.splitlines() if ln.startswith("{")][-1]))
+    print(f"75 game seconds later: {dead_line}\nkey: {dead_key}")
+    h = st.get("health") or {}
+    print(f"read in {took:.2f} s; health: {json.dumps(h, sort_keys=True)}")
+    line, key = claude_loop.status_line(st)
+    print(f"world line: {line}\nkey: {key}")
+    reactor = (h.get("fuel") or {}).get("reactor") or {}
+    off = h.get("off") or {}
+    ok = (not h.get("error") and 15 < (reactor.get("min") or 0) < 18
+          and (h.get("robots") or {}).get("logistic") == 5 and off.get("items") == 904
+          and (off.get("top") or [{}])[0].get("name") == "plastic-bar"
+          and "no_power" in ((h.get("makers") or {}).get("stalled") or {})
+          and h["plates"]["iron-plate"]["ever"] == 100
+          and "fuel:low" in key and "robots:chest" in key and took < 5
+          and "plates:none" in dead_key and dead_line.startswith("BASE DEAD"))
+    print("world-line health read:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
-                      "turned": check_turned}[what]())
+                      "turned": check_turned, "health": check_health}[what]())

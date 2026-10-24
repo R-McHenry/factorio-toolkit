@@ -50,6 +50,9 @@ $run = Join-Path $P "runs\$name"
 runas /savecred /user:computah "powershell -NoProfile -ExecutionPolicy Bypass -File $P\stop.ps1"
 Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "feed\.(py|js)" } |
     ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
+# the watchdogs first (2.0.12): an earlier run's would start its loop again
+Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "python.exe" -and $_.CommandLine -match "watchdog\.py" } |
+    ForEach-Object { taskkill /F /PID $_.ProcessId 2>$null | Out-Null }
 Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "python.exe" -and $_.CommandLine -match "claude_loop\.py" } |
     ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
 

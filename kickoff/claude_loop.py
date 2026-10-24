@@ -55,6 +55,15 @@ conversation gets so long). The player hears when its context passes 150k tokens
 fresh conversation from NOTES.md and GOAL.md, with the file's text, if any, as a note to itself. The
 file is kept in .loop. A Stop hook that keeps the player going lets its stop through while the file
 is there.
+
+2.0.12 (the solo run, 2026-10-22 22:40 - 09:18: the loop died without a word and the game ran
+10.6 hours unattended; then the base stood dead for hours while the world line spoke of ghosts
+and research). The loop starts watchdog.py beside it, a process of its own that opens play.cmd
+again when play.log has been silent 15 minutes with no loop running, and says so in play.log, in
+the game chat and to the player. The world line leads with a dead base (no iron or copper plates
+in the last minute), the reactor's fuel out or low and robots in chests while the network has
+none, and ends with the plates per minute, the makers that stand and why, and items in chests
+outside every logistic network; the first three are notes too, like no research.
 """
 import argparse
 import atexit
@@ -122,7 +131,12 @@ FRESH = ("[From the loop] This is a fresh conversation: the one before grew long
 #: player's silent deadlock: a re-laid grid left the poles that would join it out of reach), the
 #: construction robots, the research, the labs that wait for packs and what their packs' makers
 #: lack (2026-10-21: both players' research stood on one starved pack while the line said 11%),
-#: and the game chat after CURSOR
+#: the game chat after CURSOR, and (2.0.12) the base's health: iron and copper plates made in the
+#: last minute, the reactors' fuel (what their feeding chests hold counts) and boilers without
+#: fuel, the makers that stand and why, robots in chests, and items in chests outside every
+#: logistic network. The solo run (2026-10-23 13:55-16:09): no coal, the reactor out of fuel and
+#: nothing made, while the line spoke of ghosts and research; 5 logistic robots and 500 plastic
+#: sat in chests for hours. The health read runs in a pcall: a mistake there never costs the rest
 STATUS_LUA = r"""
 local s, f = game.surfaces.nauvis, game.forces.player
 local net
@@ -184,11 +198,106 @@ if labs.short > 0 then
     end
   end
 end
+local ok, health = pcall(function()
+  local ps, pm = f.get_item_production_statistics(s), defines.flow_precision_index.one_minute
+  local plates = {}
+  for _, n in pairs{"iron-plate", "copper-plate"} do
+    plates[n] = {min = math.floor(ps.get_flow_count{name = n, category = "input",
+                                                   precision_index = pm, count = false} + 0.5),
+                 ever = ps.get_input_count(n)}
+  end
+  local function joules(inv)
+    local j = 0
+    for _, it in pairs(inv and inv.get_contents() or {}) do
+      local p = prototypes.item[it.name]
+      if p and p.fuel_value then j = j + p.fuel_value * it.count end
+    end
+    return j
+  end
+  local fuel = {}
+  for _, e in pairs(s.find_entities_filtered{type = {"reactor", "boiler"}, force = f}) do
+    local b = e.burner
+    if b then
+      local j = (b.remaining_burning_fuel or 0) + joules(b.inventory)
+      if e.type == "reactor" then
+        -- by the inserters' drop and pickup positions: drop_target stays nil on an inserter that
+        -- has not moved yet (the laptop server, 2026-10-24)
+        local p, bb, seen = e.position, e.bounding_box, {}
+        for _, i in pairs(s.find_entities_filtered{type = "inserter", force = f,
+            area = {{p.x - 5, p.y - 5}, {p.x + 5, p.y + 5}}}) do
+          local d = i.drop_position
+          if d.x >= bb.left_top.x and d.x <= bb.right_bottom.x and d.y >= bb.left_top.y
+              and d.y <= bb.right_bottom.y then
+            for _, c in pairs(s.find_entities_filtered{position = i.pickup_position, force = f,
+                type = {"container", "logistic-container"}}) do
+              if not seen[c.unit_number] then
+                seen[c.unit_number] = true
+                j = j + joules(c.get_inventory(defines.inventory.chest))
+              end
+            end
+          end
+        end
+      end
+      local t = fuel[e.type] or {n = 0, out = 0}
+      t.n = t.n + 1
+      if j <= 0 then
+        t.out = t.out + 1
+      else
+        local use = e.prototype.get_max_energy_usage() or 0
+        if use > 0 and (not t.min or j / use / 3600 < t.min) then t.min = j / use / 3600 end
+      end
+      fuel[e.type] = t
+    end
+  end
+  local names = {}
+  for k, v in pairs(defines.entity_status) do names[v] = k end
+  local makers = {n = 0, stalled = {}}
+  for _, a in pairs(s.find_entities_filtered{type = {"assembling-machine", "furnace"}, force = f}) do
+    makers.n = makers.n + 1
+    local st = a.status
+    if st and st ~= defines.entity_status.working and st ~= defines.entity_status.normal then
+      local k = names[st] or tostring(st)
+      makers.stalled[k] = (makers.stalled[k] or 0) + 1
+    end
+  end
+  local robots, off, piles = {construction = 0, logistic = 0}, {chests = 0, items = 0}, {}
+  for _, c in pairs(s.find_entities_filtered{type = {"container", "logistic-container"}, force = f}) do
+    local inv = c.get_inventory(defines.inventory.chest)
+    if inv and not inv.is_empty() then
+      local p = c.position
+      for _, kind in pairs{"construction", "logistic"} do
+        local n = inv.get_item_count(kind .. "-robot")
+        if n > 0 then
+          robots[kind] = robots[kind] + n
+          robots.at = robots.at or {x = math.floor(p.x), y = math.floor(p.y)}
+        end
+      end
+      local inside = (c.type == "logistic-container" and c.logistic_network)
+                     or (c.type == "container" and s.find_logistic_network_by_position(p, f))
+      if not inside then
+        off.chests = off.chests + 1
+        for _, it in pairs(inv.get_contents()) do
+          off.items = off.items + it.count
+          local q = piles[it.name] or {name = it.name, n = 0, most = 0}
+          q.n = q.n + it.count
+          if it.count > q.most then q.most, q.x, q.y = it.count, math.floor(p.x), math.floor(p.y) end
+          piles[it.name] = q
+        end
+      end
+    end
+  end
+  local top = {}
+  for _, q in pairs(piles) do top[#top + 1] = q end
+  table.sort(top, function(a, b) return a.n > b.n end)
+  off.top = {top[1], top[2], top[3]}
+  return {plates = plates, fuel = fuel, makers = makers, robots = robots, off = off}
+end)
 rcon.print(helpers.table_to_json{tick = game.tick, ghosts = ghosts, chat = chat,
   unreached = far > 0 and {n = far, first = at} or nil,
-  robots = net and {idle = net.available_construction_robots, all = net.all_construction_robots},
+  robots = net and {idle = net.available_construction_robots, all = net.all_construction_robots,
+                    logistic = net.all_logistic_robots},
   research = res and {name = res.name, pct = math.floor(f.research_progress * 100)},
-  labs = labs})
+  labs = labs, health = ok and health or {error = tostring(health)}})
 """
 
 
@@ -593,12 +702,96 @@ def host_status(cfg, cursor, folder=None):
     return None
 
 
+#: a maker's status (a defines.entity_status name) as the world line says it; others lose their _
+STALLED = {"item_ingredient_shortage": "no ingredients", "fluid_ingredient_shortage": "no fluid",
+           "no_input_fluid": "no fluid", "full_output": "output full",
+           "waiting_for_space_in_destination": "output full", "no_power": "no power",
+           "low_power": "low power", "no_fuel": "no fuel", "no_recipe": "no recipe",
+           "disabled_by_control_behavior": "off by circuit",
+           "marked_for_deconstruction": "to be taken up"}
+FUEL_LOW = 30   # minutes of reactor fuel at full burn: less is LOW, and the player hears so
+
+#: what blocks that is also a note, so it wakes a player that waits on its workers, once each time
+#: it starts: no research (2.0) and, like it (2.0.12), a dead base and the reactor's fuel
+WAKE = {"research:none": "[The labs stand idle: nothing researches. `fk research` queues the next "
+                          "techs.]",
+        "plates:none": "[The base is dead: no iron or copper plates in the last minute.]",
+        "fuel:out": "[The reactor is out of fuel.]",
+        "fuel:low": f"[The reactor's fuel is low: under {FUEL_LOW} minutes at full burn.]"}
+
+
+def _dict(x):
+    """Lua's empty table comes back as a JSON list."""
+    return x if isinstance(x, dict) else {}
+
+
+def health(st):
+    """The base's health in the read (2.0.12) -> (alarms, which lead the world line; facts, which
+    end it; the keys of what blocks: plates:none, fuel:out, fuel:low, robots:chest)."""
+    h = _dict(st.get("health"))
+    alarms, facts, blocked = [], [], []
+    plates = _dict(h.get("plates"))
+    if plates:
+        fe, cu = _dict(plates.get("iron-plate")), _dict(plates.get("copper-plate"))
+        made = fe.get("ever") or cu.get("ever")
+        if not made:
+            facts.append("no plates made yet")
+        elif (fe.get("min") or 0) <= 0 and (cu.get("min") or 0) <= 0:
+            alarms.append("BASE DEAD: no iron or copper plates made in the last minute")
+            blocked.append("plates:none")
+        else:
+            facts.append(f"plates/min: iron {fe.get('min') or 0}, copper {cu.get('min') or 0}")
+    fuel = _dict(h.get("fuel"))
+    r = _dict(fuel.get("reactor"))
+    if r.get("out"):
+        alarms.append("REACTOR FUEL OUT" + (f" in {r['out']} of {r['n']} reactors"
+                                            if r.get("n", 1) > 1 else ""))
+        blocked.append("fuel:out")
+    elif r.get("min") is not None and r["min"] < FUEL_LOW:
+        alarms.append(f"REACTOR FUEL LOW: about {max(1, round(r['min']))} min left at full burn")
+        blocked.append("fuel:low")
+    b = _dict(fuel.get("boiler"))
+    if b.get("out"):
+        facts.append(f"{b['out']} of {b.get('n')} boilers without fuel")
+    mk = _dict(h.get("makers"))
+    why = {}
+    for k, n in _dict(mk.get("stalled")).items():
+        w = STALLED.get(k, k.replace("_", " "))
+        why[w] = why.get(w, 0) + int(n)
+    if why:
+        facts.append(f"makers stalled {sum(why.values())} of {mk.get('n')}: " + ", ".join(
+            f"{n} {w}" for w, n in sorted(why.items(), key=lambda kv: (-kv[1], kv[0]))[:5]))
+    rb, net = _dict(h.get("robots")), st.get("robots") or {}
+    inchest = [(rb[k], k) for k in ("logistic", "construction") if rb.get(k)]
+    if inchest:
+        at = _dict(rb.get("at"))
+        text = (" and ".join(f"{n} {k} robots" for n, k in inchest) + " sit in chests, where they "
+                f"do nothing (first at {at.get('x')},{at.get('y')})")
+        if (rb.get("logistic") and not net.get("logistic")) or \
+                (rb.get("construction") and not net.get("all")):
+            alarms.append("ROBOTS IN CHESTS: " + text + ", while the network has none of them")
+            blocked.append("robots:chest")
+        else:
+            facts.append(text)
+    off = _dict(h.get("off"))
+    if off.get("items"):
+        top = [p for p in off.get("top") or [] if isinstance(p, dict)]
+        facts.append(f"{off['items']} items sit in {off.get('chests')} chests outside every logistic "
+                     "network" + (" (" + "; ".join(f"{p.get('n')} {p.get('name')}, most at "
+                                                     f"{p.get('x')},{p.get('y')}" for p in top)
+                                  + ")" if top else ""))
+    return alarms, facts, blocked
+
+
 def status_line(st):
     """-> (the world line, the key of what blocks: SHORT and LOCKED ghost items, ghosts no
-    powered roboport reaches, no research, research stalled with every lab waiting for packs)."""
+    powered roboport reaches, no research, research stalled with every lab waiting for packs,
+    and (2.0.12) a dead base, the reactor's fuel out or low, robots in chests while the network
+    has none). The base's alarms lead the line and its other health facts end it."""
     gh = sorted(st.get("ghosts") or [], key=lambda g: -g["ghosts"])
     total = sum(g["ghosts"] for g in gh)
-    blocked, parts = [], []
+    alarms, facts, blocked = health(st)
+    parts = list(alarms)
     if total:
         items = []
         for g in gh[:8]:
@@ -649,7 +842,7 @@ def status_line(st):
     else:
         parts.append("RESEARCH: NONE, nothing researches")
         blocked.append("research:none")
-    return "; ".join(parts) + ".", ",".join(sorted(blocked))
+    return "; ".join(parts + facts) + ".", ",".join(sorted(blocked))
 
 
 class Watch(threading.Thread):
@@ -668,7 +861,8 @@ class Watch(threading.Thread):
         # no cursor yet: the chat so far is not news, the first read only sets the cursor
         self.cursor = int(open(self.cursor_file).read()) if os.path.exists(self.cursor_file) else None
         self.key, self.said = None, 0.0
-        self.no_research = False
+        self.woke = set()                # the WAKE keys noted while they last
+        self.health_error = None         # the health read's last error, logged once
         self.mutex = threading.Lock()
 
     def note(self, text):
@@ -770,15 +964,19 @@ class Watch(threading.Thread):
                 with open(self.cursor_file, "w") as f:
                     f.write(str(self.cursor))
             line, key = status_line(st)
-            # no research is the one world fact that is also a note, so it wakes a lead that
-            # waits on its workers, once each time it starts (2.0, the first lead run: the queue
-            # ran out while the lead waited, 21:40-22:13 and 23:24-23:33 on 2026-10-21)
-            none = "research:none" in key.split(",")
-            if none and not self.no_research:
-                self.note("[The labs stand idle: nothing researches. `fk research` queues the next "
-                          "techs.]")
-                self.log("note: nothing researches")
-            self.no_research = none
+            err = _dict(st.get("health")).get("error")
+            if err and err != self.health_error:
+                self.log(f"  (watch: the health read failed: {short(err, 200)})")
+            self.health_error = err
+            # the world facts that are also notes (WAKE) wake a lead that waits on its workers,
+            # once each time they start (2.0, the first lead run: the queue ran out while the lead
+            # waited, 21:40-22:13 and 23:24-23:33 on 2026-10-21; 2.0.12, the solo run: the base
+            # stood dead 13:55-16:09 on 2026-10-23 while the player watched research)
+            now = {k for k in key.split(",") if k in WAKE}
+            for k in sorted(now - self.woke):
+                self.note(WAKE[k])
+                self.log("note: " + WAKE[k].strip("[]"))
+            self.woke = now
             since = time.time() - self.said
             due = (key != self.key and since > SETTLE) or (key and since > REMIND)
             if world or (due and (key or self.key)):
@@ -803,6 +1001,22 @@ def settings(folder):
             "PreToolUse": [{"matcher": "Bash|PowerShell|Monitor", "hooks": [
                 {"type": "command", "command": wait, "timeout": 10}]}]}}, f, indent=1)
     return path
+
+
+def start_watchdog(run, log):
+    """watchdog.py beside this file, as a process of its own (2.0.12): it opens play.cmd again when
+    this loop dies. ``--detach`` starts it outside this process's tree and returns; a run's
+    second watchdog ends at once, so each loop start may ask for one."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watchdog.py")
+    if not os.path.exists(path):
+        return
+    try:
+        r = subprocess.run([sys.executable, path, run, "--detach"], capture_output=True,
+                           text=True, timeout=30)
+        if r.returncode:
+            log(f"  (watchdog: exit {r.returncode}: {short(r.stderr, 200)})")
+    except (OSError, subprocess.SubprocessError) as exc:
+        log(f"  (watchdog: {type(exc).__name__}: {short(exc, 200)})")
 
 
 def lock(run):
@@ -835,6 +1049,7 @@ def main():
     # ES_CONTINUOUS | ES_SYSTEM_REQUIRED: the laptop does not sleep while the loop plays
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
     log = Log(run)
+    start_watchdog(run, log)
     events = open(os.path.join(run, "claude-events.jsonl"), "a", encoding="utf-8")
     ensure_login(run, log)
     sid_file = os.path.join(run, "claude-session.txt")

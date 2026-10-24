@@ -52,9 +52,10 @@ leave their factory.
 endpoints (:func:`endpoints`) or, without a netlist, the machines its carriers pick from and drop
 into. A net is **connected** when every driver reaches every consumer through the net's own
 carriers. Report lines (``elaborate.Check``), never raised: ``UNROUTED`` (no driver reaches a
-consumer), ``OPEN`` (some pairs connect, not all), ``LEAK`` (an edge from one net's carrier into a
-carrier that does not carry that net: a belt or side-load feeding another net's belt, an inserter
-picking from another net's belt, an underground the game pairs with another net's; with a netlist
+consumer; ``UNUSED`` when the net has no driver, consumer or carrier), ``OPEN`` (some pairs
+connect, not all), ``LEAK`` (an edge from one net's carrier into a carrier that does not carry
+that net: a belt or side-load feeding another net's belt, an inserter picking from another net's
+belt, an underground the game pairs with another net's; with a netlist
 also a carrier moving items into a machine that is not a consumer of any of its nets, or out of
 one that drives none of them). A net's belt side-loaded onto a belt of two nets that carries it
 (``ore`` onto ``ore|fuel``) is no LEAK: that is how two nets come to share a belt. A fluid LEAK
@@ -85,7 +86,7 @@ from .fkp import CARRIER_TYPES, map_nets, natural_key, net_names
 from .templates import CONTACT
 
 __all__ = ["Node", "Graph", "Leak", "NetReport", "Report", "graph", "connect", "endpoints",
-           "endpoint_box", "one_inserter", "HOLDER_TYPES", "REACH"]
+           "endpoint_box", "one_inserter", "cut_off", "HOLDER_TYPES", "REACH"]
 
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 _BELTS = frozenset({"transport-belt", "underground-belt", "splitter"})
@@ -701,7 +702,31 @@ def _status_line(r):
         msg += f"; unpaired {', '.join(r.unpaired)}"
     if r.missing:
         msg += f"; not in the layout: {', '.join(r.missing)}"
+    if not r.drivers and not r.consumers and not r.carriers:
+        # 2.0.12: a declared net that nothing uses has nothing to route; as UNROUTED it would
+        # hold every paste now that the build script stops on UNROUTED by default
+        return Check("UNUSED", f"net {r.name}", msg)
     return Check("UNROUTED" if r.reached == 0 else "OPEN", f"net {r.name}", msg)
+
+
+def cut_off(rep, makers):
+    """The makers among ``makers`` (machine keys) whose product reaches none of the consumers of a
+    net they drive, from a :func:`connect` report: [(maker, net, consumers)], in net order. One
+    consumer reached is enough (the net's OPEN line names the pairs it misses). A net with no
+    consumers is UNROUTED already; a maker not in the layout is the net's "not in the layout".
+
+    2.0.12 (the solo run, 2026-10-23 23:23): Mall4 went out with its products belt unrouted, and
+    its makers had no output."""
+    out = []
+    for name, r in rep.nets.items():
+        if not r.consumers:
+            continue
+        missed = {}
+        for d, _c in r.unreached:
+            missed[d] = missed.get(d, 0) + 1
+        out += [(d, name, len(r.consumers)) for d in r.drivers
+                if d in makers and d not in r.missing and missed.get(d, 0) >= len(r.consumers)]
+    return out
 
 
 def one_inserter(ents, cat, nets):
