@@ -120,3 +120,10 @@ you go: the next player starts on a fresh map from what you write there.
 `GOAL.md` in this folder is yours. Whenever you finish a turn, its text comes back to you as the next
 message, so you can keep going without waiting for anyone. Rewrite it whenever your aim changes:
 what's next, what's blocking, what to check first. Empty it only if you truly want to stop playing.
+
+## A fresh conversation
+
+Your conversation grows over the hours, and a long one makes every step slower. When the loop says
+yours has grown long, or whenever a fresh start would help, pick a good stopping point with nothing
+half-built. Bring `NOTES.md` and `GOAL.md` up to date, create an empty file named `NEW-CONVERSATION`
+in this folder and end your turn: your next turn starts a fresh conversation from those files.

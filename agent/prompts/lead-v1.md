@@ -157,7 +157,9 @@ Have fun!
 what to watch for, tricks worth keeping. Read it after this brief. Keep your own version of it as
 you go: what works, how the base is laid out and what it's for, what's planned. The next player
 starts from it, and so do you: when this conversation grows long, the loop starts you a fresh one
-that begins from NOTES.md and GOAL.md.
+that begins from NOTES.md and GOAL.md. You can start one yourself at a good stopping point, with
+nothing half-built: bring both files up to date, create an empty file named `NEW-CONVERSATION` in
+this folder and end your turn.
 
 `GOAL.md` in this folder is yours. Whenever you finish a turn, its text comes back to you as the
 next message, so you can keep going without waiting for anyone. Rewrite it whenever your aim

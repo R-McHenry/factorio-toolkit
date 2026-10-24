@@ -238,7 +238,7 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(lines[-1], "    background task completed: Poll belts to 200")
         self.assertEqual(state["agents"], {"t1": "w"})            # the worker still runs
 
-    def run_round(self, script, cap_min=1, horizon=None):
+    def run_round(self, script, cap_min=1, horizon=None, told=None):
         """turn() on a fake claude process and a fake clock: ``script`` is [(at seconds, event)],
         each event sent once the clock reaches it. -> (state, cut, the messages written in, log,
         the commands run, the clock at the end)."""
@@ -293,13 +293,15 @@ class StreamTest(unittest.TestCase):
         d = tempfile.mkdtemp(prefix="fkcap-")
         self.addCleanup(shutil.rmtree, d, True)
         os.makedirs(os.path.join(d, ".loop"))
+        self.run_dir = d
         with mock.patch.object(claude_loop, "time", Clock), \
                 mock.patch.object(claude_loop, "claude_bin", lambda: "claude"), \
                 mock.patch.object(claude_loop.subprocess, "Popen",
                                   lambda *a, **kw: procs.append(Proc()) or procs[0]), \
                 mock.patch.object(claude_loop.subprocess, "run", run):
             state, rc, cut = claude_loop.turn(d, "sid", "go", "m", cap_min, lines.append,
-                                              io.StringIO(), take=lambda: "", horizon=horizon)
+                                              io.StringIO(), take=lambda: "", horizon=horizon,
+                                              heard=told)
         with open(os.path.join(d, ".loop", "workers.txt"), encoding="utf-8") as fh:
             self.workers_txt = fh.read()
         return state, cut, written, lines, ran, clock[0]
@@ -377,6 +379,39 @@ class StreamTest(unittest.TestCase):
         state, cut, written, lines, ran, end = self.run_round(script)
         self.assertIsNone(cut)
         self.assertEqual(written, ["go"])                             # no note: nothing runs
+
+    def test_a_long_conversation_hears_so_once_per_100k(self):
+        # Rory (2026-10-23): let the player restart itself at a good stopping point before its
+        # conversation gets so long (the solo player's reached 466k)
+        def call(k):
+            return {"type": "assistant", "message": {"usage": {"cache_read_input_tokens": k * 1000},
+                                                     "content": [{"type": "text", "text": "."}]}}
+        script = [(0, call(120)), (10, call(160)), (20, call(190)), (30, call(260)),
+                  (40, {"type": "result", "result": "done"})]
+        told = [0]
+        state, cut, written, lines, ran, end = self.run_round(script, cap_min=120, told=told)
+        with open(os.path.join(self.run_dir, ".loop", "notes-pending.txt"), encoding="utf-8") as fh:
+            notes = [n for n in fh.read().split("\n\n") if n.strip()]
+        self.assertEqual(len(notes), 2)                       # at 160k and at 260k, not at 190k
+        self.assertTrue(notes[0].startswith("[From the loop] This conversation holds about 160k"))
+        self.assertIn("create an empty file named NEW-CONVERSATION", notes[0])
+        self.assertIn("about 260k", notes[1])
+        self.assertEqual(told, [250000])
+        self.assertEqual(claude_loop.long_note(255000, told), "")   # heard already
+        self.assertEqual(claude_loop.long_note(140000, [0]), "")    # below the first mark
+
+    def test_the_new_conversation_file_is_taken_once(self):
+        d = tempfile.mkdtemp(prefix="fknew-")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, ".loop"))
+        self.assertIsNone(claude_loop.new_conversation(d))
+        with open(os.path.join(d, claude_loop.NEW), "w", encoding="utf-8") as fh:
+            fh.write("Mall3 pasted; check its belts first.\n")
+        self.assertEqual(claude_loop.new_conversation(d), "Mall3 pasted; check its belts first.")
+        self.assertFalse(os.path.exists(os.path.join(d, claude_loop.NEW)))
+        self.assertEqual(len([f for f in os.listdir(os.path.join(d, ".loop"))
+                              if f.startswith("new-conversation-")]), 1)
+        self.assertIsNone(claude_loop.new_conversation(d))
 
     def test_a_streaming_message(self):
         self.assertEqual(json.loads(claude_loop.user_message("hi").decode("utf-8")),

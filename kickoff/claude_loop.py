@@ -48,6 +48,13 @@ note saying so, with each worker's progress and, when the run has a staged plan 
 how far the plan reaches. <run>\\.loop\\workers.txt keeps each running worker's line current (its
 minutes, tool calls and last command): the first lead run's lead could not see a long builder's
 progress without reading its transcript.
+
+2.0.7 (Rory, 2026-10-23: let the player restart itself at a good stopping point before its
+conversation gets so long). The player hears when its context passes 150k tokens, and again every
+100k after. When it creates <run>\\NEW-CONVERSATION and ends its turn, the next round starts a
+fresh conversation from NOTES.md and GOAL.md, with the file's text, if any, as a note to itself. The
+file is kept in .loop. A Stop hook that keeps the player going lets its stop through while the file
+is there.
 """
 import argparse
 import atexit
@@ -95,6 +102,16 @@ HANDOVER = ("[From the loop] This conversation has grown to about {k}k tokens of
             "that begins from your files, so bring them up to date now: NOTES.md (what works, how "
             "the base is laid out and what for, what is planned, what to watch for) and GOAL.md "
             "(what's next, what's blocking, what to check first). Then end your turn.")
+#: the player's own way to a fresh conversation (2.0.7, Rory 2026-10-23: the solo player's
+#: conversation reached 466k tokens before Rory asked whether it wanted a fresh session; give it a
+#: way to restart itself at a good stopping point): a file it creates in its folder, which the loop
+#: takes at the next round and starts a fresh conversation from NOTES.md and GOAL.md
+NEW = "NEW-CONVERSATION"
+LONG_AT, LONG_EVERY = 150000, 100000  # tokens of context: the player hears so, then each 100k more
+LONG = ("[From the loop] This conversation holds about {k}k tokens of context, which makes every "
+        "step slower and costlier. At a good stopping point, with nothing half-built, bring "
+        "NOTES.md and GOAL.md up to date, create an empty file named NEW-CONVERSATION in your "
+        "folder and end your turn: the next turn starts a fresh conversation from them.")
 #: the first message of the fresh conversation after a hand-over
 FRESH = ("[From the loop] This is a fresh conversation: the one before grew long. AGENTS.md is "
          "your brief as before, and NOTES.md and GOAL.md are where you left off, brought up to "
@@ -376,7 +393,41 @@ def user_message(text):
             ).encode("utf-8")
 
 
-def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None):
+def long_note(context, told):
+    """LONG once each time the player's context passes LONG_AT, LONG_AT + LONG_EVERY, ...;
+    ``told`` is [the last mark it heard], kept per conversation. -> the note, or ""."""
+    if context < LONG_AT:
+        return ""
+    mark = LONG_AT + (context - LONG_AT) // LONG_EVERY * LONG_EVERY
+    if mark <= told[0]:
+        return ""
+    told[0] = mark
+    return LONG.format(k=context // 1000)
+
+
+def pend(run, text):
+    """A note for the player, as the watcher writes them: the hook hands it over after the
+    player's next tool call, or the loop with its next message."""
+    with open(os.path.join(run, ".loop", "notes-pending.txt"), "a", encoding="utf-8") as f:
+        f.write(text.rstrip() + "\n\n")
+
+
+def new_conversation(run):
+    """The player's NEW-CONVERSATION file, taken into .loop: its text ("" when empty), or None when
+    there is none."""
+    path = os.path.join(run, NEW)
+    if not os.path.exists(path):
+        return None
+    kept = os.path.join(run, ".loop", f"{NEW.lower()}-{datetime.now():%Y%m%d-%H%M%S}.md")
+    try:
+        os.replace(path, kept)
+    except OSError:
+        return None                    # its writer still holds it: next round
+    with open(kept, encoding="utf-8", errors="replace") as f:
+        return f.read().strip()
+
+
+def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None, heard=None):
     """One claude -p round on the run's conversation -> (state, exit code, why it was cut short).
 
     2.0 (Rory, 2026-10-21: chat goes to the lead player at once): the round runs on streaming
@@ -390,7 +441,9 @@ def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None):
     ended the round 10 minutes after the lead's last turn, stopping that worker mid-build.
 
     A player that has waited WAIT seconds while something of its runs hears so once per wait,
-    with ``horizon()`` (the plan's reach) in the note (2.0, Rory 2026-10-22: 5 minutes at most)."""
+    with ``horizon()`` (the plan's reach) in the note (2.0, Rory 2026-10-22: 5 minutes at most).
+    With ``heard`` (2.0.7, the context marks heard in this conversation) the player hears when its
+    context grows long (long_note)."""
     cmd = [claude_bin(), "-p", "--input-format", "stream-json", "--output-format", "stream-json",
            "--verbose", "--model", model, "--permission-mode", "auto", "--strict-mcp-config",
            "--settings", settings(run)]
@@ -436,6 +489,11 @@ def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None):
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
             p.wait()
             break
+        if heard is not None:
+            long = long_note(state["context"], heard)
+            if long:
+                pend(run, long)
+                log(f"note: the conversation holds about {state['context'] // 1000}k tokens")
         if not capped and time.time() > deadline:
             capped = True
             log(f"round past its {cap_min:g}-minute cap: it ends when what runs now is done "
@@ -783,6 +841,7 @@ def main():
     paused = False
     handing, fresh = False, False     # a hand-over round asked for, and the fresh start after it
     conv = 0                          # rounds done in this conversation (FRESH_MIN)
+    told, asked_note = [0], ""         # the context marks heard in this conversation; NEW's text
     while True:
         goal = open(goal_path, encoding="utf-8").read().strip() if os.path.exists(goal_path) else ""
         why = ("STOP file" if os.path.exists(stop_path) else
@@ -803,6 +862,19 @@ def main():
         if paused:
             log("resumed: GOAL.md has text again")
             paused = False
+        asked = new_conversation(run)
+        if asked is not None:
+            if sid:
+                # the player asked for a fresh conversation at a stopping point of its own (2.0.7)
+                with open(os.path.join(run, "claude-sessions.txt"), "a", encoding="utf-8") as f:
+                    f.write(f"{datetime.now():%Y-%m-%dT%H:%M:%S} {sid} asked\n")
+                log(f"=== conversation {sid[:8]}: the player asked for a fresh one ({NEW}); this "
+                    "round starts it from NOTES.md and GOAL.md")
+                sid, handing, fresh, conv, restarted = "", False, True, 0, False
+                told[0] = 0
+                if os.path.exists(sid_file):
+                    os.remove(sid_file)
+                asked_note = asked
         if sid and handing:
             text = HANDOVER.format(k=handing // 1000)
         elif sid:
@@ -810,8 +882,9 @@ def main():
                     f"edit that file to change what it says next time, or empty it to stop "
                     f"playing.]\n\n{goal}")
         elif fresh:
-            text = f"{FRESH}\n\n{goal}"
-            fresh = False
+            text = f"{FRESH}\n\n{goal}" + (f"\n\n[Your note, from {NEW}]\n{asked_note}"
+                                           if asked_note else "")
+            fresh, asked_note = False, ""
         else:
             text = first
         if cut == "cap":
@@ -832,7 +905,7 @@ def main():
         log(f"=== round {n} ({'conversation ' + sid[:8] if sid else 'new conversation'})")
         t0 = time.time()
         state, rc, cut = turn(run, sid, text, a.model, a.turn_cap, log, events, watch.take_notes,
-                              lambda: plan_horizon(run))
+                              lambda: plan_horizon(run), told)
         if state["sid"] and state["sid"] != sid:
             sid = state["sid"]
             with open(sid_file, "w") as f:
@@ -847,6 +920,7 @@ def main():
             log(f"=== conversation {sid[:8]} handed over at about {handing // 1000}k tokens; "
                 "the next round starts a fresh one from NOTES.md and GOAL.md")
             sid, handing, fresh, conv = "", False, True, 0
+            told[0] = 0
             if os.path.exists(sid_file):
                 os.remove(sid_file)
             if cut != "STOP":
