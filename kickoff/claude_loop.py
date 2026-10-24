@@ -789,13 +789,19 @@ class Watch(threading.Thread):
 
 def settings(folder):
     """The --settings file: claude_hook.py after every tool call (2.0: any tool, so a busy
-    player hears Rory's chat soon whatever it is doing; inside a worker the hook takes nothing)."""
-    hook = os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude_hook.py")
-    cmd = f'python "{hook}" "{folder}"'.replace("\\", "/")
+    player hears Rory's chat soon whatever it is doing; inside a worker the hook takes nothing),
+    and wait_hook.py before every shell or Monitor command (2.0.11, Rory 2026-10-23: "dont wait"
+    and wait commands are blocked)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    cmd = f'python "{os.path.join(here, "claude_hook.py")}" "{folder}"'.replace("\\", "/")
+    wait = f'python "{os.path.join(here, "wait_hook.py")}" "{folder}"'.replace("\\", "/")
     path = os.path.join(folder, ".loop", "settings.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [
-            {"type": "command", "command": cmd, "timeout": 10}]}]}}, f, indent=1)
+        json.dump({"hooks": {
+            "PostToolUse": [{"matcher": "*", "hooks": [
+                {"type": "command", "command": cmd, "timeout": 10}]}],
+            "PreToolUse": [{"matcher": "Bash|PowerShell|Monitor", "hooks": [
+                {"type": "command", "command": wait, "timeout": 10}]}]}}, f, indent=1)
     return path
 
 

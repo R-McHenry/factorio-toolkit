@@ -126,6 +126,30 @@ class HookTest(unittest.TestCase):
             matcher = json.load(fh)["hooks"]["PostToolUse"][0]["matcher"]
         self.assertEqual(matcher, "*")
 
+    def test_wait_commands_are_blocked(self):
+        # Rory (2026-10-23): "dont wait" and wait commands are blocked
+        path = claude_loop.settings(self.run)
+        with open(path, encoding="utf-8") as fh:
+            pre = json.load(fh)["hooks"]["PreToolUse"][0]
+        self.assertEqual(pre["matcher"], "Bash|PowerShell|Monitor")
+        self.assertIn("wait_hook.py", pre["hooks"][0]["command"])
+        import wait_hook
+        for cmd, blocked in (("sleep 5; ls", True), ("timeout 590 bash -c 'until x; do sleep 10; done'", True),
+                             ("python bin/fk.py wait built 1,1,9,9 --max 2m", True),
+                             ("Start-Sleep -Seconds 30", True), ("python bin/fk.py build", False),
+                             ("grep -n sleep NOTES.md", False)):
+            raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+            out = io.StringIO()
+            with mock.patch("sys.stdin", io.StringIO(raw)), mock.patch("sys.stdout", out), \
+                    mock.patch("sys.argv", ["wait_hook.py", self.run]):
+                wait_hook.main()
+            if blocked:
+                decision = json.loads(out.getvalue())["hookSpecificOutput"]
+                self.assertEqual((decision["permissionDecision"], decision["permissionDecisionReason"]),
+                                 ("deny", "Don't wait."), cmd)
+            else:
+                self.assertEqual(out.getvalue(), "", cmd)
+
 
 class WatchTest(unittest.TestCase):
     """2.0: what the watcher hands a lead that waits on its workers: notes only (chat, INBOX.md,

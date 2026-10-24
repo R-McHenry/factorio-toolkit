@@ -143,7 +143,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
                          check=True, text=True).stdout.strip()
     src = os.path.join(run, ".kit")
     _archive(sha, src, ("agent", "kickoff/template")
-             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py") if player == "claude" else ()))
+             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py", "kickoff/wait_hook.py")
+                if player == "claude" else ()))
     agent = os.path.join(src, "agent")
     brief = os.path.join(agent, "prompts", f"{prompt}.md")
     if not os.path.exists(brief):
@@ -165,8 +166,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     if player == "claude":
         loop = os.path.join(run, ".toolkit", "claude_loop.py")
         shutil.copy(os.path.join(src, "kickoff", "claude_loop.py"), loop)
-        shutil.copy(os.path.join(src, "kickoff", "claude_hook.py"),
-                    os.path.join(run, ".toolkit", "claude_hook.py"))
+        for name in ("claude_hook.py", "wait_hook.py"):
+            shutil.copy(os.path.join(src, "kickoff", name), os.path.join(run, ".toolkit", name))
         with open(os.path.join(run, "play.cmd"), "w", encoding="ascii", newline="\r\n") as fh:
             fh.write(PLAY.format(name=os.path.basename(os.path.abspath(run)), loop=os.path.abspath(loop),
                                  run=os.path.abspath(run)))

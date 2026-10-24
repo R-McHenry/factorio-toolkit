@@ -171,7 +171,7 @@ def upgrade(run, sha, dry=False):
     src = os.path.join(run, f".kit-{sha}")
     claude = cfg.get("player") == "claude"
     _archive(sha, src, ("agent", "fkcore")
-             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py") if claude else ())
+             + (("kickoff/claude_loop.py", "kickoff/claude_hook.py", "kickoff/wait_hook.py") if claude else ())
              + (("kickoff/template/helpers",) if helpers else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
@@ -183,7 +183,7 @@ def upgrade(run, sha, dry=False):
     os.makedirs(os.path.join(run, ".toolkit"))
     shutil.copytree(os.path.join(src, "fkcore"), os.path.join(run, ".toolkit", "fkcore"))
     if claude:
-        for name in ("claude_loop.py", "claude_hook.py"):
+        for name in ("claude_loop.py", "claude_hook.py", "wait_hook.py"):
             shutil.copy(os.path.join(src, "kickoff", name), os.path.join(run, ".toolkit", name))
     os.makedirs(os.path.join(run, "bin"))
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))

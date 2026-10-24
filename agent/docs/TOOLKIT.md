@@ -16,15 +16,9 @@ fk build --to diff               a dry run: the design against the world and wha
                                  take up; nothing written, nothing pasted
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
-fk wait built [AREA] --max 5m    poll until no ghosts are left there (or --name ENTITY's):
-                                 one line at the end; 0 clear, 1 the bound expired
 ```
 
-`fk wait built` is the bounded wait: it reads the world (as a look does) until the area has no
-ghosts left, or the named entity's ghosts are gone (`--name transport-belt`), and stops at `--max`
-(default 5m; `90s`, `5m`, `1h`) with one line saying what is left by name. Exit 0 when clear, 1
-when the bound ran out with ghosts left, 2 on a link error. A GHOST SHORT or LOCKED never builds
-by waiting: fix the item first.
+Don't wait. Wait commands are blocked.
 
 One thing `fk rates` gets wrong: it shares a short net in proportion to what each machine wants,
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,

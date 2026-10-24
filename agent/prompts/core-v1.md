@@ -49,18 +49,11 @@ or planning and nothing new is running in the game, stop and build the simplest 
 Mistakes are cheap here: a build replaces whatever was in the way, and takes up what it built before
 and your design no longer has (a moved plot's old ground, a row you replaced, an emptied factory).
 
-## Waiting is the last resort
+## Don't wait
 
-This one is a hard rule, Rory's. Waiting is never your next step by default: no sleep, no delay, no
-waiting for a build, a layout, the robots or a background command to finish. A loop that checks and
-sleeps a few seconds at a time is waiting too, however short each sleep.
+Don't wait. Wait commands are blocked.
 
-After a big step, such as a build pasted or a block rebuilt, your go-to is: look at that step, check
-that it's operational (it makes what it should: `fk look`, `fk stats`, `fk measure`), look for things
-that can be cleaned up or improved, and plan the next things. While something runs, do the same for
-another part of the base, queue research or bring NOTES.md up to date. Rory: "only after seeing that
-there is no way to progress but wait can that ever be an option." Then wait on a condition with a
-short limit (`fk wait built AREA --max 2m`), never a fixed sleep, and say what you're waiting for.
+After a big step: look at it, check that it works, clean up or improve it, and plan the next things.
 
 You can also write your own code and scripts, and read the game directly with Lua (`fk lua`), to
 find out what's going on. Use whatever helps. The game's rules are short and all in

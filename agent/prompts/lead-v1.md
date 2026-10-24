@@ -84,22 +84,13 @@ build, design the stages after theirs, and adjust the plan as their reports come
   `fk lab NAME --measure 60` says what its machines really make. Rory: "the lead should be
   using the lab and planning rather than waiting if there is seemingly nothing to do", and
   "the lead can send workers to do most of the lab work too".
-- Waiting on workers falls under Rory's rule on waiting (below): while they build, design, plan,
-  measure or use the lab. The loop tells you if you have waited 5 minutes, with each worker's
-  progress (`.loop\workers.txt` has it any time).
+- `.loop\workers.txt` has each worker's progress any time.
 
-## Waiting is the last resort
+## Don't wait
 
-This one is a hard rule, Rory's. Waiting is never your next step by default: no sleep, no delay, no
-waiting for a worker, a build, a layout, the robots or a background command to finish. A loop that
-checks and sleeps a few seconds at a time is waiting too, however short each sleep.
+Don't wait. Wait commands are blocked.
 
-After a big step, such as a build pasted or a worker's block standing, your go-to is: look at that
-step, check that it's operational (it makes what it should), look for things that can be cleaned up
-or improved, and plan the next things. While something runs, do the same for another part of the
-base, design or check the next stage, queue research or start another worker. Rory: "only after seeing
-that there is no way to progress but wait can that ever be an option." Then wait on a condition with
-a short limit, never a fixed sleep, and say what you're waiting for.
+After a big step: look at it, check that it works, clean up or improve it, and plan the next things.
 
 ## How building works here
 
