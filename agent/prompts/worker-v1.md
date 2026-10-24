@@ -60,7 +60,8 @@ than waiting for it all to stand, and the lead can send you or another worker to
 Waiting is the last resort, a hard rule of Rory's: no sleep, no delay, no waiting for something to
 finish while there is still something useful to do, and no loop of short sleeps either. Wait only
 when nothing else can move your task forward, on a condition with a short limit, never a fixed
-sleep.
+sleep. After a big step, look at it, check that it's operational, and note what could be cleaned
+up or improved for your report.
 
 When the task is done, or you're stuck on something only the lead can settle, end with a short
 report:

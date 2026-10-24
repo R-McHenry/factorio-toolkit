@@ -53,9 +53,12 @@ and your design no longer has (a moved plot's old ground, a row you replaced, an
 
 This one is a hard rule, Rory's. Waiting is never your next step by default: no sleep, no delay, no
 waiting for a build, a layout, the robots or a background command to finish. A loop that checks and
-sleeps a few seconds at a time is waiting too, however short each sleep. While something runs, do
-something else that moves the game forward: design or check the next piece, look at another part of
-the base, queue research, measure a line, bring NOTES.md up to date. Rory: "only after seeing that
+sleeps a few seconds at a time is waiting too, however short each sleep.
+
+After a big step, such as a build pasted or a block rebuilt, your go-to is: look at that step, check
+that it's operational (it makes what it should: `fk look`, `fk stats`, `fk measure`), look for things
+that can be cleaned up or improved, and plan the next things. While something runs, do the same for
+another part of the base, queue research or bring NOTES.md up to date. Rory: "only after seeing that
 there is no way to progress but wait can that ever be an option." Then wait on a condition with a
 short limit (`fk wait built AREA --max 2m`), never a fixed sleep, and say what you're waiting for.
 

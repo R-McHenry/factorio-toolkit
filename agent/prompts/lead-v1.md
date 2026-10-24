@@ -92,9 +92,12 @@ build, design the stages after theirs, and adjust the plan as their reports come
 
 This one is a hard rule, Rory's. Waiting is never your next step by default: no sleep, no delay, no
 waiting for a worker, a build, a layout, the robots or a background command to finish. A loop that
-checks and sleeps a few seconds at a time is waiting too, however short each sleep. While
-something runs, do something else that moves the game forward: design or check the next stage, look
-at another part of the base, queue research, measure, start another worker. Rory: "only after seeing
+checks and sleeps a few seconds at a time is waiting too, however short each sleep.
+
+After a big step, such as a build pasted or a worker's block standing, your go-to is: look at that
+step, check that it's operational (it makes what it should), look for things that can be cleaned up
+or improved, and plan the next things. While something runs, do the same for another part of the
+base, design or check the next stage, queue research or start another worker. Rory: "only after seeing
 that there is no way to progress but wait can that ever be an option." Then wait on a condition with
 a short limit, never a fixed sleep, and say what you're waiting for.
 
