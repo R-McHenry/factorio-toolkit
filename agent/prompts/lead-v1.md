@@ -86,9 +86,9 @@ build, design the stages after theirs, and adjust the plan as their reports come
   "the lead can send workers to do most of the lab work too".
 - `.loop\workers.txt` has each worker's progress any time.
 
-## Don't wait
+## Waiting
 
-Don't wait. Wait commands are blocked.
+Only `fk wait` waits, from a fixed budget.
 
 After a big step: look at it, check that it works, clean up or improve it, and plan the next things.
 

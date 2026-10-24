@@ -535,7 +535,135 @@ rcon.print(string.format('drop %.1f,%.1f pickup %.1f,%.1f', i.drop_position.x, i
     return 0 if ok else 1
 
 
+#: check_settings' design: a condition, a filter, a reading on a wire, a request, a slot limit
+#: and a constant combinator
+SET = """\
+fkp 1 factory set
+size 12x6
+wire w red
+e m/m0 assembling-machine-2 1.5,1.5 recipe=iron-gear-wheel read=contents
+e m/i0 inserter 4.5,0.5 E logistic=iron-plate<50
+e m/i1 inserter 4.5,1.5 E filter=iron-plate|copper-plate
+e m/i2 inserter 4.5,2.5 E if=iron-gear-wheel<100
+e m/i3 inserter 6.5,0.5 E
+e m/c0 requester-chest 8.5,0.5
+e m/c1 wooden-chest 8.5,2.5
+e m/k0 constant-combinator 10.5,0.5 signals=signal-A:5
+w w red m/m0 m/i2
+"""
+
+
+def check_settings():
+    """2.0.12: a diff sees settings changed by hand on entities the toolkit placed. The design
+    SET is pasted under play rules and built (revived); a diff then finds nothing. Then, by Lua:
+    i0's logistic condition, a red wire from i3 to i1, c0's request, m0's recipe and c1's limit
+    change. The diff names each, the apply's hand edits too, and after the paste i0's condition and
+    c0's request are the design's again; the wire from i3 stays (the design has none)."""
+    from fkcore import apply as applymod, codec, compose, fkp
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    watch = {"plots": "keep", "sanctioned": "mark 2h", "notify": "off"}
+    lay = fkp.loads(SET)
+    lay.entities["m/c0"].attrs["config"] = codec.config_text({"request_filters": {"sections": [
+        {"index": 1, "filters": [{"index": 1, "name": "iron-plate", "quality": "normal",
+                                  "comparator": "=", "count": 100}]}]}})
+    lay.entities["m/c1"].attrs["config"] = codec.config_text({"bar": 2})
+    composed = compose.compose(fkp.loads("fkp 1 surface lab\nplot set at 10,0 rot 0 size 12x6\n"),
+                               {"set": lay}, cat)
+    area = (8, -2, 24, 8)
+    tweak = """
+local s = game.get_surface('lab')
+local function at(n, x, y) return s.find_entity(n, {x, y}) end
+local cb = at('inserter', 14.5, 0.5).get_or_create_control_behavior()
+cb.logistic_condition = {first_signal = {type = 'item', name = 'copper-plate'}, comparator = '>', constant = 7}
+at('inserter', 16.5, 0.5).get_wire_connector(defines.wire_connector_id.circuit_red, true).connect_to(
+  at('inserter', 14.5, 1.5).get_wire_connector(defines.wire_connector_id.circuit_red, true))
+at('requester-chest', 18.5, 0.5).get_logistic_sections().get_section(1).set_slot(1, {value = 'copper-plate', min = 5})
+at('assembling-machine-2', 11.5, 1.5).set_recipe('copper-cable')
+at('wooden-chest', 18.5, 2.5).get_inventory(defines.inventory.chest).set_bar(6)
+rcon.print('ok')"""
+    after = """
+local s = game.get_surface('lab')
+local c = s.find_entity('inserter', {14.5, 0.5}).get_control_behavior().logistic_condition
+local sl = s.find_entity('requester-chest', {18.5, 0.5}).get_logistic_sections().get_section(1).get_slot(1)
+local w = s.find_entity('inserter', {16.5, 0.5}).get_wire_connector(defines.wire_connector_id.circuit_red, true).connection_count
+local bar = s.find_entity('wooden-chest', {18.5, 2.5}).get_inventory(defines.inventory.chest).get_bar()
+local rc = s.find_entity('assembling-machine-2', {11.5, 1.5}).get_recipe()
+rcon.print(c.first_signal.name .. c.comparator .. c.constant .. ' ' .. tostring(sl.value and sl.value.name) .. ' ' .. w
+           .. ' ' .. bar .. ' ' .. tostring(rc and rc.name))"""
+    with LaptopServer("settings", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area(s, f, (-32, -32, 64, 64)))
+            rep = applymod.apply(r, composed, cat, area=area, mode="play", force=f, policy=watch)
+            r.lua(link.lua_revive(s, area))
+            clean = applymod.diff(r, composed, cat, area, watch, force=f)
+            r.lua(tweak)
+            seen = applymod.diff(r, composed, cat, area, watch, force=f)
+            rep = applymod.apply(r, composed, cat, area=area, mode="play", force=f, policy=watch,
+                                 own=rep.own)
+            back = r.lua(after).strip()
+    print(f"untouched: {len(clean.settings)} differences {clean.settings_error or ''}")
+    for d in clean.settings:
+        print("   ", d.line())
+    print("after the tweaks:")
+    for d in seen.settings:
+        print("   ", d.line())
+    print("the apply's hand edits:", len(rep.hand))
+    print("after the paste (i0's condition, c0's request, red wires on i3, c1's bar, m0's recipe):",
+          back)
+    keys = sorted(d.key.split("/")[-1] for d in seen.settings)
+    ok = (not clean.settings and not clean.settings_error
+          and keys == ["c0", "c1", "i0", "i1", "i3", "m0"]
+          and len(rep.hand) >= 6 and back.startswith("iron-plate<50 iron-plate 1 "))
+    print("settings changed by hand:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
+def check_lab():
+    """2.0.12: the lab has no edge. The lab surface is set back to 2048 x 2048 (a save made
+    before), 100 slots are taken, then `fk lab` builds the smelting example (TOOLKIT's) as a
+    450 x 300 factory: its slot lies past the old edge, the build takes the edge off, generates
+    the chunks under it, and the diff after the apply is all OK."""
+    import tempfile
+    from fkcore import lab
+    run = tempfile.mkdtemp(prefix="fklabsize-")
+    game = os.path.join(run, "game")
+    os.makedirs(game)
+    shutil.copy(os.path.join(ROOT, "agent", "docs", "examples", "smelting.fk"), game)
+    for name, text in (("nauvis.surface", "surface  nauvis\nmode     play\nterrain  none\n"
+                        "catalog  base\n\nplace iron = smelting plot 10,90 26x26\n"),
+                       ("nauvis.build.fkb", "read_surface nauvis\n")):
+        with open(os.path.join(game, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    for k in range(100):
+        lab.slot_of(game, f"f{k}", (150, 150))
+    with LaptopServer("lab", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            print("a new lab:", r.lua("local m = game.get_surface('lab').map_gen_settings "
+                                     "rcon.print(m.width .. 'x' .. m.height)").strip())
+            r.lua("local s = game.get_surface('lab') local m = s.map_gen_settings "
+                  "m.width, m.height = 2048, 2048 s.map_gen_settings = m rcon.print(1)")
+            t0 = time.time()
+            lines = lab.build(r, game, "iron", size=(450, 300))
+            took = time.time() - t0
+            x, y, w, h = lab.slots(game)["iron"]
+            far = r.lua(f"local s = game.get_surface('lab') "
+                        f"rcon.print(s.get_tile({x + w - 20}, {y + h - 20}).name .. ' ' .. "
+                        f"s.count_entities_filtered{{area = {{{{{x}, {y}}}, {{{x + w}, {y + h}}}}}, "
+                        f"force = 'lab'}})").strip()
+    print("\n".join(lines))
+    print(f"slot {x},{y} {w}x{h}; tile and entities there: {far}; {took:.1f} s")
+    diff = next((ln for ln in lines if ln.strip().startswith("diff")), "")
+    ok = (max(abs(x), abs(y), abs(x + w), abs(y + h)) > 1024 and (w, h) == (600, 400)
+          and "the lab has no edge now (it was 2048x2048)" in "\n".join(lines)
+          and far.startswith("lab-") and int(far.split()[1]) > 0 and "OK" in diff)
+    print("a lab without an edge:", "OK" if ok else "NOT as designed")
+    shutil.rmtree(run, True)
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
-                      "turned": check_turned, "health": check_health}[what]())
+                      "turned": check_turned, "health": check_health,
+                      "settings": check_settings, "lab": check_lab}[what]())

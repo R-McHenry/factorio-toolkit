@@ -22,10 +22,15 @@ load of coal for burners. ``--measure SECONDS`` reads what its machines make ove
 against the rate model (``fkcore.measure``): let it run a minute or two first, or a backlog that
 piled up while it started reads as speed.
 
-The lab is 2048 tiles square, -1024..1024 (a plot past its edge leaves ghosts on out-of-map tiles,
-found on 2026-10-22), so slots are 200 tiles each on a 9 x 9 grid inside it; a factory bigger than
-a slot (190 x 190) isn't tried here. Every game call is one RCON command with the link's 5 s
-timeout, and nothing is registered.
+2.0.12 (Rory, 2026-10-24: "the lab should be allowed to have infinite size"): the lab has no
+edge. It was 2048 tiles square, -1024..1024 (a plot past its edge left ghosts on out-of-map tiles,
+found on 2026-10-22), with slots of 200 tiles on a 9 x 9 grid and nothing bigger than 190 x 190.
+Now each build first takes the edge off the lab surface (``lua_unbounded``: the scenario does it
+too, on a save whose script is new enough) and generates the chunks under its slot. A slot is
+sized to its factory, in whole cells of 200 tiles with 10 to spare, so a 450 x 300 factory takes
+3 x 2 cells. A new one goes to the free cells nearest the middle, ring by ring, and there is no
+last one. A factory that has outgrown its slot gets a new one; the old slot is emptied first.
+Every game call is one RCON command with the link's 5 s timeout, and nothing is registered.
 """
 from __future__ import annotations
 
@@ -41,9 +46,9 @@ __all__ = ["LabError", "workspace", "slot_of", "prepare", "build", "measure_lab"
            "slots"]
 
 SURFACE, FORCE = "lab", "lab"
-SLOT = 200                         # tiles a slot spans
-GRID = range(-900, 900, SLOT)      # slot origins: 9 x 9 inside the lab's -1024..1024
-FIT = SLOT - 10                    # the biggest factory a slot takes
+SLOT = 200                         # tiles a cell spans; a slot is one or more cells each way
+ORIGIN = -900                      # a cell's corner is ORIGIN + SLOT * i (2.0.3's grid, extended)
+SPARE = 10                         # tiles a slot keeps free beyond its factory
 DEFAULT_SIZE = (100, 100)          # a factory no surface file places
 #: what the workspace copies from the source: the modules, their layouts, Literals' files, models
 _COPY = (".fk", ".fkp", ".json", ".py")
@@ -87,31 +92,61 @@ def _slots_file(game):
 
 
 def slots(game):
-    """{name: [x, y]}: the slots the lab builds of this run hold."""
+    """{name: [x, y, w, h]}: the slots the lab builds of this run hold (origin and span in
+    tiles; a 2.0.3 slot, [x, y], spans one cell)."""
     try:
         with open(_slots_file(game), encoding="utf-8") as fh:
-            return dict(json.load(fh))
+            held = dict(json.load(fh))
     except (OSError, ValueError):
         return {}
+    return {n: (list(v) + [SLOT, SLOT])[:4] for n, v in held.items()}
 
 
-def slot_of(game, name):
-    """NAME's slot origin (x, y), the same each time; a new name takes the first free slot."""
+def _save(game, held):
+    os.makedirs(os.path.dirname(_slots_file(game)), exist_ok=True)
+    with open(_slots_file(game), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(held, fh, indent=0, sort_keys=True)
+        fh.write("\n")
+
+
+def cells(w, h):
+    """The cells (each way) a w x h factory's slot spans: whole cells, SPARE tiles to spare."""
+    return -(-(int(w) + SPARE) // SLOT), -(-(int(h) + SPARE) // SLOT)
+
+
+def _free(spot, held):
+    x, y, w, h = spot
+    return all(x + w <= hx or hx + hw <= x or y + h <= hy or hy + hh <= y
+               for hx, hy, hw, hh in held)
+
+
+def _spots(cw, ch):
+    """Slot origins for a slot of cw x ch cells, ring by ring outward from the middle; no end."""
+    ring = 0
+    while True:
+        ring_spots = [(i, j) for j in range(-ring, ring + 1) for i in range(-ring, ring + 1)
+                      if max(abs(i), abs(j)) == ring]
+        for i, j in sorted(ring_spots, key=lambda ij: (ij[1], ij[0])):
+            # cell 4 of 2.0.3's grid holds the middle (-100..100): the rings are around it
+            yield (ORIGIN + SLOT * (4 + i - (cw - 1) // 2), ORIGIN + SLOT * (4 + j - (ch - 1) // 2),
+                   cw * SLOT, ch * SLOT)
+        ring += 1
+
+
+def slot_of(game, name, size=DEFAULT_SIZE):
+    """NAME's slot (x, y, w, h) for a factory of ``size``, the same each time while the factory
+    fits it; a new name, or one that outgrew its slot, takes the free spot nearest the middle.
+    -> (slot, the slot it outgrew or None)."""
     held = slots(game)
-    if name in held:
-        return tuple(held[name])
-    taken = {tuple(v) for v in held.values()}
-    for y in GRID:
-        for x in GRID:
-            if (x, y) not in taken:
-                held[name] = [x, y]
-                os.makedirs(os.path.dirname(_slots_file(game)), exist_ok=True)
-                with open(_slots_file(game), "w", encoding="utf-8", newline="\n") as fh:
-                    json.dump(held, fh, indent=0, sort_keys=True)
-                    fh.write("\n")
-                return (x, y)
-    raise LabError(f"every one of the lab's {len(GRID) ** 2} slots is taken: "
-                   "`fk lab NAME --clear` frees one")
+    want = cells(*size)
+    old = held.get(name)
+    if old is not None and old[2] >= want[0] * SLOT and old[3] >= want[1] * SLOT:
+        return tuple(old), None
+    others = [tuple(v) for n, v in held.items() if n != name]
+    spot = next(s for s in _spots(*want) if _free(s, others))
+    held[name] = list(spot)
+    _save(game, held)
+    return spot, (tuple(old) if old else None)
 
 
 def _source(game, src):
@@ -141,9 +176,7 @@ def prepare(game, name, src=None, size=None):
     if not os.path.exists(os.path.join(source, f"{module}.fk")):
         raise LabError(f"{name}: no {module}.fk in {source}"
                        + ("" if sf is None else f" (its surface places {', '.join(sorted(sf.places))})"))
-    if w > FIT or h > FIT:
-        raise LabError(f"{name} is {w}x{h}: a lab slot takes {FIT}x{FIT} at most")
-    x, y = slot_of(game, name)
+    (x, y, _sw, _sh), _old = slot_of(game, name, (w, h))
     ws = workspace(game, name)
     if os.path.isdir(ws):
         shutil.rmtree(ws)
@@ -163,8 +196,26 @@ def prepare(game, name, src=None, size=None):
     return ws, (x, y, w, h)
 
 
-def _box(x, y):
-    return (x - 2, y - 2, x + SLOT - 8, y + SLOT - 8)
+def _box(x, y, w=SLOT, h=SLOT):
+    return (x - 2, y - 2, x + w - 8, y + h - 8)
+
+
+def lua_unbounded():
+    """Take the lab surface's edge off (2.0.12; the scenario does it too, on a newer script):
+    width and height 0 in its map_gen_settings, which the game reads back as 2000000 (2.0.77).
+    -> "unbounded" or "was 2048x2048"."""
+    return f"""
+local s = game.get_surface('{SURFACE}')
+if not s then rcon.print('no lab surface') return end
+local m = s.map_gen_settings
+if (m.width == 0 or m.width >= 2000000) and (m.height == 0 or m.height >= 2000000) then
+  rcon.print('unbounded') return
+end
+local was = m.width .. 'x' .. m.height
+m.width, m.height = 0, 0
+s.map_gen_settings = m
+rcon.print('was ' .. was)
+"""
 
 
 def lua_clear(box):
@@ -245,22 +296,30 @@ def clear(r, game, name):
     held = slots(game)
     if name not in held:
         return [f"lab {name}: no slot (fk lab --list)"]
-    x, y = held.pop(name)
-    got = r.lua(lua_clear(_box(x, y))).strip()
-    with open(_slots_file(game), "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(held, fh, indent=0, sort_keys=True)
-        fh.write("\n")
+    x, y, w, h = held.pop(name)
+    got = r.lua(lua_clear(_box(x, y, w, h))).strip()
+    _save(game, held)
     return [f"lab {name}: slot {x},{y} emptied ({got} entities) and freed"]
 
 
 def build(r, game, name, src=None, size=None, cat=None):
     """NAME on its lab slot: workspace, the slot emptied, the lab flow, then power, the
     requesters' items and burners' first coal. -> the report lines."""
+    before = slots(game).get(name)
     ws, (x, y, w, h) = prepare(game, name, src, size)
-    lines = [f"lab {name}: slot {x},{y} ({w}x{h}) on the lab surface, workspace "
-             f"{os.path.relpath(ws, _run_dir(game))} (from {src or 'game'})"]
-    gone = r.lua(lua_clear(_box(x, y))).strip()
-    lines.append(f"  emptied first: {gone} entities")
+    sx, sy, sw, sh = slots(game)[name]
+    lines = [f"lab {name}: slot {x},{y} ({sw}x{sh} tiles for {w}x{h}) on the lab surface, "
+             f"workspace {os.path.relpath(ws, _run_dir(game))} (from {src or 'game'})"]
+    edge = r.lua(lua_unbounded()).strip()
+    if edge.startswith("was"):
+        lines.append(f"  the lab has no edge now (it {edge})")
+    if before is not None and list(before) != [sx, sy, sw, sh]:
+        moved = r.lua(lua_clear(_box(*before))).strip()
+        lines.append(f"  it outgrew its slot at {before[0]},{before[1]}: that one emptied "
+                     f"({moved} entities)")
+    chunks = r.lua(link.lua_generate_area(SURFACE, FORCE, _box(sx, sy, sw, sh))).strip()
+    gone = r.lua(lua_clear(_box(sx, sy, sw, sh))).strip()
+    lines.append(f"  emptied first: {gone} entities; {chunks} chunks generated under the slot")
     steps = []
     code, ctx = flow.run(os.path.join(ws, "lab.build.fkb"), cat=cat, echo=steps.append, link=r)
     for want in ("elaborate", "route", "report_checks", "apply", "diff"):
@@ -270,7 +329,7 @@ def build(r, game, name, src=None, size=None, cat=None):
     if code != 0:
         lines.append(f"  stopped: {steps[-1] if steps else 'the flow'} (out\\*.txt in the workspace)")
         return lines
-    got = json.loads(r.lua(lua_supply(_box(x, y))).strip() or "{}")
+    got = json.loads(r.lua(lua_supply(_box(sx, sy, sw, sh))).strip() or "{}")
     stocked = got.get("stocked") or {}
     if isinstance(stocked, list):
         stocked = {}
@@ -291,11 +350,11 @@ def measure_lab(r, game, name, seconds, cat=None):
                          echo=lambda _l: None)
     if code != 0 or ctx.composed is None:
         raise LabError(f"{name}: its lab design didn't lay out again (out\\*.txt in {ws})")
-    x, y = slots(game)[name]
-    top = json.loads(r.lua(lua_supply(_box(x, y))).strip() or "{}")    # requesters topped up
+    x, y, w, h = slots(game)[name]
+    top = json.loads(r.lua(lua_supply(_box(x, y, w, h))).strip() or "{}")    # requesters topped up
     stocked = top.get("stocked") if isinstance(top.get("stocked"), dict) else {}
     models = {f: rates.solve(flat) for f, flat in ctx.flats.items()}
-    got = measure.measure(r, ctx.composed, ctx.cat, _box(x, y), ctx.flats, models, seconds)
+    got = measure.measure(r, ctx.composed, ctx.cat, _box(x, y, w, h), ctx.flats, models, seconds)
     head = f"lab {name} (slot {x},{y})"
     if stocked:
         head += ", requesters topped up first: " + ", ".join(f"{n} {k}" for n, k in

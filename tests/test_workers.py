@@ -129,7 +129,8 @@ class HookTest(unittest.TestCase):
         self.assertEqual(matcher, "*")
 
     def test_wait_commands_are_blocked(self):
-        # Rory (2026-10-23): "dont wait" and wait commands are blocked
+        # Rory (2026-10-23): "dont wait" and wait commands are blocked; (2026-10-24) fk wait is
+        # the one wait, from a fixed budget
         path = claude_loop.settings(self.run)
         with open(path, encoding="utf-8") as fh:
             pre = json.load(fh)["hooks"]["PreToolUse"][0]
@@ -137,7 +138,8 @@ class HookTest(unittest.TestCase):
         self.assertIn("wait_hook.py", pre["hooks"][0]["command"])
         import wait_hook
         for cmd, blocked in (("sleep 5; ls", True), ("timeout 590 bash -c 'until x; do sleep 10; done'", True),
-                             ("python bin/fk.py wait built 1,1,9,9 --max 2m", True),
+                             ("python bin/fk.py wait built 1,1,9,9 --max 2m", False),
+                             ("fk wait 90s --sure", False),
                              ("Start-Sleep -Seconds 30", True), ("python bin/fk.py build", False),
                              ("grep -n sleep NOTES.md", False)):
             raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
@@ -148,7 +150,7 @@ class HookTest(unittest.TestCase):
             if blocked:
                 decision = json.loads(out.getvalue())["hookSpecificOutput"]
                 self.assertEqual((decision["permissionDecision"], decision["permissionDecisionReason"]),
-                                 ("deny", "Don't wait."), cmd)
+                                 ("deny", "Use fk wait."), cmd)
             else:
                 self.assertEqual(out.getvalue(), "", cmd)
 
@@ -172,7 +174,7 @@ class WatchTest(unittest.TestCase):
                      "inserter at 78.5,46 on coal/~cfuel/s0's tile; this build replaces it\n")
         self.watch.check()
         notes = self.watch.take_notes()
-        self.assertIn("[A build replaced or removed what someone placed by hand]", notes)
+        self.assertIn("[A build replaced, removed or set back what someone did by hand]", notes)
         self.assertIn("on coal/~cfuel/s0's tile; this build replaces it", notes)
         self.watch.check()
         self.assertEqual(self.watch.take_notes(), "")             # each line once

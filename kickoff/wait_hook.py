@@ -1,9 +1,10 @@
-"""wait_hook.py RUN: a PreToolUse hook that blocks wait commands (Rory, 2026-10-23: "dont wait" and
-wait commands are blocked).
+"""wait_hook.py RUN: a PreToolUse hook that blocks shell waits (Rory, 2026-10-23: "dont wait" and
+wait commands are blocked; 2026-10-24: `fk wait` is the one wait, from a fixed budget).
 
 A Bash, PowerShell or Monitor command that sleeps (`sleep`, `Start-Sleep`, a loop of short sleeps)
-or runs `fk wait` is denied, and the reason the player reads is "Don't wait.". claude_loop.py names
-it in every Claude run's --settings (2.0.11). Each block is one line in RUN\\.loop\\wait-hook.log.
+is denied, and the reason the player reads is "Use fk wait.". `fk wait` goes through: it waits
+from the run's wait budget and asks first (agent/fk.py). claude_loop.py names this hook in every
+Claude run's --settings (2.0.11). Each block is one line in RUN\\.loop\\wait-hook.log.
 """
 import json
 import os
@@ -11,7 +12,8 @@ import re
 import sys
 from datetime import datetime
 
-WAIT = re.compile(r"\bsleep\s+\d|\bStart-Sleep\b|\bfk(?:\.py|\.cmd)?\s+wait\b", re.I)
+WAIT = re.compile(r"\bsleep\s+\d|\bStart-Sleep\b", re.I)
+REASON = "Use fk wait."
 
 
 def main():
@@ -34,7 +36,7 @@ def main():
             pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                              "permissionDecision": "deny",
-                                             "permissionDecisionReason": "Don't wait."}}))
+                                             "permissionDecisionReason": REASON}}))
     return 0
 
 

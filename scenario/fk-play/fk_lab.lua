@@ -20,13 +20,29 @@ local function state()
   return storage.fk_lab
 end
 
+-- the lab has no edge (2.0.12, Rory 2026-10-24: "the lab should be allowed to have infinite
+-- size"): width and height 0. A lab made before was 2048 tiles square; it loses its edge here,
+-- and fkcore.lab does the same through the game link on a save whose script is older
+local function unbounded(surface)
+  local settings = surface.map_gen_settings
+  -- 0 reads back as 2000000, the game's largest (2.0.77)
+  if settings.width < 2000000 and settings.width ~= 0
+      or settings.height < 2000000 and settings.height ~= 0 then
+    settings.width = 0
+    settings.height = 0
+    surface.map_gen_settings = settings
+  end
+end
+
 local function ensure_lab()
   local surface = game.get_surface(LAB)
-  if not surface then
+  if surface then
+    unbounded(surface)
+  else
     surface = game.create_surface(LAB, {
       seed = 1,
-      width = 2048,
-      height = 2048,
+      width = 0,
+      height = 0,
       peaceful_mode = true,
       no_enemies_mode = true,
       starting_area = "none",

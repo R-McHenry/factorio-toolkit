@@ -914,7 +914,7 @@ class Watch(threading.Thread):
         with open(mark, "w") as f:
             f.write(str(size))
         if text:
-            self.note("[A build replaced or removed what someone placed by hand]\n" + text +
+            self.note("[A build replaced, removed or set back what someone did by hand]\n" + text +
                       "\n(Adopt it into the design, leave it out, or come back to it.)")
             self.log("hand: " + short(text, 300))
 

@@ -379,15 +379,13 @@ def main(argv):
         return code
     if cmd == "wait":
         if "-h" in rest or "--help" in rest:
-            print("fk wait built [AREA] [--name ENTITY[,...]] [--max 5m] [--poll 10s]: poll the "
-                  "world until the area has no ghosts left (or the named entity's are gone), or "
-                  "the bound expires; one line at the end; 0 clear, 1 ghosts left, 2 a link "
-                  "error (docs\\TOOLKIT.md, \"The loop\")")
+            print("fk wait 90s | fk wait built [AREA] [--name ENTITY[,...]] [--max 5m] [--poll "
+                  "10s]: the one way to wait, from the run's fixed wait budget; it asks first "
+                  "(run it again, or add --sure). built: until the area has no ghosts left (or "
+                  "the named entity's are gone), or the bound expires; 0 clear, 1 ghosts left, "
+                  "2 a link error or no budget left (docs\\TOOLKIT.md, \"The loop\")")
             return 0
-        push(cfg)
-        code = remote(cfg, ["wait", "."] + _wait_args(rest))
-        pull(cfg)
-        return code
+        return wait(cfg, rest)
     if cmd == "stage":
         code = local(cfg, ["stage", "."] + rest)
         footer(cfg)
@@ -478,6 +476,107 @@ def _area(rest):
     if rest and not rest[0].startswith("--"):
         return ["--area", rest[0]] + rest[1:]
     return rest
+
+
+#: The run's wait budget (2.0.12, Rory 2026-10-24): `fk wait` is the one way to wait, and a run
+#: has this many minutes of it. RUN\wait-budget.json keeps what is spent; a "budget_min" written
+#: there wins over this number.
+WAIT_BUDGET_MIN = 30
+WAIT_FILE = os.path.join(RUN, "wait-budget.json")
+#: the same wait asked again within this many seconds is the answer "yes"
+ASK_AGAIN_S = 120
+_DURATION = re.compile(r"(\d+(?:\.\d+)?)\s*(h|min|m|s)")
+
+
+def _seconds(text):
+    m = _DURATION.fullmatch((text or "").strip())
+    if not m:
+        return None
+    return float(m.group(1)) * {"h": 3600, "min": 60, "m": 60, "s": 1}[m.group(2)]
+
+
+def _budget(settle=True, clock=time.time):
+    """The wait budget: {budget_min, spent_s, ...}. A wait that was cut off (its process killed:
+    a tool timeout) counts what it ran, up to what it was for (``settle``; the wait that wrote it
+    counts itself)."""
+    try:
+        with open(WAIT_FILE, encoding="utf-8") as fh:
+            b = json.load(fh)
+    except (OSError, ValueError):
+        b = {}
+    b.setdefault("budget_min", WAIT_BUDGET_MIN)
+    b.setdefault("spent_s", 0.0)
+    cut = b.pop("running", None)
+    if settle and isinstance(cut, dict):
+        b["spent_s"] += max(0.0, min(clock() - cut.get("since", clock()), cut.get("for", 0.0)))
+    return b
+
+
+def _save_budget(b):
+    with open(WAIT_FILE + ".new", "w", encoding="utf-8") as fh:
+        json.dump(b, fh, indent=1, sort_keys=True)
+    os.replace(WAIT_FILE + ".new", WAIT_FILE)
+
+
+def _left(b):
+    return max(0.0, b["budget_min"] * 60 - b["spent_s"])
+
+
+def wait(cfg, rest, clock=time.time, sleep=time.sleep):
+    """``fk wait 90s`` or ``fk wait built ...`` from the run's wait budget (2.0.12). The first
+    time it asks; the same wait again within ASK_AGAIN_S seconds, or ``--sure``, waits. It
+    spends the time it waited, and with nothing left it refuses. ``built`` waits on the host at
+    most what is left."""
+    sure = "--sure" in rest
+    rest = [a for a in rest if a != "--sure"]
+    plain = len(rest) == 1 and _seconds(rest[0]) is not None
+    if not plain and rest[:1] != ["built"]:
+        print("fk wait 90s, or fk wait built [AREA] [--max 5m] (fk wait --help)", file=sys.stderr)
+        return 2
+    b = _budget(clock=clock)
+    left = _left(b)
+    if left <= 0:
+        _save_budget(b)
+        print(f"fk wait: the run's {b['budget_min']:g} min of wait budget is spent. Look, check "
+              "or plan instead.")
+        return 2
+    asked = " ".join(rest)
+    if not sure and not (b.get("asked") == asked
+                         and clock() - b.get("asked_at", 0) < ASK_AGAIN_S):
+        b["asked"], b["asked_at"] = asked, clock()
+        _save_budget(b)
+        print(f"Are you sure you want to wait? {left / 60:.0f} min of wait budget left. Run it "
+              "again (or add --sure) to wait.")
+        return 1
+    b.pop("asked", None)
+    b.pop("asked_at", None)
+    t0 = clock()
+    if plain:
+        want = min(_seconds(rest[0]), left)
+        b["running"] = {"since": t0, "for": want}
+        _save_budget(b)
+        sleep(want)
+        code = 0
+    else:
+        args = _wait_args(rest)
+        if "--max" in args:
+            i = args.index("--max")
+            want = min(_seconds(args[i + 1]) or 300.0, left) if i + 1 < len(args) else left
+            args = args[:i] + args[i + 2:]
+        else:
+            want = min(300.0, left)
+        args += ["--max", f"{int(want)}s"]
+        b["running"] = {"since": t0, "for": want}
+        _save_budget(b)
+        push(cfg)
+        code = remote(cfg, ["wait", "."] + args)
+        pull(cfg)
+    b = _budget(settle=False)
+    took = clock() - t0
+    b["spent_s"] += took
+    _save_budget(b)
+    print(f"fk wait: waited {took:.0f} s; {_left(b) / 60:.0f} min of wait budget left")
+    return code
 
 
 #: ``fk wait built`` takes the area where look does, after the word ``built``.

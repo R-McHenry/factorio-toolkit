@@ -1258,7 +1258,8 @@ def s_diff(ctx, args):
         area = applymod.default_area(ctx.composed, ctx.cat, keys, own)
     if area is None:
         return ["diff: nothing is designed on this surface"], []
-    rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx), own=own)
+    rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx), own=own,
+                        force=_force(ctx))
     try:
         _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
@@ -1279,7 +1280,8 @@ def s_diff(ctx, args):
     from . import sense
     hand = sense.hand_edits(rep)
     if hand:
-        lines.append(f"hand: {len(hand)} placed by hand that the apply would replace or remove:")
+        lines.append(f"hand: {len(hand)} hand edits that the apply would replace, remove or set "
+                     "back:")
         lines += [f"  {line}" for line in hand]
         checks += [Check("HAND", ctx.surface.name, line) for line in hand]
     turned = _turned(ctx, rep)
@@ -1427,7 +1429,7 @@ def _hand_file(ctx, lines):
     import time
     with open(os.path.join(ctx.out, "hand.txt"), "a", encoding="utf-8", newline="\n") as fh:
         fh.write(f"# {time.strftime('%Y-%m-%d %H:%M')} fk build ({os.path.basename(ctx.script)}): "
-                 f"{len(lines)} placed by hand, replaced or removed by this build\n")
+                 f"{len(lines)} hand edits this build replaced, removed or set back\n")
         fh.writelines(f"  {line}\n" for line in lines)
 
 

@@ -427,7 +427,8 @@ def _lab(a, cat):
     from . import lab
     if a.list or not a.name:
         held = lab.slots(a.game)
-        print("lab slots: " + (", ".join(f"{n} at {x},{y}" for n, (x, y) in sorted(held.items()))
+        print("lab slots: " + (", ".join(f"{n} at {x},{y} ({w}x{h})"
+                                         for n, (x, y, w, h) in sorted(held.items()))
                                or "none in use"))
         return 0
     r = _game_link("lab")

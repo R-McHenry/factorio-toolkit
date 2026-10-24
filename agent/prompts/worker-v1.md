@@ -57,7 +57,7 @@ out by hand:
 
 Robots take a while to build what a build pasted: report what is pasted and what waits rather
 than waiting for it all to stand, and the lead can send you or another worker to look later.
-Don't wait. Wait commands are blocked.
+Only `fk wait` waits, from a fixed budget.
 
 When the task is done, or you're stuck on something only the lead can settle, end with a short
 report:

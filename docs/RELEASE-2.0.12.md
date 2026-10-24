@@ -1,7 +1,8 @@
-# Toolkit 2.0.12: a watchdog, base health in the world line, no unrouted pastes
+# Toolkit 2.0.12: a watchdog, base health, no unrouted pastes, hand settings seen, an unbounded lab, a wait budget
 
-The first three fixes ranked in the solo run's review (`..\assessment-20261023\SOLO-RUN-REVIEW.md`,
-section 5). Together they would have saved about 13 of that run's 29 hours.
+Items 1-3 are the first three fixes ranked in the solo run's review
+(`..\assessment-20261023\SOLO-RUN-REVIEW.md`, section 5). Together they would have saved about 13
+of that run's 29 hours. Items 4-6 are Rory's, from 2026-10-24.
 
 ## 1. The loop's watchdog
 
@@ -103,6 +104,85 @@ Mall4 went out with its products belt UNROUTED: no output, and inserters to nowh
   the world line's stalled makers.
 - **TOOLKIT.md** lists NO_SINK and UNUSED, and says that the default script stops on them.
 
+## 4. Settings changed by hand are seen, and so is what the paste does to them
+
+Rory: "it needs to be able to see my circuit changes and know that it is overriding them too".
+A diff judged an entity by its name, position and direction only. So a condition, wire, filter,
+request or recipe that Rory changed on an entity the toolkit placed went unseen. The solo run had
+one at 21:52 on 10-23: "a couple circuit tweaks I did since some of the inserters are out of
+roboport range".
+
+- **What a paste does.** On a laptop server (2.0.77), a paste over a standing inserter and
+  requester chest wrote the design's logistic condition, request, chest limit and recipe over the
+  ones set by hand, and placed nothing. Where the design has none, a request is cleared, but a
+  condition and a wire stay.
+- **The diff reads them** (`fkcore/settings.py`). It blueprints the area in the game, which is the
+  game's own export of each entity's settings, the same fields a paste reads. It compares them with
+  the fields the paste would write, for every entity that stands where the design has it:
+  - recipe, control behaviour (conditions, readings), filters, requests and chest limit;
+  - the circuit wires between entities.
+  
+  What the game exports by default is dropped first (signal-S on every wired inserter, an empty
+  request section).
+- **The line, plain:** `rory_618 changed inserter at 14.5,0.5 (mall/i0): logistic=copper-plate>7
+  (the paste sets logistic=iron-plate<50)`. Where the design has none: `(the design has none:
+  the paste clears it)` for a request, or `... leaves it` for a wire or a condition.
+- **Where it goes.** It is a hand edit, so it is a `HAND` line in the diff before the paste, it
+  goes into `out\hand.txt` after the apply, and the loop hands it to the player. That note now
+  reads `[A build replaced, removed or set back what someone did by hand]`.
+- **What the player does.** To keep a change, write it into the source (the line uses the
+  source's words where it can). `stop_on HAND` holds a paste until then. Otherwise the build
+  overrides it, knowing.
+- **Checked on a laptop server** (`python tools/laptop_server.py settings`). A design with a
+  condition, a filter, a reading on a wire, a request, a limit and a constant combinator, pasted
+  and built:
+  - a diff finds no difference;
+  - after 5 changes by Lua, it names each one (the added wire on both of its ends);
+  - after the paste, the condition, request, limit and recipe are the design's again, and the
+    added wire is still there.
+
+## 5. The lab has no edge
+
+Rory: "the lab should be allowed to have infinite size, and I think it works already but make
+sure they can generate chunks easily".
+
+- **The surface.** The scenario creates the lab with width and height 0, and on load it takes the
+  edge off a lab made before (it was 2048 tiles square). A save keeps the script it was made
+  with, so `fk lab` also does it through the game link before each build (`lab.lua_unbounded`).
+  The game reads 0 back as 2000000.
+- **Slots.** A slot is sized to its factory, in 200-tile cells with 10 to spare (a 450 x 300
+  factory takes 3 x 2 cells). A new one goes to the free cells nearest the middle, ring by ring,
+  with no last slot and no size cap; 2.0.3 had a 9 x 9 grid and 190 x 190 at most. A factory that
+  outgrew its slot gets a new one, and the old one is emptied. 2.0.3's `[x, y]` slots read as
+  one cell.
+- **Chunks.** `fk lab NAME` generates the chunks under the whole slot itself (apply's lab mode
+  already did so under the design), so nothing is left for the player to do.
+- **Checked on a laptop server** (`python tools/laptop_server.py lab`). The lab was set back to
+  2048 x 2048 and 100 slots were taken. Then the smelting example was built as a 450 x 300
+  factory:
+  - its slot was -1300,900, past the old edge;
+  - the build said "the lab has no edge now (it was 2048x2048)" and generated 247 chunks;
+  - the diff was OK for all 137 entities, in 0.4 s.
+
+## 6. `fk wait`, from a fixed budget
+
+Rory changed 2.0.11's rule: instead of "don't wait", `fk wait` is the only allowed wait, with a
+fixed budget of wait time and an "are you sure" question.
+
+- **The hook.** `kickoff/wait_hook.py` still blocks `sleep`, `Start-Sleep` and sleep loops, now
+  with the reason "Use fk wait.". `fk wait` goes through.
+- **`fk wait 90s`** (or `5m`) waits that long. **`fk wait built [AREA]`** waits on the host until
+  the robots have built the area, at most what is left of the budget (its `--max` is capped).
+- **It asks first:** "Are you sure you want to wait? N min of wait budget left. Run it again (or
+  add --sure) to wait." The same wait run again within 2 minutes, or `--sure`, waits.
+- **The budget.** It spends the time it actually waited. A wait cut off by a tool timeout counts
+  what it ran. When the budget is spent, `fk wait` refuses (exit 2).
+- **One number, two places to change it.** It is 30 minutes a run, `WAIT_BUDGET_MIN` in
+  `agent/fk.py`. The run's `wait-budget.json` keeps what is spent, and a `budget_min` written
+  there wins.
+- **The briefs and TOOLKIT.md** now say "Only `fk wait` waits, from a fixed budget." (core-v1,
+  lead-v1, worker-v1). The after-a-big-step line stays.
+
 ## Tests
 
 - `tests/test_watchdog.py`: the restart and its three lines, a quiet live loop, STOP and an empty
@@ -113,5 +193,11 @@ Mall4 went out with its products belt UNROUTED: no output, and inserters to nowh
 - `tests/test_workers.py`: the wake notes once each time, and the watchdog in `.toolkit`.
 - `tests/test_connect.py` `SinkTest`: cut_off, the `sinks` line and NO_SINK, and UNUSED.
 - `tests/test_upgrade_run.py` `StopsTest`: the template's stops, and an old script's.
+- `tests/test_settings.py`: the game's export against the design, its defaults, a changed
+  condition and request, a request the design lacks, an added wire, and the hand edit line.
+- `tests/test_lab.py`: slots of any size and no last one, a 2.0.3 slot, and a build that takes
+  the edge off and generates its chunks.
+- `tests/test_wait_budget.py`: the question, `--sure`, the budget spent and refused, a cut-off
+  wait, and `wait built` capped; `tests/test_workers.py`: the hook lets `fk wait` through.
 
 Nothing in the live run or the game changed. A live run gets all of this through upgrade_run.

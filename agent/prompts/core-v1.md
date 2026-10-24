@@ -49,9 +49,9 @@ or planning and nothing new is running in the game, stop and build the simplest 
 Mistakes are cheap here: a build replaces whatever was in the way, and takes up what it built before
 and your design no longer has (a moved plot's old ground, a row you replaced, an emptied factory).
 
-## Don't wait
+## Waiting
 
-Don't wait. Wait commands are blocked.
+Only `fk wait` waits, from a fixed budget.
 
 After a big step: look at it, check that it works, clean up or improve it, and plan the next things.
 

@@ -49,8 +49,8 @@ class LabTest(unittest.TestCase):
         p = surf.places["iron"]
         self.assertEqual((p.module, p.x, p.y, p.w, p.h), ("smelting", x, y, 26, 26))
         self.assertIn("apply           --scope all", self.read(ws, "lab.build.fkb"))
-        # inside the lab's -1024..1024 with the slot's room
-        self.assertTrue(-1024 < x and x + lab.SLOT < 1024 and -1024 < y and y + lab.SLOT < 1024)
+        # the first slot is the middle cell, as 2.0.3's grid had it
+        self.assertEqual((x, y), (-100, -100))
         # the same slot each time; another factory, another slot
         self.assertEqual(lab.prepare(self.game, "iron")[1][:2], (x, y))
         self.assertNotEqual(lab.prepare(self.game, "smelting")[1][:2], (x, y))
@@ -70,8 +70,6 @@ class LabTest(unittest.TestCase):
         with self.assertRaises(lab.LabError):
             lab.prepare(self.game, "nope")
         with self.assertRaises(lab.LabError):
-            lab.prepare(self.game, "iron", size=(300, 20))         # bigger than a slot
-        with self.assertRaises(lab.LabError):
             lab.prepare(self.game, "iron", src="../elsewhere")    # outside the run
 
     def test_clear_frees_the_slot(self):
@@ -83,8 +81,47 @@ class LabTest(unittest.TestCase):
         self.assertEqual(lab.slots(self.game), {})
         self.assertIn("no slot", lab.clear(r, self.game, "iron")[0])
 
+    def test_any_size_and_no_last_slot(self):
+        # 2.0.12 (Rory, 2026-10-24: "the lab should be allowed to have infinite size")
+        self.assertEqual(lab.cells(190, 190), (1, 1))
+        self.assertEqual(lab.cells(191, 450), (2, 3))
+        lab.prepare(self.game, "iron")
+        _ws, (x, y, _w, _h) = lab.prepare(self.game, "iron", size=(450, 300))
+        held = lab.slots(self.game)
+        self.assertEqual(held["iron"][2:], [600, 400])              # outgrown: a new slot
+        self.assertEqual(held["iron"][:2], [x, y])
+        for k in range(120):                                       # 81 was 2.0.3's last
+            lab.slot_of(self.game, f"f{k}", (150, 150))
+        held = lab.slots(self.game)
+        boxes = [tuple(v) for v in held.values()]
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1:]:
+                self.assertTrue(lab._free(a, [b]), (a, b))         # no two slots overlap
+        self.assertEqual(len(held), 121)
+
+    def test_a_2_0_3_slot_reads_as_one_cell(self):
+        self.write("lab/slots.json", json.dumps({"iron": [-900, -900]}))
+        self.assertEqual(lab.slots(self.game), {"iron": [-900, -900, 200, 200]})
+        self.assertEqual(lab.slot_of(self.game, "iron", (26, 26))[0], (-900, -900, 200, 200))
+
+    def test_a_build_takes_the_edge_off_and_generates_its_chunks(self):
+        said = []
+
+        def lua(text):
+            said.append(text)
+            return "was 2048x2048" if "map_gen_settings" in text else "0"
+        r = mock.Mock()
+        r.lua.side_effect = lua
+        with mock.patch.object(lab.flow, "run", return_value=(1, None)):
+            lines = lab.build(r, self.game, "iron")
+        self.assertIn("  the lab has no edge now (it was 2048x2048)", lines)
+        self.assertIn("m.width, m.height = 0, 0", said[0])
+        self.assertIn("force_generate_chunk_requests", said[1])
+        self.assertIn("chunks generated under the slot", lines[2])
+
     def test_the_lua_is_safe(self):
-        for text in (lab.lua_clear((0, 0, 10, 10)), lab.lua_supply((0, 0, 10, 10))):
+        for text in (lab.lua_clear((0, 0, 10, 10)), lab.lua_supply((0, 0, 10, 10)),
+                     lab.lua_unbounded()):
             link.assert_safe("/sc " + text)
             self.assertIn("'lab'", text)                         # the lab surface, never nauvis
 

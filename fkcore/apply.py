@@ -71,6 +71,7 @@ from dataclasses import dataclass, field
 
 from . import codec, link, scene, sense
 from . import own as ownmod
+from . import settings as settingsmod
 from .fkp import natural_key
 
 __all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
@@ -279,10 +280,22 @@ def single_ghosts(rows, s, cat, refused):
                       if a - 1 in alone or b - 1 in alone]
 
 
-def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None):
-    """Snapshot ``area`` and judge it against the design: a ``sense.SenseReport``."""
+def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=None):
+    """Snapshot ``area`` and judge it against the design: a ``sense.SenseReport``. With
+    ``force`` (2.0.12), the standing entities' settings too (``fkcore.settings``): those that
+    differ from the design's are in the report's ``settings``, and so in its hand edits."""
     live = scene.from_capture(link.snapshot(r, s.name, area, tag))
-    return sense.sense(s, live, cat, list(area), policy, net_items=net_items, own=own)
+    rep = sense.sense(s, live, cat, list(area), policy, net_items=net_items, own=own)
+    if force is not None:
+        try:
+            have = settingsmod.read(r, s.name, force, area, f"{tag}-settings")
+            users = {ownmod.at(t["name"], t["x"], t["y"]): t.get("last_user")
+                     for t in live["things"] if not t["ghost"]}
+            rep.settings = settingsmod.drifts(settingsmod.design(scope_rows(s, area), s), have,
+                                              rep.verdicts, users)
+        except (link.LinkError, OSError, ValueError, KeyError, TypeError) as exc:
+            rep.settings_error = f"{type(exc).__name__}: {exc}"
+    return rep
 
 
 def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None, keys=None,
@@ -301,7 +314,8 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         return rep
     standing = []
     if mode != "lab" and policy is not None:
-        before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own)
+        before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own,
+                      force=force)
         held = scaffold(before, s, cat, area)
         rep.hand = sense.hand_edits(before, held)
         gone = [v for v in before.verdicts

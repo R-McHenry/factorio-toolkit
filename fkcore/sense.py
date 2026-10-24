@@ -113,6 +113,10 @@ class SenseReport:
     expired: list                     # names of marks past their expiry, inside the area
     push: list                        # lines to push (notify all), else []
     owners: dict                      # live thing index -> owner word (for the render)
+    #: 2.0.12: standing entities whose settings differ from the design's (``fkcore.settings``
+    #: Drift rows, read by ``apply.diff``), and why they could not be read
+    settings: list = field(default_factory=list)
+    settings_error: str | None = None
 
     def counts(self):
         out = {}
@@ -135,6 +139,11 @@ class SenseReport:
                     + (f", until {m.until}" if m.until is not None else ", kept until decided")
                     for m in self.marks]
         out += [f"expired mark {name}: list it for clearing" for name in self.expired]
+        if self.settings:
+            out += [f"settings: {len(self.settings)} standing entities set otherwise than the "
+                    "design (hand edits)"]
+        if self.settings_error:
+            out.append(f"settings: not read ({self.settings_error})")
         return out
 
 
@@ -343,7 +352,9 @@ def hand_edits(rep, held=()):
       not have it): the paste goes over it, kept by the watch policy or not;
     - a foreign ``NOBODY`` (``revert`` / ``strict``) the apply orders out, unless ``held``
       (scaffolding, {(name, x, y)});
-    - a ``turned`` one a player touched last (2.0.5): the build lays it fresh as designed.
+    - a ``turned`` one a player touched last (2.0.5): the build lays it fresh as designed;
+    - a standing entity whose settings differ from the design's (2.0.12, ``rep.settings``): a
+      condition, a wire, a filter, a request, a limit or a recipe, and what the paste does.
 
     Who: the entity's ``last_user``. Entities placed in the map editor carry none (the first lead
     run's map, 2026-10-21: none of 555 had one, Rory's edit among them), and neither do the
@@ -364,6 +375,7 @@ def hand_edits(rep, held=()):
         elif v.turned and v.actor:
             out.append(f"{v.actor} turned {v.name} at {_fmt(v.x)},{_fmt(v.y)} ({_local(v.key)}: "
                        f"{v.detail}); this build lays it fresh as designed")
+    out += [d.line() for d in getattr(rep, "settings", None) or ()]
     return out
 
 

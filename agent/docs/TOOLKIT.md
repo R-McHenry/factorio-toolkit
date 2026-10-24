@@ -18,7 +18,10 @@ fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 ```
 
-Don't wait. Wait commands are blocked.
+Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, and `fk wait built
+X0,Y0,X1,Y1` waits until the robots have built the area. It asks first: run it again, or add
+`--sure`. The run has 30 minutes of waiting in all; `wait-budget.json` in your folder says how
+much is spent.
 
 One thing `fk rates` gets wrong: it shares a short net in proportion to what each machine wants,
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
@@ -222,8 +225,9 @@ fk lab NAME --clear              its slot emptied and freed
 fk lab --list                    the slots in use
 ```
 
-- Each factory gets its own slot of 200 x 200 tiles inside the lab (the lab is 2048 tiles square)
-  and keeps it; building it again empties the slot first. Its workspace is `lab\NAME` in the run
+- The lab has no edge, and a factory of any size fits. Each factory gets its own slot, sized to
+  it in 200-tile cells, and keeps it while it fits; building it again empties the slot first,
+  and `fk lab` generates the ground under it. Its workspace is `lab\NAME` in the run
   folder, never `game\`.
 - Drill rows get their ore seeded under them, so a smelting block runs as designed. A requester
   chest is filled with what it asks for, so the machines run as fast as they can: the measure
@@ -359,7 +363,12 @@ fixing in the source.
 - `HAND`: the build replaces or removes something someone placed by hand: who (when the game
   names them), what, where, and on which design entity's tile. The design wins, so the build goes
   on; adopt it into your source, leave it out, or come back to it. A Claude lead hears it like
-  chat (`out\hand.txt` keeps every one)
+  chat (`out\hand.txt` keeps every one). It also names settings changed by hand on what the
+  toolkit placed, with what the paste does: `rory_618 changed inserter at 14.5,0.5 (mall/i0):
+  logistic=copper-plate>7 (the paste sets logistic=iron-plate<50)`. A paste writes the design's
+  condition, request, chest limit and recipe over the one set by hand; a wire or condition the
+  design lacks stays. To keep it, write it into the source (`logistic=copper-plate>7`);
+  `stop_on HAND` holds a paste until you have
 - `TURNED` (diff, before the paste): belts, undergrounds, splitters or inserters stand on their
   design tiles under the right name but facing another way (or as the other underground end), so
   their line stops there. A factory built over another keeps the old one's belts wherever the
