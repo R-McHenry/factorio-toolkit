@@ -480,7 +480,14 @@ def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None, h
     deadline, hard = t0 + cap_min * 60, t0 + (cap_min + GRACE) * 60
     cut, open_, capped, told = None, True, False, False
     waited, shown = None, None        # the wait the player heard about; workers.txt as written
+    kept = sid                        # the conversation id in claude-session.txt
     while p.poll() is None:
+        if state["sid"] and state["sid"] != kept:
+            # kept at once (2.0.8): the id was written only when a round ended, so a first round
+            # whose window was closed (2026-10-23 22:29, after an hour) lost its conversation
+            kept = state["sid"]
+            with open(os.path.join(run, "claude-session.txt"), "w") as f:
+                f.write(kept)
         if os.path.exists(os.path.join(run, "STOP")):
             cut = "STOP"
         elif time.time() > hard:

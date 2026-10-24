@@ -400,6 +400,16 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(claude_loop.long_note(255000, told), "")   # heard already
         self.assertEqual(claude_loop.long_note(140000, [0]), "")    # below the first mark
 
+    def test_a_new_conversations_id_is_kept_at_once(self):
+        # 2026-10-23 22:29: a first round's window was closed after an hour, and the id, written
+        # only when the round ended, was lost with the conversation
+        script = [(0, {"type": "system", "subtype": "init", "session_id": "c0ffee"}),
+                  (5, {"type": "assistant", "message": {"content": [{"type": "text", "text": "."}]}}),
+                  (6, {"type": "result", "result": "done"})]
+        self.run_round(script, cap_min=120)
+        with open(os.path.join(self.run_dir, "claude-session.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "c0ffee")
+
     def test_the_new_conversation_file_is_taken_once(self):
         d = tempfile.mkdtemp(prefix="fknew-")
         self.addCleanup(shutil.rmtree, d, True)
