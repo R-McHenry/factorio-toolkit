@@ -88,7 +88,7 @@ class RunSetupTest(unittest.TestCase):
             with mock.patch("sys.stdout", io.StringIO()):
                 new_run.main([self.run_dir, "--player", "claude", "--workers", "claude"])
         run, prompt = seen["a"][:2]
-        self.assertEqual((prompt, seen["a"][-2], seen["a"][-1]), ("lead-v1", "claude", "inherit"))
+        self.assertEqual((prompt, seen["a"][-3], seen["a"][-2], seen["a"][-1]), ("lead-v1", "claude", "inherit", ""))
 
 
 class HookTest(unittest.TestCase):

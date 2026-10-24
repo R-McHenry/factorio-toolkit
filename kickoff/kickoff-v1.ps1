@@ -25,7 +25,8 @@ come from the run's launch.json; then the feed window.
 param([string]$Prompt = "core-v1", [string]$Name = "", [switch]$NoReset, [switch]$NoLaunch,
       [string]$Sha = "HEAD",
       [ValidateSet("deepseek", "claude")][string]$Player = "deepseek",
-      [ValidateSet("none", "claude")][string]$Workers = "none", [string]$WorkerModel = "inherit")
+      [ValidateSet("none", "claude")][string]$Workers = "none", [string]$WorkerModel = "inherit",
+      [string]$Effort = "")
 $ErrorActionPreference = "Stop"
 if ($Workers -ne "none") {
     if ($Player -ne "claude") { throw "-Workers claude needs -Player claude (workers are Claude Code subagents)" }
@@ -73,8 +74,9 @@ $notes = @()
 $last = Get-ChildItem (Join-Path $P "runs\*\NOTES.md") -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($last) { $notes = @("--notes", $last.FullName); Write-Host "notes: $($last.FullName)" }
+$eff = if ($Effort) { @("--effort", $Effort) } else { @() }
 python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player @notes `
-    --workers $Workers --worker-model $WorkerModel
+    --workers $Workers --worker-model $WorkerModel @eff
 if ($LASTEXITCODE -ne 0) { throw "new_run.py failed" }
 # the folder is made by this (Admin) account; DSH's sandbox, running as computah, rewrites the
 # workspace ACL at start (kickoff.ps1, 2026-10-18 09:53)

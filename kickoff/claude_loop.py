@@ -536,7 +536,8 @@ def new_conversation(run):
         return f.read().strip()
 
 
-def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None, heard=None):
+def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None, heard=None,
+         effort=None):
     """One claude -p round on the run's conversation -> (state, exit code, why it was cut short).
 
     2.0 (Rory, 2026-10-21: chat goes to the lead player at once): the round runs on streaming
@@ -556,6 +557,8 @@ def turn(run, sid, text, model, cap_min, log, events, take=None, horizon=None, h
     cmd = [claude_bin(), "-p", "--input-format", "stream-json", "--output-format", "stream-json",
            "--verbose", "--model", model, "--permission-mode", "auto", "--strict-mcp-config",
            "--settings", settings(run)]
+    if effort:
+        cmd += ["--effort", effort]    # 2.0.13 (Rory, 2026-10-24: a game with Opus at low effort)
     if sid:
         cmd += ["--resume", sid]
     state = {"sid": sid, "tools": 0, "result": None, "context": 0, "agents": {}, "reports": [],
@@ -1039,6 +1042,7 @@ def main():
     ap.add_argument("--rounds", type=int, default=500)
     ap.add_argument("--turn-cap", type=float, default=120, help="minutes")
     ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--effort", default="", help="Claude Code's --effort (low, medium, high, ...)")
     ap.add_argument("--note", default="", help="a paragraph added to the first message")
     ap.add_argument("--fresh-at", type=int, default=FRESH_AT,
                     help="tokens of context after which a fresh conversation starts (0: never)")
@@ -1062,7 +1066,7 @@ def main():
     end = time.time() + a.hours * 3600
     n, fails, cut = 0, 0, None
     restarted = bool(sid)  # a loop started again on a conversation: its last turn was cut
-    log(f"loop start: {run}, {a.model}, conversation {sid or 'new'}; it stops on a STOP file, "
+    log(f"loop start: {run}, {a.model}{' at ' + a.effort + ' effort' if a.effort else ''}, conversation {sid or 'new'}; it stops on a STOP file, "
         f"{a.rounds} rounds or {a.hours:g} h, and pauses while GOAL.md is empty"
         + (f"; a fresh conversation after {a.fresh_at // 1000}k tokens of context"
            if a.fresh_at else ""))
@@ -1133,7 +1137,7 @@ def main():
         log(f"=== round {n} ({'conversation ' + sid[:8] if sid else 'new conversation'})")
         t0 = time.time()
         state, rc, cut = turn(run, sid, text, a.model, a.turn_cap, log, events, watch.take_notes,
-                              lambda: plan_horizon(run), told)
+                              lambda: plan_horizon(run), told, a.effort)
         if state["sid"] and state["sid"] != sid:
             sid = state["sid"]
             with open(sid_file, "w") as f:

@@ -118,7 +118,7 @@ LOOP = ("claude_loop.py", "claude_hook.py", "wait_hook.py", "watchdog.py")
 #: a Claude Code player's goal loop, in its own window
 PLAY = """@echo off
 title Factorio player (Claude) - {name}
-python "{loop}" "{run}"
+python "{loop}" "{run}"{args}
 echo.
 echo The player loop has stopped (play.log says why).
 pause
@@ -138,7 +138,7 @@ Git Bash.
 
 def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
          host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek", notes=None,
-         workers=None, worker_model="inherit"):
+         workers=None, worker_model="inherit", effort=""):
     if os.path.exists(run) and os.listdir(run):
         raise SystemExit(f"new_run: {run} exists and is not empty")
     if workers not in (None, "claude"):
@@ -174,7 +174,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
             shutil.copy(os.path.join(src, "kickoff", name), os.path.join(run, ".toolkit", name))
         with open(os.path.join(run, "play.cmd"), "w", encoding="ascii", newline="\r\n") as fh:
             fh.write(PLAY.format(name=os.path.basename(os.path.abspath(run)), loop=os.path.abspath(loop),
-                                 run=os.path.abspath(run)))
+                                 run=os.path.abspath(run),
+                                 args=f" --effort {effort}" if effort else ""))
     worker_md5 = None
     if workers:
         worker_md5 = write_worker(run, agent, worker_model)
@@ -223,6 +224,7 @@ def main(argv=None):
                     help="claude: the player leads, Claude Code subagents work (2.0)")
     ap.add_argument("--worker-model", default="inherit",
                     help="the workers' model: inherit (the lead's), sonnet, opus or a model id")
+    ap.add_argument("--effort", default="", help="the Claude player's --effort (low, medium, high, ...)")
     a = ap.parse_args(argv)
     workers = None if a.workers == "none" else a.workers
     prompt = a.prompt or ("lead-v1" if workers else "core-v1")
@@ -231,7 +233,7 @@ def main(argv=None):
         local = {"FK_RCON_PORT": a.rcon_port, "FK_RCON_PW_FILE": a.pw_file,
                  "FK_SCRIPT_OUTPUT": a.script_output}
     cfg = make(a.run, prompt, a.sha, a.host, a.host_root, local, a.player, a.notes, workers,
-               a.worker_model)
+               a.worker_model, a.effort)
     print(json.dumps(cfg, indent=1))
     return 0
 
