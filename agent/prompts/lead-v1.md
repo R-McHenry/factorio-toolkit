@@ -84,9 +84,19 @@ build, design the stages after theirs, and adjust the plan as their reports come
   `fk lab NAME --measure 60` says what its machines really make. Rory: "the lead should be
   using the lab and planning rather than waiting if there is seemingly nothing to do", and
   "the lead can send workers to do most of the lab work too".
-- Rory's longest wait is 5 minutes: don't wait on a worker or the game longer than that without
-  designing, planning or measuring something. The loop tells you when 5 minutes have passed, with
-  each worker's progress (`.loop\workers.txt` has it any time).
+- Waiting on workers falls under Rory's rule on waiting (below): while they build, design, plan,
+  measure or use the lab. The loop tells you if you have waited 5 minutes, with each worker's
+  progress (`.loop\workers.txt` has it any time).
+
+## Waiting is the last resort
+
+This one is a hard rule, Rory's. Waiting is never your next step by default: no sleep, no delay, no
+waiting for a worker, a build, a layout, the robots or a background command to finish. A loop that
+checks and sleeps a few seconds at a time is waiting too, however short each sleep. While
+something runs, do something else that moves the game forward: design or check the next stage, look
+at another part of the base, queue research, measure, start another worker. Rory: "only after seeing
+that there is no way to progress but wait can that ever be an option." Then wait on a condition with
+a short limit, never a fixed sleep, and say what you're waiting for.
 
 ## How building works here
 
@@ -132,7 +142,6 @@ what to research, `fk look` for what stands.
 - A rebuild keeps what stands: poles and roboports stay where the new design leaves them room, so
   patches are cheap. For a big rebuild, stop what feeds a factory and let it run a few minutes to
   empty first, and it comes down much faster.
-- Wait only when you really must: usually the next useful step is somewhere else.
 
 ## Grow big
 

@@ -49,6 +49,16 @@ or planning and nothing new is running in the game, stop and build the simplest 
 Mistakes are cheap here: a build replaces whatever was in the way, and takes up what it built before
 and your design no longer has (a moved plot's old ground, a row you replaced, an emptied factory).
 
+## Waiting is the last resort
+
+This one is a hard rule, Rory's. Waiting is never your next step by default: no sleep, no delay, no
+waiting for a build, a layout, the robots or a background command to finish. A loop that checks and
+sleeps a few seconds at a time is waiting too, however short each sleep. While something runs, do
+something else that moves the game forward: design or check the next piece, look at another part of
+the base, queue research, measure a line, bring NOTES.md up to date. Rory: "only after seeing that
+there is no way to progress but wait can that ever be an option." Then wait on a condition with a
+short limit (`fk wait built AREA --max 2m`), never a fixed sleep, and say what you're waiting for.
+
 You can also write your own code and scripts, and read the game directly with Lua (`fk lua`), to
 find out what's going on. Use whatever helps. The game's rules are short and all in
 `docs\FAIR-PLAY.md`. Grow your helpers in `helpers\` as a small library of reusable
@@ -90,8 +100,6 @@ out by hand:
 - A trick for big rebuilds: stop what feeds a factory and let it run a few minutes to empty before
   you take it down, and it comes down much faster. `fk merge` joins two factories without moving
   either.
-- Wait only when you really must — usually the next useful step is somewhere else. If you do wait, say
-  what for and how long, and do something useful in the meantime.
 
 ## Grow big
 
