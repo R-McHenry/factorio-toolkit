@@ -309,6 +309,21 @@ def infinity_pipe(params, cat):
                   frozenset(), source=rate is None, extra={"fluid": fluid})]
 
 
+def roboport(params, cat):
+    """``Roboport<>``: a roboport of the logistic network, taking construction and logistic robots
+    into its robot inventory from the net (a sink). A ``Chest<requester, item="logistic-robot",
+    request=N>`` beside it and a net from the chest to the roboport is the loader: the router lays
+    the inserter (``robots``, 2.0.16: every run before this one hand-wrote a blueprint for it, and
+    the 0317 and 0928 players each spent a long detour on it: the kit's robots come back out of a
+    storage chest only into a roboport). ``cover robots`` counts it as coverage, ``cover power``
+    powers it."""
+    _only(params, ())
+    if not cat.has_entity("roboport"):
+        raise TemplateError("this catalog has no roboport")
+    return [MSpec("m0", "roboport", None, {}, {},
+                  frozenset({"logistic-robot", "construction-robot"}), sink=True)]
+
+
 def lab_row(params, cat):
     """``LabRow<n, rate=>``: n labs; each takes every science pack that reaches it (a sink), or,
     with ``rate`` (1.6), up to ``rate`` of each pack it is fed: a research unit of T seconds
@@ -436,6 +451,7 @@ TEMPLATES = {
     "InfinityPipe": infinity_pipe,
     "LabRow": lab_row,
     "Lab": lab,
+    "Roboport": roboport,
     "Chest": chest,
     "TurretRow": turret_row,
     "Bus": bus,

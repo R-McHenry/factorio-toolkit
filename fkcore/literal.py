@@ -12,7 +12,10 @@ hand somewhere else, here a file in the game codebase. Two file shapes are read:
   list), read with ``fkcore.codec``.
 
 A bare JSON list of entities is the entity list too (1.4.2: the 2005 player's ``[{name, x, y}]``
-file read as a blueprint string, "a blueprint string starts with a version digit").
+file read as a blueprint string, "a blueprint string starts with a version digit"). A listed entity
+may set itself (2.0.16): ``recipe``, ``ug``, ``config`` (the game's fields as JSON text), or the
+sugar ``request`` ({"logistic-robot": 50}) and ``request_filters``, so a two-entity fixture needs no
+blueprint at all.
 
 The game settings travel verbatim (``fkcore.codec``): ``recipe``, an underground's ``ug``, every
 other game field as ``config`` JSON (a requester's request, an inserter's circuit condition, a
@@ -54,9 +57,15 @@ class LiteralError(ValueError):
 
 def read_entities(path):
     """-> (rows, wires) from an entity-list JSON or a blueprint string file. rows: [(name, x, y,
-    dir, settings)] in file order, ``settings`` the entity's game settings from the file's
-    blueprint (``recipe``, ``ug``, ``config``); wires: the circuit wires [(i, ci, j, cj)] between
-    rows, as row indices."""
+    dir, settings)] in file order, ``settings`` the entity's game settings (``recipe``, ``ug``,
+    ``config``); wires: the circuit wires [(i, ci, j, cj)] between rows, as row indices.
+
+    A listed entity may set itself: ``recipe``, ``ug`` and ``config`` verbatim, or the sugar
+    ``request`` ({"logistic-robot": 50}) / ``request_filters`` (the game's own fields), turned into
+    ``config`` (2.0.16: before this, a two-entity fixture -- a requester and an inserter -- could
+    not say what the chest asks for in an entity list at all, so every player hand-wrote a
+    blueprint string; the 0928 player generated one from the toolkit's source, over ssh). The
+    blueprint, if the file also holds one, sets what the list leaves unset."""
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     data = None
@@ -94,10 +103,32 @@ def read_entities(path):
         k = at.get((e["name"], float(e.get("bx", x)), float(e.get("by", y))))
         if k is not None:
             row_of[k] = len(rows)
+        own = _own_settings(e)
         rows.append((e["name"], float(x), float(y), None if d is None else int(d),
-                     _settings(got[k]["attrs"]) if k is not None else {}))
+                     own or (_settings(got[k]["attrs"]) if k is not None else {})))
     return rows, [(row_of[i], ci, row_of[j], cj) for i, ci, j, cj in wires
                   if i in row_of and j in row_of]
+
+
+def _own_settings(e):
+    """The settings a listed entity writes itself: ``recipe``/``ug``/``config`` verbatim, or
+    ``request`` / ``request_filters`` as the ``config`` text the game takes. ``{}`` when it sets
+    nothing (then the file's blueprint, if any, decides)."""
+    out = {k: e[k] for k in _SETTINGS if k in e}
+    if "config" in out:
+        return out
+    fields = None
+    if isinstance(e.get("request_filters"), dict):
+        fields = {"request_filters": e["request_filters"]}
+    elif isinstance(e.get("request"), dict):
+        filters = [{"comparator": "=", "count": int(count), "index": i, "name": item,
+                    "quality": "normal"}
+                   for i, (item, count) in enumerate(sorted(e["request"].items()), 1)]
+        if filters:
+            fields = {"request_filters": {"sections": [{"filters": filters, "index": 1}]}}
+    if fields is not None:
+        out["config"] = json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return out
 
 
 def _settings(attrs):

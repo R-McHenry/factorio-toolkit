@@ -253,6 +253,25 @@ and 6 underground ends in all). `bus4.json` is his demo exactly as he placed it 
 (`Literal<file="bus4.json">` pastes it as it is). To grow it: make it longer, add loads and taps
 (`load=s11|s40`), and a net for each.
 
+## robot-feed.fk: the kit's robots back into a roboport (12x8)
+
+The robots the kit starts with, and the ones a build takes up with a roboport, sit in a storage
+chest as items: nothing flies. This puts them back into service.
+
+```
+port  = Roboport @(0, 0)
+botin = Chest<requester, item="logistic-robot", request=50, rate=1/s> @(5, 1)
+net load: botin -> port
+```
+
+The chest asks the network for the robots and the router lays the one inserter between the chest
+and the roboport (no belt: they are neighbours). On paper it moves them as fast as the inserter's
+hand; the roboport's own square covers the chest. Place it on free ground inside the network, next
+to what it serves; `cover power` powers the roboport. `request=50` covers the kit's 50 logistic
+robots; add a second chest with `item="construction-robot"` in the same way if those are stranded.
+Check it with `fk stats` (robots count as items in a chest) and `fk lua` on the roboport's robot
+inventory.
+
 ## steam.fk: a steam power plant, 3.6 MW (16x26)
 
 ```
