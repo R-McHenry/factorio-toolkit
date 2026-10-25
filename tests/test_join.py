@@ -1,11 +1,12 @@
 """Several iron works and several iron consumers joined by ONE net (Rory's question): the toolkit
-elaborates, routes (the producers' belts meet at a hub) and solves it. join-small fits one yellow
-lane; join-big asks twice that, and the routed solver's CAPACITY line says so
-(games/v2-bench/join-*.fk, CORE-V2.md)."""
+elaborates, routes (the producers' belts meet at a hub), hands it and solves it. join-small fits one
+yellow lane; join-big asks twice that, and the routed solver's CAPACITY line says so
+(games/v2-bench/join-*.fk, CORE-V2.md). The hands are the build's (``fkcore.hands``: the lowest rung,
+raised where the flow needs more), so what binds here is the belt and the hub, not a slow hand."""
 import os
 import unittest
 
-from fkcore import connect, expand, lang, route, routed, tiers
+from fkcore import avail, connect, expand, hands, lang, route, routed, tiers
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -24,8 +25,10 @@ class _Joined:
         cls.flat = elaborate(f, dict(f.modules), CAT, cls.NAME)
         lay, cls.notes = expand.expand_factory(cls.flat, CAT)
         cls.rt = route.route_layout(cls.flat, lay, CAT)
-        cls.rep = connect.connect(cls.rt.layout, CAT, connect.endpoints(cls.flat))
-        cls.r = routed.solve(cls.flat, cls.rt.layout, CAT)
+        lay, _lines, _changed = hands.assign(cls.rt.layout, cls.flat, CAT)
+        cls.layout = lay
+        cls.rep = connect.connect(lay, CAT, connect.endpoints(cls.flat))
+        cls.r = routed.solve(cls.flat, lay, CAT)
         cls.lines, cls.checks = routed.report(cls.r, cls.NAME)
 
     def plates(self):
@@ -75,7 +78,7 @@ class JoinBigTest(_Joined, unittest.TestCase):
 
     def test_tier_minimize_carries_it(self):
         # the trunk and the hub's splitters go red (15/s a lane): every plate arrives
-        new, _lines, changed = tiers.assign(self.flat, self.rt.layout, CAT, "minimize")
+        new, _lines, changed = tiers.assign(self.flat, self.layout, CAT, "minimize")
         self.assertIn("fast-splitter", {n for _o, n in changed.values()})
         r = routed.solve(self.flat, new, CAT)
         keys = {k for k, _item in self.flat.nets["iron"].consumers}

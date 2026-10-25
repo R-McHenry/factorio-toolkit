@@ -491,8 +491,14 @@ default `--allow yellow` keeps every belt yellow). A belt never goes down a tier
 `--downgrade`.
 `route --hand inserter` links machines with plain inserters
 instead of fast ones (rows take `inserter=inserter` for the same). `--hand any` (the template's
-line) is usually better: it takes the best hand robots can build **now**, so plain inserters while
-`fast-inserter` is locked or the network holds none, fast ones once it does. A route that already
+line) is usually better: the router lays the **lowest** hand the network can build (a plain
+inserter, 0.86/s), and the `hands` step raises only the connectors whose flow needs more
+(`out\hands.txt`: `hand minimize ... 41 inserter, 8 fast-inserter; 8 changed`). The flow it reads is
+the design's demand through every connector with no capacities (`routed.required`), so it does not
+depend on the hand laid: a stone furnace (0.33/s all in) keeps plain hands, a gear assembler (2
+plates/s in) gets fast ones. `hands maximize` takes the top rung everywhere; `hands minimize
+--downgrade` may also take a standing fast hand back to plain; a rung the network cannot build now
+is skipped and the line says so. A route that already
 stands keeps its carriers, so `--hand any` renames the standing hands robots cannot build to the one
 they can (`out\route.txt`: `rehanded 2 standing inserters robots cannot build, to inserter`), and
 leaves a hand that stands built alone. `cover power --pole

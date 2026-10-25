@@ -135,8 +135,10 @@ implies, roughly one and a half to two times.
 - **Wood poles are cheap and easy to make.** The kit's medium poles go quickly, and wood poles give
   you as much early power distribution as you need. You need not decide this yourself: `cover
   power --pole any` in the build script takes medium poles while the network can build them and
-  wood poles after, and `route --hand any` does the same for inserters. Spend the attention on the
-  design, not on which tier the network happens to hold.
+  wood poles after. Inserters work the same way: they come in plain (cheap, 0.86/s) and the `hands`
+  step raises only the ones a recipe's flow cannot get through, so a stone furnace keeps plain hands
+  and a gear assembler gets fast ones. Spend the attention on the design, not on which tier the
+  network happens to hold.
 - **Rebuilds can cut power.** A changed layout re-lays poles, and if the old ones go before the new
   ones stand, part of the base goes dark with its roboports. Get the new grid standing first (see
   "Building with the future in mind").

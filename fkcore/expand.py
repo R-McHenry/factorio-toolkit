@@ -90,6 +90,11 @@ def fragment_of(flat, path, cat):
         params = {k: v for k, v in inst.params.items() if k not in ("duty",)}
         if params.get("inserter") is not None:
             params["inserter"] = _hand_param(path, params["inserter"], cat)
+        elif inst.kind != "SmelterArray":
+            # 2.0.15 (Rory, 2026-10-25): a row laid without inserter= comes in on the lowest hand
+            # the network can build, and the hands step raises the connectors the flow needs more
+            # of. A SmelterArray keeps its own plain default (Rory's stack).
+            params["inserter"] = availmod.choose("hand", "any", need=_row_hands(inst))[0]
         if inst.kind in ("SmelterRow", "SmelterArray"):
             params["_recipe"] = m0.recipe
             fuel = [i for i in m0.needs if i not in cat.recipe_rates(m0.recipe, 1)[0]]
@@ -105,6 +110,13 @@ def fragment_of(flat, path, cat):
     for name, (net, _items) in zip(names_out, outs):
         binding[name] = net
     return frag, binding
+
+
+def _row_hands(inst):
+    """How many short hands a row instance lays, at least: one per machine, which is what the
+    availability choice must be able to build (two for a two-handed row, but the row's machine count
+    is the number that matters for stock)."""
+    return max(len(inst.machines), 1)
 
 
 def _hand_param(path, want, cat):

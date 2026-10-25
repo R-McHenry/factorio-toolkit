@@ -99,5 +99,24 @@ class PolesTest(unittest.TestCase):
                         .endswith("--bridge-power any\n"))
 
 
+class HandsStepTest(unittest.TestCase):
+    """2.0.15: an upgraded run gets the hands step, right after its route line."""
+
+    def test_the_template_runs_hands_after_route(self):
+        from fkcore import flow
+        with open(TEMPLATE, encoding="utf-8") as fh:
+            names = [ln.cmd for ln in flow.parse(fh.read(), TEMPLATE)]
+        self.assertEqual(names[names.index("route") + 1], "hands")
+
+    def test_an_old_script_gets_the_step(self):
+        new = upgrade_run._hands_step(
+            "place           --keep pinned\nroute           --only stale --effort normal --hand any\n"
+            "tier            minimize\n")
+        self.assertIn("route           --only stale --effort normal --hand any\nhands           "
+                      "minimize", new)
+        self.assertIsNone(upgrade_run._hands_step(new))
+        self.assertIsNone(upgrade_run._hands_step("place\nelaborate\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

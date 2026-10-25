@@ -4,18 +4,20 @@ A design or a build script may name a *family* instead of one prototype: ``inser
 instance, ``route --hand any``, ``cover power --pole any``, ``floorplan --bridge-power any``
 (``auto`` and ``whatever`` say the same). :func:`choose` answers with one prototype of that family:
 
-1. the best one **robots can build now** (``supply.ghost_state``: the network holds as many as the
-   design needs, so no ghost stalls), best first;
-2. else the best one that is not LOCKED (it can be made; SHORT says how far off it is);
+1. the first one in the family's own order that **robots can build now** (``supply.ghost_state``:
+   the network holds as many as the design needs, so no ghost stalls): a hand's cheapest rung
+   first, since ``fkcore.hands`` raises the connectors that need a faster one; a pole's best first,
+   since no flow model sees a pole;
+2. else the first one that is not LOCKED (it can be made; SHORT says how far off it is);
 3. else the family's default, with the reason (the design's norm, as before: a fast inserter; a
-   blind pick, and the note says so).
+   blind pick, and the note says so). ``best`` walks the family the other way, for a hand: a fast
+   inserter where the network can build one.
 
-Best first is the tier Rory asks for where it is affordable: a fast inserter over a plain one, a
-medium pole over a small one. So ``any`` moves a design up by itself once the network holds the
-better tier, and never lays a ghost the network cannot build. That is the 2026-10-25 run: 4 fast
-inserters pasted LOCKED (research at 81%, none in the network) while 50 plain inserters sat in the
-kit, and the burner row they fueled stood dead; the same run's script had to say ``--hand inserter``
-by hand to get plain ones everywhere.
+The tier is the *cheapest that works*, not the best there is: a plain inserter costs a third of a
+fast one and carries 0.86/s, and `fkcore.hands` raises only the connectors whose flow needs more.
+That is the 2026-10-25 run: 4 fast inserters pasted LOCKED (research at 81%, none in the network)
+while 50 plain inserters sat in the kit, and the burner row they fueled stood dead; the same run's
+script had to say `--hand inserter` by hand to get plain ones everywhere.
 
 The read is the snapshot ``out/avail.json``. A play build designs on the laptop, where there is no
 game link (``agent/fk.py`` splits the script at ``diff``), so a host step writes it: ``report_bom
@@ -32,22 +34,27 @@ from dataclasses import dataclass
 
 from . import supply
 
-__all__ = ["HANDS", "POLES", "FAMILIES", "DEFAULT", "ANY", "CANDIDATES", "Snapshot", "is_any",
-           "buildable", "choose", "drain", "install", "load", "save", "snapshot", "use"]
+__all__ = ["HANDS", "POLES", "FAMILIES", "DEFAULT", "ANY", "BEST", "CANDIDATES", "Snapshot",
+           "is_any", "is_best", "buildable", "choose", "drain", "install", "load", "save",
+           "snapshot", "use"]
 
-#: short hands, best first: a fast inserter where the network can build one, else a plain one
-HANDS = ("fast-inserter", "inserter")
+#: short hands, LOWEST first (2.0.15, Rory 2026-10-25: "the default should probably be lowest"):
+#: ``any`` is the cheapest the network can build, and ``fkcore.hands`` raises a connector that the
+#: flow says cannot pass on a plain one. ``best`` asks for the other end of this list.
+HANDS = ("inserter", "fast-inserter")
 #: coverage poles, best first: the biggest supply area a 1x1 pole has, then the cheapest. A big pole
-#: and a substation are 2x2 and are not coverage poles: ``--pole`` names them by hand.
+#: and a substation are 2x2 and are not coverage poles: ``--pole`` names them by hand. No flow model
+#: sees a pole (its cost is the wire and the coverage), so ``any`` takes the better one.
 POLES = ("medium-electric-pole", "small-electric-pole")
 FAMILIES = {"hand": HANDS, "pole": POLES}
 #: what ``any`` is when nothing was read at all: the design's own norm, exactly what the toolkit
 #: laid before it could tell (a fast inserter, a medium pole), and the note says it is blind. A run
 #: always has a read (``report_bom --stock live``, and the wrapper's ``fk avail --save`` before the
-#: first build); a lab or a rate report has none, and must not silently get the slow tier either.
+#: first build); a lab or a rate report has none, and must not silently get another tier either.
 DEFAULT = {"hand": "fast-inserter", "pole": "medium-electric-pole"}
-#: the words that ask for a family
-ANY = frozenset({"any", "auto", "whatever"})
+#: the words that ask for a family, and the one that takes the family's other end
+ANY = frozenset({"any", "auto", "whatever", "best"})
+BEST = frozenset({"best"})
 #: what one snapshot reads: every prototype a family may choose
 CANDIDATES = tuple(dict.fromkeys(HANDS + POLES))
 _FILE = "avail.json"
@@ -56,6 +63,11 @@ _FILE = "avail.json"
 def is_any(word):
     """True for the words that ask for a family instead of a prototype (``any``, ``auto``)."""
     return isinstance(word, str) and word.strip().lower() in ANY
+
+
+def is_best(word):
+    """True for ``best``: the family's other end (a fast inserter; any pole's best is its default)."""
+    return isinstance(word, str) and word.strip().lower() in BEST
 
 
 @dataclass
@@ -121,21 +133,27 @@ def save(root, sup, when=""):
 def choose(family, name=None, need=1):
     """(prototype, note) for ``name``: as given when it names one, else the family's choice now.
 
-    ``need``: how many of them the design wants, so a tier the network holds only one or two of is
-    not chosen for forty (that is a SHORT ghost rather than a LOCKED one, and no better). The note
-    is None for a name given, and one report line for a choice (it goes to the build log once).
+    ``any`` walks the family's list: a hand's lowest buildable rung first (``fkcore.hands`` raises
+    the connectors that need more), a pole's best first. ``best`` walks it the other way (a fast
+    inserter where the network can build one). ``need``: how many of them the design wants, so a
+    tier the network holds only one or two of is not chosen for forty (that is a SHORT ghost rather
+    than a LOCKED one, and no better). The note is None for a name given, and one report line for a
+    choice (it goes to the build log once).
     """
     if family not in FAMILIES:
         raise ValueError(f"avail: family is one of {', '.join(sorted(FAMILIES))}, got {family!r}")
     if not is_any(name):
         return name, None
-    names = FAMILIES[family]
+    names = list(FAMILIES[family])
+    want = "best" if is_best(name) else "any"
+    if is_best(name):
+        names.reverse()
     need = max(int(need or 1), 1)
     snap = _snapshot
     if snap.sup is None:
         got = DEFAULT[family]
-        return got, _say(f"{family}=any: {got} (no stock read yet: out/{_FILE} comes from the game "
-                         f"host, by report_bom --stock live or fk avail --save)")
+        return got, _say(f"{family}={want}: {got} (no stock read yet: out/{_FILE} comes from the "
+                         f"game host, by report_bom --stock live or fk avail --save)")
     unread, short, locked = [], [], []
     for got in names:
         if not snap.known(got):
@@ -143,17 +161,17 @@ def choose(family, name=None, need=1):
             continue
         state, why = supply.ghost_state(snap.sup, got, need)
         if state is None:
-            return got, _say(f"{family}=any: {got} ({why})")
+            return got, _say(f"{family}={want}: {got} ({why})")
         (locked if state == "LOCKED" else short).append((got, why))
     if short:
         got, why = short[0]
-        return got, _say(f"{family}=any: {got} (SHORT, so it can be made: {why})")
+        return got, _say(f"{family}={want}: {got} (SHORT, so it can be made: {why})")
     if locked:
         got, why = locked[0]
-        return got, _say(f"{family}=any: {got} (LOCKED: {why})")
+        return got, _say(f"{family}={want}: {got} (LOCKED: {why})")
     got = DEFAULT[family]
-    return got, _say(f"{family}=any: {got} (not read: {', '.join(unread)}; report_bom --stock live "
-                     f"writes out/{_FILE})")
+    return got, _say(f"{family}={want}: {got} (not read: {', '.join(unread)}; report_bom --stock "
+                     f"live writes out/{_FILE})")
 
 
 def buildable(name, need=1):

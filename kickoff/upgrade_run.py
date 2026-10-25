@@ -134,10 +134,10 @@ def _stops(text):
 
 
 def _hand(text):
-    """The build script with ``--hand any`` on its route line: direct insertion takes the best hand
-    the network can build now (2.0.14), instead of the fast inserter a 1.1 toolkit laid whether
-    the network held one or not, or the plain one a 1.1 upgrade had to patch in by hand. None:
-    nothing to change."""
+    """The build script with ``--hand any`` on its route line: direct insertion takes the lowest
+    hand the network can build now, and the ``hands`` step raises the connectors the flow needs more
+    of (2.0.14/2.0.15), instead of the fast inserter a 1.1 toolkit laid whether the network held one
+    or not, or the plain one a 1.1 upgrade had to patch in by hand. None: nothing to change."""
     lines = text.splitlines(True)
     for i, l in enumerate(lines):
         if l.startswith("route"):
@@ -147,6 +147,23 @@ def _hand(text):
             body = re.sub(r"--hand\s+\S+", "--hand any", body) if "--hand" in body \
                 else f"{body.rstrip()} --hand any"
             lines[i] = body.rstrip() + (f"   {sep}{note}" if sep else "\n")
+            return "".join(lines)
+    return None
+
+
+def _hands_step(text):
+    """The build script with a ``hands minimize`` line right after its route line (2.0.15): every
+    short hand is the lowest rung the network can build, raised only where the routed flow needs a
+    faster one. None: nothing to change."""
+    lines = text.splitlines(True)
+    heads = [l.split("#")[0].split()[:1] for l in lines]
+    if any(h == ["hands"] for h in heads):
+        return None
+    for i, head in enumerate(heads):
+        if head == ["route"]:
+            lines.insert(i + 1, "hands           minimize                  # every short hand: the "
+                                "lowest rung the network can build, raised where the flow needs "
+                                "more (out/hands.txt)\n")
             return "".join(lines)
     return None
 
@@ -206,7 +223,11 @@ def upgrade(run, sha, dry=False):
         hand = _hand(new_script or text)
         if hand:
             new_script = hand
-            changes.append("route --hand any (the best hand the network can build)")
+            changes.append("route --hand any (the lowest hand the network can build)")
+        step = _hands_step(new_script or text)
+        if step:
+            new_script = step
+            changes.append("hands minimize after route (raised only where the flow needs it)")
         pole = _pole(new_script or text)
         if pole:
             new_script = pole

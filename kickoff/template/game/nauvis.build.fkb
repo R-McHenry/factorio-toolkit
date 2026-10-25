@@ -7,7 +7,8 @@ elaborate                                 # templates -> logical netlist + its c
 size                                      # n=auto rows: the fewest machines for the targets, asserts and consumers (out/size.txt)
 report_rates                              # nominal rate model, asserts, surface targets
 place           --keep pinned             # fragments by their @(x, y) hints; Literals stay
-route           --only stale --effort normal --hand any   # direct insertion: the best hand the network can build (out/avail.json), else the best it can make
+route           --only stale --effort normal --hand any   # direct insertion: the lowest hand the network can build (out/avail.json, which falls back to the lowest it can make)
+hands           minimize                  # every short hand: that lowest rung, raised only where the routed flow needs more (out/hands.txt; "hands maximize" takes the top rung everywhere)
 tier            minimize --allow yellow   # belt tier per lane: --allow yellow,red for red where yellow is too thin; --red N caps it
 report_rates                              # again, routed: the lanes and inserters as laid (CAPACITY)
 cover robots                              # roboports over the logistic chests (before power)

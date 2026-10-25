@@ -97,6 +97,7 @@ class Ctx:
     link_lent: bool = False                          # the caller's link: not closed here
     last_diff: object = None                         # the last diff's SenseReport this run
     hands: tuple | None = None                       # the force's (hand, bulk hand, note), read once
+    hand_requested: str | None = None                # route's --hand, as written (2.0.15)
     rates_runs: int = 0                              # report_rates steps run so far
     sized: object = None                             # the size step's fkcore.size.Sizing
     steps: list = field(default_factory=list)        # the script's step names, in order
@@ -674,7 +675,8 @@ def _need(ctx, kind):
 
 
 def s_route(ctx, args):
-    o = _opts(args, only="all", effort="normal", hand="fast-inserter")
+    o = _opts(args, only="all", effort="normal", hand="any")
+    ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
     lines, checks = [], []
@@ -732,6 +734,67 @@ def _rehand(lay, cat, hand):
         return lay, 0
     return fkp.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
                       dict(lay.plots), dict(lay.claims), dict(lay.marks), out), n
+
+
+def _fixed_hands(ctx):
+    """The keys of the inserters the design names itself: a row whose ``inserter=`` is a prototype
+    (not a family word), every tap when the route step was given a concrete hand, and every
+    ``Literal``'s entities (a Literal is pinned as it is: ``fkcore.tiers`` pins them too). The
+    ``hands`` step leaves them alone."""
+    fixed = set()
+    for factory, flat in ctx.flats.items():
+        lay = ctx.layouts.get(factory)
+        if lay is None:
+            continue
+        for path, inst in flat.insts.items():
+            if inst.kind == "Literal":
+                fixed |= {k for k, e in lay.entities.items() if e.owner == path}
+                continue
+            want = inst.params.get("inserter")
+            if want is None or availmod.is_any(want):
+                continue
+            fixed |= {k for k, e in lay.entities.items() if e.owner == path}
+    if ctx.hand_requested and not availmod.is_any(ctx.hand_requested):
+        for lay in ctx.layouts.values():
+            fixed |= {k for k, e in lay.entities.items() if e.owner.startswith("~")}
+    return fixed
+
+
+def s_hands(ctx, args):
+    """Every short hand by what its connector carries (``fkcore.hands``): the lowest rung the
+    network can build, raised only where the routed model says the connector cannot pass the flow
+    (2.0.15, Rory 2026-10-25). ``--allow inserter,fast-inserter,bulk-inserter`` names the rungs (a
+    short hand: reach 1), ``maximize`` takes the top one everywhere, ``--downgrade`` may put a hand
+    below the one that stands in the committed .fkp, ``--hand N`` / ``--bulk-hand N`` the force's
+    hand sizes the rates are computed with."""
+    from . import hands as handsmod
+    o = _opts(args, allow=",".join(handsmod.HANDS), downgrade=False, hand="auto", bulk_hand="auto")
+    mode = (o.get("_") or ["minimize"])[0]
+    allow = [t.strip() for t in str(o["allow"]).split(",") if t.strip()] \
+        if o["allow"] is not True else []
+    for name in allow:
+        if not ctx.cat.has_entity(name) or ctx.cat.kind(name) != "inserter":
+            raise FlowError(f"hands --allow {name}: not an inserter prototype")
+        if connect.REACH.get(name, 1) != 1:
+            raise FlowError(f"hands --allow {name}: not a short hand (a long-handed inserter "
+                            "reaches 2 tiles, which is the router's geometry, not a hand's speed)")
+    if mode not in ("minimize", "maximize") or not allow:
+        raise FlowError("hands minimize|maximize [--allow inserter,fast-inserter] [--downgrade] "
+                        "[--hand N] [--bulk-hand N]")
+    hand, bulk, note = _hands(ctx, o)
+    fixed = _fixed_hands(ctx)
+    # a rung is only skipped when something was read: an empty snapshot is not "the network holds
+    # nothing", it is "nobody looked yet" (a lab, a paper game, `fk build --to report_checks`)
+    gate = availmod.buildable if availmod.snapshot().sup is not None else None
+    lines, checks = [], []
+    for factory, lay in list(ctx.layouts.items()):
+        new, hlines, _changed = handsmod.assign(lay, ctx.flats[factory], ctx.cat,
+                                                ctx.previous.get(factory), mode, allow, hand, bulk,
+                                                o.get("downgrade") is True, fixed, gate)
+        ctx.layouts[factory] = new
+        lines += [f"{factory}: {hlines[0]}"] + hlines[1:]
+        checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
+    return lines + [note], checks
 
 
 def s_tier(ctx, args):
@@ -1497,13 +1560,13 @@ def s_stop_on(ctx, args):
 STEPS = {
     "read_surface": s_read_surface, "read_terrain": s_read_terrain, "run_models": s_run_models,
     "elaborate": s_elaborate, "size": s_size, "report_rates": s_report_rates, "place": s_place,
-    "route": s_route, "tier": s_tier,
+    "route": s_route, "hands": s_hands, "tier": s_tier,
     "cover_power": s_cover_power, "cover_robots": s_cover_robots, "floorplan": s_floorplan,
     "report_checks": s_report_checks, "report_bom": s_report_bom, "write_layout": s_write_layout,
     "diff": s_diff, "apply": s_apply, "stop_on": s_stop_on,
 }
 _SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "size", "stop_on")
-_LAYOUT = ("place", "route", "tier", "cover_power", "cover_robots")
+_LAYOUT = ("place", "route", "hands", "tier", "cover_power", "cover_robots")
 
 
 def _write_checkpoint(ctx, step, upto):

@@ -51,9 +51,10 @@ FILE INST` shows any row as its exact entities, with its size and where its belt
 
 `duty=0.5` on any instance caps it (a row that runs only part of the time). `inserter=inserter`
 on a row puts plain inserters in place of the fast ones; `inserter=any` (or `auto`, `whatever`)
-lets the build pick: the best hand robots can build now, so plain ones while fast inserters are
-locked or the network holds none, fast ones once it does (`out/avail.json`, written by
-`report_bom --stock live`; the build log says which one it took and why). The router's direct
+lets the build pick: the lowest hand the network can build now, and the `hands` step raises the
+connectors whose flow needs a faster one (`out/avail.json`, written by `report_bom --stock live`;
+`out/hands.txt` says what it took and why). A row without `inserter=` does the same, so say
+`inserter=fast-inserter` only when you want fast hands and nothing else. The router's direct
 insertion takes the same family, as `route --hand any` in the build script; a single machine's
 `inserter=` does nothing (its inserters are the router's: that is what `--hand` is for).
 

@@ -107,13 +107,16 @@ class FlowTest(unittest.TestCase):
     def test_the_default_script_builds_redgreen(self):
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual(len(ctx.log), 19)
+        self.assertEqual(len(ctx.log), 20)
         # this surface has no power plant (games/nauvis has one), and main makes the transport
         # belts its routes are built from: BOOTSTRAP names them, one line per net they feed
         self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks if c.code not in ADVICE],
                          [("floorplan", "NO_POWER", "nauvis main"),
                           ("report_checks", "BOOTSTRAP", "net main/iron"),
-                          ("report_checks", "BOOTSTRAP", "net main/gear")])
+                          ("report_checks", "BOOTSTRAP", "net main/gear"),
+                          # 2.0.15: its route needs plain inserters, and the only maker of one
+                          # (main/ins) is fed by this same net
+                          ("report_checks", "BOOTSTRAP", "net main/circ")])
         lay = fkp.load(os.path.join(self.dir, "main.fkp"))
         flat = elaborate_file(os.path.join(self.dir, "main.fk"), CAT)
         self.assertEqual(fkp.invariants(lay, CAT, nets=flat.nets), [])
@@ -194,7 +197,8 @@ class FlowTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.dir, "main.fkp")))
         code, ctx = self.build(frm="cover_power", to="report_checks")
         self.assertEqual(code, 0)
-        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[11/19", "[12/19", "[13/19", "[14/19"])
+        self.assertEqual([l.split("]")[0] for l in ctx.log],
+                         ["[12/20", "[13/20", "[14/20", "[15/20"])
         self.assertIn("12 connected", self.read("out/report_checks.txt"))
 
     def test_a_step_run_twice_reports_its_checks_once(self):
@@ -210,7 +214,7 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(self.read("out/report_rates.txt").count("NOT met"), 2)
         code, ctx = self.build(frm="report_rates:2", to="report_rates:2")
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[10/19"])     # the second one
+        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[11/20"])     # the second one
         self.assertEqual(self.read("out/report_rates.txt").count("# report_rates"), 1)
 
     def test_a_bad_number_is_a_script_error(self):
@@ -341,7 +345,7 @@ class FlowTest(unittest.TestCase):
                       "far", self.read("out/stop_on.txt"))
         code, ctx = self.build()
         self.assertEqual(code, 1)
-        self.assertTrue(ctx.log[-1].startswith("[ 4/20] elaborate"))
+        self.assertTrue(ctx.log[-1].startswith("[ 4/21] elaborate"))   # 20 steps + stop_on
         # the steps it didn't reach say so, not the last run's lines (2026-10-21)
         route = self.read("out/route.txt")
         self.assertIn("not run: the build stopped at line", route)

@@ -91,19 +91,28 @@ class ChooseTest(unittest.TestCase):
         avail._snapshot = avail.Snapshot()
         avail._notes = []
 
-    def test_the_best_hand_the_network_can_build_wins(self):
+    def test_a_hand_is_the_cheapest_rung_the_network_can_build(self):
+        # 2.0.15 (Rory, 2026-10-25): "the default should probably be lowest, and it would go
+        # higher if it senses a bottleneck". fkcore.hands raises the connectors that need more.
         avail.install(sup(KIT["inserter"], KIT["fast"]))
         got, note = avail.choose("hand", "any", need=4)
-        self.assertEqual(got, "inserter")               # fast: LOCKED, none in the network
+        self.assertEqual(got, "inserter")
         self.assertIn("hand=any: inserter", note)
         self.assertIn("the network holds 50", note)
-        avail.install(sup(KIT["inserter"], row("fast-inserter", 30)))
+        avail.install(sup(row("inserter", 0), row("fast-inserter", 30)))
         self.assertEqual(avail.choose("hand", "any", need=4)[0], "fast-inserter")
 
+    def test_best_asks_for_the_other_end(self):
+        avail.install(sup(KIT["inserter"], row("fast-inserter", 30)))
+        self.assertEqual(avail.choose("hand", "best", need=2)[0], "fast-inserter")
+        self.assertEqual(avail.choose("hand", "BEST", need=2)[0], "fast-inserter")
+        self.assertTrue(avail.is_best("best"))
+        self.assertFalse(avail.is_best("any"))
+
     def test_what_the_design_needs_is_what_it_must_hold(self):
-        avail.install(sup(row("inserter", 50), row("fast-inserter", 2)))
-        self.assertEqual(avail.choose("hand", "any", need=2)[0], "fast-inserter")
-        self.assertEqual(avail.choose("hand", "any", need=40)[0], "inserter")   # 2 is no use for 40
+        avail.install(sup(row("inserter", 30), row("fast-inserter", 40)))
+        self.assertEqual(avail.choose("hand", "any", need=2)[0], "inserter")
+        self.assertEqual(avail.choose("hand", "any", need=40)[0], "fast-inserter")   # 30 < 40
 
     def test_a_locked_tier_is_never_chosen_over_one_that_can_be_made(self):
         avail.install(sup(row("inserter", 0), row("fast-inserter", 0, enabled=False)))
@@ -208,21 +217,31 @@ class DesignTest(unittest.TestCase):
         return sorted(e.name for k, e in lay.entities.items()
                       if k.startswith("gears/") and CAT.kind(e.name) == "inserter")
 
-    def test_any_takes_plain_hands_while_fast_inserters_are_not_buildable(self):
+    def test_any_lays_the_lowest_rung_and_the_hands_step_raises_it(self):
+        # the row comes in plain; `fkcore.hands` (not expand) is what gives a gear row fast hands,
+        # because that is a question about the flow and the connector, not about the prototype
         src = ("plates = Chest<requester, item=iron-plate, rate=1/s> @(0, 5)\n"
                "gears = AsmRow<n=2, recipe=iron-gear-wheel, inserter=any> @(2, 0)\n"
                "box = Chest<provider> @(2, 12)\n"
                "net plates: plates -> gears\nnet gear: gears -> box\n")
         self.assertEqual(set(self.names(self.lay(src, *KIT.values()))), {"inserter"})
+        self.assertEqual(set(self.names(self.lay(src, *KIT.values()))), {"inserter"})
 
-    def test_any_takes_fast_hands_once_the_network_holds_them(self):
+    def test_best_takes_the_fast_hand_where_it_can_be_built(self):
         src = ("plates = Chest<requester, item=iron-plate, rate=1/s> @(0, 5)\n"
-               "gears = AsmRow<n=2, recipe=iron-gear-wheel, inserter=any> @(2, 0)\n"
+               "gears = AsmRow<n=2, recipe=iron-gear-wheel, inserter=best> @(2, 0)\n"
                "box = Chest<provider> @(2, 12)\n"
                "net plates: plates -> gears\nnet gear: gears -> box\n")
         lay = self.lay(src, KIT["inserter"], row("fast-inserter", 90))
         self.assertEqual(set(self.names(lay)), {"fast-inserter"})
         self.assertTrue(avail.drain())        # the build says which one it took
+
+    def test_a_row_without_inserter_takes_the_lowest_rung_too(self):
+        src = ("plates = Chest<requester, item=iron-plate, rate=1/s> @(0, 5)\n"
+               "gears = AsmRow<n=2, recipe=iron-gear-wheel> @(2, 0)\n"
+               "box = Chest<provider> @(2, 12)\n"
+               "net plates: plates -> gears\nnet gear: gears -> box\n")
+        self.assertEqual(set(self.names(self.lay(src, *KIT.values()))), {"inserter"})
 
     def test_a_name_is_still_a_name(self):
         src = ("plates = Chest<requester, item=iron-plate, rate=1/s> @(0, 5)\n"
@@ -302,14 +321,27 @@ class ScriptTest(unittest.TestCase):
         self.assertIn("pole=any: small-electric-pole", cover_txt)
 
     def test_a_standing_route_gives_up_the_hand_nobody_can_build(self):
-        # 2.0.14: a route that stands keeps its carriers, so build once while the network holds
-        # fast inserters, then again when it holds none: the pasted fast inserters (the run's four
-        # LOCKED ghosts) take the hand that can be built, in place, without re-routing the net.
-        self.run_build([row("inserter", 50), row("fast-inserter", 40),
-                        row("medium-electric-pole", 93, enabled=False)])
+        # 2.0.14: a route that stands keeps its carriers, so a run that pasted fast inserters while
+        # they could be built keeps exactly those. Its own script (--hand fast-inserter) lays them
+        # first; the next build takes the lowest rung and gives up the hand robots cannot build,
+        # in place and without re-routing the net.
+        fast_script = SHOP_SCRIPT.replace("--hand any", "--hand fast-inserter")
+        path = os.path.join(self.dir, "fast.build.fkb")
+        with open(self.script, encoding="utf-8") as fh:
+            default = fh.read()
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(fast_script)
+        avail.save(self.dir, sup(row("inserter", 50), row("fast-inserter", 40),
+                                 row("medium-electric-pole", 93, enabled=False)), "test")
+        code, ctx = flow.run(path, None, None, CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        built = {e.name for e in ctx.layouts["gear"].entities.values()
+                 if e.owner.startswith("~") and CAT.kind(e.name) == "inserter"}
+        self.assertEqual(built - {"long-handed-inserter"}, {"fast-inserter"})   # long: 2 tiles
+        with open(self.script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(default)
         ctx, route_txt, _cover = self.run_build(list(KIT.values()))
-        lay = ctx.layouts["gear"]
-        hands = {e.name for e in lay.entities.values()
+        hands = {e.name for e in ctx.layouts["gear"].entities.values()
                  if e.owner.startswith("~") and CAT.kind(e.name) == "inserter"}
         self.assertNotIn("fast-inserter", hands)
         self.assertIn("2 kept (2 pinned from the committed .fkp)", route_txt)   # it stands
