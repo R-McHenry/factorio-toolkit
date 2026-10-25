@@ -273,16 +273,27 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
     for g in grants:
         mine.setdefault(g[0], []).append(g)
 
+    #: 2.0.24: a machine's grants on one net travel on one belt, so judging that net must skip
+    #: ALL of them, not just the one item being judged. A multi-item requester (`item="iron-ore,
+    #: coal"`) driving a sushi net gave each item's grant as the other item's grant (each 2.5/3,
+    #: 0.18/3), and the pair decayed geometrically to 0 over 62 passes: the model said the 1133
+    #: player's smelter delivered 0.000/min and "coal not taken on feed" while CLOG had already
+    #: named the real risk. Key: (machine, side, net) -> the grants on it.
+    belt = {}
+    for g in grants:
+        belt.setdefault((g[0], g[1], g[2]), set()).add(g)
+
     def potential(k, skip=None):
-        """What everything but grant ``skip`` allows machine ``k``."""
+        """What everything but the grants ``skip`` (a set, or one grant) allows machine ``k``."""
         m = machines[k]
         if m.sink or m.source:
             return 1.0
         if k in dead:
             return 0.0
+        skips = skip if isinstance(skip, (set, frozenset)) else ({skip} if skip else set())
         v = m.duty
         for g in mine.get(k, ()):
-            if g != skip and grants[g] < v:
+            if g not in skips and grants[g] < v:
                 v = grants[g]
         return v
 
@@ -296,14 +307,18 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                 if m.source:
                     unb = True
                     continue
-                s += m.makes.get(item, 0.0) / len(outs[(k, item)]) * util[k]
+                # 2.0.24: judged like the solver does, on this belt's own grants only (a chest
+                # feeding iron-ore and coal on one belt supplies each at its rate; the coal's
+                # small appetite must not cap the iron)
+                s += (m.makes.get(item, 0.0) / len(outs[(k, item)])
+                      * potential(k, belt.get((k, "out", ni[0]), (k, "out", ni[0], item))))
             d = nf = cap = 0.0
             for k in e["consumers"]:
                 m = machines[k]
                 need = m.needs.get(item, 0.0)
                 if need > 0:
                     share = need / len(feeds[(k, item)])
-                    d += share * util[k]
+                    d += share * potential(k, belt.get((k, "in", ni[0]), (k, "in", ni[0], item)))
                     nf += share
                 elif m.sink:
                     cap += sink_share.get((k,) + ni, 0.0)
@@ -333,14 +348,16 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                     unb = True
                     continue
                 prod.append((k, m.makes.get(item, 0.0) / len(outs[(k, item)]),
-                             potential(k, (k, "out", n, item)), m.duty))
+                             potential(k, belt.get((k, "out", n), (k, "out", n, item))),
+                             m.duty))
             cons = []
             for k in e["consumers"]:
                 m = machines[k]
                 need = m.needs.get(item, 0.0)
                 if need > 0:
                     cons.append((k, need / len(feeds[(k, item)]),
-                                 potential(k, (k, "in", n, item)), m.duty))
+                                 potential(k, belt.get((k, "in", n), (k, "in", n, item))),
+                                 m.duty))
             can_make = INF if unb else sum(w * c for _k, w, c, _d in prod)
             would_take = sum(w * c for _k, w, c, _d in cons)
             can_take = would_take + sink_caps[ni]
@@ -523,7 +540,8 @@ def _why(model, key):
         return f"{'input' if kind == 'in' else 'output'} {item} has no net"
     if kind == "in":
         return f"{item} short on {net}"
-    return f"{item} not taken on {net}"
+    st = model.nets.get((net, item))
+    return f"{item}: {net} takes {st.delivered:.2f}/s" if st is not None else f"{item} on {net}"
 
 
 def chain(model, path, depth=8):

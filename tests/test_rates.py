@@ -129,7 +129,9 @@ class RuleTest(unittest.TestCase):
             net out: mags -> box
         """)
         self.assertAlmostEqual(m.inst_rate("mags"), 0.2)
-        self.assertEqual(rates._why(m, "mags/m0"), "firearm-magazine not taken on out")
+        # 2.0.24: the line says what the net takes; "not taken" read as a fault when the sink's
+        # rate was simply the limit (and, with a sushi net, as if a consumed item were unwanted)
+        self.assertEqual(rates._why(m, "mags/m0"), "firearm-magazine: out takes 0.20/s")
 
     def test_an_input_with_no_net_stops_the_machine(self):
         m = model_of("""
