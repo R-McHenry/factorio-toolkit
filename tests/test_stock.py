@@ -11,9 +11,10 @@ import unittest
 from fkcore.freereads import StockRead, stock_lines
 
 
-def read(chest, port, pack=None):
+def read(chest, port, pack=None, flying=None):
     return StockRead("player", "nauvis", 1234, tuple(sorted(chest.items())),
-                     tuple(sorted(port.items())), tuple(sorted((pack or {}).items())))
+                     tuple(sorted(port.items())), tuple(sorted((pack or {}).items())),
+                     tuple(sorted((flying or {}).items())))
 
 
 class StockLinesTest(unittest.TestCase):
@@ -46,6 +47,15 @@ class StockLinesTest(unittest.TestCase):
         self.assertIn("your pack", text)
         self.assertIn("8 carried", text)
         self.assertIn("burner-mining-drill", text)
+
+    def test_flying_robots_are_not_lost_robots(self):
+        """The 1035 player read "4 in roboports" while 46 were in the air and thought they were
+        being lost; a flying robot is a working robot."""
+        text = "\n".join(stock_lines(read({}, {"logistic-robot": 4}, {},
+                                          {"logistic-robot": 46})))
+        self.assertIn("46 flying", text)
+        self.assertIn("4 in roboports", text)
+        self.assertNotIn("no robots in any roboport", text)
 
 
 if __name__ == "__main__":

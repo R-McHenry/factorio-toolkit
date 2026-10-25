@@ -116,9 +116,9 @@ Two ways to feed a factory, for two phases of the base. Running both pays for bo
 
 ## Robots and roboports
 
-- `fk stock` counts robots with everything else, and says which are in roboports and which are
-  sitting in chests. The ones in chests do nothing: a chest and one inserter into a roboport
-  (`docs\examples\robot-feed.fk`) puts them back.
+- `fk stock` counts robots with everything else: flying (working), in roboports (their home slots)
+  and sitting in chests (items doing nothing). A chest and one inserter into a roboport
+  (`docs\examples\robot-feed.fk`) puts the chest ones back.
 - A roboport is where the fleet lives and what makes a logistic chest work. Decide where they go
   and keep them: taking one up strands the robots inside it, so a rebuild that moves a roboport
   leaves you a robot-loading job before anything else can use them.

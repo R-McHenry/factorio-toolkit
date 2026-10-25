@@ -896,7 +896,7 @@ def lua_stock(force, surface):
 local f = game.forces[{_q(force)}]
 local s = game.get_surface({_q(surface)})
 if not f or not s then rcon.print('no force or surface') return end
-local chest, port, pack = {{}}, {{}}, {{}}
+local chest, port, pack, flying = {{}}, {{}}, {{}}, {{}}
 local function add(into, inv)
   if not inv or not inv.valid then return end
   for _, it in pairs(inv.get_contents()) do into[it.name] = (into[it.name] or 0) + it.count end
@@ -913,8 +913,11 @@ for _, p in pairs(game.players) do
     add(pack, p.character.get_inventory(defines.inventory.character_main))
   end
 end
+for _, e in pairs(s.find_entities_filtered{{force = f, type = {{'logistic-robot', 'construction-robot'}}}}) do
+  flying[e.name] = (flying[e.name] or 0) + 1
+end
 rcon.print(helpers.table_to_json({{tick = game.tick, force = f.name, surface = s.name,
-                                   chest = chest, port = port, pack = pack}}))
+                                   chest = chest, port = port, pack = pack, flying = flying}}))
 """
 
 

@@ -419,9 +419,10 @@ fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]
                                  production statistics (free to read)
-fk stock                         what the base holds, per item: chests and roboports apart (free
-                                 to read). A robot in a chest is an item and does nothing; the
-                                 line says how many are in roboports and how many in chests
+fk stock                         what the base holds, per item: chests, roboports, your pack and
+                                 the robots in the air (free to read). A robot in a chest is an
+                                 item and does nothing; the line says how many are flying, how
+                                 many in roboports and how many in chests
 fk chart                         how much of the map is explored (free to read)
 fk alerts                        the alert panel now (new alerts also come by themselves)
 fk lua "CODE"                    run a Lua chunk in the game: its rcon.print comes back (read,
