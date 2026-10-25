@@ -120,14 +120,16 @@ class Inst:
 
 @dataclass
 class PortInst:
-    """A port of a sealed module instance (2.0.28, PLAN-MODULES): the module's own endpoint in the
-    netlist, keyed ``<instance>/<port>``. Its machine is a conduit: it makes and takes the port's
-    items at no rate of its own, and the two nets that name it are one pool in the rates model, so
-    a crossing net is one net whose two segments meet at the port."""
+    """A port of a sealed module instance (2.0.29, PLAN-MODULES): a **lane** of the module's belt
+    end, keyed ``<instance>/<port>``, the module's own endpoint in the netlist. Its machine is a
+    conduit: it makes and takes the port's items at no rate of its own, and the two nets that name it
+    are one pool in the rates model, so a crossing net is one net whose two segments meet at the
+    port. ``items`` is the left lane's items and ``right`` the right lane's when the port is the
+    pair ``A | B``; ``lane`` is a one-lane port's pinned lane (``@s4L``), else None."""
     key: str
     name: str
     dir: str             # "in" | "out" | "inout"
-    items: list
+    items: list          # the left lane's items
     side: str            # "n" | "e" | "s" | "w"
     pos: int | None      # the tile along the side as written (`@w4`), or None: chosen at layout
     scope: str           # the sealed instance's path
@@ -135,6 +137,18 @@ class PortInst:
     size: tuple | None   # the module's declared frame, or None (computed at layout)
     line: int
     src: str
+    lane: str | None = None    # "L" | "R" of a one-lane port as pinned, or None: chosen at layout
+    right: list | None = None  # the right lane's items: the port is the pair `A | B`
+
+    @property
+    def all_items(self):
+        return list(self.items) + list(self.right or ())
+
+    def lanes(self):
+        """[(lane, items)] the port occupies: both for a pair, else its one lane (None if chosen)."""
+        if self.right is not None:
+            return [("L", self.items), ("R", self.right)]
+        return [(self.lane, self.items)]
 
 
 @dataclass
@@ -240,15 +254,18 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         if key in flat.ports:
             raise ElabError(src, p.line, f"port {p.name} is defined twice")
         ports[p.name] = key
-        flat.ports[key] = PortInst(key, p.name, p.dir, list(p.items), p.side, p.pos, prefix,
-                                   mod.name, mod.size, p.line, src)
-        # a conduit: makes and takes its items at no rate of its own (rates._pools joins the two
-        # nets that name it into one pool), so a crossing net is one net that meets itself here
+        items = p.all_items
+        flat.ports[key] = PortInst(key=key, name=p.name, dir=p.dir, items=list(p.items),
+                                   side=p.side, pos=p.pos, scope=prefix, module=mod.name,
+                                   size=mod.size, line=p.line, src=src, lane=p.lane,
+                                   right=None if p.right is None else list(p.right))
+        # a conduit: makes and takes every item on either lane at no rate of its own (rates._pools
+        # joins the two nets that name it into one pool), so a crossing net meets itself here
         flat.machines[key] = Machine(key, prefix, "Port", "transport-belt", None, {},
-                                     {item: 0.0 for item in p.items}, frozenset(p.items),
+                                     {item: 0.0 for item in items}, frozenset(items),
                                      False, None, False, 1.0,
-                                     {"port": p.dir, "items": list(p.items),
-                                      "port_name": p.name, "module": mod.name})
+                                     {"port": p.dir, "items": items,
+                                      "port_name": p.name, "module": mod.name, "lane": p.lane})
     if ports:
         flat.sealed.add(prefix)
     for inst in mod.insts:
@@ -376,10 +393,16 @@ class _Pending:
     src: str
 
 
+def _port_items(p):
+    """A port's items as written: ``iron-ore | coal`` for a pair, ``iron-plate`` for one lane."""
+    right = getattr(p, "right", None)
+    return ", ".join(p.items) + (f" | {', '.join(right)}" if right else "")
+
+
 def _sealed_msg(flat, node, ref, items, side):
     """The refusal for a ref that reaches inside a sealed module: name the port to add."""
     ports = [p for p in flat.ports.values() if p.scope == node.path]
-    have = "; ".join(f"{p.name} ({p.dir} {', '.join(p.items)})" for p in ports) or "none"
+    have = "; ".join(f"{p.name} ({p.dir} {_port_items(p)})" for p in ports) or "none"
     item = ", ".join(items) if items else "ITEM"
     want = "out" if side == "driver" else "in"
     example = f"{node.path}.{ports[0].name}" if ports else f"{node.path}.PORT"
@@ -454,7 +477,7 @@ def _resolve_nets(flat):
         flat.checks.append(Check(
             "PORT", f"port {ref}",
             f"net {name} carries {_items_text(w['items'])}, and port {port.name} is "
-            f"{port.dir} {', '.join(port.items)}", ref.line))
+            f"{port.dir} {_port_items(port)}", ref.line))
 
     for name, p in pending:
         work[name] = {"items": list(p.net.items) if p.net.items else None,
@@ -765,22 +788,40 @@ def _lane_checks(flat, cat):
 
 
 def _port_checks(flat):
-    """``PORT`` (2.0.28, PLAN-MODULES), warn and never gate: a port no net uses on a side, a use
-    against its direction, a declared item nothing carries, a tile off its module's frame.
+    """``PORT`` (2.0.28, lane-level in 2.0.29; PLAN-MODULES), warn and never gate: a port no net
+    uses on a side, a use against its direction, a declared item nothing carries, an item on one
+    side only, a tile off its module's frame, and two ports on one lane of one tile.
 
     A port's nets are the one written inside its module (scope = the instance path) and the one
     written outside that names it; an ``in`` port is fed from outside and feeds inside, an ``out``
-    port the other way round.
+    port the other way round. A pair (``A | B``) is two lanes of one belt end: two ports on one tile
+    is the point, two on one lane is the collision.
     """
     outside_legal = {"in": ("consumers",), "out": ("drivers",), "inout": ("drivers", "consumers")}
     inside_legal = {"in": ("drivers",), "out": ("consumers",), "inout": ("drivers", "consumers")}
     named = getattr(flat, "_port_named", {})
+    # a lane holds one port: a pair takes both lanes of its tile, a pinned one-lane port takes the
+    # one it names; an unpinned lane is left to the build, so it cannot collide yet
+    lanes_taken = {}                       # (scope, side, pos, lane) -> the port that owns it
+    for key, port in flat.ports.items():
+        for lane, _items in port.lanes():
+            if port.pos is None or lane is None:
+                continue
+            at = (port.scope, port.side, port.pos, lane)
+            other = lanes_taken.get(at)
+            if other is not None:
+                flat.checks.append(Check(
+                    "PORT", f"port {key}",
+                    f"@{port.side}{port.pos}{lane} is already {other}'s lane: one port a lane, "
+                    "two lanes a tile", port.line))
+            else:
+                lanes_taken[at] = key
     for key, port in flat.ports.items():
         uses = []
         for name, net in flat.nets.items():
             for side, rows in (("drivers", net.drivers), ("consumers", net.consumers)):
                 for k, item in rows:
-                    if k == key and item in port.items:
+                    if k == key and item in port.all_items:
                         uses.append((name, side, item))
         inside = [u for u in uses if flat.nets[u[0]].scope == port.scope]
         outside = [u for u in uses if flat.nets[u[0]].scope != port.scope]
@@ -788,13 +829,12 @@ def _port_checks(flat):
         named_out = {n for n in named.get(key, ()) if flat.nets[n].scope != port.scope}
         if not uses and not named.get(key):
             flat.checks.append(Check("PORT", f"port {key}",
-                                     f"no net names it: {port.dir} {', '.join(port.items)}",
-                                     port.line))
+                                     f"no net names it: {port.dir} {_port_items(port)}", port.line))
             continue
         if not inside and not named_in:
             flat.checks.append(Check("PORT", f"port {key}",
                                      f"no net inside {port.module} uses it, so nothing carries "
-                                     f"{', '.join(port.items)} through it", port.line))
+                                     f"{_port_items(port)} through it", port.line))
         if not outside and not named_out:
             flat.checks.append(Check("PORT", f"port {key}",
                                      f"no net outside {port.scope} uses it: the interface is "
@@ -811,7 +851,7 @@ def _port_checks(flat):
                                      f"used against its direction ({port.dir}): " + "; ".join(bad),
                                      port.line))
         carried = {item for _n, _s, item in uses}
-        missing = [i for i in port.items if i not in carried]
+        missing = [i for i in port.all_items if i not in carried]
         if missing:
             flat.checks.append(Check("PORT", f"port {key}",
                                      f"nothing carries {', '.join(missing)} through it", port.line))
@@ -820,7 +860,7 @@ def _port_checks(flat):
         inside_items = {item for _n, _s, item in inside}
         outside_items = {item for _n, _s, item in outside}
         if inside and outside:
-            for item in port.items:
+            for item in port.all_items:
                 if item in inside_items and item not in outside_items and not named_out:
                     flat.checks.append(Check("PORT", f"port {key}",
                                              f"nothing outside brings {item} to it", port.line))

@@ -4,7 +4,7 @@
     import  := 'import' Name (',' Name)* 'from' STRING
     module  := 'module' Name ('size' WxH)? '{' stmt* '}'
     stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
-    port    := 'port' name ':' ('in' | 'out' | 'inout') item (',' item)* '@' side
+    port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* ('when' cond)?
     net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
@@ -30,15 +30,19 @@ and implements no limit. ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lan
 share a belt) says nets A and B share every belt they are on, A on the left lane and B on the
 right looking downstream: the router lays them as one pair (``fkcore.pairs``).
 
-Ports (2.0.28, PLAN-MODULES): a module body may declare
-``port NAME : in|out|inout ITEM[, ITEM] @SIDE[POS]``, and the definition may give ``size WxH``. A
-module with ports is **sealed**: the nets written in its body are local, its only endpoints for the
-rest of the design are its ports, and a ref that reaches past them (``gears.gears`` from outside) is
-refused at elaboration. A module without ports is exactly as before, which is what every existing
-``.fk`` is. Inside the body a port is an ordinary net endpoint (``net fe: iron -> gears``); outside
-it is the module's endpoint (``net fe: bus -> gears.iron``), so one net in the source is one net that
-meets itself at the port. ``@SIDE`` is ``n``, ``e``, ``s`` or ``w`` of the module's frame; ``@w4``
-pins the tile along that edge (without a number the build chooses it, facing the port's partner).
+Ports (2.0.28, lane-level in 2.0.29; PLAN-MODULES): a module body may declare
+``port NAME : in|out|inout ITEM[, ITEM][ | ITEM[, ITEM]] @SIDE[POS][L|R]``, and the definition may
+give ``size WxH``. A port is **a lane**, not a belt: its identity is the belt end's tile, direction
+and lane (L or R looking downstream, as ``fkcore.lanes`` names them), so one tile and direction can
+hold two ports, and ``A | B`` declares that pair (left = A, right = B, as ``lanes A | B``). A module
+with ports is **sealed**: the nets written in its body are local, its only endpoints for the rest of
+the design are its ports, and a ref that reaches past them (``gears.gears`` from outside) is refused
+at elaboration. A module without ports is exactly as before, which is what every existing ``.fk``
+is. Inside the body a port is an ordinary net endpoint (``net fe: iron -> gears``); outside it is the
+module's endpoint (``net fe: bus -> gears.iron``), so one net in the source is one net that meets
+itself at the port. ``@SIDE`` is ``n``, ``e``, ``s`` or ``w`` of the module's frame; ``@w4`` pins the
+tile along that edge and ``@w4L`` its lane (without them the build chooses, facing the port's
+partner).
 
 Circuits (2.0, Rory 2026-10-21: "circuit wiring in the source, with all circuit and logic
 conditions in the .fk code"; the draft is drafts\\reactor-1.1\\CIRCUITS-1.1.md): ``signal`` names a
@@ -251,15 +255,22 @@ class Module:
 
 @dataclass
 class Port:
-    """A port declaration (2.0.28, PLAN-MODULES): ``port NAME : in|out|inout ITEM[, ITEM] @SIDE[POS]``.
-    ``side`` is a compass side of the module's frame, ``pos`` the tile along that edge as written
-    (``@w4``) or None: the build chooses the tile facing the port's partner."""
+    """A port declaration (2.0.28, PLAN-MODULES; lane-level in 2.0.29): a port is a **lane** of a
+    belt end, so ``(side, pos, lane)``. ``items`` is the left lane's items, ``right`` the right
+    lane's when the declaration is the pair ``A | B`` (``items`` is then the left lane); ``lane`` is
+    the pinned lane of a one-lane port (``@s4L``), or None: the build chooses it facing the partner."""
     name: str
     dir: str             # "in" | "out" | "inout"
-    items: list
+    items: list          # the left lane's items (several: a mixed lane)
     side: str            # "n" | "e" | "s" | "w"
     pos: int | None
     line: int
+    lane: str | None = None    # "L" | "R" of a one-lane port, or None
+    right: list | None = None  # the right lane's items: the port is the pair ``A | B``
+
+    @property
+    def all_items(self):
+        return list(self.items) + list(self.right or ())
 
 
 @dataclass
@@ -393,24 +404,40 @@ class _P:
         return mod
 
     def port(self):
-        """``port NAME : in|out|inout ITEM[, ITEM] @SIDE[POS]`` (2.0.28, PLAN-MODULES)."""
+        """``port NAME : in|out|inout ITEM[, ITEM][ | ITEM[, ITEM]] @SIDE[POS][L|R]`` (2.0.29,
+        PLAN-MODULES): a port is **one lane** of a belt end, or the pair ``A | B`` = the two lanes
+        of one belt end (left = A, right = B, as ``lanes A | B``)."""
         line = self.expect("port").line
         name = self.name("port name").text
         self.expect(":")
         direction = self.word("in, out or inout").text
         if direction not in ("in", "out", "inout"):
             self.err(f"a port carries items in, out or inout, got {direction!r}")
-        items = [self.word("item").text]
-        while self.peek().text in (",", "|"):          # `|` is a lane pair, as `lanes A | B`
-            self.next()
-            items.append(self.word("item").text)
+        left = [self.word("item").text]
+        while self.accept(","):
+            left.append(self.word("item").text)
+        right = None
+        if self.accept("|"):                 # the pair: what comes before it is the left lane
+            right = [self.word("item").text]
+            while self.accept(","):
+                right.append(self.word("item").text)
+            for item in right:
+                if item in left:
+                    self.err(f"port {name}: {item} is on both lanes; a pair is two different "
+                             "lanes of one belt end")
         self.expect("@")
-        tok = self.word("a side: n, e, s or w, with a tile along it like w4")
-        rest = tok.text[1:]
-        if tok.text[0] not in "nesw" or (rest and not rest.isdigit()):
-            self.err(f"{tok.text}: a port's side is n, e, s or w, with its tile along that edge "
-                     "like w4 (or the side alone: the build chooses the tile)", tok)
-        return Port(name, direction, items, tok.text[0], int(rest) if rest else None, line)
+        tok = self.word("a side: n, e, s or w, with a tile along it like w4, and L or R")
+        text, rest = tok.text, tok.text[1:]
+        lane = rest[-1].upper() if rest and rest[-1] in "LRlr" else None
+        if lane is not None:
+            rest = rest[:-1]
+        if text[0] not in "nesw" or (rest and not rest.isdigit()):
+            self.err(f"{text}: a port's side is n, e, s or w, with its tile along that edge like "
+                     "w4, and its lane like w4L (or neither: the build chooses them)", tok)
+        if right is not None and lane is not None:
+            self.err(f"port {name}: a pair is both lanes, so drop the {lane} and place it at "
+                     f"{text[0]}{rest}", tok)
+        return Port(name, direction, left, text[0], int(rest) if rest else None, line, lane, right)
 
     def stmt(self, mod):
         tok = self.peek()

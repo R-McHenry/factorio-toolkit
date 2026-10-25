@@ -1,10 +1,13 @@
-"""2.0.28 (PLAN-MODULES phase 1): ports on module definitions.
+"""2.0.28/2.0.29 (PLAN-MODULES phase 1): ports on module definitions.
 
 A module that declares a ``port`` is sealed: its nets are local, the rest of the design reaches it
 only by a port's name, and a ref that reaches past them is refused at elaboration. A module with no
 port is exactly what it was before — which is every existing design, and the baseline test below is
 the proof: it re-elaborates every ``.fk`` in the repository and compares the digest of what 2.0.27
 (elaboration-baseline.json, generated from this tree before the change) produced.
+
+2.0.29 makes a port **a lane**: a pair ``A | B`` is the two lanes of one belt end, ``@s4L`` pins a
+lane, and two ports may share a tile (one per lane).
 
 Regenerate the baseline only when a change to elaboration is *meant* to show: a new check, a new
 template. A ports release that changes it has broken the migration promise.
@@ -88,18 +91,22 @@ class SyntaxTest(unittest.TestCase):
     def test_port_and_size(self):
         m = lang.parse(RIB, "t.fk").modules["GearRib"]
         self.assertEqual(m.size, (24, 10))
-        self.assertEqual([(p.name, p.dir, p.items, p.side, p.pos) for p in m.ports],
-                         [("iron", "in", ["iron-plate"], "w", None),
-                          ("gear", "out", ["iron-gear-wheel"], "w", None)])
+        self.assertEqual([(p.name, p.dir, p.items, p.right, p.side, p.pos, p.lane)
+                          for p in m.ports],
+                         [("iron", "in", ["iron-plate"], None, "w", None, None),
+                          ("gear", "out", ["iron-gear-wheel"], None, "w", None, None)])
 
-    def test_a_pinned_tile_and_a_lane_pair(self):
+    def test_a_pair_is_the_two_lanes_of_one_tile(self):
         m = lang.parse("module M size 8x6 {\n"
                        "  port feed : in iron-ore | coal @s5\n"
-                       "  port out_ : out iron-plate, copper-plate @n0\n"
+                       "  port out_ : out iron-plate, copper-plate @n0L\n"
                        "}", "t.fk").modules["M"]
-        self.assertEqual([(p.items, p.side, p.pos) for p in m.ports],
-                         [(["iron-ore", "coal"], "s", 5),
-                          (["iron-plate", "copper-plate"], "n", 0)])
+        feed, out = m.ports
+        self.assertEqual((feed.items, feed.right, feed.side, feed.pos, feed.lane),
+                         (["iron-ore"], ["coal"], "s", 5, None))
+        self.assertEqual(feed.all_items, ["iron-ore", "coal"])
+        self.assertEqual((out.items, out.right, out.side, out.pos, out.lane),
+                         (["iron-plate", "copper-plate"], None, "n", 0, "L"))
 
     def test_a_port_belongs_to_a_module(self):
         with self.assertRaises(lang.FkSyntaxError) as cm:
@@ -110,6 +117,8 @@ class SyntaxTest(unittest.TestCase):
         for text, msg in (("module M { port x : sideways iron-plate @w }", "in, out or inout"),
                           ("module M { port x : in iron-plate @q }", "side is n, e, s or w"),
                           ("module M { port x : in iron-plate w }", "expected '@'"),
+                          ("module M { port x : in iron-ore | coal @s5L }", "a pair is both lanes"),
+                          ("module M { port x : in iron-ore | iron-ore @s5 }", "on both lanes"),
                           ("module M size 24 { }", "size WxH")):
             with self.assertRaises(lang.FkSyntaxError) as cm:
                 lang.parse(text, "t.fk")
@@ -215,6 +224,84 @@ net p: m.a -> c
             flat_of("module M {\n  port a : in iron-plate @w\n  port a : out iron-plate @w\n}\n"
                     "m = M")
         self.assertIn("port a is defined twice", str(cm.exception))
+
+
+class LaneTest(unittest.TestCase):
+    """A port is a lane (2.0.29): a pair is two lanes of one belt end, and a tile has two."""
+
+    BURNER = """
+module Burner size 8x6 {
+  port feed : in iron-ore | coal @s
+  port out_ : out iron-plate @n
+  row = SmelterRow<n=1, recipe=iron-plate> @(1, 1)
+  net ore_ items iron-ore: feed -> row
+  net coal_ items coal:    feed -> row
+  net out_:  row -> out_
+  lanes ore_ | coal_                       # the pair's two lanes are one belt inside
+}
+mine = MinerRow<n=1, resource=iron-ore> @(0, 0)
+coal = MinerRow<n=1, resource=coal> @(0, 4)
+burn = Burner @(20, 0)
+box = Chest<provider, limit=8> @(40, 0)
+net a: mine -> burn.feed
+net b: coal -> burn.feed
+net c: burn.out_ -> box
+"""
+
+    def test_a_pair_is_two_lane_ports_that_bind_by_item(self):
+        flat = flat_of(self.BURNER)
+        port = flat.ports["burn/feed"]
+        self.assertEqual(port.lanes(), [("L", ["iron-ore"]), ("R", ["coal"])])
+        self.assertEqual(sorted(flat.machines["burn/feed"].makes), ["coal", "iron-ore"])
+        self.assertIn(("burn/feed", "iron-ore"), flat.nets["a"].consumers)
+        self.assertIn(("burn/feed", "coal"), flat.nets["b"].consumers)
+        # inside, the pair is the two lanes of one belt: two single-item nets, paired
+        self.assertEqual(flat.nets["burn/ore_"].items, ["iron-ore"])
+        self.assertEqual(flat.nets["burn/coal_"].items, ["coal"])
+        self.assertEqual(flat.lane_of["burn/ore_"], "burn/ore_|burn/coal_")
+        self.assertEqual(codes(flat), [])
+
+    def test_a_lane_feeds_the_one_item_it_carries(self):
+        flat = flat_of(self.BURNER)
+        model = rates.solve(flat)
+        self.assertEqual(model.pools[("burn/ore_", "iron-ore")], ("a", "iron-ore"))
+        self.assertEqual(model.pools[("burn/coal_", "coal")], ("b", "coal"))
+        self.assertEqual(rates.underfed(model), [])
+
+    def test_two_ports_on_one_tile_one_lane_each(self):
+        flat = flat_of("""
+module M size 8x6 {
+  port a : in iron-plate @s4L
+  port b : in copper-plate @s4R
+}
+m = M
+""")
+        self.assertFalse([c for c in flat.checks if "already" in c.msg])
+
+    def test_two_ports_on_one_lane_collide(self):
+        flat = flat_of("""
+module M size 8x6 {
+  port a : in iron-plate @s4L
+  port b : in copper-plate @s4L
+}
+m = M
+""")
+        msgs = [c.msg for c in flat.checks if "already" in c.msg]
+        self.assertEqual(msgs, ["@s4L is already m/a's lane: one port a lane, two lanes a tile"])
+
+    def test_a_pair_takes_both_lanes_and_collides_with_neither_alone(self):
+        flat = flat_of("""
+module M size 8x6 {
+  port pair : in iron-plate | copper-plate @s4
+}
+m = M
+""")
+        self.assertFalse([c for c in flat.checks if "already" in c.msg])
+
+    def test_the_refusal_names_the_pair(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of(self.BURNER.replace("burn.feed", "burn.row"))
+        self.assertIn("feed (in iron-ore | coal)", str(cm.exception))
 
 
 class PortCheckTest(unittest.TestCase):
