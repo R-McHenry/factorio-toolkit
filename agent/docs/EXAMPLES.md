@@ -239,14 +239,16 @@ chest per product took 8: with the two plate requesters, 3 logistic chests inste
 base whose plates come by belt from a smelter row or a bus tap, only the 1. The products belt is
 sushi. The chest has no limit: when a mixed belt's chest is full the whole belt stops, so a slot
 limit only brings that sooner (`SUSHI_LIMIT`). What keeps it from filling is the limit at each
-maker: `ins = Assembler<recipe=inserter, keep=100>` puts a logistic condition on the inserter that
-takes its product onto the products belt, so it waits while the network holds 100 inserters. With
-every maker on the net limited, `net products limited:` quiets `CLOG`. More products: another pair
+maker: `set ins.out -> pbox: logistic=inserter<100` puts a logistic condition on the hand that
+takes its product into the chest, so it waits while the network holds 100 inserters. Name the chest
+with `-> pbox`: a maker that also feeds a machine has two output hands, and the condition belongs on
+the one whose job is the chest. With every maker on the net limited, `net products limited:` quiets
+`CLOG`. More products: another pair
 of rows below, the same way.
 
-A one-off crafter that should stop at N: `fill=N` (its inserter into the chest waits while the
-chest holds N, then the machine stops), and `guard` if you switch its recipe (its input inserters
-take only what the recipe takes). A wire at full length is the starter reactor's fuel saver in
+A one-off crafter that should stop at N: `set x.out -> box: if=inserter<50` (its chest hand waits
+while the chest holds 50) and `set x: logistic=inserter<50` (the machine stops crafting), and
+`guard` if you switch its recipe (its input inserters take only what the recipe takes). A wire at full length is the starter reactor's fuel saver in
 `LANGUAGE.md` ("Circuits"): a red wire from the reactor's temperature to its fuel inserter.
 
 ## bus4.fk: Rory's 4-belt bus, a river of iron (54x25)

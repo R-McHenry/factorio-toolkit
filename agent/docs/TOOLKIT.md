@@ -82,8 +82,8 @@ more machine on a net, one more net into what stands. The design the next build 
 one the last full build wrote (`write_layout`, just before the paste); `fk build --to diff` and
 `--to report_checks` write nothing, so try changes with them freely.
 
-Circuits come from the source (`LANGUAGE.md`, "Circuits"): the limits at the makers (`keep=`,
-`fill=`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
+Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on objects (`set
+NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
 before the floorplan (`out\floorplan.txt`, the `circuits` lines, says what each one set), and the
 .fkp shows them on the entity lines (`if=`, `logistic=`, `read=`, `filter=`, `signals=`) and as
 `wire` / `w` lines. Change a limit and the next build lays the inserters it touches fresh, so the
@@ -303,8 +303,8 @@ fixing in the source.
 - `LANES`: two chest-fed single-item nets feed the same machine set on two belts, a lane each: one
   belt carries both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them.
   Only pairs whose flows fit a lane are named (a requester without `rate=` is unbounded)
-- `LIMIT`: a `keep=` or `fill=` that limits nothing (no inserter takes the product into a chest,
-  or `fill=` on a maker whose output goes onto a belt: there is no chest to count)
+- `SELECT`: a `set` that matches nothing (no such instance, no hand whose sink is the named one,
+  or an `if=` with no chest to read), or an unknown property
 - `GUARD`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)
 - `SIGNAL` / `WIRE`: a condition reads a signal nothing on its wire makes, or a name that is no
   signal / a wire nothing drives or reads, or a belt reading on no wire (its reading reaches

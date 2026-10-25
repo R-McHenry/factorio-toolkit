@@ -116,96 +116,85 @@ expect spent.fill < 1 within 289 h at full_load
         self.assertIn("W.SIGNAL, network.ITEM or INSTANCE.SIGNAL", str(cm.exception))
 
 
-class LimitTest(unittest.TestCase):
-    """The 2005 and 2039 players set their mall's limits by Lua after every rebuild
-    (malllimits.lua); STRATEGY.md: "The per-item limits sit at the makers"."""
+class SetPropsTest(unittest.TestCase):
+    """2.0.27 (Rory, 2026-10-25): a limit is a property of an object the source names, not a macro
+    over a maker. keep= and fill= are gone; the error says what to write instead."""
 
-    def test_keep_puts_a_logistic_condition_on_the_makers_hop_into_its_chest(self):
-        _flat, lay, lines, cks = laid(mall(belt=", keep=200"))
+    def test_a_property_goes_on_the_hand_the_selector_names(self):
+        _flat, lay, lines, cks = laid(mall(belt="").replace("net belts:", "net belts:")
+                                      + "set belt.out: logistic=transport-belt<200\n")
         self.assertEqual(with_attr(lay, "logistic"), {"~belts/i0": "transport-belt<200"})
         self.assertEqual(lay.wires, [])                    # the network counts: no wire
-        self.assertIn("belt keep=200: 1 inserter runs while the logistic network holds fewer "
-                      "than 200 (~belts/i0)", lines)
+        self.assertIn("set belt.out: logistic=transport-belt<200 on 1 hand (~belts/i0)", lines)
         self.assertEqual(cks, [])
 
-    def test_keep_on_a_row_limits_its_output_inserters_onto_the_belt_to_the_chest(self):
-        _flat, lay, _lines, _cks = laid(mall(pipe=", keep=100"))
-        self.assertEqual(with_attr(lay, "logistic"), {"pipe/o0": "pipe<100", "pipe/o1": "pipe<100"})
-
-    def test_fill_counts_in_the_chest_by_a_red_wire(self):
-        _flat, lay, lines, cks = laid(mall(ins=", fill=50"))
-        ifs = with_attr(lay, "if")
-        self.assertEqual(set(ifs), {"~inss/i0", "~circs/i1", "~fe/i3", "~gears/i2"})
-        self.assertEqual(set(ifs.values()), {"inserter<50"})
+    def test_narrowing_to_a_chest_takes_only_that_hand(self):
+        _flat, lay, lines, cks = laid(mall(ins="") + "set ins.out -> ibox: if=inserter<50\n")
+        self.assertEqual(with_attr(lay, "if"), {"~inss/i0": "inserter<50"})
         self.assertEqual(lay.wirenets, {"ibox.signals": fkp.WireNet("ibox.signals", "red")})
-        self.assertEqual({w.net for w in lay.wires}, {"ibox.signals"})
-        self.assertEqual({w.a for w in lay.wires} | {w.b for w in lay.wires},
-                         {"ibox/c0"} | set(ifs))
+        self.assertIn("set ins.out -> ibox: if=inserter<50 on 1 hand (~inss/i0)", lines)
         self.assertEqual(cks, [])
 
-    def test_fill_holds_the_machine_by_gating_what_feeds_it(self):
-        # the live A7 case: a one-off crafter fed from a chest, its product into a chest
-        src = """
-feed = Chest<requester, item=iron-plate, rate=2/s>   @(0, 2)
-sm   = Assembler<recipe=iron-gear-wheel, fill=6>     @(4, 2)
-box  = Chest<provider>                               @(10, 2)
-net in:  feed -> sm
-net out: sm -> box
-"""
-        _flat, lay, lines, cks = laid(src)
-        self.assertEqual(with_attr(lay, "if"), {"~in/i0": "iron-gear-wheel<6",
-                                                "~out/i0": "iron-gear-wheel<6"})
-        self.assertEqual(lay.wirenets, {"box.signals": fkp.WireNet("box.signals", "red")})
-        self.assertEqual({w.a for w in lay.wires} | {w.b for w in lay.wires},
-                         {"box/c0", "~in/i0", "~out/i0"})
-        self.assertIn("  sm fill=6: 1 input inserter holds the machine on the same wire, so it "
-                      "finishes at most the craft in progress", lines)
+    def test_a_set_on_the_machine_is_its_own_enable(self):
+        _flat, lay, lines, cks = laid(mall(belt="") + "set belt: logistic=transport-belt<200\n")
+        self.assertEqual(with_attr(lay, "logistic"), {"belt/m0": "transport-belt<200"})
+        self.assertTrue(any("on 1 machine (belt/m0)" in ln for ln in lines))
         self.assertEqual(cks, [])
 
-    def test_fill_with_no_input_inserter_says_the_machine_keeps_crafting(self):
-        # the ore belt that feeds this furnace is the player's, not a net: no input inserter stands
-        # in the design, so fill= has nothing to gate (the machine is not held).
-        src = """
-f   = Furnace<recipe=iron-plate, fill=6> @(2, 2)
-box = Chest<provider>                    @(5, 2)
-net plates: f -> box
-"""
-        _flat, lay, lines, cks = laid(src)
-        self.assertEqual(with_attr(lay, "if"), {"~plates/i0": "iron-plate<6"})
-        self.assertEqual([c.code for c in cks], ["LIMIT"])
-        self.assertIn("no input inserter", cks[0].msg)
-        self.assertIn("nothing to gate", cks[0].msg)
-        self.assertIn("keeps crafting past 6", cks[0].msg)
-        self.assertIn("keep= may suit better", cks[0].msg)
-        self.assertFalse(any("hold the machine" in line for line in lines))
+    def test_a_selector_that_matches_nothing_is_a_check_not_a_silent_no_op(self):
+        _flat, _lay, _lines, cks = laid(mall(gear="") + "set gear.out -> bbox: if=x<5\n")
+        self.assertEqual([c.code for c in cks], ["SELECT"])
+        self.assertIn("matches no hand or machine", cks[0].msg)
 
-    def test_a_limit_with_no_chest_to_limit_says_so(self):
-        _flat, lay, _lines, cks = laid(mall(gear=", keep=10"))
-        self.assertEqual(with_attr(lay, "logistic"), {})   # gears go to machines only
-        self.assertEqual([c.code for c in cks], ["LIMIT"])
-        self.assertIn("no inserter takes its product into a chest", cks[0].msg)
+    def test_an_if_without_a_chest_to_read_is_a_check(self):
+        _flat, _lay, _lines, cks = laid(mall(belt="") + "set belt.out: if=transport-belt<20\n")
+        self.assertEqual([c.code for c in cks], ["SELECT"])
+        self.assertIn("if= reads a wire", cks[0].msg)
 
-    def test_a_changed_limit_changes_the_layout_and_a_removed_one_goes(self):
-        flat = flat_of(mall(belt=", keep=200"))
+    def test_a_changed_property_changes_the_layout_and_a_removed_set_clears_it(self):
+        src = mall(belt="") + "set belt.out: logistic=transport-belt<200\n"
+        flat = flat_of(src)
         lay, _n = expand.expand_factory(flat, CAT)
         routed = route.route_layout(flat, lay, CAT).layout
         first, _l, _c = circuits.lay(flat, routed, CAT)
-        flat2 = flat_of(mall(belt=", keep=50"))
-        again, _l, _c = circuits.lay(flat2, first, CAT)     # the committed layout, laid again
+        self.assertEqual(with_attr(first, "logistic"), {"~belts/i0": "transport-belt<200"})
+        again_src = mall(belt="") + "set belt.out: logistic=transport-belt<50\n"
+        again, _l, _c = circuits.lay(flat_of(again_src), first, CAT)
         self.assertEqual(with_attr(again, "logistic"), {"~belts/i0": "transport-belt<50"})
-        gone, _l, _c = circuits.lay(flat_of(mall()), again, CAT)
+        gone, _l, _c = circuits.lay(flat_of(mall(belt="")), again, CAT)
         self.assertEqual(with_attr(gone, "logistic"), {})
 
-    def test_a_limit_is_a_whole_number(self):
-        with self.assertRaises(ElabError):
-            flat_of(mall(belt=", keep=0"))
+    def test_keep_and_fill_are_shorthands_that_lower_to_the_same_properties(self):
+        """keep= is the hand's logistic condition; fill= is the chest hand's if= plus the machine's
+        input hands on the same wire — the gold standard, and now just a shortening of `set`."""
+        _flat, lay, lines, cks = laid(mall(belt=", keep=50"))
+        self.assertEqual(with_attr(lay, "logistic"), {"~belts/i0": "transport-belt<50"})
+        self.assertIn("set belt.out: logistic=transport-belt<50 on 1 hand (~belts/i0)", lines)
+        self.assertEqual(cks, [])
+        _flat, lay, lines, cks = laid(mall(ins=", fill=50"))
+        # the chest hand and every hand that feeds the machine, all on the chest's wire
+        self.assertEqual(set(with_attr(lay, "if")),
+                         {"~inss/i0", "~fe/i3", "~circs/i1", "~gears/i2"})
+        self.assertEqual(set(with_attr(lay, "if").values()), {"inserter<50"})
+        self.assertEqual(set(lay.wirenets), {"ibox.signals"})
+        self.assertTrue(any(ln.startswith("set ins.out -> ibox: if=inserter<50")
+                            for ln in lines))
+        self.assertTrue(any(ln.startswith("set ins.in: if=inserter<50") for ln in lines))
+        self.assertEqual(cks, [])
 
-    def test_limits_do_not_silence_clog(self):
+    def test_an_unknown_property_is_a_check(self):
+        _flat, _lay, _lines, cks = laid(mall(belt="") + "set belt.out: colour=red\n")
+        self.assertEqual([c.code for c in cks], ["SELECT"])
+        self.assertIn("unknown property colour", cks[0].msg)
+
+    def test_a_set_limit_does_not_silence_clog(self):
         src = """
-a   = Assembler<recipe=iron-gear-wheel, keep=50> @(2, 2)
-b   = Assembler<recipe=iron-stick, keep=50>      @(2, 8)
-box = Chest<provider>                            @(10, 5)
+a   = Assembler<recipe=iron-gear-wheel> @(2, 2)
+b   = Assembler<recipe=iron-stick>      @(2, 8)
+box = Chest<provider>                   @(10, 5)
 net out: a, b -> box
+set a.out: logistic=iron-gear-wheel<50
+set b.out: logistic=iron-stick<50
 """
         self.assertIn(("CLOG", "net out"), checks(flat_of(src), "CLOG"))
         self.assertNotIn(("CLOG", "net out"),

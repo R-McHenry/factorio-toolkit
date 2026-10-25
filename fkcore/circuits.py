@@ -20,15 +20,13 @@ What the source says, and what the layout gets:
   logistic condition (``logistic=S<100``, no wire); ``when I.S < 100`` reads instance I on a red
   wire of its own, ``I.signals``.
 - ``x = Assembler<...> when ...``: the machine's own enable condition, the same three ways.
-- ``keep=N`` on a maker: every inserter that takes its product out into a chest, straight in or
-  onto the belt of a net that ends in a chest, runs while the logistic network holds fewer than
-  N of it (``logistic=ITEM<N``, no wire). ``fill=N``: every inserter that takes it straight into a
-  chest runs while that chest holds fewer than N (``if=ITEM<N`` and a red wire, the chest's
-  ``.signals``), and every inserter that feeds each of its machines takes the same condition on the
-  same wire, so the machine stops at most one craft past N. A machine with no input inserter (a
-  belt or the ground feeds it) has nothing to gate: a ``LIMIT`` line says it keeps crafting past N
-  and ``keep=`` may suit better. These are real limits; they don't silence ``CLOG`` (Rory,
-  2026-10-21: only one inserter from the source into each sink, or ``limited``, does).
+- ``set SEL: attr=value, ...`` (2.0.27, Rory 2026-10-25): a property on the object a selector
+  names. ``NAME`` the instance's machines, ``NAME.out`` / ``NAME.in`` its hands, ``-> NAME`` the
+  hands whose sink is that instance. Properties are the codec's ``if`` / ``logistic`` / ``filter`` /
+  ``read`` / ``signal`` / ``signals``. This replaced the ``keep=`` / ``fill=`` macros: they chose
+  hands by where they pointed (two output hands on a shared belt both took one number, and the belt
+  one held a consumer row back), which is what the run hit on 2026-10-25. A ``set`` reports the
+  hands it hit and a selector that matches nothing is a ``SELECT`` line, never a silent no-op.
 - ``guard`` on a crafter: it reads its recipe's ingredients (``read=ingredients``) onto a red wire
   to every inserter that feeds it, which sets its filters from them (``filter=circuit``). A
   recipe changed in the game changes what they carry, with no script and no new paste of them.
@@ -75,6 +73,9 @@ FACTS = {"heat-exchanger": {"min_temperature": 500.0, "max_temperature": 500.0},
 #: an implicit wire's name: what instance I puts out, read by a ``when I.S``, ``fill`` or ``guard``
 IMPLICIT = "{}.signals"
 _CHEST_ROLES = ("provider", "storage", "buffer", "plain")
+#: what a ``set`` statement may write on an object (2.0.27): the codec's circuit
+#: attributes, nothing else
+PROP_ATTRS = ("if", "logistic", "filter", "read", "signal", "signals")
 
 
 def auto_pool():
@@ -119,7 +120,7 @@ class Circuit:
     wires: dict = field(default_factory=dict)        # name -> WireDef
     gates: dict = field(default_factory=dict)        # net -> CondDef
     enables: dict = field(default_factory=dict)      # instance path -> CondDef
-    limits: list = field(default_factory=list)       # [(instance path, "keep" | "fill", N)]
+    sets: list = field(default_factory=list)         # [(lang.Props, scope)] (2.0.27)
     guards: list = field(default_factory=list)       # [instance path]
     settings: dict = field(default_factory=dict)     # machine key -> {attr: value}
     behaves: list = field(default_factory=list)      # [lang.Behave, with its scope]
@@ -128,7 +129,7 @@ class Circuit:
 
     @property
     def empty(self):
-        return not (self.wires or self.gates or self.enables or self.limits or self.guards
+        return not (self.wires or self.gates or self.enables or self.sets or self.guards
                     or self.settings)
 
 
@@ -320,19 +321,45 @@ class _Resolver:
             for kind in ("keep", "fill"):
                 if p.get(kind) is None:
                     continue
+                # 2.0.27 (Rory, 2026-10-25): keep= and fill= are shorthands now, lowered to the
+                # ``set`` properties they always meant. The primitive is the property on a named
+                # object; these two just spare writing it out. A fill= reads the chest its product
+                # goes into (a red wire from that chest), and holds the machine's input hands on
+                # the same wire, so the machine stops at most one craft past N - the gold standard
+                # for limiting production, and no robots needed.
+                from .elaborate import ElabError
                 n = p[kind]
-                if isinstance(n, float) and n.is_integer():
-                    n = int(n)
                 if not isinstance(n, int) or n < 1:
-                    from .elaborate import ElabError
-                    raise ElabError(self.flat.path, inst.line, f"{path}: {kind} is how many of "
-                                    f"its product, a whole number from 1, got {n!r}")
-                made = {i for k in inst.machines for i in self.flat.machines[k].makes}
-                if not made:
+                    raise ElabError(self.flat.path, inst.line,
+                                    f"{path}: {kind}= is a whole number from 1, got {n!r}")
+                made = next((i for k in inst.machines for i in self.flat.machines[k].makes), None)
+                if made is None:
                     self.check("LIMIT", path, f"{kind}={n}: {inst.kind} makes no item to limit",
                                inst.line)
                     continue
-                self.c.limits.append((path, kind, n))
+                if kind == "keep":
+                    self.c.sets.append((lang.Props(path, "out", None,
+                                                   {"logistic": f"{made}<{n}"}, inst.line),
+                                        "",))
+                    continue
+                chests = []
+                for net in self.flat.nets.values():
+                    if not any(k in inst.machines for k, _i in net.drivers):
+                        continue
+                    for k, _i in net.consumers:
+                        if self.flat.machines[k].sink and self.flat.machines[k].inst not in chests:
+                            chests.append(self.flat.machines[k].inst)
+                if not chests:
+                    self.check("LIMIT", path, f"fill={n}: no chest takes its product, so there is "
+                               "no chest to count; keep= counts the logistic network", inst.line)
+                    continue
+                for chest in chests:
+                    self.c.sets.append((lang.Props(path, "out", chest,
+                                                   {"if": f"{made}<{n}"}, inst.line, chest),
+                                        "",))
+                    self.c.sets.append((lang.Props(path, "in", None,
+                                                   {"if": f"{made}<{n}"}, inst.line, chest),
+                                        "",))
             if p.get("guard") is not None:
                 if p["guard"] is not True:
                     self.check("GUARD", path, "guard is a flag: write it bare, Assembler<recipe=x, "
@@ -394,6 +421,8 @@ class _Resolver:
                 if kind == "require":
                     self.require(b, text, scope, line)
         self.c.expects = [e for e, _scope in self.flat.circuit_src.get("expects", ())]
+        for node, scope in self.flat.circuit_src.get("sets", ()):
+            self.c.sets.append((node, scope))
         for name, w in sorted(self.c.wires.items()):
             if w.implicit:
                 continue
@@ -565,81 +594,77 @@ class _Layer:
                     self.join(cd.wire, key)
             self.lines.append(f"{path}: {attr}={value}" + (f" on {cd.wire}" if cd.wire else ""))
 
-    def limits(self):
-        for path, kind, n in self.c.limits:
-            inst = self.flat.insts[path]
-            done, held, unfed, onto_belt, shared = [], set(), set(), 0, set()
-            for key in inst.machines:
-                makes = self.flat.machines[key].makes
-                for ins, dst in self.hops_out(key):
-                    net = self.lay.entities[ins].attrs.get("net")
-                    items = [i for i in makes if net in self.flat.nets
-                             and i in self.flat.nets[net].items] or list(makes)
-                    item = items[0]
-                    if dst is not None and self.store(dst):
-                        target = "chest"
-                    elif dst is not None and self.kind(dst) in ("transport-belt", "splitter",
-                                                                "underground-belt"):
-                        net_ = self.flat.nets.get(net)
-                        if net_ is None or not any(self.store(k) for k, _i in net_.consumers):
-                            continue
-                        target = "belt"
-                        shared |= {self.flat.machines[k].inst for k, _i in net_.consumers
-                                   if not self.store(k)}
-                    else:
-                        continue
-                    if kind == "fill":
-                        if target == "belt":
-                            onto_belt += 1
-                            continue
-                        chest = self.flat.machines[dst].inst
-                        wire = IMPLICIT.format(chest)
-                        if wire not in self.wires:
-                            self.wires[wire] = WireDef(wire, "red", [("machine", dst)],
-                                                       implicit=True)
-                        if self.set(ins, "if", f"{item}<{n}", f"{path} fill={n}"):
-                            self.join(wire, dst)
-                            self.join(wire, ins)
-                            done.append(ins)
-                            for mkey in inst.machines:
-                                feeds = self.hops_in(mkey)
-                                if not feeds:
-                                    unfed.add(mkey)
-                                for feed in feeds:
-                                    if feed in held:          # already on this pass's one wire
-                                        continue
-                                    if self.set(feed, "if", f"{item}<{n}",
-                                                f"{path} fill={n}"):
-                                        self.join(wire, feed)
-                                        held.add(feed)
-                    elif self.set(ins, "logistic", f"{item}<{n}", f"{path} keep={n}"):
-                        done.append(ins)
-            what = (f"the logistic network holds fewer than {n}" if kind == "keep"
-                    else f"the chest holds fewer than {n}")
-            if done:
-                self.lines.append(f"{path} {kind}={n}: {len(done)} inserter"
-                                  f"{'s run' if len(done) != 1 else ' runs'} while {what} "
-                                  f"({', '.join(done[:4])}{' ...' if len(done) > 4 else ''})")
-            if kind == "fill" and held:
-                self.lines.append(f"  {path} fill={n}: {len(held)} input inserter"
-                                  f"{'s hold' if len(held) != 1 else ' holds'} the machine on the "
-                                  "same wire, so it finishes at most the craft in progress")
-            if kind == "fill" and onto_belt:
-                self.check("LIMIT", path, f"fill={n}: {onto_belt} of its inserters drop onto a "
-                           "belt, not into a chest, so there is no chest to count; keep= counts "
-                           "the logistic network")
-            elif not done:
-                self.check("LIMIT", path, f"{kind}={n}: no inserter takes its product into a chest "
-                           "(straight in, or onto the belt of a net that ends in a chest), so "
-                           "nothing is limited")
-            if kind == "fill" and unfed:
-                self.check("LIMIT", path, f"fill={n}: no input inserter feeds "
-                           f"{', '.join(sorted(unfed, key=fkpmod.natural_key))}, so there is "
-                           f"nothing to gate: the machine keeps crafting past {n}; keep= may suit "
-                           "better")
-            if kind == "keep" and shared and done:
-                self.lines.append(f"  {path} keep={n} also holds back what its belt carries to "
-                                  f"{', '.join(sorted(shared))}")
+    def setprops(self):
+        """``set SEL: attr=value, ...`` (2.0.27, Rory 2026-10-25): the source names the object -
+        an instance's machines, its hands (``NAME.out`` / ``NAME.in``), narrowed to the hand whose
+        sink is an instance (``-> NAME``) - and sets its properties. Nothing is guessed from where
+        the router happened to put a hand; a selector that matches nothing is a check line."""
+        for p, scope in self.c.sets:
+            path = _join(scope, p.target)
+            label = "set " + p.target + (("." + p.side) if p.side else "") + (
+                (" -> " + p.into) if p.into else "")
+            unknown = [a for a in p.attrs if a not in PROP_ATTRS]
+            if unknown:
+                self.check("SELECT", label, f"unknown property {unknown[0]}: one of "
+                           f"{', '.join(PROP_ATTRS)}")
+                continue
+            inst = self.flat.insts.get(path)
+            if inst is None:
+                self.check("SELECT", label, f"no instance {p.target} to set at {path}")
+                continue
+            keys = []
+            if p.side is None:
+                keys = [k for k in inst.machines if k in self.lay.entities]
+            elif p.side == "out":
+                for mk in inst.machines:
+                    keys += [k for k, _dst in self.hops_out(mk) if k in self.lay.entities]
+            else:
+                for mk in inst.machines:
+                    keys += [k for k in self.hops_in(mk) if k in self.lay.entities]
+            sink, chest = None, None
+            if p.into is not None:
+                sink = _join(scope, p.into)
+                if p.side is None:
+                    self.check("SELECT", label, "-> narrows hands: write NAME.out -> CHEST, not a "
+                               "set on the machine itself")
+                    continue
+                sinks = set(self.flat.insts[sink].machines) if sink in self.flat.insts else {sink}
+                keys = [k for k in keys if self.drop(k) in sinks]
+                if not keys and p.side == "out":
+                    # the product left on a belt: the hand that carries it into the named sink is
+                    # further down a net this maker drives (2.0.27)
+                    driven = {n for n, net in self.flat.nets.items()
+                              if any(k in inst.machines for k, _i in net.drivers)}
+                    keys = [k for k, e in self.lay.entities.items()
+                            if e.attrs.get("net") in driven and "inserter" in e.name
+                            and self.drop(k) in sinks]
+                chest = next((k for k in sinks if self.store(k)), None)
+            if not keys:
+                self.check("SELECT", label, "matches no hand or machine: the route has nothing "
+                           "there")
+                continue
+            wire = None
+            if "if" in p.attrs:
+                if p.wire is not None and chest is None:
+                    # a lowered fill=: the chest its product goes into, whatever the route
+                    keys_ = list(self.flat.insts[p.wire].machines)
+                    chest = next((k for k in keys_ if self.store(k)), None)
+                if chest is None:
+                    self.check("SELECT", label, "if= reads a wire: name the chest it reads "
+                               "(set NAME.out -> CHEST: if=...) or use logistic=")
+                    continue
+                wire = IMPLICIT.format(self.flat.machines[chest].inst)
+                if wire not in self.wires:
+                    self.wires[wire] = WireDef(wire, "red", [("machine", chest)], implicit=True)
+            for k in keys:
+                for attr, value in p.attrs.items():
+                    self.set(k, attr, value, label)
+                if wire:
+                    self.join(wire, k)
+            kind = "hand" if p.side else "machine"
+            self.lines.append(f"{label}: " + ", ".join(f"{a}={v}" for a, v in p.attrs.items())
+                              + f" on {len(keys)} {kind}" + ("s" if len(keys) != 1 else "")
+                              + f" ({', '.join(keys[:4])}" + (" ..." if len(keys) > 4 else "") + ")")
 
     def guards(self):
         for path in self.c.guards:
@@ -785,7 +810,7 @@ def lay(flat, layout, cat):
     L.machine_settings()
     L.gates()
     L.enables()
-    L.limits()
+    L.setprops()
     L.guards()
     L.explicit()
     L.wire_up()

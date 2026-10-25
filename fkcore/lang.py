@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
            "Module", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand", "Behave",
-           "Expect", "COMPARATORS"]
+           "Expect", "Props", "COMPARATORS"]
 
 
 class FkSyntaxError(Exception):
@@ -232,6 +232,21 @@ class Module:
     behaves: list = field(default_factory=list)
     expects: list = field(default_factory=list)
     lanes: list = field(default_factory=list)      # [Lanes]: two nets that share a belt
+    sets: list = field(default_factory=list)       # [Props]: properties on named objects (2.0.27)
+
+
+@dataclass
+class Props:
+    """``set SEL: attr=value, ...`` (2.0.27, Rory 2026-10-25): a property on the objects a selector
+    names. ``SEL`` is an instance (its machines), ``NAME.out`` / ``NAME.in`` (its hands), narrowed
+    by ``-> NAME`` (the hand whose sink is that instance), as in
+    ``set insm.out -> ibox: logistic=inserter<1000``."""
+    target: str
+    side: str | None          # None: the instance's machines; "out" / "in": its hands
+    into: str | None          # the sink instance a hand must feed (``-> NAME``), or None
+    attrs: dict               # attr -> value as written (a string; codec parses it)
+    line: int
+    wire: str | None = None   # the chest whose contents an ``if=`` reads (a lowered ``fill=``)
 
 
 @dataclass
@@ -354,6 +369,8 @@ class _P:
             mod.wires.append(self.wire())
         elif tok.text == "behave" and self.peek(1).kind == "word" and self.peek(2).text == "on":
             mod.behaves.append(self.behave())
+        elif tok.text == "set" and self.peek(1).kind == "word":
+            mod.sets.append(self.props())
         elif tok.text == "expect" and self.peek(1).text != "=":
             mod.expects.append(self.expect_line())
         elif self.peek(1).text == "=":
@@ -369,6 +386,39 @@ class _P:
         text = " ".join(out)
         return re.sub(r" ?([.,:]) ?", lambda m: m.group(1) + (" " if m.group(1) != "." else ""),
                       text).strip()
+
+    def props(self):
+        """``set SEL: attr=value, ...`` (2.0.27, Rory 2026-10-25): SEL is NAME (its machines),
+        NAME.out / NAME.in (its hands), narrowed by ``-> NAME`` (the hand whose sink is that)."""
+        line = self.expect("set").line
+        target = self.name("an instance name").text
+        side = None
+        if self.accept("."):
+            side = self.word("out or in").text
+            if side not in ("out", "in"):
+                self.err(f"set names hands NAME.out or NAME.in, got .{side}")
+        into = None
+        if self.accept("->"):
+            into = self.name("the instance a hand feeds").text
+        self.expect(":")
+        attrs = {}
+        while True:
+            key = self.word("a property: logistic, if, filter, read, signal or signals").text
+            if key in attrs:
+                self.err(f"property {key} given twice")
+            self.expect("=")
+            attrs[key] = self.prop_value(line)
+            if not self.accept(","):
+                break
+        return Props(target, side, into, attrs, line)
+
+    def prop_value(self, line):
+        """A property value as written, without the spaces around ``<``, ``>`` and ``=``
+        (``inserter < 1000`` -> ``inserter<1000``)."""
+        out = []
+        while self.peek().kind != "eof" and self.peek().line == line and self.peek().text != ",":
+            out.append(self.next().text)
+        return re.sub(r" ?([<>=]) ?", r"\1", " ".join(out)).strip()
 
     def signal(self):
         line = self.expect("signal").line

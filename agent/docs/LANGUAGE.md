@@ -111,7 +111,7 @@ share, below): the drivers put items on it, the consumers take them.
   the limit belongs at each maker.
 - `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
   on the net. It only quiets `CLOG` and `UNLIMITED` for it: it limits nothing itself. The limits
-  are `keep=` on each maker (Circuits, below).
+  are `set` properties on the makers' hands (Properties on objects, below).
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the
@@ -181,28 +181,54 @@ Circuit wires, conditions and limits are written in the source like nets; the bu
 (inserter conditions, readings, filters, the red and green wires) and pastes them with the rest.
 Change one and the next build lays the changed entities fresh: no script sets them.
 
-### Limits at the makers
+### Properties on objects: `set`
+
+2.0.27: a limit is a property of an object, and the source names the object. `keep=` and `fill=`
+are still there, as shorthands that lower to exactly these lines.
 
 ```
-belt = Assembler<recipe=transport-belt, keep=200>    # the network keeps 200 belts
-ins  = Assembler<recipe=inserter, fill=50>           # its chest holds at most 50 inserters
-pipe = AsmRow<n=2, recipe=pipe, keep=100>
+set belt.out            : logistic=transport-belt<200   # the hands that take belts out
+set ins.out -> ibox     : if=inserter<50                # only the hand whose sink is ibox
+set ins                 : logistic=inserter<50          # the machine itself (stops crafting)
+set pipe.out            : logistic=pipe<100             # a row, all its output hands
 ```
 
-- `keep=N` on a maker (any machine or row): every inserter that takes its product out into a
-  chest, straight in or onto the belt of a net that ends in a chest, runs while the logistic
-  network holds fewer than N of it (a logistic condition; no wire). This is the mall's limit: on
-  a products belt into one chest, each maker keeps its own item, and the chest stays unlimited.
-  The maker's inserters must be in a logistic network (a roboport's orange area).
-- `fill=N`: every inserter that takes its product straight into a chest runs while that chest
-  holds fewer than N (a red wire from the chest and a circuit condition), and every inserter that
-  feeds each machine takes the same condition on the same wire: it stops feeding at N, so the
-  machine finishes at most the craft in progress. It needs no robots. A machine with no input
-  inserter (a belt or the ground feeds it) cannot be held: a `LIMIT` line says it keeps crafting
-  past N, and `keep=` may suit better.
-- A limit where nothing goes into a chest (gears that feed machines only) is a `LIMIT` line.
+- A selector is an instance name, and then:
+  - `NAME.out`: the hands that take its product out (its own output hands, and the hands further
+    down a net it drives);
+  - `NAME.in`: the hands that feed it;
+  - `-> NAME`: narrow to the hands whose sink is that instance. Use it whenever a maker feeds more
+    than one consumer, so the condition lands on the hand you mean and not on all of them.
+- Properties: `logistic=ITEM<N` (the logistic network's count, no wire), `if=ITEM<N` (a circuit
+  condition; name the chest with `-> CHEST` so it reads that chest), `filter=`, `read=`, `signal=`,
+  `signals=`.
+- Every `set` reports the hands it hit (`on 2 hands (~out/i0, ~out/i1)`), and one that matches
+  nothing is a `SELECT` line, never a silent no-op.
 - A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
-  `limited` (once each maker on it has its limit).
+  `limited`.
+
+### The two shorthands, and when to write `set` instead
+
+- `keep=N` on a maker = `set NAME.out: logistic=ITEM<N`. It reads the **logistic network** (robots
+  needed) and leaves the maker crafting into its output buffer.
+- `fill=N` on a maker = `set NAME.out -> CHEST: if=ITEM<N` **and** `set NAME.in: if=ITEM<N`, both on
+  the chest's red wire: the chest's own count holds the hand that fills it and every hand that feeds
+  the machine, so the machine stops at most one craft past N. No robots, and the tightest of the
+  two: this is the one to reach for.
+- Write `set` yourself when a maker feeds more than one consumer and the condition belongs to one
+  of them (`set ins.out -> ibox: ...`), or when you want any other circuit property on one hand.
+
+### Migrating old mall code (2.0.27 spelled the same things out)
+
+| was | the same thing, written out |
+|---|---|
+| `belt = Assembler<recipe=transport-belt, keep=200>` | `set belt.out: logistic=transport-belt<200` |
+| `ins = Assembler<recipe=inserter, keep=1000>` feeding a chest **and** a row | `set ins.out -> ibox: logistic=inserter<1000` (name the chest: a shared belt must not carry the row's condition) |
+| `x = Assembler<..., fill=50>` straight into a chest | `set x.out -> ibox: if=inserter<50` and `set x.in: if=inserter<50` |
+| `pipe = AsmRow<n=2, recipe=pipe, keep=100>` | `set pipe.out: logistic=pipe<100` |
+
+The rule of thumb: the condition lives on the hand that has the job; `-> NAME` picks that hand, and
+the machine's own `logistic=` is the way to stop the craft.
 
 ### A crafter that switches recipes: `guard`
 

@@ -265,7 +265,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         flat.asserts.append((a, prefix))
     for c in mod.covers:
         flat.covers.append((c, prefix))
-    for kind in ("signals", "wires", "behaves", "expects"):
+    for kind in ("signals", "wires", "behaves", "expects", "sets"):
         flat.circuit_src.setdefault(kind, []).extend((node, prefix)
                                                      for node in getattr(mod, kind, ()))
     for ln in getattr(mod, "lanes", ()):

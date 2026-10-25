@@ -285,8 +285,8 @@ class FlowTest(unittest.TestCase):
         self.assertIn("shop.fk changed since shop.fkp",
                       flow.layout_source_changes(folder)[0])
 
-    def test_a_resume_after_a_guard_or_fill_change_lays_out_again(self):
-        # 2.0.4 A2: a guard/fill change is a source change too. The circuits are laid at
+    def test_a_resume_after_a_guard_change_lays_out_again(self):
+        # 2.0.4 A2: a guard change is a source change too. The circuits are laid at
         # floorplan, so out/floorplan/<factory>.fkp (what a later `--from` build or a look
         # reads) must be written again, not left as the previous build wrote it.
         folder = self.shop()
@@ -296,7 +296,7 @@ class FlowTest(unittest.TestCase):
         self.assertFalse(any(a in e.attrs for e in before.entities.values()
                              for a in ("if", "read", "filter")))
         self.shop_change(folder, "recipe=iron-gear-wheel>",
-                         "recipe=iron-gear-wheel, fill=20, guard>")
+                         "recipe=iron-gear-wheel, guard>")
         said = []
         code, ctx = self.shop_build(folder, "diff", "write_layout", said)
         self.assertEqual(code, 0, ctx.log)
@@ -306,7 +306,6 @@ class FlowTest(unittest.TestCase):
             attrs = {e.key: e.attrs for e in lay.entities.values()}
             self.assertEqual(attrs["gear/m0"].get("read"), "ingredients", parts)
             self.assertEqual(attrs["~in/i1"].get("filter"), "circuit", parts)
-            self.assertEqual(attrs["~out/i0"].get("if"), "iron-gear-wheel<20", parts)
         self.assertEqual(flow.layout_source_changes(folder), [])
 
     def test_a_checkpoint_with_no_source_stamp_is_stale(self):
