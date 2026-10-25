@@ -39,6 +39,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -133,23 +134,45 @@ def _stops(text):
 
 
 def _hand(text):
-    """The build script with ``--hand inserter`` on its route line (None: nothing to change)."""
+    """The build script with ``--hand any`` on its route line: direct insertion takes the best hand
+    the network can build now (2.0.14), instead of the fast inserter a 1.1 toolkit laid whether
+    the network held one or not, or the plain one a 1.1 upgrade had to patch in by hand. None:
+    nothing to change."""
     lines = text.splitlines(True)
     for i, l in enumerate(lines):
-        if l.startswith("route") and "--hand" not in l:
+        if l.startswith("route"):
             body, sep, note = l.partition("#")
-            lines[i] = f"{body.rstrip()} --hand inserter" + (f"   {sep}{note}" if sep else "\n")
+            if re.search(r"--hand\s+any\b", body):
+                return None
+            body = re.sub(r"--hand\s+\S+", "--hand any", body) if "--hand" in body \
+                else f"{body.rstrip()} --hand any"
+            lines[i] = body.rstrip() + (f"   {sep}{note}" if sep else "\n")
             return "".join(lines)
     return None
 
 
-def _plain_hands(run):
-    """Did the run's own toolkit copy route direct insertion with plain inserters?"""
-    path = os.path.join(run, ".toolkit", "fkcore", "route.py")
-    if not os.path.exists(path):
-        return False
-    with open(path, encoding="utf-8") as fh:
-        return '_HANDS = (("inserter",)' in fh.read()
+def _pole(text):
+    """The build script's poles as ``any``: ``cover power --pole any`` and ``floorplan
+    --bridge-power any`` (2.0.14), so the coverage step takes the pole the network can build, as
+    ``--hand any`` does for hands, instead of the medium pole every template used to name. None:
+    nothing to change."""
+    lines = text.splitlines(True)
+    changed = False
+    for i, l in enumerate(lines):
+        body, sep, note = l.partition("#")
+        words = body.split()
+        if words[:2] == ["cover", "power"]:
+            new = re.sub(r"--pole\s+\S+", "--pole any", body) if "--pole" in body \
+                else f"{body.rstrip()} --pole any"
+        elif words[:1] == ["floorplan"]:
+            new = re.sub(r"--bridge-power(\s+\S+)?", "--bridge-power any", body) \
+                if "--bridge-power" in body else f"{body.rstrip()} --bridge-power any"
+        else:
+            continue
+        if new.rstrip() != body.rstrip():
+            lines[i] = new.rstrip() + (f"   {sep}{note}" if sep else "\n")
+            changed = True
+    return "".join(lines) if changed else None
 
 
 def upgrade(run, sha, dry=False):
@@ -180,11 +203,14 @@ def upgrade(run, sha, dry=False):
         if stops:
             new_script = stops
             changes.append("stop_on UNROUTED NO_SINK (no paste with a net unrouted)")
-        if _plain_hands(run):
-            hand = _hand(new_script or text)
-            if hand:
-                new_script = hand
-                changes.append("route --hand inserter (its own route.py used plain inserters)")
+        hand = _hand(new_script or text)
+        if hand:
+            new_script = hand
+            changes.append("route --hand any (the best hand the network can build)")
+        pole = _pole(new_script or text)
+        if pole:
+            new_script = pole
+            changes.append("cover power --pole any, --bridge-power any (the pole it can build)")
     plan += [f"  replace {p} (old kept in .upgrade-{old}/)" for p in REPLACED
              if os.path.exists(os.path.join(run, p)) or p in (".toolkit", "bin", "docs")]
     if new_script:

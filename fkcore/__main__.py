@@ -111,6 +111,8 @@ def _fkp_path(path):
 def _flat(path, layout=None):
     """The file's netlist; its n=auto rows sized as the build's size step sizes them (with the
     surface file beside it, when that places it), the Sizing on ``flat._sizing``."""
+    from . import avail as availmod
+    availmod.use(os.path.dirname(os.path.abspath(path)))     # inserter=any chooses from out/
     if layout is None and os.path.exists(_fkp_path(path)):
         layout = fkp.load(_fkp_path(path))
     cat = Catalog.load()
@@ -303,6 +305,33 @@ def _force_surface(game):
     from .apply import force_for
     sf = surfacemod.load_game(game)
     return getattr(sf, "force", None) or force_for(sf.mode), sf.name
+
+
+def _avail(a):
+    """What a design's ``inserter=any`` / ``route --hand any`` / ``cover power --pole any`` can
+    build now: one read of the families' prototypes, and ``--save`` writes ``out/avail.json`` for
+    the next build's design half, which runs where there is no game link (2.0.14)."""
+    from . import avail as availmod
+    from . import link, supply
+    r = _game_link("avail")
+    if r is None:
+        return 2
+    force, surface = _force_surface(a.game)
+    try:
+        with r:
+            sup = supply.read(r, force, surface, availmod.CANDIDATES, tag="avail")
+    except (link.LinkError, OSError) as exc:
+        print(f"error: avail: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    availmod.install(sup, "fk avail")
+    lines = [f"avail: {len(sup.entities)} items read on {surface} (tick {sup.tick})"]
+    for fam in sorted(availmod.FAMILIES):
+        lines.append(f"  {availmod.choose(fam, 'any', need=1)[1]}")
+    if a.save:
+        path = availmod.save(a.game, sup, "fk avail --save")
+        lines.append(f"  saved {path}: what the next build's any chooses from")
+    print("\n".join(lines))
+    return 0
 
 
 def _research_footer(r, game):
@@ -694,6 +723,10 @@ def main(argv=None):
     th = sub.add_parser("tech")
     th.add_argument("game")
     th.add_argument("names", nargs="+")
+    av = sub.add_parser("avail", description="what inserter=any, --hand any and --pole any can "
+                        "build now (fkcore.avail); --save writes out/avail.json for the next build")
+    av.add_argument("game")
+    av.add_argument("--save", action="store_true")
     rc = sub.add_parser("recipes")
     rc.add_argument("game")
     rc.add_argument("names", nargs="*")
@@ -714,6 +747,8 @@ def main(argv=None):
         return _talk(a)
     if a.cmd in ("research", "tech", "recipes"):
         return _research(a)
+    if a.cmd == "avail":
+        return _avail(a)
     if a.cmd == "lua":
         return _lua(a)
     if a.cmd == "read-terrain":

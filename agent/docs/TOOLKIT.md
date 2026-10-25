@@ -62,7 +62,10 @@ and the robot network keep running through a rebuild (`out\cover_power.txt` says
 kept; `cover power --fresh` or `cover robots --fresh` in the build script lays them all anew).
 Switching the pole kind (`cover power --pole small-electric-pole` while medium poles are short)
 keeps the poles of the old kind the last build found standing and lays the new kind only where
-the old one never stood.
+the old one never stood. `--pole any` switches by itself, the way `--hand any` does: medium poles
+while the network can build them (they are in the kit at the start), small ones when it cannot.
+Small and medium poles are both 1x1, so a switch keeps what stands; `big-electric-pole` and
+`substation` are 2x2 and are named by hand only.
 Old poles and roboports the design no longer has stay up until the design's own stand there, and
 the first build after that takes them up.
 
@@ -487,4 +490,13 @@ design asks (`--red 20` caps how many; `tier maximize` uses the fastest allowed 
 default `--allow yellow` keeps every belt yellow). A belt never goes down a tier unless you add
 `--downgrade`.
 `route --hand inserter` links machines with plain inserters
-instead of fast ones (rows take `inserter=inserter` for the same).
+instead of fast ones (rows take `inserter=inserter` for the same). `--hand any` (the template's
+line) is usually better: it takes the best hand robots can build **now**, so plain inserters while
+`fast-inserter` is locked or the network holds none, fast ones once it does. A route that already
+stands keeps its carriers, so `--hand any` renames the standing hands robots cannot build to the one
+they can (`out\route.txt`: `rehanded 2 standing inserters robots cannot build, to inserter`), and
+leaves a hand that stands built alone. `cover power --pole
+any` and `floorplan --bridge-power any` do the same for poles: medium poles where the network can
+build them, small ones otherwise. The choice is written to `out\avail.json` by `report_bom --stock
+live` (and `fk avail --save`), the design half of a build runs on the laptop where there is no game
+link, and `out\route.txt` / `out\cover_power.txt` say what was taken and why.

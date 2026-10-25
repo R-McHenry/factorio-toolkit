@@ -50,7 +50,12 @@ a few free tiles at a row's head and between rows: the router lays the belts the
 FILE INST` shows any row as its exact entities, with its size and where its belts attach.
 
 `duty=0.5` on any instance caps it (a row that runs only part of the time). `inserter=inserter`
-on a row puts plain inserters in place of the fast ones.
+on a row puts plain inserters in place of the fast ones; `inserter=any` (or `auto`, `whatever`)
+lets the build pick: the best hand robots can build now, so plain ones while fast inserters are
+locked or the network holds none, fast ones once it does (`out/avail.json`, written by
+`report_bom --stock live`; the build log says which one it took and why). The router's direct
+insertion takes the same family, as `route --hand any` in the build script; a single machine's
+`inserter=` does nothing (its inserters are the router's: that is what `--hand` is for).
 
 ## Counts the build chooses: `n=auto`
 

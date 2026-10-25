@@ -172,11 +172,14 @@ class PlayerPatchesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             route.route_layout(flat, lay, CAT, hand="long-handed-inserter")
 
-    def test_the_upgrade_keeps_plain_hands(self):
+    def test_the_upgrade_takes_the_hand_the_network_can_build(self):
+        # 2.0.14: `--hand any` rather than a hard-coded plain hand, and a run's own patch replaced
         script = "place           --keep pinned\nroute           --only stale --effort normal\n"
-        self.assertIn("route           --only stale --effort normal --hand inserter\n",
+        self.assertIn("route           --only stale --effort normal --hand any\n",
                       upgrade_run._hand(script))
-        self.assertIsNone(upgrade_run._hand(script.replace("normal", "normal --hand inserter")))
+        patched = script.replace("normal", "normal --hand inserter")
+        self.assertIn("normal --hand any", upgrade_run._hand(patched))
+        self.assertIsNone(upgrade_run._hand(patched.replace("--hand inserter", "--hand any")))
 
 
 def v(verdict, name, x=0.5, y=0.5, wrong=()):

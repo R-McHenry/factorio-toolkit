@@ -71,5 +71,33 @@ class StopsTest(unittest.TestCase):
         self.assertIn("stop_on         invariant\nstop_on         NO_SINK", new)
 
 
+class PolesTest(unittest.TestCase):
+    """2.0.14: an upgraded run's coverage step takes the pole the network can build."""
+
+    def test_the_template_names_any_pole(self):
+        with open(TEMPLATE, encoding="utf-8") as fh:
+            text = fh.read()
+        from fkcore import flow
+        opts = {ln.cmd: ln.args for ln in flow.parse(text, TEMPLATE)}
+        self.assertIn("any", opts["cover_power"])
+        self.assertIn("any", opts["floorplan"])
+
+    def test_a_named_pole_becomes_any(self):
+        old = ("route           --only stale --effort normal\n"
+               "cover power     --pole medium-electric-pole\n"
+               "floorplan       --bridge-power\n")
+        new = upgrade_run._pole(old)
+        self.assertIn("cover power     --pole any\n", new)
+        self.assertIn("floorplan       --bridge-power any\n", new)
+        self.assertIsNone(upgrade_run._pole(new))
+        sized = old.replace("--pole medium-electric-pole", "--pole small-electric-pole")
+        self.assertIn("--pole any", upgrade_run._pole(sized))
+        self.assertIn("--bridge-power any", upgrade_run._pole(old.replace(
+            "--bridge-power", "--bridge-power substation")))
+        self.assertTrue(upgrade_run._pole("cover power     --pole any\n"
+                                          "floorplan       --bridge-power substation\n")
+                        .endswith("--bridge-power any\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

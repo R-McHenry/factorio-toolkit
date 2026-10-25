@@ -28,6 +28,7 @@ from __future__ import annotations
 import math
 import re
 
+from . import avail as availmod
 from . import fkp as fkpmod
 from . import placer
 from .codec import config_text
@@ -87,6 +88,8 @@ def fragment_of(flat, path, cat):
         frag = _single(flat, keys, cat, ins, outs)
     else:
         params = {k: v for k, v in inst.params.items() if k not in ("duty",)}
+        if params.get("inserter") is not None:
+            params["inserter"] = _hand_param(path, params["inserter"], cat)
         if inst.kind in ("SmelterRow", "SmelterArray"):
             params["_recipe"] = m0.recipe
             fuel = [i for i in m0.needs if i not in cat.recipe_rates(m0.recipe, 1)[0]]
@@ -102,6 +105,19 @@ def fragment_of(flat, path, cat):
     for name, (net, _items) in zip(names_out, outs):
         binding[name] = net
     return frag, binding
+
+
+def _hand_param(path, want, cat):
+    """A row's ``inserter=``: the prototype it names, checked, or the one ``any`` picks now
+    (``fkcore.avail``: the best hand the network can build, else the best it can make)."""
+    got, _note = availmod.choose("hand", want)
+    if not cat.has_entity(got):
+        raise FragmentError(f"{path}: inserter={want}: no prototype {got!r} in the catalog")
+    if cat.kind(got) != "inserter":
+        raise FragmentError(f"{path}: inserter={want}: {got} is a {cat.kind(got)}, not an inserter "
+                            "(inserter, fast-inserter, long-handed-inserter, bulk-inserter, ... "
+                            "or any)")
+    return str(got)
 
 
 def _array_column(cat, m):

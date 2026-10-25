@@ -62,7 +62,7 @@ LOCAL = {"rates", "plan", "check", "explain", "unfold", "render", "layout", "spl
          "merge", "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "alerts", "stats", "chart", "read-terrain", "measure", "adopt",
-        "sense", "research", "tech", "recipes", "lua", "fresh"}
+        "sense", "research", "tech", "recipes", "lua", "fresh", "avail"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
 AREA_FIRST = ("fresh", "measure")
 #: files only the host writes: pulled, never pushed
@@ -254,6 +254,20 @@ def local(cfg, args):
     return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env).returncode
 
 
+#: what the design half reads about the game: the host writes it, the laptop only reads it
+AVAIL = os.path.join(GAME, "out", "avail.json")
+
+
+def _avail_first(cfg):
+    """One host read of what ``inserter=any`` / ``--hand any`` / ``--pole any`` can build, before a
+    design half that has no snapshot yet (the first build of a run): without it the first build
+    chooses blind, which is how a run used to paste inserters its network could not build."""
+    if cfg["host"] == "local" or os.path.exists(AVAIL):
+        return
+    remote(cfg, ["avail", ".", "--save"], footer=False)
+    pull(cfg)
+
+
 def remote(cfg, args, footer=True, data=None):
     """``fkcore ARGS`` on the host (``data``: bytes for its stdin)."""
     if cfg["host"] == "local":
@@ -335,6 +349,7 @@ def build(cfg, args):
     split = link_at[0] if link_at else len(names)
     code = 0
     if i < split:
+        _avail_first(cfg)
         code = local(cfg, ["build", script, "--from", _spec(names, i),
                            "--to", _spec(names, min(j, split - 1))])
     if code == 0 and j >= split:

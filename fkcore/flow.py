@@ -51,6 +51,7 @@ import re
 import shlex
 from dataclasses import dataclass, field
 
+from . import avail as availmod
 from . import compose, connect, expand, fkp, placer, rates, route
 from . import own as ownmod
 from . import surface as surfacemod
@@ -662,8 +663,19 @@ def _frame_blocked(ctx, factory, size):
     return terrainmod.frame_blocked(ctx.ground, p, size or terrainmod.frame_size(p))
 
 
+def _need(ctx, kind):
+    """How many entities of ``kind`` the design holds (its committed layout when this build has
+    none yet): what a family choice must be able to build, at least. A tier the network holds one
+    or two of is no better than none for forty, and this keeps ``any`` from choosing it."""
+    lays = list(ctx.layouts.values()) or list(ctx.previous.values())
+    n = sum(1 for lay in lays for e in lay.entities.values()
+            if ctx.cat.has_entity(e.name) and ctx.cat.kind(e.name) == kind)
+    return max(n, 1)
+
+
 def s_route(ctx, args):
     o = _opts(args, only="all", effort="normal", hand="fast-inserter")
+    hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
@@ -673,7 +685,8 @@ def s_route(ctx, args):
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
-                               hand=o["hand"], patch=pinned)
+                               hand=hand, patch=pinned)
+        r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
         lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept"
@@ -683,6 +696,9 @@ def s_route(ctx, args):
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
                         else ""))
         lines += [f"  stale     {n}: routed again: {why}" for n, why in sorted(again.items())]
+        if rehanded:
+            lines.append(f"  rehanded  {rehanded} standing inserter"
+                         f"{'s' if rehanded != 1 else ''} robots cannot build, to {hand}")
         lines += [f"  {l}" for l in r.lines]
         lines += _one_inserter(ctx, factory, flat, r.layout)
         checks += [Check("UNROUTED", f"{factory} net {n}", why) for n, why in r.failed.items()]
@@ -690,6 +706,32 @@ def s_route(ctx, args):
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]
         checks += _invariant_checks(factory, fkp.invariants(r.layout, ctx.cat, nets=flat.nets))
     return lines, checks
+
+
+def _rehand(lay, cat, hand):
+    """The standing route's inserters that robots cannot build now take ``hand`` instead: -> (new
+    layout, how many changed). A route that stands keeps its carriers (2.0), so ``--hand any`` alone
+    would leave the fast inserter a run pasted while none was researched exactly where it was: the
+    2026-10-25 run's four LOCKED ghosts, on a net that never changes. Only a short hand becomes
+    another short hand (the footprint is one tile either way), only one the network cannot build
+    now is touched, and only when it can build ``hand``: an inserter that stands built is left
+    alone, since it works and its speed is not worth losing."""
+    out = dict(lay.entities)
+    n = 0
+    for key, e in lay.entities.items():
+        if not e.owner.startswith("~") or not cat.has_entity(e.name) \
+                or cat.kind(e.name) != "inserter" or e.name == hand:
+            continue
+        if connect.REACH.get(e.name, 1) != 1 or connect.REACH.get(hand, 1) != 1:
+            continue
+        if availmod.buildable(e.name) or not availmod.buildable(hand):
+            continue
+        out[key] = fkp.Entity(e.key, hand, e.x, e.y, e.dir, dict(e.attrs))
+        n += 1
+    if not n:
+        return lay, 0
+    return fkp.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
+                      dict(lay.plots), dict(lay.claims), dict(lay.marks), out), n
 
 
 def s_tier(ctx, args):
@@ -735,6 +777,10 @@ def s_cover_power(ctx, args):
     the committed poles stay where they still fit and new ones go only where coverage is missing;
     ``--fresh`` lays every pole anew, as before."""
     o = _opts(args, pole="medium-electric-pole")
+    pole, _note = availmod.choose("pole", o["pole"], need=_need(ctx, "electric-pole"))
+    if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
+        raise FlowError(f"--pole {pole}: not an electric pole (small-electric-pole, "
+                        "medium-electric-pole, big-electric-pole, substation), or any")
     try:
         from . import cover
     except ImportError:
@@ -745,9 +791,9 @@ def s_cover_power(ctx, args):
         keep_out = _frame_blocked(ctx, factory, lay.size)
         pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
         standing = _standing(ctx, factory)
-        _poles, rep = cover.cover_power(lay, ctx.cat, pole=o["pole"], keep_out=keep_out,
+        _poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
                                         pinned=pinned, standing=standing)
-        new = cover.apply_cover(lay, ctx.cat, pole=o["pole"], keep_out=keep_out, pinned=pinned,
+        new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
                                 standing=standing)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}"
@@ -863,6 +909,10 @@ def s_floorplan(ctx, args):
     if o.get("bridge_power"):
         from . import cover
         pole = o["bridge_power"] if isinstance(o["bridge_power"], str) else "medium-electric-pole"
+        pole, _note = availmod.choose("pole", pole, need=_need(ctx, "electric-pole"))
+        if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
+            raise FlowError(f"--bridge-power {pole}: not an electric pole (small-electric-pole, "
+                            "medium-electric-pole, big-electric-pole, substation), or any")
         s = ctx.composed
         keep = set()
         for p in s.plots.values():
@@ -1110,7 +1160,11 @@ def _bom_live(ctx):
     used = sorted({e.attrs["recipe"] for e in (ctx.composed.entities.values() if ctx.composed
                                                 else ()) if e.attrs.get("recipe")
                    and ctx.cat.kind(e.name) == "assembling-machine"})
-    sup = supply.read(r, _force(ctx), ctx.surface.name, need, used)
+    # the availability families too: this is the read the next (linkless) build's inserter=any,
+    # --hand any and --pole any choose from (out/avail.json, beside out/force.json)
+    sup = supply.read(r, _force(ctx), ctx.surface.name, list(need) + list(availmod.CANDIDATES),
+                      used)
+    availmod.save(ctx.root, sup, "report_bom --stock live")
     lines, checks = supply.bom(need, sup, used)
     lines = ([lines[0], f"  to build: {what}; {sum(need.values())} entities",
               f"  {supply.research_line(sup.research)}"] + lines[1:])
@@ -1506,6 +1560,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
     with open(script, encoding="utf-8") as fh:
         lines = parse(fh.read(), script)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
+    availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:
         ctx.link, ctx.link_lent = link, True
     ctx.steps = [ln.cmd for ln in lines]
@@ -1556,6 +1611,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
     for i in range(first, last + 1):
         ln = lines[i]
         report, checks = STEPS[ln.cmd](ctx, ln.args)
+        report = report + availmod.drain()      # what inserter=any / --hand any / --pole any chose
         if i == first:
             report = report + notes
         ctx.checks += [(ln.cmd, c) for c in checks]
