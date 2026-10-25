@@ -436,9 +436,14 @@ fk tech NAME                     a technology, or what opens an item or recipe: 
 fk recipes [NAME...] [--enabled] the locked recipes (or the enabled ones) and what opens each
 fk read-terrain --surface nauvis --area X0,Y0,X1,Y1
                                  read more bare ground into map.terrain.json
-fk chat                          Rory's messages since you last looked
+fk chat                          the chat messages you have not dismissed yet
 fk say "text"                    one line in the game chat
+fk ack                           dismiss them (the only way; until then they keep coming back)
 ```
+
+A chat message is not shown once and gone: it appears at the end of every `fk` command until you
+`fk ack`, so a pipe (`| Select-Object -First 30`) that drops it costs nothing. Answer first, then
+ack: `fk say "on it: belting the ore now"`, do the work, `fk ack`.
 
 Every command takes `--help`.
 

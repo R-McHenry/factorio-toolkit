@@ -294,15 +294,20 @@ def _talk(a):
         if a.cmd == "say":
             chat.say(r, " ".join(a.text))
             return 0
+        if a.cmd == "ack":
+            tick = chat.ack(r, a.game)
+            print(f"ack: chat dismissed up to tick {tick}: nothing unanswered")
+            return 0
         if a.cmd == "chat" and a.all:
             got = chat.read(r, 0)
             lines = [f"chat {m.get('name') or '?'}: {m.get('message', '')}" for m in got["messages"]]
         else:
-            lines = chat.new_lines(r, a.game)
+            lines = chat.pending(r, a.game)
         if a.cmd == "poll":
             from . import alerts
-            lines = alerts.poll(r, a.game) + lines + [_research_footer(r, a.game)]
-        print("\n".join(lines) if lines else ("chat: nothing new" if a.cmd == "chat" else ""),
+            # 2.0.25: the unanswered chat goes LAST, so `| Select-Object -Last N` keeps it
+            lines = alerts.poll(r, a.game) + [_research_footer(r, a.game)] + lines
+        print("\n".join(lines) if lines else ("chat: nothing unanswered" if a.cmd == "chat" else ""),
               end="\n" if lines or a.cmd == "chat" else "")
     return 0
 
@@ -719,6 +724,8 @@ def main(argv=None):
     ch.add_argument("--all", action="store_true")
     sy = sub.add_parser("say")
     sy.add_argument("text", nargs="+")
+    ak = sub.add_parser("ack")
+    ak.add_argument("game")
     po = sub.add_parser("poll")
     po.add_argument("game")
     lu = sub.add_parser("lua")
@@ -753,7 +760,7 @@ def main(argv=None):
     if a.cmd == "stage":
         from . import stage
         return stage.main(a.game, a.rest)
-    if a.cmd in ("chat", "say", "poll"):
+    if a.cmd in ("chat", "say", "poll", "ack"):
         return _talk(a)
     if a.cmd in ("research", "tech", "recipes"):
         return _research(a)

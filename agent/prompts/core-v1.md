@@ -153,7 +153,10 @@ the base makes now (`fk stats`), what it holds (`fk stock`), and what the last s
 dedicated mall, belt-fed from its own smelting, is what makes the later steps cheap; one-off
 crafters are for the rare items.
 
-Rory's chat messages show up at the end of any `fk` command; answer with `fk say "text"`.
+Rory's chat messages are not one-off: a message you have not answered stays at the end of every
+`fk` command, with its age, until you dismiss it. Answer with `fk say "text"` and, when you have
+dealt with it, run `fk ack`: that is the only thing that clears it, and a message you never answer
+keeps coming back under every command you run.
 
 If something in the tools seems broken, just say so in `FRICTION.md`: that's useful to know.
 
