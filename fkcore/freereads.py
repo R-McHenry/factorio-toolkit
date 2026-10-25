@@ -42,16 +42,19 @@ class StatsRead:
 
 @dataclass(frozen=True)
 class StockRead:
-    """What the base holds: items in chests (idle until something moves them) and in roboports
-    (robots in the robot slots, repair packs in the material slots), per item."""
+    """What the base holds: items in chests (idle until something moves them), in roboports
+    (robots in the robot slots, repair packs in the material slots) and in the character's pack,
+    per item."""
     force: str
     surface: str
     tick: int
     chest: tuple            # ((name, count), ...) sorted by name
     port: tuple
+    pack: tuple = ()        # what the character carries
 
     def total(self, name):
-        return dict(self.chest).get(name, 0) + dict(self.port).get(name, 0)
+        return (dict(self.chest).get(name, 0) + dict(self.port).get(name, 0)
+                + dict(self.pack).get(name, 0))
 
 
 @dataclass(frozen=True)
@@ -93,7 +96,7 @@ def stock_from(raw) -> StockRead:
     def rows(v):
         return tuple(sorted((str(k), int(n)) for k, n in (v or {}).items()))
     return StockRead(str(raw.get("force")), str(raw.get("surface")), int(raw.get("tick") or 0),
-                     rows(raw.get("chest")), rows(raw.get("port")))
+                     rows(raw.get("chest")), rows(raw.get("port")), rows(raw.get("pack")))
 
 
 def stock(r, force, surface) -> StockRead:
@@ -101,23 +104,28 @@ def stock(r, force, surface) -> StockRead:
 
 
 def stock_lines(st: StockRead):
-    """What the base holds, largest first. Robots get their own line: one in a chest is an item
-    and does nothing until an inserter puts it into a roboport."""
-    chest, port = dict(st.chest), dict(st.port)
-    names = sorted(set(chest) | set(port),
-                   key=lambda n: (-(chest.get(n, 0) + port.get(n, 0)), n))
-    total = sum(chest.values()) + sum(port.values())
+    """What the base holds, largest first, with the character's pack named: robots get their own
+    line, since one in a chest is an item and does nothing until an inserter puts it in a roboport."""
+    chest, port, pack = dict(st.chest), dict(st.port), dict(st.pack)
+    names = sorted(set(chest) | set(port) | set(pack),
+                   key=lambda n: (-(chest.get(n, 0) + port.get(n, 0) + pack.get(n, 0)), n))
+    total = sum(chest.values()) + sum(port.values()) + sum(pack.values())
     out = [f"stock {st.surface}: force {st.force}, tick {st.tick}: {len(names)} kinds, {total} "
-           f"items in chests and roboports (a free read: never an alert)"]
+           f"items in chests, roboports and your pack (a free read: never an alert)"]
     for n in names:
-        c, p = chest.get(n, 0), port.get(n, 0)
-        line = f"  {n:<30} {c + p:>7}"
+        c, p, k = chest.get(n, 0), port.get(n, 0), pack.get(n, 0)
+        line = f"  {n:<30} {c + p + k:>7}"
         if n.endswith("-robot"):
-            line += f"  ({p} in roboports, {c} in chests)"
+            line += f"  ({p} in roboports, {c} in chests"
+            if k:
+                line += f", {k} carried"
+            line += ")"
             if c:
                 line += " - the ones in chests are idle: an inserter into a roboport starts them"
-        elif c and p:
-            line += f"  ({c} in chests, {p} in roboports)"
+        elif (c and p) or k:
+            line += "  (" + ", ".join(x for x in (f"{c} in chests" if c else "",
+                                                 f"{p} in roboports" if p else "",
+                                                 f"{k} carried" if k else "") if x) + ")"
         out.append(line)
     if not any(n.endswith("-robot") and port.get(n) for n in port):
         out.append("  no robots in any roboport: nothing flies until one is loaded")

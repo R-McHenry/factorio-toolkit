@@ -1,4 +1,4 @@
-"""`fk stock` (2.0.18): what the base holds, per item, chests and roboports apart.
+"""`fk stock` (2.0.18): what the base holds, per item, chests, roboports and your pack apart.
 
 Rory, 2026-10-25: "make sure the agent is looking at the items it has, thats how it should tell
 things like that it picked up robots and be able to decide on its own a policy for roboports". In
@@ -11,8 +11,9 @@ import unittest
 from fkcore.freereads import StockRead, stock_lines
 
 
-def read(chest, port):
-    return StockRead("player", "nauvis", 1234, tuple(sorted(chest.items())), tuple(sorted(port.items())))
+def read(chest, port, pack=None):
+    return StockRead("player", "nauvis", 1234, tuple(sorted(chest.items())),
+                     tuple(sorted(port.items())), tuple(sorted((pack or {}).items())))
 
 
 class StockLinesTest(unittest.TestCase):
@@ -38,6 +39,13 @@ class StockLinesTest(unittest.TestCase):
         lines = stock_lines(read({"coal": 200, "iron-plate": 1188}, {}))
         self.assertTrue(lines[1].strip().startswith("iron-plate"))
         self.assertTrue(lines[2].strip().startswith("coal"))
+
+    def test_the_pack_is_counted_and_named(self):
+        text = "\n".join(stock_lines(read({"iron-plate": 100}, {}, {"iron-plate": 8,
+                                                                   "burner-mining-drill": 1})))
+        self.assertIn("your pack", text)
+        self.assertIn("8 carried", text)
+        self.assertIn("burner-mining-drill", text)
 
 
 if __name__ == "__main__":
