@@ -113,9 +113,10 @@ def primary(flat, keys):
 
 
 def _pools(flat):
-    """{(net, item): (pool net, item)} for every net a bus joins. A port passes on what reaches
+    """{(net, item): (pool net, item)} for every net a port joins. A port passes on what reaches
     it, so its nets are one: the nets into a bus's loads, the bus's own net, the nets out of its
-    taps, and any bus a net joins to them. The pool is named as its first bus."""
+    taps, any bus a net joins to them, and the two nets of a sealed module's port (2.0.28: the
+    inside one and the one outside that names it). The pool is named as its first bus."""
     parent = {}
 
     def find(x):
@@ -129,10 +130,10 @@ def _pools(flat):
     for key, m in flat.machines.items():
         if not m.extra.get("port"):
             continue
-        item = m.extra["item"]
-        nets = [n for hold in holds for n in hold.get((key, item), ())]
-        for n in nets:
-            parent[find((n, item))] = find((nets[0], item))
+        for item in m.extra.get("items") or [m.extra["item"]]:
+            nets = [n for hold in holds for n in hold.get((key, item), ())]
+            for n in nets:
+                parent[find((n, item))] = find((nets[0], item))
     groups = {}
     for ni in list(parent):
         groups.setdefault(find(ni), []).append(ni)
@@ -460,7 +461,7 @@ def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, un
         if it != item:
             continue
         if m.extra.get("port"):
-            into = into or m.extra["port"] == "load"
+            into = into or m.extra["port"] in ("load", "in")
             continue
         need = m.needs.get(item, 0.0)
         if need > 0:

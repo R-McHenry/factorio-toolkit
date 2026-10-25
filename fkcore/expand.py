@@ -308,11 +308,18 @@ def _turn_box(box, rot, frame):
 
 def _module_frame(flat, path, cat, frames=None):
     """(x0, y0, x1, y1): module instance ``path``'s frame in its own coordinates, the box of its
-    origin and every placed child's turned frame. A child with no ``@(x, y)`` hint (unplaced, or
+    origin and every placed child's turned frame, or the frame the module declares with ``size
+    WxH`` (2.0.28: a port list needs a frame before anything is placed). A child with no ``@(x, y)``
+    hint (unplaced, or
     ``@patch``: placed in the factory frame), a pinned Literal (its entities stay where the
     .fkp has them) and one whose fragment fails (its note says why) are not in it."""
     if frames is not None and path in frames:
         return frames[path]
+    if flat.insts[path].size is not None:      # a module that declares its frame (2.0.28: ports)
+        w, h = flat.insts[path].size
+        if frames is not None:
+            frames[path] = (0, 0, w, h)
+        return 0, 0, w, h
     x0 = y0 = x1 = y1 = 0
     for child in flat.scopes[path].values():
         hint = child.hints.get("at")

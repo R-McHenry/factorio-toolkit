@@ -2,8 +2,9 @@
 
     file    := (import | module | stmt)*        # the file's top level is the factory body
     import  := 'import' Name (',' Name)* 'from' STRING
-    module  := 'module' Name '{' stmt* '}'
-    stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect
+    module  := 'module' Name ('size' WxH)? '{' stmt* '}'
+    stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
+    port    := 'port' name ':' ('in' | 'out' | 'inout') item (',' item)* '@' side
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* ('when' cond)?
     net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
@@ -29,6 +30,16 @@ and implements no limit. ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lan
 share a belt) says nets A and B share every belt they are on, A on the left lane and B on the
 right looking downstream: the router lays them as one pair (``fkcore.pairs``).
 
+Ports (2.0.28, PLAN-MODULES): a module body may declare
+``port NAME : in|out|inout ITEM[, ITEM] @SIDE[POS]``, and the definition may give ``size WxH``. A
+module with ports is **sealed**: the nets written in its body are local, its only endpoints for the
+rest of the design are its ports, and a ref that reaches past them (``gears.gears`` from outside) is
+refused at elaboration. A module without ports is exactly as before, which is what every existing
+``.fk`` is. Inside the body a port is an ordinary net endpoint (``net fe: iron -> gears``); outside
+it is the module's endpoint (``net fe: bus -> gears.iron``), so one net in the source is one net that
+meets itself at the port. ``@SIDE`` is ``n``, ``e``, ``s`` or ``w`` of the module's frame; ``@w4``
+pins the tile along that edge (without a number the build chooses it, facing the port's partner).
+
 Circuits (2.0, Rory 2026-10-21: "circuit wiring in the source, with all circuit and logic
 conditions in the .fk code"; the draft is drafts\\reactor-1.1\\CIRCUITS-1.1.md): ``signal`` names a
 game signal (``signal temp = signal-T``) or leaves it to the build; ``wire`` is a net of signals,
@@ -44,8 +55,8 @@ import re
 from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
-           "Module", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand", "Behave",
-           "Expect", "Props", "COMPARATORS"]
+           "Module", "Port", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand",
+           "Behave", "Expect", "Props", "COMPARATORS"]
 
 
 class FkSyntaxError(Exception):
@@ -57,6 +68,7 @@ class FkSyntaxError(Exception):
 _TOKEN = re.compile(r"""
     (?P<ws>[ \t\r]+) | (?P<nl>\n) | (?P<comment>\#[^\n]*)
   | (?P<string>"[^"\n]*")
+  | (?P<dim>\d+x\d+)(?![A-Za-z0-9_])
   | (?P<num>-?\d+(?:\.\d+)?(?![A-Za-z_\-]))
   | (?P<op>->|>=|<=|==|!=|[{}()\[\]<>,:=|@./*])
   | (?P<word>[A-Za-z_](?:[A-Za-z0-9_]|-(?!>))*)
@@ -233,6 +245,21 @@ class Module:
     expects: list = field(default_factory=list)
     lanes: list = field(default_factory=list)      # [Lanes]: two nets that share a belt
     sets: list = field(default_factory=list)       # [Props]: properties on named objects (2.0.27)
+    ports: list = field(default_factory=list)      # [Port]: the module's interface (2.0.28)
+    size: tuple | None = None                      # (W, H) of its frame as written, or None
+
+
+@dataclass
+class Port:
+    """A port declaration (2.0.28, PLAN-MODULES): ``port NAME : in|out|inout ITEM[, ITEM] @SIDE[POS]``.
+    ``side`` is a compass side of the module's frame, ``pos`` the tile along that edge as written
+    (``@w4``) or None: the build chooses the tile facing the port's partner."""
+    name: str
+    dir: str             # "in" | "out" | "inout"
+    items: list
+    side: str            # "n" | "e" | "s" | "w"
+    pos: int | None
+    line: int
 
 
 @dataclass
@@ -328,6 +355,11 @@ class _P:
                 f.modules[mod.name] = mod
             else:
                 self.stmt(body)
+        if body.ports:
+            p = body.ports[0]
+            raise FkSyntaxError(self.path, p.line,
+                                f"port {p.name}: a port is a module's interface; declare it inside "
+                                "`module NAME { ... }`")
         return f
 
     def import_(self):
@@ -344,12 +376,41 @@ class _P:
     def module(self):
         line = self.expect("module").line
         mod = Module(self.name("module name").text, line)
+        if self.accept("size"):
+            tok = self.peek()
+            if tok.kind != "dim":
+                self.err("a module's frame is written `size WxH`, like size 24x10", tok)
+            self.next()
+            w, h = (int(v) for v in tok.text.split("x"))
+            if w < 1 or h < 1:
+                self.err(f"size {tok.text}: a frame is at least 1x1", tok)
+            mod.size = (w, h)
         self.expect("{")
         while not self.accept("}"):
             if self.peek().kind == "eof":
                 self.err(f"module {mod.name} is not closed")
             self.stmt(mod)
         return mod
+
+    def port(self):
+        """``port NAME : in|out|inout ITEM[, ITEM] @SIDE[POS]`` (2.0.28, PLAN-MODULES)."""
+        line = self.expect("port").line
+        name = self.name("port name").text
+        self.expect(":")
+        direction = self.word("in, out or inout").text
+        if direction not in ("in", "out", "inout"):
+            self.err(f"a port carries items in, out or inout, got {direction!r}")
+        items = [self.word("item").text]
+        while self.peek().text in (",", "|"):          # `|` is a lane pair, as `lanes A | B`
+            self.next()
+            items.append(self.word("item").text)
+        self.expect("@")
+        tok = self.word("a side: n, e, s or w, with a tile along it like w4")
+        rest = tok.text[1:]
+        if tok.text[0] not in "nesw" or (rest and not rest.isdigit()):
+            self.err(f"{tok.text}: a port's side is n, e, s or w, with its tile along that edge "
+                     "like w4 (or the side alone: the build chooses the tile)", tok)
+        return Port(name, direction, items, tok.text[0], int(rest) if rest else None, line)
 
     def stmt(self, mod):
         tok = self.peek()
@@ -371,6 +432,8 @@ class _P:
             mod.behaves.append(self.behave())
         elif tok.text == "set" and self.peek(1).kind == "word":
             mod.sets.append(self.props())
+        elif tok.text == "port" and self.peek(1).kind == "word":
+            mod.ports.append(self.port())
         elif tok.text == "expect" and self.peek(1).text != "=":
             mod.expects.append(self.expect_line())
         elif self.peek(1).text == "=":

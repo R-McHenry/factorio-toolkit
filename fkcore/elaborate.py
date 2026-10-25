@@ -41,8 +41,8 @@ from dataclasses import dataclass, field
 from . import lang
 from .templates import CONTACT, MSpec, TemplateError, literal_machines, machines as template_machines
 
-__all__ = ["ElabError", "Machine", "FlatNet", "Check", "Flat", "load", "elaborate", "elaborate_file",
-           "AUTO_KINDS"]
+__all__ = ["ElabError", "Machine", "FlatNet", "PortInst", "Check", "Flat", "load", "elaborate",
+           "elaborate_file", "AUTO_KINDS"]
 
 #: the templates whose count may be ``n=auto``: the rows
 AUTO_KINDS = ("MinerRow", "SmelterRow", "SmelterArray", "AsmRow", "LabRow")
@@ -84,6 +84,7 @@ class FlatNet:
     line: int
     limited: bool = False      # `net NAME limited:` the source limits its makers (1.7)
     when: tuple | None = None  # a gated net (2.0): (lang.Cond, its scope)
+    scope: str = ""            # the path of the body it is written in (2.0.28)
 
     @property
     def sushi(self):
@@ -114,6 +115,26 @@ class Inst:
     literal: tuple | None = None   # Literal<file>: (entities, frame size, file origin, sig)
     auto: tuple | None = None      # n=auto: (lo, hi), the bounds of the count in params["n"]
     when: tuple | None = None      # its machines' own enable condition (2.0): (lang.Cond, scope)
+    size: tuple | None = None      # a module's declared frame (2.0.28): (W, H)
+
+
+@dataclass
+class PortInst:
+    """A port of a sealed module instance (2.0.28, PLAN-MODULES): the module's own endpoint in the
+    netlist, keyed ``<instance>/<port>``. Its machine is a conduit: it makes and takes the port's
+    items at no rate of its own, and the two nets that name it are one pool in the rates model, so
+    a crossing net is one net whose two segments meet at the port."""
+    key: str
+    name: str
+    dir: str             # "in" | "out" | "inout"
+    items: list
+    side: str            # "n" | "e" | "s" | "w"
+    pos: int | None      # the tile along the side as written (`@w4`), or None: chosen at layout
+    scope: str           # the sealed instance's path
+    module: str          # the module type's name
+    size: tuple | None   # the module's declared frame, or None (computed at layout)
+    line: int
+    src: str
 
 
 @dataclass
@@ -131,9 +152,12 @@ class Flat:
     circuit: object = None                          # fkcore.circuits.Circuit (2.0)
     pairs: dict = field(default_factory=dict)       # "A|B" -> (A, B): two nets on one belt
     lane_of: dict = field(default_factory=dict)     # net -> its pair's "A|B"
+    ports: dict = field(default_factory=dict)       # "<instance>/<port>" -> PortInst (2.0.28)
+    sealed: set = field(default_factory=set)        # instance paths whose module declares ports
 
     def resolve_ref(self, ref, scope=""):
-        """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine."""
+        """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine or a port.
+        A ref into a sealed module names one of its ports, or elaboration refuses it (2.0.28)."""
         return _resolve(self, ref, scope)
 
 
@@ -192,10 +216,12 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._layout = layout
     flat._sizes = dict(sizes or {})
     flat._lanes = []
+    flat._port_named = {}
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     _resolve_nets(flat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
+    _port_checks(flat)
     _endpoint_checks(flat, cat)
     from . import circuits
     flat.circuit = circuits.resolve(flat, cat)
@@ -205,8 +231,31 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
 def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
     scope = {}
     flat.scopes[prefix] = scope
+    ports = {}
+    for p in mod.ports:
+        if prefix == "":
+            raise ElabError(src, p.line, f"port {p.name}: a port is a module's interface; declare "
+                                        "it inside `module NAME { ... }`")
+        key = _join(prefix, p.name)
+        if key in flat.ports:
+            raise ElabError(src, p.line, f"port {p.name} is defined twice")
+        ports[p.name] = key
+        flat.ports[key] = PortInst(key, p.name, p.dir, list(p.items), p.side, p.pos, prefix,
+                                   mod.name, mod.size, p.line, src)
+        # a conduit: makes and takes its items at no rate of its own (rates._pools joins the two
+        # nets that name it into one pool), so a crossing net is one net that meets itself here
+        flat.machines[key] = Machine(key, prefix, "Port", "transport-belt", None, {},
+                                     {item: 0.0 for item in p.items}, frozenset(p.items),
+                                     False, None, False, 1.0,
+                                     {"port": p.dir, "items": list(p.items),
+                                      "port_name": p.name, "module": mod.name})
+    if ports:
+        flat.sealed.add(prefix)
     for inst in mod.insts:
         path = _join(prefix, inst.name)
+        if inst.name in ports:
+            raise ElabError(src, inst.line, f"{inst.name} is a port of module {mod.name}: name the "
+                                            "instance otherwise")
         if inst.name in scope:
             raise ElabError(src, inst.line, f"{inst.name} is defined twice")
         d = min(duty, _duty(inst.params, path, inst.line, src))
@@ -219,9 +268,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                                                 f"not {', '.join(extra)}")
             before = set(flat.machines)
             _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,))
-            keys = [k for k in flat.machines if k not in before]
+            keys = [k for k in flat.machines if k not in before and k not in flat.ports]
             node = Inst(path, inst.kind, inst.params, inst.hints, keys, inst.kind,
-                        flat.scopes[path], inst.line)
+                        flat.scopes[path], inst.line, size=modules[inst.kind].size)
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
             auto = _auto(flat, path, inst, src)
@@ -327,19 +376,63 @@ class _Pending:
     src: str
 
 
-def _resolve(flat, ref, scope):
+def _sealed_msg(flat, node, ref, items, side):
+    """The refusal for a ref that reaches inside a sealed module: name the port to add."""
+    ports = [p for p in flat.ports.values() if p.scope == node.path]
+    have = "; ".join(f"{p.name} ({p.dir} {', '.join(p.items)})" for p in ports) or "none"
+    item = ", ".join(items) if items else "ITEM"
+    want = "out" if side == "driver" else "in"
+    example = f"{node.path}.{ports[0].name}" if ports else f"{node.path}.PORT"
+    return (f"{ref}: {node.path} is a sealed module ({node.kind}), and its ports are {have}. "
+            f"Name a port (e.g. {example}), or add one to module {node.kind}: "
+            f"`port NAME : {want} {item} @SIDE`, and give it a net inside")
+
+
+def _sealed_ref(flat, node, ref, used, items, side, src):
+    """``ref`` reached sealed instance ``node`` after ``used`` parts: only a port's name may follow."""
+    left = ref.parts[used:]
+    if left and not ref.star:
+        key = _join(node.path, left[0])
+        if key in flat.ports:
+            if len(left) > 1:
+                raise ElabError(src, ref.line,
+                                f"{ref}: {key} is a port of module {node.kind}, and a port is the "
+                                "module's whole interface: nothing is inside it")
+            return None, [key]
+    raise ElabError(src, ref.line, _sealed_msg(flat, node, ref, items, side))
+
+
+def _resolve(flat, ref, scope, items=None, side=None, src=None):
+    """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine or a port.
+
+    A ref into a sealed module (one whose module declares ports) may name a port and nothing
+    deeper: everything else is refused with the port it would need (2.0.28, PLAN-MODULES).
+    """
+    src = src or flat.path
     names = flat.scopes.get(scope, {})
     node = names.get(ref.parts[0])
     if node is None:
+        key = _join(scope, ref.parts[0])
+        if key in flat.ports:
+            if ref.star or len(ref.parts) > 1:
+                raise ElabError(src, ref.line,
+                                f"{ref}: {key} is a port of module {flat.ports[key].module}, and a "
+                                "port is the module's whole interface: nothing is inside it")
+            return None, [key]
         return None, []
-    for part in ref.parts[1:]:
+    used = 1
+    while used < len(ref.parts) and node.path not in flat.sealed:
+        part = ref.parts[used]
         if node.scope is not None and part in node.scope:
             node = node.scope[part]
+            used += 1
             continue
         key = _join(node.path, part)
         if node.scope is None and key in flat.machines:
             return None, [key]
         return None, []
+    if node.path in flat.sealed:
+        return _sealed_ref(flat, node, ref, used, items, side, src)
     return node, list(node.machines)
 
 
@@ -348,11 +441,20 @@ def _resolve_nets(flat):
     work = {}
     out_hold, in_hold = {}, {}
 
-    def machines_of(p, ref):
-        _node, keys = _resolve(flat, ref, p.scope)
+    def machines_of(p, ref, side):
+        _node, keys = _resolve(flat, ref, p.scope, items=p.net.items, side=side, src=p.src)
         if not keys:
             raise ElabError(p.src, ref.line, f"net {p.net.name}: {ref} names nothing")
         return keys
+
+    def port_items_check(name, ref, w, keys):
+        """``PORT``: a port named by a net that carries none of the port's items (2.0.28)."""
+        port = flat.ports[keys[0]]
+        flat._port_named.setdefault(keys[0], set()).add(name)
+        flat.checks.append(Check(
+            "PORT", f"port {ref}",
+            f"net {name} carries {_items_text(w['items'])}, and port {port.name} is "
+            f"{port.dir} {', '.join(port.items)}", ref.line))
 
     for name, p in pending:
         work[name] = {"items": list(p.net.items) if p.net.items else None,
@@ -361,7 +463,8 @@ def _resolve_nets(flat):
     def add_drivers(name, p, ref, free_only):
         w = work[name]
         added = 0
-        for key in machines_of(p, ref):
+        keys = machines_of(p, ref, "driver")
+        for key in keys:
             for item in flat.machines[key].makes:
                 if w["items"] is not None and item not in w["items"]:
                     continue
@@ -373,15 +476,19 @@ def _resolve_nets(flat):
                 out_hold.setdefault((key, item), []).append(name)
                 added += 1
         if not added:
-            flat.checks.append(Check("TYPE", f"net {name}", f"driver {ref} makes no "
-                                     + _items_text(w["items"]) + (" that is still free"
-                                                                  if free_only else ""),
-                                     ref.line))
+            if keys and all(k in flat.ports for k in keys):
+                port_items_check(name, ref, w, keys)
+            else:
+                flat.checks.append(Check("TYPE", f"net {name}", f"driver {ref} makes no "
+                                         + _items_text(w["items"]) + (" that is still free"
+                                                                      if free_only else ""),
+                                         ref.line))
 
     def add_consumers(name, p, ref, free_only):
         w = work[name]
         added = 0
-        for key in machines_of(p, ref):
+        keys = machines_of(p, ref, "consumer")
+        for key in keys:
             m = flat.machines[key]
             for item in w["items"]:
                 if not m.accepts(item):
@@ -394,10 +501,13 @@ def _resolve_nets(flat):
                 in_hold.setdefault((key, item), []).append(name)
                 added += 1
         if not added:
-            flat.checks.append(Check("TYPE", f"net {name}", f"consumer {ref} takes no "
-                                     + _items_text(w["items"]) + (" that is still free"
-                                                                  if free_only else ""),
-                                     ref.line))
+            if keys and all(k in flat.ports for k in keys):
+                port_items_check(name, ref, w, keys)
+            else:
+                flat.checks.append(Check("TYPE", f"net {name}", f"consumer {ref} takes no "
+                                         + _items_text(w["items"]) + (" that is still free"
+                                                                      if free_only else ""),
+                                         ref.line))
 
     for star in (False, True):
         for name, p in pending:
@@ -430,7 +540,7 @@ def _resolve_nets(flat):
         flat.nets[name] = FlatNet(name, w["items"], w["drivers"], w["consumers"],
                                   p.net.items is not None, p.net.line,
                                   getattr(p.net, "limited", False),
-                                  None if when is None else (when, p.scope))
+                                  None if when is None else (when, p.scope), p.scope)
     flat._out_hold, flat._in_hold = out_hold, in_hold
 
 
@@ -451,7 +561,8 @@ def _bus_nets(flat):
             elif port == "tap" and (key, item) in flat._out_hold:
                 consumers.append((key, item))
                 flat._in_hold.setdefault((key, item), []).append(path)
-        flat.nets[path] = FlatNet(path, [item], drivers, consumers, True, inst.line)
+        flat.nets[path] = FlatNet(path, [item], drivers, consumers, True, inst.line,
+                                  False, None, path.rsplit("/", 1)[0] if "/" in path else "")
 
 
 def _resolve_lanes(flat, cat):
@@ -535,7 +646,8 @@ def _clog_checks(flat, in_hold, fed):
     """
     sushi_in = {}                          # chest key -> the mixed nets of makers it takes
     for name, net in flat.nets.items():
-        made = any(flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
+        made = any(not flat.machines[k].extra.get("port")
+                   and flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
         if net.sushi and net.drivers and net.consumers and not net.limited:
             flat.checks.append(Check(
                 "CLOG", f"net {name}",
@@ -595,7 +707,8 @@ def _clog_checks(flat, in_hold, fed):
         chests = sorted({flat.machines[k].inst for k, _i in net.consumers
                          if _unlimited(flat.machines[k])})
         machines = sorted({flat.machines[k].inst for k, _i in net.consumers
-                           if not flat.machines[k].sink})
+                           if not flat.machines[k].sink
+                           and not flat.machines[k].extra.get("port")})
         if chests and machines:
             flat.checks.append(Check(
                 "SHARED_SINK", f"net {name}",
@@ -649,6 +762,80 @@ def _lane_checks(flat, cat):
             f"both feed {where} on belts of their own, a lane each: one belt carries both "
             f"(`lanes {first[0]} | {second[0]}`), one lane each, and each machine takes from both. "
             "Two half-empty belts otherwise", flat.nets[first[0]].line))
+
+
+def _port_checks(flat):
+    """``PORT`` (2.0.28, PLAN-MODULES), warn and never gate: a port no net uses on a side, a use
+    against its direction, a declared item nothing carries, a tile off its module's frame.
+
+    A port's nets are the one written inside its module (scope = the instance path) and the one
+    written outside that names it; an ``in`` port is fed from outside and feeds inside, an ``out``
+    port the other way round.
+    """
+    outside_legal = {"in": ("consumers",), "out": ("drivers",), "inout": ("drivers", "consumers")}
+    inside_legal = {"in": ("drivers",), "out": ("consumers",), "inout": ("drivers", "consumers")}
+    named = getattr(flat, "_port_named", {})
+    for key, port in flat.ports.items():
+        uses = []
+        for name, net in flat.nets.items():
+            for side, rows in (("drivers", net.drivers), ("consumers", net.consumers)):
+                for k, item in rows:
+                    if k == key and item in port.items:
+                        uses.append((name, side, item))
+        inside = [u for u in uses if flat.nets[u[0]].scope == port.scope]
+        outside = [u for u in uses if flat.nets[u[0]].scope != port.scope]
+        named_in = {n for n in named.get(key, ()) if flat.nets[n].scope == port.scope}
+        named_out = {n for n in named.get(key, ()) if flat.nets[n].scope != port.scope}
+        if not uses and not named.get(key):
+            flat.checks.append(Check("PORT", f"port {key}",
+                                     f"no net names it: {port.dir} {', '.join(port.items)}",
+                                     port.line))
+            continue
+        if not inside and not named_in:
+            flat.checks.append(Check("PORT", f"port {key}",
+                                     f"no net inside {port.module} uses it, so nothing carries "
+                                     f"{', '.join(port.items)} through it", port.line))
+        if not outside and not named_out:
+            flat.checks.append(Check("PORT", f"port {key}",
+                                     f"no net outside {port.scope} uses it: the interface is "
+                                     "declared but not wired yet", port.line))
+        bad = []
+        for name, side, _item in uses:
+            own = flat.nets[name].scope == port.scope
+            legal = inside_legal if own else outside_legal
+            if side not in legal[port.dir]:
+                bad.append(f"net {name} {'drives' if side == 'drivers' else 'takes from'} it "
+                           f"{'inside' if own else 'outside'}")
+        if bad:
+            flat.checks.append(Check("PORT", f"port {key}",
+                                     f"used against its direction ({port.dir}): " + "; ".join(bad),
+                                     port.line))
+        carried = {item for _n, _s, item in uses}
+        missing = [i for i in port.items if i not in carried]
+        if missing:
+            flat.checks.append(Check("PORT", f"port {key}",
+                                     f"nothing carries {', '.join(missing)} through it", port.line))
+        # an item on one side and not the other is a hole in the interface, not a dead port: the
+        # outside must bring what the inside takes, and take what the inside brings
+        inside_items = {item for _n, _s, item in inside}
+        outside_items = {item for _n, _s, item in outside}
+        if inside and outside:
+            for item in port.items:
+                if item in inside_items and item not in outside_items and not named_out:
+                    flat.checks.append(Check("PORT", f"port {key}",
+                                             f"nothing outside brings {item} to it", port.line))
+                elif item in outside_items and item not in inside_items and not named_in:
+                    flat.checks.append(Check("PORT", f"port {key}",
+                                             f"nothing inside {port.module} takes {item} from it",
+                                             port.line))
+        if port.pos is not None and port.size is not None:
+            w, h = port.size
+            along = w if port.side in "ns" else h
+            if not 0 <= port.pos < along:
+                flat.checks.append(Check(
+                    "PORT", f"port {key}",
+                    f"@{port.side}{port.pos} is off the module's frame: {port.module} is "
+                    f"{w}x{h}, so its {port.side} edge runs 0..{along - 1}", port.line))
 
 
 def _endpoint_checks(flat, cat):

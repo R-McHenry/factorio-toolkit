@@ -1,0 +1,258 @@
+{
+ "designs": {
+  "agent/docs/examples/beltless.fk": {
+   "checks": 2,
+   "machines": 5,
+   "nets": 4,
+   "sha256": "b1cafcc93ba3e5d4ec58658f5e4e959a87bb67ee6ec64a05b7b0e41333084f8f"
+  },
+  "agent/docs/examples/bus4.fk": {
+   "checks": 1,
+   "machines": 16,
+   "nets": 7,
+   "sha256": "94d648ff209af6874fb595cc96f956918155ab30d2ed10d7da12e229143b8793"
+  },
+  "agent/docs/examples/compact-mall.fk": {
+   "checks": 0,
+   "machines": 28,
+   "nets": 20,
+   "sha256": "0f0332010ec5d63124ea3e18807bc6344f71b23354e2bf56c7f5ffd94b643f58"
+  },
+  "agent/docs/examples/early-mall.fk": {
+   "checks": 0,
+   "machines": 44,
+   "nets": 30,
+   "sha256": "83e27b15a297bf65336044ab9f220ee9efe2e0ea6d31ccc38116fe771becc9ae"
+  },
+  "agent/docs/examples/gears.fk": {
+   "checks": 0,
+   "machines": 4,
+   "nets": 2,
+   "sha256": "83960ff0a4e81c2c8d7bd9e0583666c1d027f6f4b1ae92cb4b33f25475df2c83"
+  },
+  "agent/docs/examples/mall.fk": {
+   "checks": 0,
+   "machines": 12,
+   "nets": 8,
+   "sha256": "51c92363f80b379777c833727fe397afe43269499a9246e7fcfa4e6c32994fef"
+  },
+  "agent/docs/examples/red.fk": {
+   "checks": 0,
+   "machines": 9,
+   "nets": 4,
+   "sha256": "3a52dd7d403186f6e1ae9848811f3730985fb1aa7103c0d93a3929c42078e622"
+  },
+  "agent/docs/examples/robot-feed.fk": {
+   "checks": 0,
+   "machines": 2,
+   "nets": 1,
+   "sha256": "c18d3432f1bee9f1a03a0c77fc082fe74dc61e91df696bbe9a6ee595bafd645f"
+  },
+  "agent/docs/examples/shared-belt.fk": {
+   "checks": 0,
+   "machines": 15,
+   "nets": 3,
+   "sha256": "3148112670ae823f4ed91abb4e51874320a072dd5486b52b507dcdd2980c717e"
+  },
+  "agent/docs/examples/sized.fk": {
+   "checks": 0,
+   "machines": 5,
+   "nets": 4,
+   "sha256": "22d3a78710c911dff3fb90a636bd7f346344306b9fd7a2d08a8b170fccd01350"
+  },
+  "agent/docs/examples/smelter-array.fk": {
+   "checks": 0,
+   "machines": 45,
+   "nets": 3,
+   "sha256": "f2c81c4ec38d774c321a3918cf3271f31ba7b9f833ff9c89c2bb20add060483a"
+  },
+  "agent/docs/examples/smelting.fk": {
+   "checks": 0,
+   "machines": 15,
+   "nets": 3,
+   "sha256": "3148112670ae823f4ed91abb4e51874320a072dd5486b52b507dcdd2980c717e"
+  },
+  "agent/docs/examples/steam.fk": {
+   "checks": 0,
+   "machines": 8,
+   "nets": 3,
+   "sha256": "ecbca4a95f15dec8160a9423ecce08b0a03d917031cff3cd207b4f4b020d6af2"
+  },
+  "games/lab-fluids/steam.fk": {
+   "checks": 2,
+   "machines": 7,
+   "nets": 2,
+   "sha256": "9f9b5340b1f2f5a3a229aa02520b0dd7f76a95ff1aac1d2e62f394635a0e913f"
+  },
+  "games/lab-fluids/sulfur.fk": {
+   "checks": 1,
+   "machines": 3,
+   "nets": 2,
+   "sha256": "2e03eafed229d50d484b18445a3ea20cd9674019addec5ed07971e803b3f7cb1"
+  },
+  "games/lab-kxm/kxm.fk": {
+   "checks": 3,
+   "machines": 5,
+   "nets": 1,
+   "sha256": "bc5433e75664789c22e5a61e967407b953611f1789dd5459e49b03943748716f"
+  },
+  "games/lab-merge/gears.fk": {
+   "checks": 1,
+   "machines": 4,
+   "nets": 2,
+   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+  },
+  "games/lab-merge/iron.fk": {
+   "checks": 1,
+   "machines": 8,
+   "nets": 3,
+   "sha256": "4fc82f40432de285e3134602007e241ef6678a388ea7925179badce7384278e1"
+  },
+  "games/lab-play/gears.fk": {
+   "checks": 1,
+   "machines": 4,
+   "nets": 2,
+   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+  },
+  "games/lab-play/red.fk": {
+   "checks": 0,
+   "machines": 9,
+   "nets": 4,
+   "sha256": "3a52dd7d403186f6e1ae9848811f3730985fb1aa7103c0d93a3929c42078e622"
+  },
+  "games/lab-redgreen/main.fk": {
+   "checks": 1,
+   "machines": 71,
+   "nets": 12,
+   "sha256": "3189363acf44a99ec69e17ee6e24639f0cbd8cf3a75f45d7f017b97624a25f0e"
+  },
+  "games/lab-sense/gears.fk": {
+   "checks": 1,
+   "machines": 4,
+   "nets": 2,
+   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+  },
+  "games/lab-sense/iron.fk": {
+   "checks": 1,
+   "machines": 8,
+   "nets": 3,
+   "sha256": "4fc82f40432de285e3134602007e241ef6678a388ea7925179badce7384278e1"
+  },
+  "games/lab-terrain/gears.fk": {
+   "checks": 1,
+   "machines": 3,
+   "nets": 2,
+   "sha256": "8923033bedd93eb256d2c2555e6821401a979a9bcc8e2eab30961bdf164b71dd"
+  },
+  "games/lab-terrain/iron.fk": {
+   "checks": 1,
+   "machines": 18,
+   "nets": 3,
+   "sha256": "126f8bc3fd7045b08979bff95544381a63657f75805ec71d87bfedb86b1193c1"
+  },
+  "games/merge/gears.fk": {
+   "checks": 1,
+   "machines": 4,
+   "nets": 2,
+   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+  },
+  "games/merge/iron.fk": {
+   "checks": 1,
+   "machines": 8,
+   "nets": 3,
+   "sha256": "4fc82f40432de285e3134602007e241ef6678a388ea7925179badce7384278e1"
+  },
+  "games/nauvis-terrain/gears.fk": {
+   "checks": 1,
+   "machines": 3,
+   "nets": 2,
+   "sha256": "8923033bedd93eb256d2c2555e6821401a979a9bcc8e2eab30961bdf164b71dd"
+  },
+  "games/nauvis-terrain/iron.fk": {
+   "checks": 1,
+   "machines": 18,
+   "nets": 3,
+   "sha256": "126f8bc3fd7045b08979bff95544381a63657f75805ec71d87bfedb86b1193c1"
+  },
+  "games/nauvis/boot.fk": {
+   "checks": 1,
+   "machines": 8,
+   "nets": 3,
+   "sha256": "be2ac94e2a81681e68e74140cdb404d7e0398578d7817aea173db8da272b3d33"
+  },
+  "games/nauvis/main.fk": {
+   "checks": 1,
+   "machines": 71,
+   "nets": 12,
+   "sha256": "3189363acf44a99ec69e17ee6e24639f0cbd8cf3a75f45d7f017b97624a25f0e"
+  },
+  "games/nauvis/plant.fk": {
+   "checks": 0,
+   "machines": 0,
+   "nets": 0,
+   "sha256": "e51c1fd163efb42bde82ee3b2d2905cd8853a809793eab4d7f2777b5c4334491"
+  },
+  "games/plant/plant.fk": {
+   "checks": 0,
+   "machines": 7,
+   "nets": 5,
+   "sha256": "10b587f476ff7560ade51d4ca36c8943dca0b27b47c0db751d8a644657cac104"
+  },
+  "games/redgreen/main.fk": {
+   "checks": 1,
+   "machines": 71,
+   "nets": 12,
+   "sha256": "3189363acf44a99ec69e17ee6e24639f0cbd8cf3a75f45d7f017b97624a25f0e"
+  },
+  "games/spm10/main.fk": {
+   "checks": 7,
+   "machines": 142,
+   "nets": 38,
+   "sha256": "fe10ee0aad1cf0a8a9b16bec100ba8c79489b00335b6eadb5fd3012b562603e3"
+  },
+  "games/spm10/mall.fk": {
+   "checks": 0,
+   "machines": 0,
+   "nets": 0,
+   "sha256": "e51c1fd163efb42bde82ee3b2d2905cd8853a809793eab4d7f2777b5c4334491"
+  },
+  "games/spm10/redgreen.fk": {
+   "checks": 1,
+   "machines": 71,
+   "nets": 12,
+   "sha256": "3189363acf44a99ec69e17ee6e24639f0cbd8cf3a75f45d7f017b97624a25f0e"
+  },
+  "games/v2-bench/join-big.fk": {
+   "checks": 1,
+   "machines": 97,
+   "nets": 10,
+   "sha256": "9f36261e19d902fd986a3d3a4241905569ce67f4eef78f5fe7997f5f7bf97364"
+  },
+  "games/v2-bench/join-small.fk": {
+   "checks": 1,
+   "machines": 30,
+   "nets": 10,
+   "sha256": "dce5c6062f84781f968cbf976859f9ef82fc1d69b4d488bb43574d1506c994e7"
+  },
+  "kickoff/template/game/plant.fk": {
+   "checks": 0,
+   "machines": 0,
+   "nets": 0,
+   "sha256": "e51c1fd163efb42bde82ee3b2d2905cd8853a809793eab4d7f2777b5c4334491"
+  },
+  "tests/data/bad_sushi.fk": {
+   "checks": 4,
+   "machines": 13,
+   "nets": 5,
+   "sha256": "4321fb727064631bcf018ac1abb8ed2182c935950f4df8c4c2e10cb376922f14"
+  },
+  "tests/data/red_green.fk": {
+   "checks": 1,
+   "machines": 71,
+   "nets": 12,
+   "sha256": "7bc7eeefd98a9ba73f57cc43e6eb254b5ae9b81d2845da2ec98d0c84b330c50f"
+  }
+ },
+ "note": "what 2.0.27's elaboration produces for every existing .fk: the ports release (2.0.28) must reproduce it exactly",
+ "version": "2.0.27"
+}
