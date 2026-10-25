@@ -143,6 +143,26 @@ implies, roughly one and a half to two times.
   ones stand, part of the base goes dark with its roboports. Get the new grid standing first (see
   "Building with the future in mind").
 
+## Chests first, belts later
+
+The two ways to feed a factory belong to two phases of the base, and running both at once pays for
+both.
+
+- **First factories: logistic chests.** A requester chest into a row of assemblers or furnaces is a
+  3x5 cell and five items, and the robots carry it. It is minutes to build and minutes to change,
+  which is what a base whose shape is still changing needs.
+- **Factories you mean to keep: belts.** A belt-fed factory runs continuously: it uses no logistic
+  robots, it doesn't slow down when the robot fleet is busy, and it does not have to wait for a
+  robot to finish a trip per item. Robots are a small, fixed budget until late research; plates on
+  belts are not.
+- **The worst base is both at once**: belts for the first machines, paying for belts and their
+  routing before the shape is known, and logistic chests for the ones that grow, paying for robots
+  forever. Rory: "over reliance on combined belt and logistic chest bases gives the worst of both
+  worlds."
+- **When a factory you are keeping goes onto belts, pair the two feeds of a row**: one belt carries
+  both items, one lane each (`lanes A | B`). Two single-item belts there leave half of each empty.
+  The build's `LANES` check names the pair when you miss it.
+
 ## Chests and buffers
 
 - **Chests full of items are a problem because robots can't move that much easily.** Limit chests

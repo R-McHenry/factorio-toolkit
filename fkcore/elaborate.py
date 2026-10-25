@@ -39,7 +39,7 @@ import os
 from dataclasses import dataclass, field
 
 from . import lang
-from .templates import MSpec, TemplateError, literal_machines, machines as template_machines
+from .templates import CONTACT, MSpec, TemplateError, literal_machines, machines as template_machines
 
 __all__ = ["ElabError", "Machine", "FlatNet", "Check", "Flat", "load", "elaborate", "elaborate_file",
            "AUTO_KINDS"]
@@ -196,7 +196,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _resolve_nets(flat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
-    _endpoint_checks(flat)
+    _endpoint_checks(flat, cat)
     from . import circuits
     flat.circuit = circuits.resolve(flat, cat)
     return flat
@@ -494,7 +494,7 @@ def _group(rows):
 _STORES = ("provider", "storage")
 #: the 1.1 check lines about limited production, and 2.0.1's UNDERFED (a rate fact about the
 #: design): advice that tests of other things, and fk stage check's list, leave out
-ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT", "UNDERFED")
+ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT", "UNDERFED", "LANES")
 #: chests that take any item that reaches them
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
 
@@ -604,7 +604,54 @@ def _clog_checks(flat, in_hold, fed):
                 "machines can starve. A limit=, or a net of its own, avoids it", net.line))
 
 
-def _endpoint_checks(flat):
+def _lane_checks(flat, cat):
+    """2.0.17 (Rory, 2026-10-25): two single-item nets feeding the same machine set on belts of
+    their own waste half of each belt; one belt carries both, one lane each (``lanes A | B``).
+    The 0928 player laid a smelter's ore and its coal on two belts, a lane each, and the build said
+    nothing: the lane router existed, the design never reached for it. Only pairs with a known,
+    finite rate that fits a lane (a requester without ``rate=`` is unbounded, and closing it to one
+    lane would throttle it), and only nets not already paired."""
+    from .lanes import lane_rate
+    cap = lane_rate(cat, "transport-belt")
+    by_consumers = {}
+    for name, net in flat.nets.items():
+        if name in flat.lane_of or net.sushi or len(net.items) != 1:
+            continue
+        item = net.items[0]
+        if cat.is_fluid(item) or item in CONTACT or not net.drivers or not net.consumers:
+            continue
+        # only feeds that a chest drives: two raw feeds out of the network into one row are the
+        # case (the 0928 smelter's ore and coal); a design's own product belts stay its business
+        drivers = [flat.machines[k] for k, _i in net.drivers]
+        if not all(cat.kind(m.prototype) in ("logistic-container", "container") for m in drivers):
+            continue
+        rate = 0.0
+        for key, got in net.drivers:
+            m = flat.machines[key]
+            if m.source:
+                rate = None
+                break
+            rate += float(m.makes.get(got, 0.0))
+        if rate is None or rate > cap:
+            continue
+        by_consumers.setdefault(frozenset(k for k, _i in net.consumers), []).append(
+            (name, item, rate))
+    for consumers, nets in sorted(by_consumers.items(), key=lambda kv: sorted(n for n, _i, _r in kv[1])):
+        nets.sort()
+        first = nets[0]
+        second = next((n for n in nets[1:] if n[1] != first[1]), None)
+        if second is None:
+            continue
+        inst = flat.machines[next(iter(consumers))].inst
+        where = inst + (f" ({len(consumers)} machines)" if len(consumers) > 1 else "")
+        flat.checks.append(Check(
+            "LANES", f"net {first[0]} and {second[0]}",
+            f"both feed {where} on belts of their own, a lane each: one belt carries both "
+            f"(`lanes {first[0]} | {second[0]}`), one lane each, and each machine takes from both. "
+            "Two half-empty belts otherwise", flat.nets[first[0]].line))
+
+
+def _endpoint_checks(flat, cat):
     out_hold, in_hold = flat._out_hold, flat._in_hold
     for side, hold in (("out", out_hold), ("in", in_hold)):
         for (key, item), nets in hold.items():
@@ -646,6 +693,7 @@ def _endpoint_checks(flat):
                                      f"{inst} does not take {missing}"
                                      + (f" ({n} machines)" if n > 1 else ""), net.line))
     _clog_checks(flat, in_hold, fed)
+    _lane_checks(flat, cat)
     seen = set()
     driving = {key for key, _item in out_hold}
     for key, m in flat.machines.items():

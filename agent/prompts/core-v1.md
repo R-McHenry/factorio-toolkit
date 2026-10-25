@@ -97,6 +97,19 @@ out by hand:
   you take it down, and it comes down much faster. `fk merge` joins two factories without moving
   either.
 
+## Chests first, belts later
+
+Two ways to feed a factory, for two phases of the base. Running both pays for both.
+
+- **First factories: logistic chests.** A requester chest into a row is a 3x5 cell and five items,
+  and the robots carry it: build it in minutes, change it in minutes.
+- **Factories you mean to keep: belts.** A belt runs continuously, uses no logistic robots, and does
+  not slow down when the robot fleet is busy. Robots are a small fixed budget until late research.
+- **Both at once is the worst of both worlds**: belts where the shape is still changing, logistic
+  chests where the flows grow.
+- **Two items into one row go on one belt, one lane each** (`lanes A | B`); the build's `LANES`
+  check names the pair when you leave them on two belts.
+
 ## Grow big
 
 Rory's advice after watching the first nights: a base that stays small takes dozens of hours per

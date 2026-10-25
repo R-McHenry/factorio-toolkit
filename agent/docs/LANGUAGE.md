@@ -140,6 +140,9 @@ lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on th
 - The `.fkp` records a shared belt as `net=ore_|fuel` and its inserters as `net=ore_+fuel`.
 - `SmelterArray` shares its own feed belts: give it its ore and its fuel on two nets of their
   own, and it side-loads them onto its lanes.
+- A row fed two items from two chests (a SmelterRow's ore and coal, an AsmRow's gears and
+  circuits) is the case to pair: two belts there carry a lane each, and half of both is empty. The
+  build's `LANES` check names the pair when you leave it on two belts.
 
 ## A bus
 

@@ -300,6 +300,9 @@ fixing in the source.
   of many items works best unlimited, with the limit at each maker
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
+- `LANES`: two chest-fed single-item nets feed the same machine set on two belts, a lane each: one
+  belt carries both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them.
+  Only pairs whose flows fit a lane are named (a requester without `rate=` is unbounded)
 - `LIMIT`: a `keep=` or `fill=` that limits nothing (no inserter takes the product into a chest,
   or `fill=` on a maker whose output goes onto a belt: there is no chest to count)
 - `GUARD`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)

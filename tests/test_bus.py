@@ -15,7 +15,7 @@ import unittest
 from fkcore import connect, expand, fkp, lang, lanes, literal, rates, route, routed
 from fkcore import throughput as tp
 from fkcore.catalog import Catalog
-from fkcore.elaborate import ElabError, elaborate, elaborate_file
+from fkcore.elaborate import ADVICE, ElabError, elaborate, elaborate_file
 from fkcore.fragments import fragment
 
 CAT = Catalog.load()
@@ -98,7 +98,7 @@ class TemplateTest(unittest.TestCase):
 
     def test_ports_are_endpoints_and_the_bus_is_a_net(self):
         flat = flat_of(LOADED)
-        self.assertEqual(flat.checks, [])
+        self.assertEqual([c for c in flat.checks if c.code not in ADVICE], [])
         self.assertEqual(flat.nets["iron1"].consumers, [("bus/load1", PLATE)])
         self.assertEqual(flat.nets["fe"].drivers, [("bus/tap1", PLATE)])
         bus = flat.nets["bus"]
@@ -108,7 +108,7 @@ class TemplateTest(unittest.TestCase):
 
     def test_a_port_no_net_names_is_a_spare(self):
         flat = flat_of(LOADED.replace("load=s4,", "load=s4|n10,"))
-        self.assertEqual(flat.checks, [])                   # no UNFED / UNCONSUMED for load2
+        self.assertEqual([c for c in flat.checks if c.code not in ADVICE], [])   # no UNFED for load2
         self.assertEqual(flat.nets["bus"].drivers, [("bus/load1", PLATE)])
         _flat, lay, _notes = laid(LOADED.replace("load=s4,", "load=s4|n10,"))
         self.assertIn("bus/load1", lay.entities)
@@ -388,7 +388,8 @@ class RouteTest(unittest.TestCase):
 
     def test_the_example(self):
         flat = elaborate_file(os.path.join(EXAMPLES, "bus4.fk"), CAT)
-        self.assertEqual(flat.checks, [])
+        # LANES is advice (the example's smelter takes ore and coal by two chests), not a fault
+        self.assertEqual([c for c in flat.checks if c.code not in ADVICE], [])
         lay, notes = expand.expand_factory(flat, CAT)
         self.assertEqual(notes, [])
         r = route.route_layout(flat, lay, CAT)
