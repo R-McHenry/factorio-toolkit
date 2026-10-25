@@ -124,7 +124,9 @@ implies, roughly one and a half to two times.
 ## Robots
 
 - **Build robots early and keep building them** until you have enough to manage; then cap them.
-- **Robots in a chest do nothing.** An inserter puts them into a roboport.
+- **Robots in a chest do nothing.** An inserter puts them into a roboport. `fk stock` counts them
+  and says which are in roboports and which in chests; when robots come back from a rebuild they
+  land in a chest, and the factory quietly loses its fleet until one is loaded again.
 - **More robots raise the cap at first; robot speed research raises it later.**
 
 ## Power

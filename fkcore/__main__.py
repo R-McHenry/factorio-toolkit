@@ -41,6 +41,9 @@ use the game link, and only with FK_LINK=on)
     stats GAME_DIR [--items A,B] [--window 1min|10min|1h] [--force F]
                                           production and consumption per item on the surface
                                           (a free read, never an alert)
+    stock GAME_DIR [--force F]            what the base holds, per item: chests and roboports
+                                          apart (a free read, never an alert). A robot in a chest
+                                          is idle: the line says how many are where
     chart GAME_DIR [--force F]            the surface's charted chunks: count and bounding box
                                           (a free read, never an alert)
     split-to-chest GAME_DIR FACTORY NET NAME --at X,Y [--requester --item I [--rate R]]
@@ -185,6 +188,9 @@ def _free_read(a, cat):
     if a.cmd == "chart":
         return _world(a, cat, "chart", lambda r: freereads.chart_lines(
             freereads.chart(r, force, sf.name)))
+    if a.cmd == "stock":
+        return _world(a, cat, "stock", lambda r: freereads.stock_lines(
+            freereads.stock(r, force, sf.name)))
     if a.window not in freereads.WINDOWS:
         print(f"error: --window is one of {', '.join(freereads.WINDOWS)}", file=sys.stderr)
         return 2
@@ -652,6 +658,10 @@ def main(argv=None):
     ch = sub.add_parser("chart")
     ch.add_argument("game")
     ch.add_argument("--force")
+    sk = sub.add_parser("stock", description="what the base holds, item by item: in chests and "
+                                             "in roboports (a free read, never an alert)")
+    sk.add_argument("game")
+    sk.add_argument("--force")
     se = sub.add_parser("sense")
     se.add_argument("game")
     se.add_argument("capture")
@@ -784,7 +794,7 @@ def main(argv=None):
     if a.cmd == "fresh":
         from . import fresh
         return _world(a, cat, "fresh", lambda r: fresh.run(r, a.game, cat, _area(a.area)))
-    if a.cmd in ("stats", "chart"):
+    if a.cmd in ("stats", "chart", "stock"):
         return _free_read(a, cat)
     if a.cmd == "sense":
         return _sense(a, cat)

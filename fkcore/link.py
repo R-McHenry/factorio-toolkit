@@ -885,3 +885,38 @@ def chart(rcon, force, surface):
         return json.loads(text)
     except ValueError:
         raise LinkError(f"chart failed: {text[:300]}") from None
+
+
+def lua_stock(force, surface):
+    """What the base holds, per item: the chests' inventories and the roboports' (robots in their
+    robot slots, repair packs in their material slots), summed apart. A robot in a chest is an item:
+    it flies only from a roboport (2.0.18: the 0928 player needed three Lua probes to find 28 of
+    the kit's 50 logistic robots sitting in a storage chest)."""
+    return f"""
+local f = game.forces[{_q(force)}]
+local s = game.get_surface({_q(surface)})
+if not f or not s then rcon.print('no force or surface') return end
+local chest, port = {{}}, {{}}
+local function add(into, inv)
+  if not inv or not inv.valid then return end
+  for _, it in pairs(inv.get_contents()) do into[it.name] = (into[it.name] or 0) + it.count end
+end
+for _, e in pairs(s.find_entities_filtered{{force = f, type = {{'logistic-container', 'container'}}}}) do
+  add(chest, e.get_inventory(defines.inventory.chest))
+end
+for _, r in pairs(s.find_entities_filtered{{force = f, type = 'roboport'}}) do
+  add(port, r.get_inventory(defines.inventory.roboport_robot))
+  add(port, r.get_inventory(defines.inventory.roboport_material))
+end
+rcon.print(helpers.table_to_json({{tick = game.tick, force = f.name, surface = s.name,
+                                   chest = chest, port = port}}))
+"""
+
+
+def stock(rcon, force, surface):
+    """The raw stock read (``lua_stock``): a small reply, no file."""
+    text = rcon.lua(lua_stock(force, surface)).strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        raise LinkError(f"stock failed: {text[:300]}") from None

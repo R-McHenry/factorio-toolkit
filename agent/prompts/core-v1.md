@@ -82,6 +82,10 @@ out by hand:
   the routed rates: a `CAPACITY` line names the belt lane or inserter that is too thin; `tier
   minimize --allow yellow,red` in the build script lays red belts where yellow is too thin
 - what is the factory really making → `fk stats`
+- **what do you have** → `fk stock`: every item the base holds, chests and roboports apart. A
+  robot in a chest is an item and does nothing; a robot in a roboport flies. Look at it before you
+  plan: it is how you notice that your robots were collected, that a chest holds what a machine is
+  short of, or that the plate pile you counted on is gone
 - anything else → `fk lua` reads the game for you
 
 `docs\TOOLKIT.md` lists every command and its options; every command takes `--help`.
@@ -109,6 +113,17 @@ Two ways to feed a factory, for two phases of the base. Running both pays for bo
   chests where the flows grow.
 - **Two items into one row go on one belt, one lane each** (`lanes A | B`); the build's `LANES`
   check names the pair when you leave them on two belts.
+
+## Robots and roboports
+
+- `fk stock` counts robots with everything else, and says which are in roboports and which are
+  sitting in chests. The ones in chests do nothing: a chest and one inserter into a roboport
+  (`docs\examples\robot-feed.fk`) puts them back.
+- A roboport is where the fleet lives and what makes a logistic chest work. Decide where they go
+  and keep them: taking one up strands the robots inside it, so a rebuild that moves a roboport
+  leaves you a robot-loading job before anything else can use them.
+- `cover robots` adds a roboport (and a storage chest beside it) only where a chest is out of the
+  network's reach, so let it do that rather than scattering roboports.
 
 ## Grow big
 

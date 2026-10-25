@@ -9,7 +9,9 @@ or pushes, and ``fkcore.alerts.track`` refuses anything but an alert-panel read.
   counts of ``LuaForce.get_item_production_statistics(surface)`` over the window (made and used
   per minute, and as counts) and the totals since the map began;
 - ``chart(r, force, surface)`` -> ``ChartRead``: how many of the surface's generated chunks the
-  force has charted, and their bounding box.
+  force has charted, and their bounding box;
+- ``stock(r, force, surface)`` -> ``StockRead``: what the base holds per item, in chests and in
+  roboports apart (a robot in a chest is an item, and flies only from a roboport).
 
 ``python -m fkcore stats GAME [--items a,b] [--window 1min|10min|1h]`` and ``chart GAME`` print
 them for the game's surface and its mode's force (lab -> ``lab``, play -> ``player``). The
@@ -21,8 +23,8 @@ from dataclasses import dataclass
 
 from . import link
 
-__all__ = ["StatsRead", "ChartRead", "stats", "chart", "stats_from", "chart_from",
-           "stats_lines", "chart_lines", "WINDOWS"]
+__all__ = ["StatsRead", "ChartRead", "StockRead", "stats", "chart", "stock", "stats_from",
+           "chart_from", "stock_from", "stats_lines", "chart_lines", "stock_lines", "WINDOWS"]
 
 WINDOWS = link.WINDOWS
 CHUNK = 32
@@ -36,6 +38,20 @@ class StatsRead:
     window: str
     items: tuple            # ({name, made_per_min, used_per_min, made, used, made_total,
                             #   used_total} | {name, unknown: True}, ...) sorted by name
+
+
+@dataclass(frozen=True)
+class StockRead:
+    """What the base holds: items in chests (idle until something moves them) and in roboports
+    (robots in the robot slots, repair packs in the material slots), per item."""
+    force: str
+    surface: str
+    tick: int
+    chest: tuple            # ((name, count), ...) sorted by name
+    port: tuple
+
+    def total(self, name):
+        return dict(self.chest).get(name, 0) + dict(self.port).get(name, 0)
 
 
 @dataclass(frozen=True)
@@ -71,6 +87,41 @@ def stats(r, force, surface, items=None, window="1min") -> StatsRead:
 
 def chart(r, force, surface) -> ChartRead:
     return chart_from(link.chart(r, force, surface))
+
+
+def stock_from(raw) -> StockRead:
+    def rows(v):
+        return tuple(sorted((str(k), int(n)) for k, n in (v or {}).items()))
+    return StockRead(str(raw.get("force")), str(raw.get("surface")), int(raw.get("tick") or 0),
+                     rows(raw.get("chest")), rows(raw.get("port")))
+
+
+def stock(r, force, surface) -> StockRead:
+    return stock_from(link.stock(r, force, surface))
+
+
+def stock_lines(st: StockRead):
+    """What the base holds, largest first. Robots get their own line: one in a chest is an item
+    and does nothing until an inserter puts it into a roboport."""
+    chest, port = dict(st.chest), dict(st.port)
+    names = sorted(set(chest) | set(port),
+                   key=lambda n: (-(chest.get(n, 0) + port.get(n, 0)), n))
+    total = sum(chest.values()) + sum(port.values())
+    out = [f"stock {st.surface}: force {st.force}, tick {st.tick}: {len(names)} kinds, {total} "
+           f"items in chests and roboports (a free read: never an alert)"]
+    for n in names:
+        c, p = chest.get(n, 0), port.get(n, 0)
+        line = f"  {n:<30} {c + p:>7}"
+        if n.endswith("-robot"):
+            line += f"  ({p} in roboports, {c} in chests)"
+            if c:
+                line += " - the ones in chests are idle: an inserter into a roboport starts them"
+        elif c and p:
+            line += f"  ({c} in chests, {p} in roboports)"
+        out.append(line)
+    if not any(n.endswith("-robot") and port.get(n) for n in port):
+        out.append("  no robots in any roboport: nothing flies until one is loaded")
+    return out
 
 
 def _n(v):

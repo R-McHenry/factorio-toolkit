@@ -388,6 +388,8 @@ fixing in the source.
 ## When you need something
 
 ```
+fk stock                         what you have, per item (free to read): robots in chests count,
+                                 and a robot in a chest does nothing until it is in a roboport
 fk plan ITEM RATE                the machines, furnaces and drills a rate takes, every step down to
                                  the ore (fk plan ITEM --machines N: what N machines take)
 fk build --to size               the counts of your n=auto rows and what each one serves
@@ -417,6 +419,9 @@ fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]
                                  production statistics (free to read)
+fk stock                         what the base holds, per item: chests and roboports apart (free
+                                 to read). A robot in a chest is an item and does nothing; the
+                                 line says how many are in roboports and how many in chests
 fk chart                         how much of the map is explored (free to read)
 fk alerts                        the alert panel now (new alerts also come by themselves)
 fk lua "CODE"                    run a Lua chunk in the game: its rcon.print comes back (read,
