@@ -93,6 +93,26 @@ net gear:      gears -> box
 On paper: 37.5 gears/min, limited by the 1.25 plates/s the requester asks for (`rate=`). The
 chest feeds the row with one inserter (a route of one inserter).
 
+## beltless.fk: a first cell with no belts (13x7)
+
+```
+fe   = Chest<requester, item=iron-plate, request=400>  @(0, 0)
+gear = Assembler<recipe=iron-gear-wheel>                @(2, 0)
+red  = Assembler<recipe=automation-science-pack>        @(6, 0)
+lab1 = Lab                                              @(10, 0)
+cu   = Chest<requester, item=copper-plate, request=200> @(6, 4)
+net fe:    fe -> gear
+net gears: gear -> red
+net cu:    cu -> red
+net packs: red -> lab1
+```
+
+Every transfer is one inserter, laid by the router between the machines: a fast one across a
+one-tile gap, a long-handed one across two or three, and **no belt at all**. On paper 6 packs/min;
+built in the lab it measured 6.00/min against the model at both a one-tile and a three-tile spacing.
+This is the shape of a first factory: chests in, nothing belted in or out. Give the machines 1 to 3
+free tiles between them and the whole cell routes itself.
+
 ## red.fk: red science into labs (30x30)
 
 ```
