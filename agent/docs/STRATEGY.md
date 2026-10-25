@@ -105,29 +105,47 @@ implies, roughly one and a half to two times.
 
 ## Growing
 
-- **The volume targets:**
-  - about 10 red and 10 green science assemblers before blue;
-  - with blue, 8 to 15 each of blue, advanced circuit and engine assemblers.
+- **The base grows in a ramp, not in leaps.** Each step about twice the last, and the next one
+  starts when the last runs. A good solo speedrun's pace is the shape (default settings; times are
+  the shape, not a clock):
 
-  Size the next step with `fk rates` / `fk plan` (or `n=auto`), build it, then double it.
+  | by | smelting | what is running |
+  |---|---|---|
+  | 10 min | 4 furnaces (~75 plates/min) | the first lab, red science |
+  | 20-25 min | 8-12 furnaces (~150-225 plates/min) | red + green, steel |
+  | 35-45 min | 24 furnaces (~450 plates/min) | oil, plastic, engines, blue science |
+  | 60-75 min | 48 furnaces (~900 plates/min) | production and utility science |
+  | 90-120 min | 1000+ plates/min | the rocket |
+
+  Size the next step with `fk rates` / `fk plan` (or `n=auto`) against what the base makes now
+  (`fk stats`) and holds (`fk stock`), build it, then double it when it runs.
+- **Ask the order-of-magnitude question before every build.** At the stage the base is at, is this
+  ten times too big, ten times too small, or about right? Spending hundreds of inserters and belts
+  before you have constructed a single one is a sign you are off by an order of magnitude, and you
+  will not be able to progress. A factory fed by two chests while its ore comes from one small mine,
+  or a science block whose packs the labs cannot eat, is the same mistake at the other end.
 - **More, then enough.** Early on you always want more: more robots, more plates, more of
   everything. Once the base is big enough that you're managing it, robots and every material get
   capped: you want as much as you need.
-- **Belts carry the big flows; robots build and handle one-offs.** Logistic robots become a
-  throughput cap if they carry the main plate flows. Put smelting and its consumers in one factory
-  where you can.
-- **Find the next ore patch before you need it.** Use radar, and roboport chains (each roboport
-  within 50 tiles of the last) to reach new patches; put a storage chest near far builds.
+- **Find the next ore patch before you need it.** Use radar, and a belt or a roboport chain (each
+  roboport within 50 tiles of the last) to reach new patches; put a storage chest near far builds.
 - **Keep the rest of the base growing alongside science.** A big science block with too little
   smelting and too few building materials stalls.
 
 ## Robots
 
+- **Robots are the easy way to get a couple of items.** Build a chest, a roboport if the network
+  does not reach, and let them carry it: that is what they are for, and it needs no rules.
+- **When robots are the slow part, use a belt.** A belt carries a flow continuously and costs no
+  robots.
+- **Keep the robots' trips short.** A chest far from the hub makes every delivery a long flight.
+  Put the chest near the hub and belt the item to it from the far end: a provider beside the hub
+  takes the belt, the requester beside it pulls from that, and the robots only fly the short hop.
+  You spend more belt on the routing and save most of the robot travel.
+- **Robots in a chest do nothing.** An inserter puts them into a roboport. `fk stock` counts them:
+  flying (working), in roboports (home) and in chests (idle items). A build that takes up a
+  roboport returns its robots to a chest, so check after a rebuild.
 - **Build robots early and keep building them** until you have enough to manage; then cap them.
-- **Robots in a chest do nothing.** An inserter puts them into a roboport. `fk stock` counts them
-  and says which are in roboports and which in chests; when robots come back from a rebuild they
-  land in a chest, and the factory quietly loses its fleet until one is loaded again.
-- **More robots raise the cap at first; robot speed research raises it later.**
 
 ## Power
 
@@ -150,13 +168,16 @@ implies, roughly one and a half to two times.
 The two ways to feed a factory belong to two phases of the base, and running both at once pays for
 both.
 
-- **First factories: logistic chests.** A requester chest into a row of assemblers or furnaces is a
-  3x5 cell and five items, and the robots carry it. It is minutes to build and minutes to change,
-  which is what a base whose shape is still changing needs.
-- **Factories you mean to keep: belts.** A belt-fed factory runs continuously: it uses no logistic
-  robots, it doesn't slow down when the robot fleet is busy, and it does not have to wait for a
-  robot to finish a trip per item. Robots are a small, fixed budget until late research; plates on
-  belts are not.
+- **First factories: logistic chests, with no belt in or out.** The little belts inside a row are
+  part of the row; what a first cell must not have is a belt carrying items to it or away from it,
+  or a chest feeding a belt. A requester beside the row feeds it by robot or one inserter: a 3x5
+  cell and five items, minutes to build and minutes to change, which is what a base whose shape is
+  still changing needs. A chest-to-belt feed is a temporary measure for a small volume, never a
+  design.
+- **Factories you mean to keep: belts, and no logistic chests.** A belt-fed factory runs
+  continuously: it uses no logistic robots, it doesn't slow down when the robot fleet is busy, and
+  it does not wait for a robot to finish a trip per item. A kept factory fed by requester chests is
+  a robot fleet doing a belt's job, and it will go slow however many robots you add.
 - **The worst base is both at once**: belts for the first machines, paying for belts and their
   routing before the shape is known, and logistic chests for the ones that grow, paying for robots
   forever. Rory: "over reliance on combined belt and logistic chest bases gives the worst of both

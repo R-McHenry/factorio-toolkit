@@ -49,5 +49,12 @@ class RoboportTest(unittest.TestCase):
         self.assertEqual(rep.nets["load"].status, "connected")
 
 
+    def test_a_coverage_roboport_is_not_unfed(self):
+        """A roboport with no robot net is a coverage roboport; it is not missing an input."""
+        f = lang.parse("port = Roboport @(0, 0)\n", "t.fk")
+        flat = elaborate(f, dict(f.modules), CAT, "t")
+        self.assertEqual([c for c in flat.checks if c.code == "UNFED"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

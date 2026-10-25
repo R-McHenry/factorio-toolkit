@@ -666,7 +666,8 @@ def _endpoint_checks(flat, cat):
         for item in m.needs:
             if (key, item) not in in_hold:
                 unfed.append((m.inst, item, key))
-        if m.sink and key not in fed:
+        # a roboport with no robot net is a coverage roboport: it takes robots when it needs them
+        if m.sink and key not in fed and cat.kind(m.prototype) != "roboport":
             unfed.append((m.inst, "anything", key))
         for item in m.makes:
             if (key, item) not in out_hold:
@@ -700,5 +701,14 @@ def _endpoint_checks(flat, cat):
         if m.source and m.inst not in seen and key in driving:
             seen.add(m.inst)
             item = next(iter(m.makes))
-            flat.checks.append(Check("UNBOUNDED", m.inst, f"{item} from the logistic network has "
-                                     "no rate; everything downstream of it is unbounded"))
+            nets = out_hold.get((key, item)) or []
+            pairs = [(k, i) for n in nets for k, i in flat.nets[n].consumers if i == item]
+            msg = (f"{item} from the logistic network has no rate=: everything downstream of it "
+                   "is unbounded")
+            if pairs:
+                take = sum(flat.machines[k].needs.get(item, 0.0) for k, _i in pairs)
+                n = len(pairs)
+                msg += (f". The {n} machine{'s' if n > 1 else ''} on it "
+                        f"take{'s' if n == 1 else ''} {take:g}/s: `fk stock` says what the network "
+                        "holds, so compare that with this need before you size it")
+            flat.checks.append(Check("UNBOUNDED", m.inst, msg))

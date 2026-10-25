@@ -105,10 +105,15 @@ out by hand:
 
 Two ways to feed a factory, for two phases of the base. Running both pays for both.
 
-- **First factories: logistic chests.** A requester chest into a row is a 3x5 cell and five items,
-  and the robots carry it: build it in minutes, change it in minutes.
-- **Factories you mean to keep: belts.** A belt runs continuously, uses no logistic robots, and does
-  not slow down when the robot fleet is busy. Robots are a small fixed budget until late research.
+- **First factories: logistic chests, and no belt in or out.** The little belts inside a row are
+  part of the row; what a first cell must not have is a belt carrying items to it or from it, or a
+  chest feeding a belt. A requester beside the row feeds it by robot or one inserter: a 3x5 cell,
+  five items, minutes to build, minutes to change. A chest-to-belt feed is a temporary measure for a
+  small volume, never a design.
+- **Factories you mean to keep: belts, and no logistic chests.** A belt runs continuously, uses no
+  logistic robots, and does not slow down when the fleet is busy. A kept factory fed by requester
+  chests is a robot fleet doing a belt's job. When a cell turns into a factory, rebuild its feed as
+  a belt in the same move.
 - **Both at once is the worst of both worlds**: belts where the shape is still changing, logistic
   chests where the flows grow.
 - **Two items into one row go on one belt, one lane each** (`lanes A | B`); the build's `LANES`
@@ -116,24 +121,37 @@ Two ways to feed a factory, for two phases of the base. Running both pays for bo
 
 ## Robots and roboports
 
-- `fk stock` counts robots with everything else: flying (working), in roboports (their home slots)
-  and sitting in chests (items doing nothing). A chest and one inserter into a roboport
-  (`docs\examples\robot-feed.fk`) puts the chest ones back.
-- A roboport is where the fleet lives and what makes a logistic chest work. Decide where they go
-  and keep them: taking one up strands the robots inside it, so a rebuild that moves a roboport
-  leaves you a robot-loading job before anything else can use them.
-- `cover robots` adds a roboport (and a storage chest beside it) only where a chest is out of the
-  network's reach, so let it do that rather than scattering roboports.
+- Robots are the easy way to get a couple of items across the base: a chest, a roboport if the
+  network does not reach, and they carry it. Do not overthink them and do not build around them.
+- When the robots are the slow part, the answer is a belt, not more robots: put that flow on belts.
+- Keep their trips short: a chest far from the hub makes every delivery a long flight. Put the
+  chest near the hub and belt the item in from the far end (a provider by the hub takes the belt, a
+  requester beside it pulls from that): more belt on the routing, far less robot travel.
+- `fk stock` counts them: flying (working), in roboports (their home slots) and in chests (items
+  doing nothing). One chest and one inserter into a roboport (`docs\examples\robot-feed.fk`) puts
+  the idle ones back. A build that takes up a roboport strands what is inside it, so look after a
+  rebuild.
 
-## Grow big
+## How big
 
-Rory's advice after watching the first nights: a base that stays small takes dozens of hours per
-batch of research, so grow exponentially. Before blue science players usually run ten or so red and
-ten or so green science assemblers; with blue, 8 to 15 each of blue science, advanced circuit and
-engine assemblers, with the smelting under them (one pack a second of each colour eats about 1200
-iron and 600 copper plates a minute). A proper dedicated mall, belt-fed from its own smelting, keeps
-the belts, inserters, poles, assemblers, furnaces and drills coming that the growth eats; one-off
-crafters are for the rare items. Model the next size with `fk rates`, build it, then double it.
+The base grows in a ramp: each step about twice the last, and you build the next one when the last
+one runs. A good solo speedrun's pace is the shape to aim at (default settings; the times are the
+shape, not a clock to beat):
+
+| by | smelting | what is running |
+|---|---|---|
+| 10 min | 4 furnaces (~75 plates/min) | the first lab, red science |
+| 20-25 min | 8-12 furnaces (~150-225 plates/min) | red + green science, steel |
+| 35-45 min | 24 furnaces (~450 plates/min) | oil, plastic, engines, blue science |
+| 60-75 min | 48 furnaces (~900 plates/min) | production and utility science |
+| 90-120 min | 1000+ plates/min | the rocket |
+
+Before each build, ask: at the stage the base is at, is this ten times too big, ten times too small,
+or about right? Spending hundreds of inserters and belts before you have constructed a single one is
+a sign you are off by an order of magnitude, and you will not be able to progress. Compare with what
+the base makes now (`fk stats`), what it holds (`fk stock`), and what the last step takes. A
+dedicated mall, belt-fed from its own smelting, is what makes the later steps cheap; one-off
+crafters are for the rare items.
 
 Rory's chat messages show up at the end of any `fk` command; answer with `fk say "text"`.
 
