@@ -68,14 +68,12 @@ if (-not $NoReset) {
     if ($LASTEXITCODE -ne 0) { throw "kickoff-v1.sh failed (exit $LASTEXITCODE)" }
 }
 
-# the run's folder, from the same commit
-# the last player's notes go to the next one: the newest NOTES.md of an earlier run
-$notes = @()
-$last = Get-ChildItem (Join-Path $P "runs\*\NOTES.md") -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($last) { $notes = @("--notes", $last.FullName); Write-Host "notes: $($last.FullName)" }
+# the run's folder, from the same commit. No inherited NOTES.md (2.0.22, Rory 2026-10-25): the
+# last player's notes carried its own playbook into the next run, and the 1035 player started with
+# the 0317 run's "cells were repeatedly traded against each other" and "finish the mall" in hand.
+# A fresh run starts from the brief and the docs. (--notes is still there for a deliberate carry.)
 $eff = if ($Effort) { @("--effort", $Effort) } else { @() }
-python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player @notes `
+python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player `
     --workers $Workers --worker-model $WorkerModel @eff
 if ($LASTEXITCODE -ne 0) { throw "new_run.py failed" }
 # the folder is made by this (Admin) account; DSH's sandbox, running as computah, rewrites the

@@ -159,11 +159,11 @@ If something in the tools seems broken, just say so in `FRICTION.md`: that's use
 
 Have fun!
 
-## Notes for the next player
+## Your notes
 
-`NOTES.md` in this folder, if there is one, is what the players before you wrote down: what worked,
-what to watch for, tricks worth keeping. Read it after this brief. Keep your own version of it as
-you go: the next player starts on a fresh map from what you write there.
+`NOTES.md` in this folder is yours if you want one: what you learned about this map, what to watch
+for. It is this run's own notes. A fresh run starts from this brief and the docs, not from another
+run's notes, so write it for yourself and do not spend the turn on it.
 
 ## Your goal file
 
