@@ -1408,6 +1408,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     todo = [n for n in js if n not in have and n not in patch and js[n].skip is None
             and not js[n].fluid]
     frames = set()
+    owned = {}                                   # instance path -> its frame's tiles
     sealed = {}                                  # module path -> its frame, for a sealed module
     for path, rec in lay.insts.items():
         if rec.kind in ("Literal", "Bus") or path not in flat.insts:
@@ -1415,7 +1416,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
         mine = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
         frames |= mine
-        if flat.insts[path].module is not None and any(k.startswith(path + "/") for k in flat.ports):
+        owned[path] = mine
+        if path in flat.sealed:
             sealed[path] = (x0, y0, x1, y1, mine)
     w, h = lay.size or (0, 0)
     box = bounds or (0, 0, w + margin, h + margin)
@@ -1441,8 +1443,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
 
     def net_frames(net):
         """The blocked frames for ``net`` and its box: a net inside a sealed module routes in that
-        module's frame (its own frames free, bounded by the innermost one); every other net keeps
-        every frame blocked, so a crossing can only be a port (PLAN-MODULES phase 3)."""
+        module's frame (bounded by the innermost one); every other net keeps every frame blocked,
+        so a crossing can only be a port (PLAN-MODULES phase 3). Only the frames of the modules
+        the net is inside are free: a template's frame or a sealed child's inside them stays
+        blocked, as it is for a net outside (2.0.40: the child's frame was freed with its
+        parent's, and a parent net ran straight across a sealed child)."""
         parts = net.split("/")[:-1]
         inside = []
         for i in range(1, len(parts) + 1):
@@ -1451,11 +1456,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 inside.append(pre)
         if not inside:
             return frames, box
-        free = set()
-        for pre in inside:
-            free |= sealed[pre][4]
+        blocked = set()
+        for path, tiles in owned.items():
+            if path not in inside:
+                blocked |= tiles
         x0, y0, x1, y1, _tiles = sealed[inside[-1]]
-        return frames - free, (x0, y0, x1, y1)
+        return frozenset(blocked), (x0, y0, x1, y1)
     base = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
                          dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
     standing, patched, again = [], {}, {}
@@ -1544,12 +1550,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
 def seal_checks(flat, lay, cat):
     """SEAL (PLAN-MODULES phase 3): a net's carrier inside a sealed module's frame that the net does
     not belong to -- a crossing that is not at a port -- or one of the module's own nets' carriers
-    outside its frame. One line per carrier at fault; none when every sealed module is sealed."""
+    outside its frame. One line per carrier at fault; none when every sealed module is sealed.
+    FRAME (2.0.40): an entity of the module's own (a machine, a template's belt) outside its frame."""
     out = []
     for path, rec in sorted(lay.insts.items()):
-        if path not in flat.insts or flat.insts[path].module is None:
-            continue
-        if not any(k.startswith(path + "/") for k in flat.ports):
+        if path not in flat.insts or path not in flat.sealed:
             continue
         try:
             x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
@@ -1560,10 +1565,17 @@ def seal_checks(flat, lay, cat):
                  if k.startswith(path + "/") and "/" not in k[len(path) + 1:]}
         for key, e in lay.entities.items():
             net = e.attrs.get("net")
-            if not net:
-                continue
             tiles = fkpmod.tiles_of(cat, e)
             inside = all(t in frame for t in tiles)
+            if key.startswith(path + "/") and not inside:
+                # FRAME (2.0.40): the module's own contents past its declared size (2.0.37's rib:
+                # a row one tile past the south edge, its port under the assembler)
+                out.append(f"FRAME     {key} ({e.name}) is part of sealed module {path} but stands "
+                           f"outside its frame {x0},{y0}..{x1 - 1},{y1 - 1}: grow its size or "
+                           "move it in")
+                continue
+            if not net:
+                continue
             mine = net == path or net.startswith(path + "/")
             if key in ports:
                 continue
@@ -1583,9 +1595,7 @@ def port_checks(flat, lay, cat):
     through it. One line per taken tile."""
     out, seen = [], set()
     for path, rec in sorted(lay.insts.items()):
-        if path not in flat.insts or flat.insts[path].module is None:
-            continue
-        if not any(k.startswith(path + "/") for k in flat.ports):
+        if path not in flat.insts or path not in flat.sealed:
             continue
         occ = {}
         for key, e in lay.entities.items():

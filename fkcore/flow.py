@@ -718,8 +718,7 @@ def s_route(ctx, args):
         flat = ctx.flats[factory]
         pinned, again = {}, {}
         if o["module"]:
-            if o["module"] not in flat.insts or not any(
-                    k.startswith(o["module"] + "/") for k in flat.ports):
+            if o["module"] not in flat.insts or o["module"] not in flat.sealed:
                 lines.append(f"{factory}: --module {o['module']} is not a sealed instance here")
             else:
                 pinned, again = _module_pinned(flat, ctx.previous.get(factory), ctx.cat,

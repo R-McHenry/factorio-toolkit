@@ -277,7 +277,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                                      False, None, False, 1.0,
                                      {"port": p.dir, "items": items,
                                       "port_name": p.name, "module": mod.name, "lane": p.lane})
-    if ports:
+    # 2.0.40 (Rory, 2026-10-26): ``size`` seals a module, ports or none, so a block (a plot) that
+    # connects to nothing keeps its frame; with no ports only robots reach it
+    if prefix and (ports or getattr(mod, "size", None) is not None):
         flat.sealed.add(prefix)
     for inst in mod.insts:
         path = _join(prefix, inst.name)

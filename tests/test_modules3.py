@@ -176,5 +176,76 @@ class SealTest(unittest.TestCase):
         self.assertIn("rib/g/m0", lines)
 
 
+# 2.0.40: a sealed Outer holds a sealed rib; Outer's own net `through` runs from its west port to a
+# chest east of the rib, so the short way is straight across the rib's frame.
+NESTED = """
+module GearRib size 16x10 {
+  port iron : in iron-plate @w
+  port gear : out iron-gear-wheel @e
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(2, 1)
+  net fe: iron -> g
+  net g: g -> gear
+}
+module Outer size 60x30 {
+  port iron : in iron-plate @w
+  port gear : out iron-gear-wheel @e
+  rib = GearRib @(20, 10)
+  box = Chest<provider, limit=8> @(50, 14)
+  feedo = Chest<requester, item=iron-plate, rate=1> @(4, 14)
+  net through: iron -> box
+  net fr: feedo -> rib.iron
+  net go: rib.gear -> gear
+}
+feed = Chest<requester, item=iron-plate, rate=4> @(0, 14)
+sink = Chest<provider> @(80, 14)
+o = Outer @(10, 0)
+net fo: feed -> o.iron
+net so: o.gear -> sink
+"""
+
+
+class FixesTest(unittest.TestCase):
+    """2.0.40: the quick fixes of the plan review (assessment-20261025\\PLAN-MODULES-REVIEW.md)."""
+
+    def test_a_parent_net_routes_around_a_sealed_child(self):
+        flat, r = routed(NESTED)
+        self.assertEqual(r.failed, {})
+        x0, y0, x1, y1 = expand.frame_of(flat, r.layout, "o/rib", CAT)
+        across = [k for k, e in r.layout.entities.items() if e.attrs.get("net") == "o/through"
+                  and x0 <= e.x < x1 and y0 <= e.y < y1]
+        self.assertEqual(across, [])
+        self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME"))], [])
+
+    def test_size_alone_seals_a_module(self):
+        text = """
+module Plot size 20x10 {
+  c = Chest<requester, item=iron-plate, rate=1> @(1, 1)
+  a = Assembler<recipe=iron-gear-wheel> @(8, 1)
+  b = Chest<provider> @(16, 1)
+  net fe: c -> a
+  net g: a -> b
+}
+p = Plot @(10, 10)
+"""
+        flat = flat_of(text)
+        self.assertIn("p", flat.sealed)
+        with self.assertRaises(Exception) as cm:
+            flat_of(text + "box = Chest<provider> @(0, 0)\nnet x: p.a -> box\n")
+        self.assertIn("sealed", str(cm.exception))
+        _flat, r = routed(text)
+        self.assertEqual(r.failed, {})
+        self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME"))], [])
+
+    def test_a_module_without_size_or_ports_stays_transparent(self):
+        self.assertEqual(flat_of(PLAIN).sealed, set())
+
+    def test_contents_past_the_declared_size_is_a_frame_line(self):
+        short = DESIGN.replace("size 16x10", "size 16x6")
+        _flat, r = routed(short)
+        lines = [ln for ln in r.lines if ln.startswith("FRAME")]
+        self.assertTrue(lines)
+        self.assertIn("sealed module rib", lines[0])
+
+
 if __name__ == "__main__":
     unittest.main()

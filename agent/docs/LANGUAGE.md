@@ -177,8 +177,9 @@ order: `bus.load1`, `bus.tap1`, `bus.tap2`.
 
 ## Modules with ports (sealed)
 
-A module that declares `port` lines is **sealed**: its nets are its own, and the only way in or out is
-a port.
+A module that declares `port` lines or a `size` is **sealed**: its nets are its own, and the only way
+in or out is a port. A sealed module with no ports is a closed block: only robots reach it. Its
+contents must fit its `size`; a machine or belt past the frame is a `FRAME` line.
 
 ```
 module GearRib size 16x10 {
