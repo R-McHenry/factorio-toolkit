@@ -201,6 +201,51 @@ m = M @(40, 0)
         self.assertEqual([(n, k) for n, _r, k in inst.conns], [("a", "left"), ("d", None)])
 
 
+BUS4_HEAD = """
+ore   = Chest<requester, item=iron-ore, rate=3/s>   @(1, 18)
+coal  = Chest<requester, item=coal, rate=1/s>       @(1, 21)
+smelt = SmelterRow<n=8, recipe=iron-plate>          @(4, 18)
+gears = AsmRow<n=1, recipe=iron-gear-wheel>         @(30, 1)
+gbox  = Chest<provider, limit=4>                    @(26, 2)
+box   = Chest<provider, limit=8>                    @(36, 19)
+net ore_:  ore -> smelt
+net fuel:  coal -> smelt
+net gear:  gears -> gbox
+"""
+
+BUS4_HAND = BUS4_HEAD + """
+bus   = Bus<belts=4, length=54, item=iron-plate, load=s11, tap=n26|s33> @(0, 10)
+net iron1: smelt -> bus.load1
+net fe:    bus.tap1 -> gears
+net spare: bus.tap2 -> box
+"""
+
+BUS4_MAP = BUS4_HEAD + """
+bus   = Bus<belts=4, item=iron-plate>(in1: smelt, fg: gears, spare: box) @(0, 10)
+"""
+
+
+class Bus4Test(unittest.TestCase):
+    """The plan's phase-2 closing test: bus4.fk as a port map, same rates and verdicts."""
+
+    def test_bus4_as_a_port_map_has_the_same_rates_and_verdicts(self):
+        hand, mapped = flat_of(BUS4_HAND), flat_of(BUS4_MAP)
+        a, b = rates.solve(hand), rates.solve(mapped)
+        self.assertAlmostEqual(a.nets[("bus", "iron-plate")].delivered,
+                               b.nets[("bus", "iron-plate")].delivered, places=6)
+        for key, util in a.util.items():
+            if util is not None and not key.startswith("bus/"):
+                self.assertAlmostEqual(util, b.util[key], places=6, msg=key)
+        for key, util in b.util.items():
+            if util is not None and not key.startswith("bus/"):
+                self.assertAlmostEqual(util, a.util[key], places=6, msg=key)
+        self.assertEqual(rates.underfed(a), rates.underfed(b))
+        self.assertEqual(sorted({c.code for c in hand.checks}),
+                         sorted({c.code for c in mapped.checks}))
+        self.assertEqual(mapped.insts["bus"].params["tap"], ["n7", "n13"])
+        self.assertEqual(mapped.insts["bus"].params["mouth"], ["in1"])
+
+
 class SyntaxTest(unittest.TestCase):
     def test_the_list_parses_in_order(self):
         f = lang.parse("bus = Bus<belts=2, item=iron-plate>(a: b.c, d: e) @(0, 0)", "t.fk")
