@@ -257,8 +257,9 @@ class Module:
 class Port:
     """A port declaration (2.0.28, PLAN-MODULES; lane-level in 2.0.29): a port is a **lane** of a
     belt end, so ``(side, pos, lane)``. ``items`` is the left lane's items, ``right`` the right
-    lane's when the declaration is the pair ``A | B`` (``items`` is then the left lane); ``lane`` is
-    the pinned lane of a one-lane port (``@s4L``), or None: the build chooses it facing the partner."""
+    lane's when the declaration is the pair ``A | B`` (``items`` is then the left lane, and the same
+    item on both lanes is one item on both lanes: V1's ``Belt[item]``); ``lane`` is the pinned lane of a
+    one-lane port (``@s4L``), or None: the build chooses it facing the partner."""
     name: str
     dir: str             # "in" | "out" | "inout"
     items: list          # the left lane's items (several: a mixed lane)
@@ -421,10 +422,6 @@ class _P:
             right = [self.word("item").text]
             while self.accept(","):
                 right.append(self.word("item").text)
-            for item in right:
-                if item in left:
-                    self.err(f"port {name}: {item} is on both lanes; a pair is two different "
-                             "lanes of one belt end")
         self.expect("@")
         tok = self.word("a side: n, e, s or w, with a tile along it like w4, and L or R")
         text, rest = tok.text, tok.text[1:]

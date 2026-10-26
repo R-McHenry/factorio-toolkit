@@ -118,7 +118,6 @@ class SyntaxTest(unittest.TestCase):
                           ("module M { port x : in iron-plate @q }", "side is n, e, s or w"),
                           ("module M { port x : in iron-plate w }", "expected '@'"),
                           ("module M { port x : in iron-ore | coal @s5L }", "a pair is both lanes"),
-                          ("module M { port x : in iron-ore | iron-ore @s5 }", "on both lanes"),
                           ("module M size 24 { }", "size WxH")):
             with self.assertRaises(lang.FkSyntaxError) as cm:
                 lang.parse(text, "t.fk")
@@ -302,6 +301,37 @@ m = M
         with self.assertRaises(ElabError) as cm:
             flat_of(self.BURNER.replace("burn.feed", "burn.row"))
         self.assertIn("feed (in iron-ore | coal)", str(cm.exception))
+
+    def test_the_same_item_on_both_lanes_is_belt_item(self):
+        """V1's `Belt[iron-plate]`: one item, both lanes."""
+        flat = flat_of("""
+module Both size 8x6 {
+  port both : in iron-plate | iron-plate @s
+  port out_ : out iron-gear-wheel @n
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(1, 1)
+  net a: both -> g
+  net b: g -> out_
+}
+feed = Chest<requester, item=iron-plate, rate=2> @(0, 0)
+both = Both @(20, 0)
+box = Chest<provider, limit=8> @(40, 0)
+net x: feed -> both.both
+net y: both.out_ -> box
+""")
+        port = flat.ports["both/both"]
+        self.assertEqual(port.lanes(), [("L", ["iron-plate"]), ("R", ["iron-plate"])])
+        self.assertEqual(sorted(flat.machines["both/both"].makes), ["iron-plate"])
+        self.assertEqual(codes(flat), [])
+
+    def test_a_pair_of_a_fluid_is_refused(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of("module M {\n  port w : in water | steam @s\n}\nm = M\n")
+        self.assertIn("pipes have no lanes", str(cm.exception))
+
+    def test_a_lane_pin_on_a_fluid_is_refused(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of("module M {\n  port w : in water @sL\n}\nm = M\n")
+        self.assertIn("drop the L", str(cm.exception))
 
 
 class PortCheckTest(unittest.TestCase):

@@ -253,6 +253,15 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         key = _join(prefix, p.name)
         if key in flat.ports:
             raise ElabError(src, p.line, f"port {p.name} is defined twice")
+        for item in p.all_items:            # a pipe has no lanes (as `lanes` says of a fluid)
+            if cat.is_fluid(item) and p.right is not None:
+                raise ElabError(src, p.line,
+                                f"port {p.name}: a pair is the two lanes of one belt end, and "
+                                f"{item} is a fluid: pipes have no lanes")
+            if cat.is_fluid(item) and p.lane is not None:
+                raise ElabError(src, p.line,
+                                f"port {p.name}: {item} is a fluid, and a pipe has no lanes: drop "
+                                f"the {p.lane}")
         ports[p.name] = key
         items = p.all_items
         flat.ports[key] = PortInst(key=key, name=p.name, dir=p.dir, items=list(p.items),
@@ -851,7 +860,8 @@ def _port_checks(flat):
                                      f"used against its direction ({port.dir}): " + "; ".join(bad),
                                      port.line))
         carried = {item for _n, _s, item in uses}
-        missing = [i for i in port.all_items if i not in carried]
+        declared = list(dict.fromkeys(port.all_items))     # one item twice is both lanes
+        missing = [i for i in declared if i not in carried]
         if missing:
             flat.checks.append(Check("PORT", f"port {key}",
                                      f"nothing carries {', '.join(missing)} through it", port.line))
@@ -860,7 +870,7 @@ def _port_checks(flat):
         inside_items = {item for _n, _s, item in inside}
         outside_items = {item for _n, _s, item in outside}
         if inside and outside:
-            for item in port.all_items:
+            for item in declared:
                 if item in inside_items and item not in outside_items and not named_out:
                     flat.checks.append(Check("PORT", f"port {key}",
                                              f"nothing outside brings {item} to it", port.line))
