@@ -772,8 +772,7 @@ def _rehand(lay, cat, hand):
         n += 1
     if not n:
         return lay, 0
-    return fkp.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
-                      dict(lay.plots), dict(lay.claims), dict(lay.marks), out), n
+    return lay.copy(entities=out), n
 
 
 def _fixed_hands(ctx):

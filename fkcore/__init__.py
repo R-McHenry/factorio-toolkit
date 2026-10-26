@@ -1,5 +1,5 @@
 """fkcore: the core of the Factorio toolkit (CORE.md, and CORE-V2.md for lanes and throughput).
 Pure, stdlib only."""
 
-#: the release (docs/RELEASE-2.0.13.md); a run's run.json names the commit it plays
-__version__ = "2.0.13"
+#: the release (docs/RELEASE-2.0.41.md); a run's run.json names the commit it plays
+__version__ = "2.0.41"

@@ -145,6 +145,17 @@ class PortInst:
     def all_items(self):
         return list(self.items) + list(self.right or ())
 
+    @property
+    def both(self):
+        """The port is the whole belt end: ``X | X``, the same items on both lanes (2.0.41)."""
+        return self.right is not None and list(self.right) == list(self.items)
+
+    def width_of(self, item):
+        """How many of the port's lanes carry ``item``: 2 for ``X | X``, 1 for a pair's lane or a
+        one-lane port (the capacity ``CAPACITY`` rates the port at)."""
+        lanes = self.lanes()
+        return sum(1 for _lane, items in lanes if item in items)
+
     def lanes(self):
         """[(lane, items)] the port occupies: both for a pair, else its one lane (None if chosen)."""
         if self.right is not None:
@@ -168,6 +179,9 @@ class Flat:
     pairs: dict = field(default_factory=dict)       # "A|B" -> (A, B): two nets on one belt
     lane_of: dict = field(default_factory=dict)     # net -> its pair's "A|B"
     ports: dict = field(default_factory=dict)       # "<instance>/<port>" -> PortInst (2.0.28)
+    port_tiles: dict = field(default_factory=dict)  # port key -> (x, y, out, lane) in its frame
+                                                    # (recorded, or chosen at layout; 2.0.41)
+    port_records: dict = field(default_factory=dict)  # port key -> fkp.PortRec (the committed .fkp)
     sealed: set = field(default_factory=set)        # instance paths whose module declares ports
 
     def resolve_ref(self, ref, scope=""):
@@ -226,7 +240,8 @@ def _duty(params, path, line, src):
 
 def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     """``layout`` (the factory's .fkp) is needed by Literal instances, and gives an ``n=auto``
-    row the count it laid out; ``sizes`` ({instance path: n}, the size step's) overrides it."""
+    row the count it laid out; it also carries the committed port tiles (2.0.41), which a rebuild
+    keeps. ``sizes`` ({instance path: n}, the size step's) overrides it."""
     flat = Flat(name, f.path)
     flat._layout = layout
     flat._sizes = dict(sizes or {})
@@ -237,11 +252,21 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _resolve_nets(flat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
+    _recorded_ports(flat, layout)
     _port_checks(flat)
     _endpoint_checks(flat, cat)
     from . import circuits
     flat.circuit = circuits.resolve(flat, cat)
     return flat
+
+
+def _recorded_ports(flat, layout):
+    """Keep the committed .fkp's ``port`` lines (2.0.41, PLAN-GLOBAL phase A): the tile the build
+    chose stays where it is, so a parent change never moves a port (``expand`` reads these back
+    into the module's own frame and a rebuild lays the same tile)."""
+    from . import fkp as fkpmod
+    for rec in getattr(layout, "ports", {}).values() if layout is not None else ():
+        flat.port_records[fkpmod.port_key(rec.key)] = rec
 
 
 def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
@@ -1050,6 +1075,13 @@ def _port_checks(flat):
                     "PORT", f"port {key}",
                     f"@{port.side}{port.pos} is off the module's frame: {port.module} is "
                     f"{w}x{h}, so its {port.side} edge runs 0..{along - 1}", port.line))
+    # 2.0.41 (PLAN-GLOBAL phase A): a committed port tile whose port is gone
+    for key in sorted(getattr(flat, "port_records", ())):
+        if key not in flat.ports:
+            flat.checks.append(Check(
+                "PORT", f"port {key}",
+                "the committed .fkp records its tile, but this design declares no such port: "
+                "drop the port line"))
 
 
 def _endpoint_checks(flat, cat):

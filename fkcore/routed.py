@@ -15,7 +15,8 @@ netlist machine whose entity the layout holds on it (``fkcore.throughput``):
 its routed one (mean, and the lowest machine), and what limits it; per net and item what its
 consumers asked and got, and its critical connector (the largest required ratio). The checks:
 ``CAPACITY`` per net and kind of connector that binds (it runs at capacity while more is required
-through it): the required flow, what the connector carries, the ratio and the consumers it starves.
+through it): the required flow, what the connector carries, the ratio and the consumers it starves
+— and, 2.0.41, per **port** its declared width (one lane 7.5/s, an ``X | X`` port both, 15/s).
 Checks warn, never gate. Pure, stdlib only.
 
 A net is one lane (2.0): a belt written ``net=A|B`` gives its left lane to A and its right to B
@@ -330,6 +331,7 @@ def report(r: Routed, factory=None):
                          + _critical(r, mine))
         checks += _capacity(r, net, mine, where)
     checks += lane_checks(r, where)
+    checks += port_capacity(r, where)
     return lines, checks
 
 
@@ -509,6 +511,41 @@ def lane_checks(r, where=""):
                          f"reach underground {ug} from its closed side and stop there: only the "
                          f"{_SIDE[other]} lane of a belt side-loaded onto an underground gets "
                          "through"))
+    return out
+
+
+def port_capacity(r, where=""):
+    """``CAPACITY`` lines for a sealed module's **ports** (2.0.41, PLAN-GLOBAL phase A): what the
+    design asks through a port against the width the declaration gives it. A one-lane port
+    (``@e4L``) is one lane of its belt end, 7.5/s on yellow; an ``X | X`` port is the whole belt
+    end, both lanes, 15/s, and its carrier says so (``net=A|A``). A crossing net that asks more
+    than its port's width is short **at the port**, whatever the route behind it carries: the fix
+    is a second lane (``item | item``) or a second port."""
+    flat, lg, need = r.flat, r.lg, r.need or {}
+    out = []
+    for key in sorted(flat.ports):
+        port = flat.ports[key]
+        ent = f"{key.rsplit('/', 1)[0]}/port_{port.name}"
+        lanes = [nid for nid in ((ent, "L"), (ent, "R")) if nid in lg.nodes]
+        if not lanes:
+            continue
+        unit = lg.nodes[lanes[0]].cap
+        what = TIER_WORD.get(lg.nodes[lanes[0]].name, lg.nodes[lanes[0]].name)
+        for item in dict.fromkeys(port.all_items):
+            width = port.width_of(item)
+            cap = unit * width
+            req = sum((need.get(nid) or {}).get(item, 0.0) for nid in lanes)
+            if req <= cap + 1e-6:
+                continue
+            if width == 1:
+                msg = (f"{req:.2f}/s asked through it, and a one-lane port carries {cap:.2f}/s "
+                       f"(one {what} lane of its belt end): declare it both lanes (item | item) "
+                       f"or give it a second port")
+            else:
+                msg = (f"{req:.2f}/s asked through it, and a both-lane port carries {cap:.2f}/s "
+                       f"(both {what} lanes of its belt end): give it a wider belt or a second "
+                       f"port")
+            out.append(Check("CAPACITY", f"{where}port {key}", msg))
     return out
 
 

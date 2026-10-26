@@ -1462,8 +1462,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 blocked |= tiles
         x0, y0, x1, y1, _tiles = sealed[inside[-1]]
         return frozenset(blocked), (x0, y0, x1, y1)
-    base = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
-                         dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
+    base = lay.copy()
     standing, patched, again = [], {}, {}
     if patch:
         claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
@@ -1501,9 +1500,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         order = [n for n in order if n in failed] + [n for n in order if n not in failed]
     _score, added, failed, how, passes, order = best
     added, failed, how = dict(added), dict(failed), dict(how)
-    new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(base.insts), dict(base.covers),
-                        dict(base.plots), dict(base.claims), dict(base.marks),
-                        dict(base.entities))
+    new = base.copy()
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
@@ -1592,8 +1589,25 @@ def port_checks(flat, lay, cat):
     """PORT (2.0.37, PLAN-MODULES phase 3): the tiles just inside and just outside a sealed module's
     port must be free for the route to meet the port carrier. A machine standing on one of them (the
     rib's assembler under the port, say) loses that entity when the design is built: the route is laid
-    through it. One line per taken tile."""
+    through it. One line per taken tile.
+
+    2.0.41 (PLAN-GLOBAL phase A): a committed port record and a pin must agree; the pin wins, since
+    the source is what someone decided (the rebuild then records the pinned tile)."""
     out, seen = [], set()
+    for key in sorted(getattr(flat, "port_records", ())):
+        port = flat.ports.get(key)
+        rec = flat.port_records[key]
+        if port is None or port.pos is None or port.size is None:
+            continue
+        w, h = port.size
+        if port.side in "ew":
+            pin = (w - 1 if port.side == "e" else 0, port.pos - 1)
+        else:
+            pin = (port.pos - 1, 0 if port.side == "n" else h - 1)
+        if (rec.x, rec.y) != pin:
+            out.append(f"PORT      {key}: the committed tile {rec.x},{rec.y} and the pin "
+                       f"@{port.side}{port.pos} disagree: the pin wins (a rebuild records "
+                       f"{pin[0]},{pin[1]})")
     for path, rec in sorted(lay.insts.items()):
         if path not in flat.insts or path not in flat.sealed:
             continue

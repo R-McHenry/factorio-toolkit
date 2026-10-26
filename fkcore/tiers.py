@@ -222,8 +222,7 @@ def assign(flat, lay, cat, mode="minimize", allow=TIERS, budgets=None, hand=1, b
              if e.owner in flat.insts and flat.insts[e.owner].kind == "Literal"}
     tiers, notes = choose(lg, res.required, cat, lay.entities, mode, allow, budgets, fixed,
                           res.required_edge, downgrade)
-    new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
-                        dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
+    new = lay.copy()
     changed, count = {}, {}
     for key, t in sorted(tiers.items()):
         e = lay.entities[key]

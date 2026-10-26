@@ -92,10 +92,16 @@ class PortTileTest(unittest.TestCase):
         self.assertIn("rib", lay.insts)
         self.assertIn("rib/port_iron", lay.entities)
         self.assertIn("rib/port_gear", lay.entities)
+        # 2.0.41: an unpinned port's tile faces its partner (the feed west, the box east), not
+        # the middle of its side, and the tile is recorded in the module's own frame
         self.assertEqual((lay.entities["rib/port_iron"].x, lay.entities["rib/port_iron"].y),
-                         (40.5, 4.5))
+                         (40.5, 0.5))
         self.assertEqual((lay.entities["rib/port_gear"].x, lay.entities["rib/port_gear"].y),
-                         (51.5, 4.5))
+                         (51.5, 0.5))
+        self.assertEqual(lay.ports["rib.iron"],
+                         fkpmod.PortRec("rib.iron", 0, 0, 4, "R", "iron-plate"))
+        self.assertEqual(lay.ports["rib.gear"],
+                         fkpmod.PortRec("rib.gear", 11, 0, 4, "R", "iron-gear-wheel"))
 
     def test_a_module_without_a_frame_stays_out_of_the_layout(self):
         _flat, lay = lay_of(PLAIN)
@@ -125,16 +131,16 @@ class SealTest(unittest.TestCase):
     def test_the_route_meets_the_port_tile(self):
         _flat, r = routed(DESIGN)
         port = r.layout.entities["rib/port_iron"]
-        self.assertEqual((port.x, port.y), (40.5, 15.5))       # the west edge, middle row
+        self.assertEqual((port.x, port.y), (40.5, 10.5))      # the west edge, facing the bus
         kinds = ("transport-belt", "underground-belt", "splitter")
         last = [e for e in r.layout.entities.values()
                 if e.attrs.get("net") == "fg" and e.name in kinds
-                and e.x == 39.5 and e.y == 15.5]
+                and e.x == 39.5 and e.y == 10.5]
         self.assertEqual(len(last), 1)                         # the carrier west of the port
         self.assertEqual(last[0].dir, 4)                       # facing the port
         first = [e for e in r.layout.entities.values()
                  if e.attrs.get("net") == "rib/fe" and e.name in kinds
-                 and e.x == 41.5 and e.y == 15.5]
+                 and e.x == 41.5 and e.y == 10.5]
         self.assertEqual(len(first), 1)                        # the carrier inside it
 
     def test_a_portless_module_routes_as_one_block(self):
@@ -169,7 +175,10 @@ class SealTest(unittest.TestCase):
         self.assertEqual(b.failed, {})
 
     def test_a_port_whose_inside_tile_is_taken_is_a_port_line(self):
-        tight = DESIGN.replace("size 16x10", "size 12x8").replace("@(2, 1)", "@(1, 1)")
+        # the port pinned under the machine: 2.0.41's unpinned port would face its partner and
+        # step aside, so this pins it where the row stands
+        tight = DESIGN.replace("size 16x10", "size 12x8").replace("@(2, 1)", "@(1, 1)") \
+                       .replace("iron-plate @w", "iron-plate @w4")
         _flat, r = routed(tight)
         lines = " ".join(ln for ln in r.lines if ln.startswith("PORT"))
         self.assertIn("rib.iron", lines)

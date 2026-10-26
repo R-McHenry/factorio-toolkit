@@ -135,8 +135,7 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
                     and rates[key][cur] > rates[key][want[key]] + _EPS:
                 want[key] = cur
                 kept += 1
-    new = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
-                        dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
+    new = lay.copy()
     changed, count = {}, {}
     for key, name in sorted(want.items()):
         count[name] = count.get(name, 0) + 1

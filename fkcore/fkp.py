@@ -5,6 +5,7 @@
     inst <path> <Kind> [k=v ...] at <x>,<y> rot <r> sig <sig>
     cover <name> <kind> [k=v ...]                       a coverage object (power, robots)
     plot <factory> at <x>,<y> rot <r> size <W>x<H> [k=v ...]
+    port <inst>.<name> at <x>,<y> dir <DIR> lane <L|R|LR> items <A>[,<B>][,..][|<C>...]
     claim <name> box <x0>,<y0> <x1>,<y1> [until <tick>] ["reason"]
     mark <actor@tick> tiles <x>,<y> ... [until <tick>]
     wire <name> red|green                               a wire net (2.0, circuits)
@@ -36,6 +37,21 @@ one target. :func:`net_names` and :func:`net_lanes` read it, :func:`pair_net` an
 write it; a ``~<net>`` owner may name such a carrier's nets (``~ore|fuel``: the route of two nets
 that share a belt).
 
+A sealed module's **port tile** is a record of its own (2.0.41, PLAN-GLOBAL phase A):
+
+    port rib.iron at 0,4 dir E lane L items iron-plate
+    port both.plate at 19,5 dir E lane LR items iron-plate|iron-plate
+    port burn.feed at 6,9 dir N lane LR items iron-ore|coal
+
+``<inst>.<name>`` names the port (the instance path, then the port's name), ``at`` the tile **in
+the module's own frame** (0,0 is the frame's top-left, whatever the parent does with it), ``dir``
+the port carrier's direction in that frame, ``lane`` the lane(s) the port occupies (one, or ``LR``
+for both lanes) and ``items`` what it carries (``|`` splits a pair's left and right lane, ``,``
+several items on one lane). The build writes it when it chooses the tile, and a rebuild reads it
+back, so a parent change never moves a port: the tile is kept like a committed route, and the
+module's own routes with it. A pinned port (``@w4``) whose record disagrees is a ``PORT`` line,
+and the pin wins.
+
 :func:`invariants` lists what makes a layout malformed: two entities on a tile, an entity outside
 the factory's size, an owner that does not resolve, a carrier with no net, a net written with a
 comma, more than two lanes, or lanes on a carrier that has none. The writer (:func:`dumps` with
@@ -43,14 +59,16 @@ comma, more than two lanes, or lanes on a carrier that has none. The writer (:fu
 """
 from __future__ import annotations
 
+import math
 import re
 import shlex
 from dataclasses import dataclass, field
 
-__all__ = ["FkpError", "InvariantError", "Entity", "Inst", "Cover", "Plot", "Claim", "Mark",
-           "WireNet", "Wire", "Layout", "loads", "dumps", "load", "save", "invariants", "tiles_of",
-           "DIRS", "CARRIER_TYPES", "LANE_TYPES", "COLOURS", "natural_key", "fmt", "split_end",
-           "net_names", "net_lanes", "pair_net", "hand_net", "map_nets"]
+__all__ = ["FkpError", "InvariantError", "Entity", "Inst", "Cover", "Plot", "PortRec", "Claim",
+           "Mark", "WireNet", "Wire", "Layout", "loads", "dumps", "load", "save", "invariants",
+           "tiles_of", "DIRS", "CARRIER_TYPES", "LANE_TYPES", "COLOURS", "natural_key", "fmt",
+           "split_end", "net_names", "net_lanes", "pair_net", "hand_net", "map_nets", "port_key",
+           "port_record_key"]
 
 DIRS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
         "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
@@ -169,6 +187,32 @@ class Plot:
 
 
 @dataclass
+class PortRec:
+    """A sealed module's port tile, recorded (2.0.41, PLAN-GLOBAL phase A): the tile the build
+    chose **in the module's own frame**, its direction there, the lane(s) it occupies and what it
+    carries. Kept like a committed route: a rebuild reads the tile back, so a parent change never
+    moves a port."""
+    key: str                                      # "<inst>.<name>"
+    x: int
+    y: int
+    dir: int                                      # the port carrier's direction, own frame
+    lane: str                                     # "L" | "R" | "LR"
+    items: str                                    # "iron-plate", "iron-ore|coal", "a,b"
+
+
+def port_key(rec_key):
+    """``<inst>.<name>`` (a port record's key) -> ``<inst>/<name>`` (the netlist's port key)."""
+    inst, _dot, name = rec_key.rpartition(".")
+    return f"{inst}/{name}"
+
+
+def port_record_key(key):
+    """``<inst>/<name>`` (the netlist's port key) -> ``<inst>.<name>`` (its record's)."""
+    inst, _slash, name = key.rpartition("/")
+    return f"{inst}.{name}"
+
+
+@dataclass
 class Claim:
     name: str
     x0: int
@@ -227,12 +271,24 @@ class Layout:
     entities: dict = field(default_factory=dict)  # key -> Entity
     wirenets: dict = field(default_factory=dict)  # name -> WireNet (2.0, circuits)
     wires: list = field(default_factory=list)     # [Wire], canonical
+    ports: dict = field(default_factory=dict)     # "<inst>.<name>" -> PortRec (2.0.41)
 
     def add(self, e: Entity):
         if e.key in self.entities:
             raise FkpError(e.key, "duplicate key")
         self.entities[e.key] = e
         return e
+
+    def copy(self, **changes):
+        """A copy with ``changes`` applied, every record travelling with it: a step that writes a
+        new layout (route, hands, tiers, unfold) keeps the port tiles (2.0.41)."""
+        fields = dict(level=self.level, name=self.name, size=self.size, insts=dict(self.insts),
+                      covers=dict(self.covers), plots=dict(self.plots),
+                      claims=dict(self.claims), marks=dict(self.marks),
+                      entities=dict(self.entities), wirenets=dict(self.wirenets),
+                      wires=list(self.wires), ports=dict(self.ports))
+        fields.update(changes)
+        return Layout(**fields)
 
 
 # -- formatting -----------------------------------------------------------------------------------
@@ -263,6 +319,18 @@ def _int(s, where):
     if not isinstance(v, int):
         raise FkpError(where, f"expected a whole number, got {s!r}")
     return v
+
+
+#: The lanes a port record may name: one, or both of a belt end's two (2.0.41).
+PORT_LANES = ("L", "R", "LR")
+
+
+def _tile(s, where):
+    """``x,y`` of a whole tile (a port's), unlike :func:`_pair`'s position."""
+    parts = s.split(",")
+    if len(parts) != 2:
+        raise FkpError(where, f"expected x,y, got {s!r}")
+    return _int(parts[0], where), _int(parts[1], where)
 
 
 def _size(s, where):
@@ -342,6 +410,21 @@ def loads(text, path="<fkp>") -> Layout:
                 w, h = _size(t[7], where)
                 _put(lay.plots, t[1], Plot(t[1], x, y, _int(t[5], where), w, h,
                                            _kv(t[8:], where)), where)
+            elif head == "port":
+                if len(t) != 10 or t[2] != "at" or t[4] != "dir" or t[6] != "lane" \
+                        or t[8] != "items":
+                    raise FkpError(where, "port <inst>.<name> at x,y dir D lane L|R|LR items "
+                                          "ITEM[|ITEM]")
+                if lay.level != "factory":
+                    raise FkpError(where, "a port record belongs to a factory")
+                if t[5] not in _DIR:
+                    raise FkpError(where, f"dir: expected a compass direction, got {t[5]!r}")
+                if t[7] not in PORT_LANES:
+                    raise FkpError(where, f"lane: expected L, R or LR, got {t[7]!r}")
+                if not t[1].rpartition(".")[0] or not t[1].rpartition(".")[2]:
+                    raise FkpError(where, f"{t[1]}: a port record's key is <inst>.<name>")
+                x, y = _tile(t[3], where)
+                _put(lay.ports, t[1], PortRec(t[1], x, y, _DIR[t[5]], t[7], t[9]), where)
             elif head == "claim":
                 if t[2] != "box":
                     raise FkpError(where, "claim <name> box x0,y0 x1,y1 [until t] [\"reason\"]")
@@ -420,6 +503,10 @@ def record_lines(lay: Layout) -> list:
         p = lay.plots[name]
         out.append(" ".join(["plot", p.factory, "at", f"{p.x},{p.y}", "rot", str(p.rot), "size",
                              f"{p.w}x{p.h}"] + _kv_text(p.params)))
+    for name in sorted(lay.ports, key=natural_key):
+        r = lay.ports[name]
+        out.append(f"port {r.key} at {fmt(r.x)},{fmt(r.y)} dir {DIRS[r.dir % 16]} lane {r.lane} "
+                   f"items {r.items}")
     for name in sorted(lay.claims, key=natural_key):
         c = lay.claims[name]
         parts = ["claim", c.name, "box", f"{fmt(c.x0)},{fmt(c.y0)}", f"{fmt(c.x1)},{fmt(c.y1)}"]
@@ -527,6 +614,29 @@ def invariants(lay: Layout, cat, nets=None) -> list:
             if lay.size is not None and not (0 <= t[0] < lay.size[0] and 0 <= t[1] < lay.size[1]):
                 problems.append(f"{key}: tile {t[0]},{t[1]} is outside the factory's "
                                 f"{lay.size[0]}x{lay.size[1]} frame")
+    for name in sorted(lay.ports, key=natural_key):
+        r = lay.ports[name]
+        inst, _dot, _port = name.rpartition(".")
+        rec = lay.insts.get(inst)
+        ent = lay.entities.get(f"{inst}/port_{_port}")
+        if ent is None:
+            problems.append(f"port {name}: no {inst}/port_{_port} carrier in the layout")
+        elif rec is not None and rec.rot % 2 == 0:
+            # the record is in the module's own frame: with a quarter-turned module the frame's
+            # size is not in the .fkp, so the position check is only exact unturned
+            t = (math.floor(float(ent.x)), math.floor(float(ent.y)))
+            want = (int(rec.x) + int(r.x), int(rec.y) + int(r.y))
+            if t != want:
+                problems.append(f"port {name}: recorded at {r.x},{r.y} in its frame, its carrier "
+                                f"stands on {t[0] - int(rec.x)},{t[1] - int(rec.y)}")
+            elif int(ent.dir or 0) % 16 != (r.dir + 4 * rec.rot) % 16:
+                problems.append(f"port {name}: recorded facing {DIRS[r.dir % 16]}, its carrier "
+                                f"faces {DIRS[int(ent.dir or 0) % 16]}")
+        if lay.size is not None and rec is not None and rec.rot % 2 == 0 \
+                and not (0 <= r.x + int(rec.x) < lay.size[0]
+                         and 0 <= r.y + int(rec.y) < lay.size[1]):
+            problems.append(f"port {name}: tile {r.x + int(rec.x)},{r.y + int(rec.y)} is outside "
+                            f"the factory's {lay.size[0]}x{lay.size[1]} frame")
     for w in lay.wires:
         for end in (w.a, w.b):
             if split_end(end)[0] not in lay.entities:
