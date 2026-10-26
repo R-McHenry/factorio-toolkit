@@ -211,11 +211,43 @@ def _imports(f, folder, modules, seen):
             seen.add(target)
             _imports(g, os.path.dirname(target), modules, seen)
         for name in names:
-            if name not in g.modules:
-                raise ElabError(f.path, line, f"import: {rel} has no module {name}")
-            if name in modules and modules[name] is not g.modules[name]:
+            mod = g.modules.get(name)
+            if mod is None:
+                body = g.body
+                if g.modules and not _body_written(body):
+                    raise ElabError(f.path, line,
+                                    f"import: {rel} has no module {name} (it defines "
+                                    f"{', '.join(sorted(g.modules))}) and no body of its own")
+                # 2.0.43 (PLAN-GLOBAL phase B): the file defines no module NAME, so its body
+                # **is** the module: `import Outpost from "outpost.fk"` needs no wrapping, and a
+                # `size WxH` at the top of the file is its frame (an empty body is an empty plot)
+                mod = lang.Module(name, body.line, insts=body.insts, nets=body.nets,
+                                  asserts=body.asserts, covers=body.covers, signals=body.signals,
+                                  wires=body.wires, behaves=body.behaves, expects=body.expects,
+                                  lanes=body.lanes, sets=body.sets, ports=body.ports,
+                                  size=body.size)
+            if name in modules and modules[name] is not mod:
                 raise ElabError(f.path, line, f"import: module {name} is defined twice")
-            modules[name] = g.modules[name]
+            modules[name] = mod
+
+
+def _placement_hints(inst):
+    """An instance's hints, with the placement its own line gives it (2.0.43, PLAN-GLOBAL phase
+    B): ``gap`` (tiles kept free around a plot) and ``lifecycle`` (``retired`` / ``temporary
+    until ...``), which the root design's plot list reads."""
+    hints = dict(inst.hints)
+    if getattr(inst, "gap", 0):
+        hints["gap"] = inst.gap
+    if getattr(inst, "lifecycle", None):
+        hints["lifecycle"] = inst.lifecycle
+    return hints
+
+
+def _body_written(body):
+    """Whether a file's top-level body holds anything (so it is a factory file, not a file of
+    ``module`` definitions only)."""
+    return any(getattr(body, k) for k in ("insts", "nets", "asserts", "covers", "signals",
+                                          "wires", "behaves", "expects", "lanes", "sets"))
 
 
 def elaborate_file(path, cat, name=None, layout=None, sizes=None):
@@ -324,9 +356,16 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             before = set(flat.machines)
             _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,))
             keys = [k for k in flat.machines if k not in before and k not in flat.ports]
-            node = Inst(path, inst.kind, inst.params, inst.hints, keys, inst.kind,
-                        flat.scopes[path], inst.line, size=modules[inst.kind].size,
-                        conns=inst.conns)
+            # 2.0.43 (PLAN-GLOBAL phase B): an instance line's own `size WxH` is the frame a plot
+            # gets from its placement, and it seals the instance as the module's own `size` does
+            size = getattr(inst, "size", None) or modules[inst.kind].size
+            if size is not None:
+                flat.sealed.add(path)
+                for key, port in flat.ports.items():
+                    if port.scope == path:
+                        port.size = size
+            node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, inst.kind,
+                        flat.scopes[path], inst.line, size=size, conns=inst.conns)
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
             auto = _auto(flat, path, inst, src)
@@ -351,8 +390,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                 m = _machine(spec, path, inst.kind, d)
                 flat.machines[m.key] = m
                 keys.append(m.key)
-            node = Inst(path, inst.kind, inst.params, inst.hints, keys, None, None, inst.line,
-                        imported, conns=inst.conns)
+            node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
+                        inst.line, imported, conns=inst.conns)
             if auto is not None:
                 node.params = dict(inst.params, n=auto[2])
                 node.auto = auto[:2]

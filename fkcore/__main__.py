@@ -312,6 +312,53 @@ def _talk(a):
     return 0
 
 
+def _migrate_surface(a):
+    """``fk migrate-surface GAME`` (2.0.43, PLAN-GLOBAL phase B): write the world design
+    ``<surface>.fk`` from the surface's ``place`` lines, and put ``design`` in the surface file.
+    The place lines stay as commented-out record; nothing else changes."""
+    from . import root as rootmod
+    game = a.game
+    try:
+        sf = surfacemod.load_game(game, derive=False)
+    except (surfacemod.SurfaceError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if sf.design:
+        print(f"error: {sf.name} already has `design {sf.design}`: nothing to migrate",
+              file=sys.stderr)
+        return 2
+    if not sf.places:
+        print(f"error: {os.path.basename(sf.path)} has no place lines to migrate", file=sys.stderr)
+        return 2
+    rootname = f"{sf.name}.fk"
+    rootpath = os.path.join(game, rootname)
+    if os.path.exists(rootpath):
+        print(f"error: {rootname} already exists: move it aside first", file=sys.stderr)
+        return 2
+    text = rootmod.migrate(sf.places, sf.name)
+    with open(rootpath, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    with open(sf.path, encoding="utf-8") as fh:
+        was = fh.read()
+    with open(sf.path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(surfacemod.migrate_text(was, rootname))
+    after = surfacemod.load(sf.path)
+    print(f"migrate-surface {game}: wrote {rootname} "
+          f"({len(sf.places)} plots: {', '.join(sorted(sf.places))})")
+    for p in sf.places.values():
+        print(f"  {p.factory} = {p.module} @{p.x},{p.y} size {p.w}x{p.h}"
+              + (f" rot {p.rot}" if p.rot else "") + (f" gap {p.gap}" if p.gap else "")
+              + (f" patch {p.patch}" if p.patch else "") + f" ({p.lifecycle})")
+    print(f"  {os.path.basename(sf.path)}: `design {rootname}` added, "
+          f"{len(sf.places)} place lines kept as comments")
+    if after.design_notes:
+        for note in after.design_notes:
+            print(f"  note {note}")
+    print(f"  the design derives {len(after.places)} plots; "
+          f"`fk build` reads it from now on (`place` lines no longer place anything)")
+    return 0
+
+
 def _force_surface(game):
     from .apply import force_for
     sf = surfacemod.load_game(game)
@@ -598,6 +645,11 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")
     c.add_argument("file")
+    ms = sub.add_parser("migrate-surface", description="write the world design (the root .fk) from "
+                                                       "a game codebase's place lines, and add "
+                                                       "`design` to its surface file (2.0.43, "
+                                                       "PLAN-GLOBAL phase B)")
+    ms.add_argument("game")
     ct = sub.add_parser("contract", description="every sealed module's contract: each port's "
                         "direction, item, rate at full speed, where it crosses and what it got "
                         "(fkcore.contract)")
@@ -775,6 +827,8 @@ def main(argv=None):
     if a.cmd == "read-terrain":
         return _read_terrain(a)
     cat = Catalog.load()
+    if a.cmd == "migrate-surface":
+        return _migrate_surface(a)
     if a.cmd in ("merge", "insert", "chests-to-net", "net-to-chests"):
         return _rewire(a)
     if a.cmd == "measure":

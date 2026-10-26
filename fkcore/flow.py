@@ -340,16 +340,24 @@ def s_read_surface(ctx, args):
     lines = [f"surface {sf.name}: mode {sf.mode}, terrain {sf.terrain}, catalog {sf.catalog}, "
              f"notify {sf.notify_mode}, watch plots {sf.watch['plots']} / sanctioned "
              f"{sf.watch['sanctioned']}"]
+    if sf.design:
+        lines.append(f"design {sf.design}: {len(sf.places)} plots from its top-level sealed "
+                     f"instances" + (f" (the {len(sf.lines_places)} place lines are not read "
+                                     "while a design is present)" if sf.lines_places else ""))
     for p in sf.places.values():
         lines.append(f"  place {p.factory} = {p.module} plot {p.x},{p.y} {p.w}x{p.h} rot {p.rot}"
-                     f" ({p.lifecycle})")
+                     + (f" gap {p.gap}" if p.gap else "")
+                     + (f" patch {p.patch}" if p.patch else "")
+                     + f" ({p.lifecycle})")
     for item, r in sf.targets.items():
         lines.append(f"  target {item} {r * 60:g}/min")
+    checks = [Check("DESIGN", f"{sf.name} plot {note.split(':', 1)[0]}",
+                    note.split(": ", 1)[-1]) for note in sf.design_notes]
     for p in sf.places.values():
         prev = os.path.join(ctx.root, f"{p.module}.fkp")
         if os.path.exists(prev):
             ctx.previous[p.factory] = fkp.load(prev)
-    return lines, []
+    return lines, checks
 
 
 def s_read_terrain(ctx, args):

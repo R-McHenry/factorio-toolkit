@@ -1,11 +1,13 @@
 """fkcore.lang: tokenizer and parser for V1 factory source (.fk). Grammar: CORE.md "`.fk`".
 
-    file    := (import | module | stmt)*        # the file's top level is the factory body
+    file    := (import | module | 'size' WxH | stmt)*   # the file's top level is the factory body
     import  := 'import' Name (',' Name)* 'from' STRING
     module  := 'module' Name ('size' WxH)? '{' stmt* '}'
     stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
-    inst    := name '=' Kind ('<' param (',' param)* '>')? hint* ('when' cond)?
+    inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
+    place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
+    hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
     net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
@@ -13,7 +15,6 @@
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
     param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
     value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
-    hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word ')'
     signal  := 'signal' name ('=' word)?                # pinned to a game signal, or auto
     wire    := 'wire' name ('red' | 'green') ':' refs ('->' refs)?
     cond    := operand op (operand | number)       op := '<' | '>' | '<=' | '>=' | '=' | '==' | '!='
@@ -43,6 +44,14 @@ module's endpoint (``net fe: bus -> gears.iron``), so one net in the source is o
 itself at the port. ``@SIDE`` is ``n``, ``e``, ``s`` or ``w`` of the module's frame; ``@w4`` pins the
 tile along that edge and ``@w4L`` its lane (without them the build chooses, facing the port's
 partner).
+
+The world design (2.0.43, PLAN-GLOBAL phase B): **a file's body is a module**, so
+``import Outpost from "outpost.fk"`` needs no wrapping when ``outpost.fk`` declares no ``Outpost``
+module; a top-level ``size WxH`` line is that body's frame. An instance line carries its placement
+after the hints, on the same source line: ``size WxH`` (the frame of a sealed instance: what a plot
+gets from its placement), ``gap N`` (tiles kept free around it for the root's routes), ``retired``
+| ``temporary [until ...]`` (the lifecycles a surface ``place`` line has) and further ``@`` hints,
+in any order. ``fkcore.root`` reads them into a surface's plot list.
 
 Circuits (2.0, Rory 2026-10-21: "circuit wiring in the source, with all circuit and logic
 conditions in the .fk code"; the draft is drafts\\reactor-1.1\\CIRCUITS-1.1.md): ``signal`` names a
@@ -168,6 +177,9 @@ class Inst:
     line: int
     when: Cond | None = None   # the machine's own enable condition
     conns: list | None = None  # [(name, Ref, kind)]: a Bus's connection list, in port order
+    size: tuple | None = None  # a module instance's frame from its own line (2.0.43): (W, H)
+    gap: int = 0               # tiles kept free around it, for the root's routes (2.0.43)
+    lifecycle: str | None = None   # "retired" | "temporary ..." on the instance line (2.0.43)
 
 
 @dataclass
@@ -366,6 +378,15 @@ class _P:
                 if mod.name in f.modules:
                     self.err(f"module {mod.name} defined twice", tok)
                 f.modules[mod.name] = mod
+            elif tok.text == "size" and tok.kind == "word" and self.peek(1).kind == "dim":
+                # 2.0.43 (PLAN-GLOBAL phase B): a factory file's own frame, so a file body can be
+                # imported as a module as it is; the root's placement may give one instead
+                self.next()
+                dim = self.next()
+                w, h = (int(v) for v in dim.text.split("x"))
+                if body.size is not None:
+                    self.err("the file's size is written twice", dim)
+                body.size = (w, h)
             else:
                 self.stmt(body)
         if body.ports:
@@ -668,24 +689,68 @@ class _P:
                         break
                     self.expect(",")
         while self.peek().text == "@":
-            self.next()
-            if self.accept("patch"):
-                self.expect("(")
-                hints["patch"] = self.word("resource").text
-                self.expect(")")
-            else:
-                self.expect("(")
-                x = self.number()
-                self.expect(",")
-                y = self.number()
-                rot = 0
-                if self.accept(","):
-                    self.expect("rot")
-                    rot = self.number()
-                self.expect(")")
-                hints["at"] = (x, y, rot)
+            self.hint(hints)
         when = self.cond() if self.accept("when") else None
-        return Inst(tok.text, kind, params, hints, tok.line, when, conns)
+        size, gap, lifecycle = self.placement(tok.line, hints)
+        return Inst(tok.text, kind, params, hints, tok.line, when, conns, size, gap, lifecycle)
+
+    def hint(self, hints):
+        """One ``@`` hint: ``@(x, y[, rot r])`` or ``@patch(resource)`` (a resource may be written
+        as a string, so a patch number survives: ``@patch("iron-ore#2")``, 2.0.43)."""
+        self.expect("@")
+        if self.accept("patch"):
+            self.expect("(")
+            tok = self.next()
+            if tok.kind not in ("word", "string"):
+                self.err('expected a resource, or "resource#n" in quotes', tok)
+            hints["patch"] = tok.text[1:-1] if tok.kind == "string" else tok.text
+            self.expect(")")
+            return
+        self.expect("(")
+        x = self.number()
+        self.expect(",")
+        y = self.number()
+        rot = 0
+        if self.accept(","):
+            self.expect("rot")
+            rot = self.number()
+        self.expect(")")
+        hints["at"] = (x, y, rot)
+
+    def placement(self, line, hints):
+        """The placement extras on an instance's own source line (2.0.43, PLAN-GLOBAL phase B):
+        ``size WxH`` (the frame of a sealed instance: a plot's), ``gap N`` (tiles kept free around
+        it for the root's routes), ``retired`` | ``temporary [until ...]`` (the lifecycles a
+        surface ``place`` line has) and any ``@`` hint, in any order. They are that line's own
+        words, so a statement on the next line — even one starting with ``size`` — is still read
+        as a statement."""
+        size, gap, lifecycle = None, 0, None
+        while self.peek().line == line:
+            word = self.peek().text
+            if word == "@":
+                self.hint(hints)
+            elif word == "size" and self.peek(1).kind == "dim":
+                self.next()
+                dim = self.next()
+                w, h = (int(v) for v in dim.text.split("x"))
+                if w < 1 or h < 1:
+                    self.err(f"size {dim.text}: a frame is at least 1x1", dim)
+                size = (w, h)
+            elif word == "gap" and self.peek(1).kind == "num":
+                self.next()
+                gap = self.number()
+                if not isinstance(gap, int) or gap < 0:
+                    self.err(f"gap {gap}: whole tiles, 0 or more")
+            elif word == "retired":
+                self.next()
+                lifecycle = "retired"
+            elif word == "temporary":
+                self.next()
+                rest = self.rest_of_line(line)
+                lifecycle = ("temporary " + rest) if rest else "temporary"
+            else:
+                break
+        return size, gap, lifecycle
 
     def param(self):
         key = self.name("parameter").text
