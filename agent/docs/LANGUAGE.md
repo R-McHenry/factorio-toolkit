@@ -175,6 +175,72 @@ order: `bus.load1`, `bus.tap1`, `bus.tap2`.
   gap row between them), and a net crosses a 4-belt bus by an underground from one of its outer
   rows to the other.
 
+## Modules with ports (sealed)
+
+A module that declares `port` lines is **sealed**: its nets are its own, and the only way in or out is
+a port.
+
+```
+module GearRib size 16x10 {
+  port iron : in iron-plate @w        # plates in at the west edge
+  port gear : out iron-gear-wheel @e  # gears out at the east edge
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(2, 1)
+  net fe: iron -> g
+  net g: g -> gear
+}
+```
+
+- `port NAME : in|out|inout ITEM [| ITEM2] [@side[pos][L|R]]`. A port is a **lane** of one belt end:
+  `Belt[… ]` is retired (a belt end is two lanes). `item | item2` is the two lanes of the pair; the
+  same item twice is one item on both. A fluid port is refused ("pipes have no lanes"), and a net may
+  name a port only in the module that declares it: naming one from outside the module is an error
+  that says which `port` line to add.
+- `size WxH` is the module's frame, and every port sits on that frame's edge: one tile per port,
+  at `pos` along the side if the declaration pins one (`@w4`), else the middle. The tiles just inside
+  and just outside a port must be free: a machine standing there is a `PORT` line (`fk check`), and
+  the route would run through it.
+- Inside a sealed module the internal nets route **inside the frame**; outside, a parent's route ends
+  at the port from the other side. A crossing anywhere but a port is a `SEAL` line. The module's
+  internals are the module's own: a parent change never re-routes them (the same carriers, key for
+  key, just moved), and `fk explain rib` shows both the template line and its plain entities.
+- Width: in 2.0 a port is one lane (7.5/s); the two-lane pair is 2.1's multi-lane nets.
+
+### The bus's connection list
+
+A `Bus` may bind its ports with a list instead of `load=`/`tap=` pins: each entry is a named net,
+written in port order, and the direction comes from the netlist:
+
+```
+bus = Bus<belts=4, item=iron-plate>(
+        in1: smelt.plate,     # a mouth: belt 1 fed in line at the head (a source)
+        in2: smelt2.plate,
+        fg:  gears.iron,      # a tap: an in port
+        fb:  belts.iron) @(10, 20)
+```
+
+- A name that is `in1..in{belts}` is a **mouth**: the bus's own belt end at the head, fed in line.
+- Every other entry is a staircase: a maker (or an `out` port) loads, a taker (or an `in` port)
+  taps. Its position follows the list order, with the staircases spaced as the bus needs; `length`
+  follows.
+- `left NAME: …` and `right NAME: …` before the entry's name choose the tap kind (2.0.34): `dual` is
+  the belt strap, two lanes, 15/s; `left` is a lone underground exit at the stub, `right` an
+  underground entrance with its exit one row out, each one lane, 7.5/s, both delivering on the left.
+- A tap written before any load is an `ORDER` line; a mouth is at the head, so it always counts first.
+
+### The contract
+
+`fk contract FILE` prints every sealed module's contract, generated from the rate model:
+
+```
+contract bus4ribs: 4 sealed instances
+  rib0: out iron-gear-wheel 1.0/s via box0/c0 (got 1.0) | in iron-plate 2.0/s via bus tap n7 (got 2.0)
+  rib1: out iron-gear-wheel 1.0/s via box1/c0 (got 1.0) | in iron-plate 2.0/s via bus tap n13 (got 2.0)
+```
+
+Each port shows its direction, item and the rate it needs (an `in` port) or makes (an `out` port) at
+full speed, where in the netlist it crosses, and what it actually got — the at-a-glance proof every
+rib is fed through the bus. `agent/docs/examples/bus4ribs.fk` is the four-rib base it was written for.
+
 ## Circuits
 
 Circuit wires, conditions and limits are written in the source like nets; the build lays them

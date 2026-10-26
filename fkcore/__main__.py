@@ -598,6 +598,10 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")
     c.add_argument("file")
+    ct = sub.add_parser("contract", description="every sealed module's contract: each port's "
+                        "direction, item, rate at full speed, where it crosses and what it got "
+                        "(fkcore.contract)")
+    ct.add_argument("file")
     r = sub.add_parser("rates")
     r.add_argument("file")
     r.add_argument("--unbounded", default="")
@@ -853,6 +857,18 @@ def main(argv=None):
         print(f"check {flat.name}: {len(flat.machines)} machines, {len(flat.nets)} nets, "
               f"{len(flat.checks)} check lines")
         for line in flat.checks:
+            print(f"  {line}")
+        return 0
+    if a.cmd == "contract":
+        from . import contract as contractmod
+        try:
+            model = rates.solve(flat)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        lines = contractmod.contract(flat, model)
+        print(f"contract {flat.name}: {len(lines)} sealed instances")
+        for line in lines:
             print(f"  {line}")
         return 0
     unbounded = [n for n in a.unbounded.split(",") if n]
