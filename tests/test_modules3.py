@@ -25,10 +25,10 @@ net out: rib.gear -> box
 """
 
 DESIGN = """
-module GearRib size 12x8 {
+module GearRib size 16x10 {
   port iron : in iron-plate @w
   port gear : out iron-gear-wheel @e
-  g = AsmRow<n=1, recipe=iron-gear-wheel> @(1, 1)
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(2, 1)
   net fe: iron -> g
   net g: g -> gear
 }
@@ -108,7 +108,7 @@ class SealTest(unittest.TestCase):
         self.assertEqual(r.failed, {})
         self.assertFalse([ln for ln in r.lines if ln.startswith("SEAL")], r.lines)
         x0, y0, x1, y1 = expand.frame_of(flat, r.layout, "rib", CAT)
-        self.assertEqual((x0, y0, x1, y1), (40, 10, 52, 18))
+        self.assertEqual((x0, y0, x1, y1), (40, 10, 56, 20))
         for net in ("rib/fe", "rib/g"):
             keys = [k for k, e in r.layout.entities.items() if e.attrs.get("net") == net]
             self.assertTrue(keys, net)
@@ -125,16 +125,16 @@ class SealTest(unittest.TestCase):
     def test_the_route_meets_the_port_tile(self):
         _flat, r = routed(DESIGN)
         port = r.layout.entities["rib/port_iron"]
-        self.assertEqual((port.x, port.y), (40.5, 14.5))       # the west edge, middle row
+        self.assertEqual((port.x, port.y), (40.5, 15.5))       # the west edge, middle row
         kinds = ("transport-belt", "underground-belt", "splitter")
         last = [e for e in r.layout.entities.values()
                 if e.attrs.get("net") == "fg" and e.name in kinds
-                and e.x == 39.5 and e.y == 14.5]
+                and e.x == 39.5 and e.y == 15.5]
         self.assertEqual(len(last), 1)                         # the carrier west of the port
         self.assertEqual(last[0].dir, 4)                       # facing the port
         first = [e for e in r.layout.entities.values()
                  if e.attrs.get("net") == "rib/fe" and e.name in kinds
-                 and e.x == 41.5 and e.y == 14.5]
+                 and e.x == 41.5 and e.y == 15.5]
         self.assertEqual(len(first), 1)                        # the carrier inside it
 
     def test_a_portless_module_routes_as_one_block(self):
@@ -167,6 +167,13 @@ class SealTest(unittest.TestCase):
             return sorted(out)
         self.assertEqual(inside(a, 40, 10), inside(b, 40, 60))
         self.assertEqual(b.failed, {})
+
+    def test_a_port_whose_inside_tile_is_taken_is_a_port_line(self):
+        tight = DESIGN.replace("size 16x10", "size 12x8").replace("@(2, 1)", "@(1, 1)")
+        _flat, r = routed(tight)
+        lines = " ".join(ln for ln in r.lines if ln.startswith("PORT"))
+        self.assertIn("rib.iron", lines)
+        self.assertIn("rib/g/m0", lines)
 
 
 if __name__ == "__main__":

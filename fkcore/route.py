@@ -1537,6 +1537,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
     lines += seal_checks(flat, new, cat)
+    lines += port_checks(flat, new, cat)
     return Routed(new, lines, sorted(added), failed, kept, passes, patched, again)
 
 
@@ -1572,6 +1573,41 @@ def seal_checks(flat, lay, cat):
             elif mine and not inside:
                 out.append(f"SEAL      {key} ({net}) belongs to sealed module {path} but stands "
                            "outside its frame")
+    return out
+
+
+def port_checks(flat, lay, cat):
+    """PORT (2.0.37, PLAN-MODULES phase 3): the tiles just inside and just outside a sealed module's
+    port must be free for the route to meet the port carrier. A machine standing on one of them (the
+    rib's assembler under the port, say) loses that entity when the design is built: the route is laid
+    through it. One line per taken tile."""
+    out, seen = [], set()
+    for path, rec in sorted(lay.insts.items()):
+        if path not in flat.insts or flat.insts[path].module is None:
+            continue
+        if not any(k.startswith(path + "/") for k in flat.ports):
+            continue
+        occ = {}
+        for key, e in lay.entities.items():
+            for t in fkpmod.tiles_of(cat, e):
+                occ.setdefault(t, key)
+        ports = {f"{path}/port_{flat.ports[k].name}" for k in flat.ports
+                 if k.startswith(path + "/") and "/" not in k[len(path) + 1:]}
+        for role, _side, _net, (x, y, d) in attach_points(flat, lay, path, cat):
+            if d is None:
+                continue
+            k = _H[int(d)]
+            tile = (math.floor(x), math.floor(y))
+            for sign, where in ((1, "inside"), (-1, "outside")):
+                t = (tile[0] + sign * _DX[k], tile[1] + sign * _DY[k])
+                other = occ.get(t)
+                if other is None or other in ports or other.startswith("~"):
+                    continue
+                name = f"{path}.{role.rsplit('!', 1)[0]}"
+                if (name, t, other) in seen:
+                    continue
+                seen.add((name, t, other))
+                out.append(f"PORT      {name}: its {where} tile {t[0]},{t[1]} is taken by {other}")
     return out
 
 
