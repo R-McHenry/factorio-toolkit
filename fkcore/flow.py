@@ -20,6 +20,11 @@ Steps: read_surface, read_terrain, run_models, elaborate, size, report_rates, pl
 cover power, cover robots, floorplan, report_checks, report_bom, write_layout, diff, apply,
 stop_on.
 
+``route --only stale`` hands the router the committed routes of the nets none of whose ends moved;
+``route --module X`` (PLAN-MODULES phase 4, 2.0.39) re-routes a sealed module's own nets and the
+parent nets ending at its ports, and keeps every other committed route as it stands -- a rib change
+never moves the rest of the base.
+
 ``size`` (1.6, ``fkcore.size``) gives every ``n=auto`` row its count: the fewest machines that
 meet the surface's targets, the factories' asserts and what each row's consumers ask, all the
 factories together, before anything is placed. Its report says what each count serves; ``FIT``
@@ -641,6 +646,35 @@ def _pinned_routes(flat, new, prev, cat):
     return pinned, again
 
 
+def _module_pinned(flat, prev, cat, path):
+    """A sealed module's patch scope (``route --module X``, PLAN-MODULES phase 4): X's own nets and
+    the parent nets ending at X's ports are routed again; every other committed route is kept as it
+    stands, so changing a rib re-lays its frame and its port segments and touches nothing else.
+    -> ({net: its committed carriers}, {net: why it is routed again})."""
+    if prev is None:
+        return {}, {}
+    scope = {name for name in flat.nets if name == path or name.startswith(path + "/")}
+    for key, port in flat.ports.items():
+        if not key.startswith(path + "/"):
+            continue
+        item = port.items[0] if port.items else None
+        for hold in (flat._in_hold, flat._out_hold):
+            for net in hold.get((key, item), []):
+                scope.add(net)
+    pinned, again = {}, {}
+    by_net = {}
+    for e in prev.entities.values():
+        if e.owner.startswith("~"):
+            by_net.setdefault(e.owner[1:], []).append(e)
+    for net, ents in sorted(by_net.items()):
+        if net in scope:
+            continue
+        pinned[net] = [fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)) for e in ents]
+    for net in sorted(scope):
+        again[net] = f"in {path}'s scope (route --module)"
+    return pinned, again
+
+
 def _one_inserter(ctx, factory, flat, lay):
     """2.0 (Rory, 2026-10-21): a sushi net laid as one inserter from its source straight into
     each sink can't clog (the inserter takes only what the sink accepts), so its ``CLOG`` line
@@ -675,7 +709,7 @@ def _need(ctx, kind):
 
 
 def s_route(ctx, args):
-    o = _opts(args, only="all", effort="normal", hand="any")
+    o = _opts(args, only="all", effort="normal", hand="any", module="")
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -683,7 +717,14 @@ def s_route(ctx, args):
     for factory, lay in list(ctx.layouts.items()):
         flat = ctx.flats[factory]
         pinned, again = {}, {}
-        if o["only"] == "stale":
+        if o["module"]:
+            if o["module"] not in flat.insts or not any(
+                    k.startswith(o["module"] + "/") for k in flat.ports):
+                lines.append(f"{factory}: --module {o['module']} is not a sealed instance here")
+            else:
+                pinned, again = _module_pinned(flat, ctx.previous.get(factory), ctx.cat,
+                                               o["module"])
+        elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
