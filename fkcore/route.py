@@ -682,10 +682,11 @@ def _hub_search(cat, job, blocked, spans, clear, box, limit):
 
 
 # -- one net --------------------------------------------------------------------------------------
-def _settle_leaves(cat, laid, ents, also=frozenset()):
+def _settle_leaves(cat, laid, ents, also=frozenset(), allow=frozenset()):
     """A tapped belt's last tile points on into whatever stands ahead: turn it (never back at its
     feed) where that is another net's belt, or one of the keys ``also`` (a patch's tapped branch:
-    the standing route it branched from). -> the carriers, or None when no turn is clear."""
+    the standing route it branched from). ``allow``: keys it may point into on purpose (a joint: a bus
+    port or a sealed module's port carrier, 2.0.36). -> the carriers, or None when no turn is clear."""
     occ = {}
     for e in ents:
         if _is_belt(cat, e):
@@ -706,7 +707,7 @@ def _settle_leaves(cat, laid, ents, also=frozenset()):
         def bad(d):
             ahead = (tx + _DX[d], ty + _DY[d])
             o = occ.get(ahead)
-            return o is not None and (o.net != e.net or o.key in also)
+            return o is not None and o.key not in allow and (o.net != e.net or o.key in also)
 
         if not bad(h):
             out.append(e)
@@ -720,7 +721,8 @@ def _settle_leaves(cat, laid, ents, also=frozenset()):
     return out
 
 
-def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None):
+def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
+               allow=frozenset()):
     if job.parts:
         from . import pairs
         return pairs.route(cat, job, ents, frames, js, box, limit, terrain, avoid, spans)
@@ -734,7 +736,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
         plan, how = _tree_job(cat, job, blocked, spans, clear, box, limit)
     if plan is None:
         return None, how
-    laid = _settle_leaves(cat, _carriers(job, plan, net), ents)
+    laid = _settle_leaves(cat, _carriers(job, plan, net), ents, allow=allow)
     if laid is None:
         return None, "a tapped belt's last tile points into another net's belt"
     return laid, how
@@ -1406,13 +1408,54 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     todo = [n for n in js if n not in have and n not in patch and js[n].skip is None
             and not js[n].fluid]
     frames = set()
+    sealed = {}                                  # module path -> its frame, for a sealed module
     for path, rec in lay.insts.items():
         if rec.kind in ("Literal", "Bus") or path not in flat.insts:
             continue
         x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
-        frames |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        mine = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        frames |= mine
+        if flat.insts[path].module is not None and any(k.startswith(path + "/") for k in flat.ports):
+            sealed[path] = (x0, y0, x1, y1, mine)
     w, h = lay.size or (0, 0)
     box = bounds or (0, 0, w + margin, h + margin)
+    # the joint carriers a route may hand over into: a sealed module's port belts and a bus's load and
+    # mouth stubs (2.0.36, PLAN-MODULES phase 3)
+    joints = set()
+    for path, rec in lay.insts.items():
+        if path not in flat.insts:
+            continue
+        for key in flat.insts[path].machines:
+            m = flat.machines.get(key)
+            if m is not None and m.extra.get("port") in ("load", "mouth"):
+                joints.add(key)
+            if m is not None and m.extra.get("mouth"):
+                # a mouth is a belt end of the bus itself: its carrier is the bus's own belt
+                name = m.extra.get("at") or ""
+                if name.startswith("in") and name[2:].isdigit():
+                    joints.add(f"{path}/b{int(name[2:])}_0")
+        if flat.insts[path].module is not None:
+            for k in flat.ports:
+                if k.startswith(path + "/") and "/" not in k[len(path) + 1:]:
+                    joints.add(f"{path}/port_{flat.ports[k].name}")
+
+    def net_frames(net):
+        """The blocked frames for ``net`` and its box: a net inside a sealed module routes in that
+        module's frame (its own frames free, bounded by the innermost one); every other net keeps
+        every frame blocked, so a crossing can only be a port (PLAN-MODULES phase 3)."""
+        parts = net.split("/")[:-1]
+        inside = []
+        for i in range(1, len(parts) + 1):
+            pre = "/".join(parts[:i])
+            if pre in sealed:
+                inside.append(pre)
+        if not inside:
+            return frames, box
+        free = set()
+        for pre in inside:
+            free |= sealed[pre][4]
+        x0, y0, x1, y1, _tiles = sealed[inside[-1]]
+        return frames - free, (x0, y0, x1, y1)
     base = fkpmod.Layout(lay.level, lay.name, lay.size, dict(lay.insts), dict(lay.covers),
                          dict(lay.plots), dict(lay.claims), dict(lay.marks), dict(lay.entities))
     standing, patched, again = [], {}, {}
@@ -1435,7 +1478,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             for other, tiles in claims.items():
                 if other != net:
                     avoid |= tiles
-            got, why = _route_one(cat, js[net], ents, frames, js, box, limit, terrain, avoid)
+            fnet, bnet = net_frames(net)
+            got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
+                                  allow=joints)
             if got is None:
                 failed[net] = why
                 continue
@@ -1491,7 +1536,43 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, {how[net]}")
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
+    lines += seal_checks(flat, new, cat)
     return Routed(new, lines, sorted(added), failed, kept, passes, patched, again)
+
+
+def seal_checks(flat, lay, cat):
+    """SEAL (PLAN-MODULES phase 3): a net's carrier inside a sealed module's frame that the net does
+    not belong to -- a crossing that is not at a port -- or one of the module's own nets' carriers
+    outside its frame. One line per carrier at fault; none when every sealed module is sealed."""
+    out = []
+    for path, rec in sorted(lay.insts.items()):
+        if path not in flat.insts or flat.insts[path].module is None:
+            continue
+        if not any(k.startswith(path + "/") for k in flat.ports):
+            continue
+        try:
+            x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
+        except Exception:
+            continue
+        frame = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        ports = {f"{path}/port_{flat.ports[k].name}" for k in flat.ports
+                 if k.startswith(path + "/") and "/" not in k[len(path) + 1:]}
+        for key, e in lay.entities.items():
+            net = e.attrs.get("net")
+            if not net:
+                continue
+            tiles = fkpmod.tiles_of(cat, e)
+            inside = all(t in frame for t in tiles)
+            mine = net == path or net.startswith(path + "/")
+            if key in ports:
+                continue
+            if inside and not mine:
+                out.append(f"SEAL      {key} ({net}) stands inside sealed module {path} and is not "
+                           "one of its ports")
+            elif mine and not inside:
+                out.append(f"SEAL      {key} ({net}) belongs to sealed module {path} but stands "
+                           "outside its frame")
+    return out
 
 
 def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain):

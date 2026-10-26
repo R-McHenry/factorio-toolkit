@@ -488,9 +488,32 @@ def endpoints(flat, surface=None, factory=None):
     ``main/gear``)."""
     pre = f"{surface}:{factory}/" if surface and factory else ""
     netpre = f"{factory}/" if surface and factory else ""
-    return {netpre + name: ([(pre + k, i) for k, i in n.drivers],
-                            [(pre + k, i) for k, i in n.consumers])
-            for name, n in flat.nets.items()}
+    table = {netpre + name: ([(pre + k, i) for k, i in n.drivers],
+                             [(pre + k, i) for k, i in n.consumers])
+             for name, n in flat.nets.items()}
+    # A sealed module's port and a bus's mouth have no entity of their own: the carrier belt at the
+    # port tile (or the bus's own belt under the mouth) is their carrier (2.0.36, PLAN-MODULES
+    # phase 3). Swap the machine key for the carrier key, so the net reaches the carrier and a
+    # crossing there is a joint (a consumer of the net the items leave, a driver of the one they
+    # enter), not a LEAK.
+    alias = {}
+    for key, port in getattr(flat, "ports", {}).items():
+        alias[key] = f"{key.rsplit('/', 1)[0]}/port_{port.name}"
+    for path, inst in getattr(flat, "insts", {}).items():
+        if inst.kind != "Bus":
+            continue
+        for key in inst.machines:
+            m = flat.machines.get(key)
+            if m is None or not m.extra.get("mouth"):
+                continue
+            name = m.extra.get("at") or ""
+            if name.startswith("in") and name[2:].isdigit():
+                alias[key] = f"{path}/b{int(name[2:])}_0"
+    if alias:
+        for name, (drivers, consumers) in table.items():
+            table[name] = ([(alias.get(k, k), i) for k, i in drivers],
+                           [(alias.get(k, k), i) for k, i in consumers])
+    return table
 
 
 def _keys(ends):

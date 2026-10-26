@@ -452,7 +452,7 @@ def bus(params, cat):
                          **({} if kind == "dual" else {"kind": kind})})
             for k, ((s, x), kind) in enumerate(zip(taps, tkinds), 1)]
     out += [MSpec(name, "transport-belt", None, {}, {}, frozenset([item]),
-                  extra={"port": "load", "item": item, "at": name})
+                  extra={"port": "load", "item": item, "at": name, "mouth": True})
             for name in mouths]
     return out
 

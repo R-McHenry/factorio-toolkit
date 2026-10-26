@@ -1,12 +1,9 @@
-"""2.0.36 (PLAN-MODULES phase 3.1): a sealed module's ports are tiles the router can meet.
-
-The carrier belt and the two roles of each port, and the module's own instance in the layout, so the
-parent's route ends at the port's outside tile and the module's own net starts at its inside one.
-Routing inside the frame (bounds) and the SEAL check are the next slices.
+"""2.0.36 (PLAN-MODULES phase 3): a sealed module's ports are tiles the router can meet, it routes
+inside its frame, and SEAL reports a crossing that is not at a port.
 """
 import unittest
 
-from fkcore import expand, lang
+from fkcore import expand, fkp as fkpmod, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -27,9 +24,28 @@ net fg: feed -> rib.iron
 net out: rib.gear -> box
 """
 
+DESIGN = """
+module GearRib size 12x8 {
+  port iron : in iron-plate @w
+  port gear : out iron-gear-wheel @e
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(1, 1)
+  net fe: iron -> g
+  net g: g -> gear
+}
+feed = Chest<requester, item=iron-plate, rate=4> @(0, 10)
+bus = Bus<belts=2, item=iron-plate>(in1: feed, fg: rib.iron) @(20, 10)
+rib = GearRib @(40, 10)
+box = Chest<provider, limit=8> @(60, 10)
+net out: rib.gear -> box
+"""
+
 PLAIN = """
 module GearRib {
-  g = AsmRow<n=1, recipe=iron-gear-wheel> @(1, 1)
+  c = Chest<requester, item=iron-plate, rate=2> @(0, 0)
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(4, 0)
+  b = Chest<provider, limit=8> @(20, 0)
+  net fe: c -> g
+  net g: g -> b
 }
 rib = GearRib @(40, 0)
 """
@@ -43,6 +59,12 @@ def flat_of(text):
 def lay_of(text):
     flat = flat_of(text)
     return flat, expand.expand_factory(flat, CAT)[0]
+
+
+def routed(text):
+    flat = flat_of(text)
+    lay, _notes = expand.expand_factory(flat, CAT)
+    return flat, route.route_layout(flat, lay, CAT)
 
 
 class PortTileTest(unittest.TestCase):
@@ -78,6 +100,73 @@ class PortTileTest(unittest.TestCase):
     def test_a_module_without_a_frame_stays_out_of_the_layout(self):
         _flat, lay = lay_of(PLAIN)
         self.assertNotIn("rib", lay.insts)
+
+
+class SealTest(unittest.TestCase):
+    def test_a_sealed_module_routes_inside_its_frame(self):
+        flat, r = routed(DESIGN)
+        self.assertEqual(r.failed, {})
+        self.assertFalse([ln for ln in r.lines if ln.startswith("SEAL")], r.lines)
+        x0, y0, x1, y1 = expand.frame_of(flat, r.layout, "rib", CAT)
+        self.assertEqual((x0, y0, x1, y1), (40, 10, 52, 18))
+        for net in ("rib/fe", "rib/g"):
+            keys = [k for k, e in r.layout.entities.items() if e.attrs.get("net") == net]
+            self.assertTrue(keys, net)
+            for k in keys:
+                for t in fkpmod.tiles_of(CAT, r.layout.entities[k]):
+                    self.assertTrue(x0 <= t[0] < x1 and y0 <= t[1] < y1, (k, t))
+        for net in ("fg", "in1", "out"):
+            keys = [k for k, e in r.layout.entities.items() if e.attrs.get("net") == net]
+            self.assertTrue(keys, net)
+            for k in keys:
+                for t in fkpmod.tiles_of(CAT, r.layout.entities[k]):
+                    self.assertFalse(x0 <= t[0] < x1 and y0 <= t[1] < y1, (k, t))
+
+    def test_the_route_meets_the_port_tile(self):
+        _flat, r = routed(DESIGN)
+        port = r.layout.entities["rib/port_iron"]
+        self.assertEqual((port.x, port.y), (40.5, 14.5))       # the west edge, middle row
+        kinds = ("transport-belt", "underground-belt", "splitter")
+        last = [e for e in r.layout.entities.values()
+                if e.attrs.get("net") == "fg" and e.name in kinds
+                and e.x == 39.5 and e.y == 14.5]
+        self.assertEqual(len(last), 1)                         # the carrier west of the port
+        self.assertEqual(last[0].dir, 4)                       # facing the port
+        first = [e for e in r.layout.entities.values()
+                 if e.attrs.get("net") == "rib/fe" and e.name in kinds
+                 and e.x == 41.5 and e.y == 14.5]
+        self.assertEqual(len(first), 1)                        # the carrier inside it
+
+    def test_a_portless_module_routes_as_one_block(self):
+        _flat, r = routed(PLAIN)
+        self.assertEqual(r.failed, {})
+        self.assertFalse([ln for ln in r.lines if ln.startswith("SEAL")])
+        self.assertFalse([k for k in r.layout.entities if "/port_" in k])
+        self.assertIn("rib/g", r.routed)
+
+    def test_seal_reports_a_crossing_outside_a_port(self):
+        flat, r = routed(DESIGN)
+        stray = fkpmod.Entity("rib/stray", "transport-belt", 42.5, 12.5, 4, {"net": "fg"})
+        r.layout.entities[stray.key] = stray
+        lines = route.seal_checks(flat, r.layout, CAT)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("rib/stray (fg) stands inside sealed module rib", lines[0])
+
+
+    def test_a_ribs_internal_route_is_the_same_after_a_parent_move(self):
+        moved = DESIGN.replace("rib = GearRib @(40, 10)", "rib = GearRib @(40, 60)")
+        moved = moved.replace("box = Chest<provider, limit=8> @(60, 10)", "box = Chest<provider, limit=8> @(60, 60)")
+        _f1, a = routed(DESIGN)
+        _f2, b = routed(moved)
+
+        def inside(r, ox, oy):
+            out = []
+            for k, e in r.layout.entities.items():
+                if e.attrs.get("net") in ("rib/fe", "rib/g") and k.startswith("~"):
+                    out.append((k.rsplit("/", 1)[-1], round(e.x - ox, 3), round(e.y - oy, 3), e.dir))
+            return sorted(out)
+        self.assertEqual(inside(a, 40, 10), inside(b, 40, 60))
+        self.assertEqual(b.failed, {})
 
 
 if __name__ == "__main__":
