@@ -408,22 +408,40 @@ def _port_items(p):
     return ", ".join(p.items) + (f" | {', '.join(right)}" if right else "")
 
 
+def _ports_text(flat, node):
+    ports = [p for p in flat.ports.values() if p.scope == node.path]
+    return "; ".join(f"{p.name} ({p.dir} {_port_items(p)})" for p in ports) or "none"
+
+
 def _sealed_msg(flat, node, ref, items, side):
     """The refusal for a ref that reaches inside a sealed module: name the port to add."""
     ports = [p for p in flat.ports.values() if p.scope == node.path]
-    have = "; ".join(f"{p.name} ({p.dir} {_port_items(p)})" for p in ports) or "none"
     item = ", ".join(items) if items else "ITEM"
     want = "out" if side == "driver" else "in"
     example = f"{node.path}.{ports[0].name}" if ports else f"{node.path}.PORT"
-    return (f"{ref}: {node.path} is a sealed module ({node.kind}), and its ports are {have}. "
-            f"Name a port (e.g. {example}), or add one to module {node.kind}: "
-            f"`port NAME : {want} {item} @SIDE`, and give it a net inside")
+    return (f"{ref}: {node.path} is a sealed module ({node.kind}), and its ports are "
+            f"{_ports_text(flat, node)}. Name a port (e.g. {example}), or add one to module "
+            f"{node.kind}: `port NAME : {want} {item} @SIDE`, and give it a net inside")
 
 
 def _sealed_ref(flat, node, ref, used, items, side, src):
-    """``ref`` reached sealed instance ``node`` after ``used`` parts: only a port's name may follow."""
+    """``ref`` reached sealed instance ``node`` after ``used`` parts.
+
+    A port's name may follow; a bare ref or ``.*`` is the ports themselves (2.0.31: ``gears.*`` is
+    the module's free ports). Either way the side picks the ports that fit it: a driver takes
+    ``out``/``inout`` ports, a consumer ``in``/``inout``. Nothing deeper is nameable."""
     left = ref.parts[used:]
-    if left and not ref.star:
+    if not left:                            # `gears` or `gears.*`: its ports
+        fit = {"driver": ("out", "inout"), "consumer": ("in", "inout")}.get(side)
+        keys = [p.key for p in flat.ports.values()
+                if p.scope == node.path and (fit is None or p.dir in fit)]
+        if not keys:
+            who = {"driver": "output", "consumer": "input"}.get(side, "port")
+            raise ElabError(src, ref.line,
+                            f"{ref}: {node.path} is a sealed module ({node.kind}) and has no "
+                            f"{who} port: its ports are {_ports_text(flat, node)}")
+        return None, keys
+    if not ref.star:
         key = _join(node.path, left[0])
         if key in flat.ports:
             if len(left) > 1:
@@ -508,7 +526,7 @@ def _resolve_nets(flat):
                 out_hold.setdefault((key, item), []).append(name)
                 added += 1
         if not added:
-            if keys and all(k in flat.ports for k in keys):
+            if keys and all(k in flat.ports for k in keys) and not free_only:
                 port_items_check(name, ref, w, keys)
             else:
                 flat.checks.append(Check("TYPE", f"net {name}", f"driver {ref} makes no "
@@ -533,7 +551,7 @@ def _resolve_nets(flat):
                 in_hold.setdefault((key, item), []).append(name)
                 added += 1
         if not added:
-            if keys and all(k in flat.ports for k in keys):
+            if keys and all(k in flat.ports for k in keys) and not free_only:
                 port_items_check(name, ref, w, keys)
             else:
                 flat.checks.append(Check("TYPE", f"net {name}", f"consumer {ref} takes no "

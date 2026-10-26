@@ -154,11 +154,43 @@ class SealedTest(unittest.TestCase):
         self.assertIn("gear (out iron-gear-wheel)", msg)
         self.assertIn("port NAME : in ITEM @SIDE", msg)      # the line to add, as a consumer
 
-    def test_a_bare_ref_or_a_star_is_refused(self):
-        for ref in ("rib", "rib.*"):
-            with self.assertRaises(ElabError) as cm:
-                flat_of(RIB + FEED.replace("rib.iron", ref))
-            self.assertIn("is a sealed module (GearRib)", str(cm.exception))
+    def test_a_star_is_the_ports_that_fit_the_side(self):
+        flat = flat_of(RIB + FEED.replace("net ore: feed -> rib.iron",
+                                          "net ore: feed -> rib.*")
+                                     .replace("net gear_out: rib.gear -> box",
+                                              "net gear_out: rib.* -> box"))
+        self.assertEqual(flat.nets["ore"].consumers, [("rib/iron", "iron-plate")])
+        self.assertEqual(flat.nets["gear_out"].drivers, [("rib/gear", "iron-gear-wheel")])
+
+    def test_a_bare_ref_is_all_the_ports(self):
+        flat = flat_of(RIB + FEED.replace("net ore: feed -> rib.iron",
+                                          "net ore: feed -> rib"))
+        self.assertEqual(flat.nets["ore"].consumers, [("rib/iron", "iron-plate")])
+
+    def test_a_star_is_the_free_ports_a_bare_ref_is_all_of_them(self):
+        text = RIB + FEED.replace(
+            "net ore: feed -> rib.iron",
+            "net ore: feed -> rib\n"
+            "net again: feed -> rib.*\n")
+        flat = flat_of(text)
+        self.assertEqual(flat.nets["ore"].consumers, [("rib/iron", "iron-plate")])
+        self.assertEqual(flat.nets["again"].consumers, [])   # rib/iron is taken (free only)
+        self.assertIn("that is still free", " ".join(c.msg for c in flat.checks))
+        self.assertIn("DOUBLE", codes(flat))                 # the bare ref fed it twice
+
+    def test_a_star_with_no_port_that_fits(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of("""
+module OnlyIn size 8x6 {
+  port iron : in iron-plate @w
+  g = AsmRow<n=1, recipe=pipe> @(1, 1)
+  net a: iron -> g
+}
+o = OnlyIn @(0, 0)
+box = Chest<provider> @(20, 0)
+net x: o.* -> box
+""")
+        self.assertIn("has no output port", str(cm.exception))
 
     def test_a_port_has_no_inside(self):
         with self.assertRaises(ElabError) as cm:
@@ -301,6 +333,16 @@ m = M
         with self.assertRaises(ElabError) as cm:
             flat_of(self.BURNER.replace("burn.feed", "burn.row"))
         self.assertIn("feed (in iron-ore | coal)", str(cm.exception))
+
+    def test_a_star_takes_both_lanes_of_a_pair(self):
+        flat = flat_of(self.BURNER.replace(
+            "mine = MinerRow<n=1, resource=iron-ore> @(0, 0)\n"
+            "coal = MinerRow<n=1, resource=coal> @(0, 4)\n",
+            'feed2 = Chest<requester, item="iron-ore,coal", rate=4> @(0, 0)\n')
+            .replace("net a: mine -> burn.feed\nnet b: coal -> burn.feed\n",
+                     "net a: feed2 -> burn.*\n"))
+        self.assertEqual(sorted(flat.nets["a"].consumers),
+                         [("burn/feed", "coal"), ("burn/feed", "iron-ore")])
 
     def test_the_same_item_on_both_lanes_is_belt_item(self):
         """V1's `Belt[iron-plate]`: one item, both lanes."""
