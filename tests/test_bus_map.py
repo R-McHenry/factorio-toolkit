@@ -153,11 +153,47 @@ m = M @(40, 0)
         self.assertIn("short of the connection list", str(cm.exception))
 
 
+    def test_a_left_tap_is_a_lone_exit_at_the_stub(self):
+        from fkcore import expand
+        flat = flat_of(RIB + MAP.replace("fg: rib.iron", "left fg: rib.iron"))
+        self.assertEqual(flat.insts["bus"].params["tapkind"], ["left"])
+        frag, binding = expand.fragment_of(flat, "bus", CAT)
+        stub = [e for e in frag.entities if e.local == "tap1"]
+        self.assertEqual(len(stub), 1)
+        self.assertEqual(stub[0].name, "underground-belt")
+        self.assertEqual(stub[0].attrs, {"ug": "out"})
+        self.assertEqual(frag.roles["tap1"].attach, [(9.5, 0.5, 0)])   # the stub tile, facing north
+        self.assertEqual(binding["tap1"], "fg")
+
+    def test_a_right_tap_is_refused_for_now(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of(RIB + MAP.replace("fg: rib.iron", "right fg: rib.iron"))
+        self.assertIn("one row outside the bus's frame", str(cm.exception))
+
+    def test_a_kind_is_only_for_a_tap(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of(RIB + MAP.replace("fe: feed", "left fe: feed"))
+        self.assertIn("a left kind is for a tap", str(cm.exception))
+
+    def test_a_dual_tap_is_the_plain_stub(self):
+        from fkcore import expand
+        flat = flat_of(RIB + MAP.replace("fg: rib.iron", "dual fg: rib.iron"))
+        frag, _binding = expand.fragment_of(flat, "bus", CAT)
+        stub = [e for e in frag.entities if e.local == "tap1"][0]
+        self.assertEqual(stub.name, "transport-belt")
+        self.assertEqual(stub.attrs, {})
+
+    def test_the_list_parses_a_kind(self):
+        f = lang.parse("bus = Bus<belts=2, item=iron-plate>(left a: b.c, d: e) @(0, 0)", "t.fk")
+        inst = f.body.insts[0]
+        self.assertEqual([(n, k) for n, _r, k in inst.conns], [("a", "left"), ("d", None)])
+
+
 class SyntaxTest(unittest.TestCase):
     def test_the_list_parses_in_order(self):
         f = lang.parse("bus = Bus<belts=2, item=iron-plate>(a: b.c, d: e) @(0, 0)", "t.fk")
         inst = f.body.insts[0]
-        self.assertEqual([(n, str(r)) for n, r in inst.conns], [("a", "b.c"), ("d", "e")])
+        self.assertEqual([(n, str(r), k) for n, r, k in inst.conns], [("a", "b.c", None), ("d", "e", None)])
 
     def test_a_connection_name_twice(self):
         with self.assertRaises(lang.FkSyntaxError) as cm:

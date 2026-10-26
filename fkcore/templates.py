@@ -415,7 +415,7 @@ def bus(params, cat):
     rate model joins every net through the bus into one pool (``fkcore.rates``). ``mouth=in1..inN``
     (2.0.33) are the belt ends at the head: a net into ``bus.in1`` feeds belt 1 in line, no staircase.
     The geometry is ``fragments.bus``; a port that doesn't fit is a bad parameter here."""
-    _only(params, ("belts", "length", "item", "load", "tap", "mouth"))
+    _only(params, ("belts", "length", "item", "load", "tap", "mouth", "tapkind"))
     try:
         belts, length, item, loads, taps = bus_ports(params)
         bus_check(belts, length, loads, taps)
@@ -438,9 +438,19 @@ def bus(params, cat):
     out = [MSpec(f"load{k}", "transport-belt", None, {}, {}, frozenset([item]),
                  extra={"port": "load", "item": item, "at": f"{s}{x}"})
            for k, (s, x) in enumerate(loads, 1)]
+    tkinds = params.get("tapkind") or []
+    if isinstance(tkinds, str):
+        tkinds = [tkinds]
+    if len(tkinds) > len(taps):
+        raise TemplateError(f"tapkind={tkinds}: the bus has {len(taps)} taps")
+    tkinds = list(tkinds) + ["dual"] * (len(taps) - len(tkinds))
+    for kind in tkinds:
+        if kind not in ("dual", "left", "right"):
+            raise TemplateError(f"tapkind={kind}: dual, left or right")
     out += [MSpec(f"tap{k}", "transport-belt", None, {}, {item: 0.0}, frozenset(),
-                  extra={"port": "tap", "item": item, "at": f"{s}{x}"})
-            for k, (s, x) in enumerate(taps, 1)]
+                  extra={"port": "tap", "item": item, "at": f"{s}{x}",
+                         **({} if kind == "dual" else {"kind": kind})})
+            for k, ((s, x), kind) in enumerate(zip(taps, tkinds), 1)]
     out += [MSpec(name, "transport-belt", None, {}, {}, frozenset([item]),
                   extra={"port": "load", "item": item, "at": name})
             for name in mouths]

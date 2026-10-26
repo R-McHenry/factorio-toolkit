@@ -543,7 +543,7 @@ def _bus_conns(flat, cat):
         scope = path.rsplit("/", 1)[0] if "/" in path else ""
         bus = path.rsplit("/", 1)[-1]
         kinds = []
-        for cname, ref in inst.conns:
+        for cname, ref, ckind in inst.conns:
             _node, keys = _resolve(flat, ref, scope, items=[item], src=flat.path)
             if not keys:
                 raise ElabError(flat.path, ref.line, f"connection {cname}: {ref} names nothing")
@@ -557,9 +557,18 @@ def _bus_conns(flat, cat):
                                     f"connection {cname}: a mouth is an input, so its endpoint must "
                                     f"make {item} (or be an out port)")
                 kind = "mouth"
-            kinds.append((cname, ref, kind))
-        upstream = any(k == "mouth" for _c, _r, k in kinds)     # a mouth is at the head: always first
-        for cname, ref, kind in kinds:
+            if ckind is not None:
+                if kind != "tap":
+                    raise ElabError(flat.path, ref.line,
+                                    f"connection {cname}: a {ckind} kind is for a tap, and this one "
+                                    f"is a {kind} (a load is dual; a mouth is a belt end)")
+                if ckind == "right":
+                    raise ElabError(flat.path, ref.line,
+                                    f"connection {cname}: a right tap needs one row outside the bus's "
+                                    "frame, which the fragment does not grow yet")
+            kinds.append((cname, ref, kind, ckind))
+        upstream = any(k == "mouth" for _c, _r, k, _t in kinds)  # a mouth is at the head: always first
+        for cname, ref, kind, _t in kinds:
             if kind in ("load", "mouth"):
                 upstream = True
             elif not upstream:
@@ -567,9 +576,9 @@ def _bus_conns(flat, cat):
                                          f"{cname} is a tap before any load: nothing upstream feeds "
                                          "the bus there", ref.line))
         bound, placed = 1, []
-        for cname, ref, kind in kinds:
+        for cname, ref, kind, tkind in kinds:
             if kind == "mouth":
-                placed.append((cname, ref, kind, None))
+                placed.append((cname, ref, kind, None, tkind))
                 continue
             if kind == "tap":
                 x = bound + 2 + belts
@@ -577,7 +586,7 @@ def _bus_conns(flat, cat):
             else:
                 x = bound + 2
                 band = (x, x + belts)
-            placed.append((cname, ref, kind, x))
+            placed.append((cname, ref, kind, x, tkind))
             bound = band[1]
         length = bound + 1
         given = inst.params.get("length")
@@ -585,13 +594,16 @@ def _bus_conns(flat, cat):
             raise ElabError(flat.path, inst.line,
                             f"{path}: length={given} is short of the connection list ({length})")
         inst.params["length"] = int(given) if given is not None else length
-        loads = [f"n{x}" for _c, _r, kind, x in placed if kind == "load"]
-        taps = [f"n{x}" for _c, _r, kind, x in placed if kind == "tap"]
-        mouths = [c for c, _r, kind, _x in placed if kind == "mouth"]
+        loads = [f"n{x}" for _c, _r, kind, x, _t in placed if kind == "load"]
+        taps = [f"n{x}" for _c, _r, kind, x, _t in placed if kind == "tap"]
+        tapkinds = [t or "dual" for _c, _r, kind, _x, t in placed if kind == "tap"]
+        mouths = [c for c, _r, kind, _x, _t in placed if kind == "mouth"]
         if loads:
             inst.params["load"] = loads
         if taps:
             inst.params["tap"] = taps
+        if any(t != "dual" for t in tapkinds):
+            inst.params["tapkind"] = tapkinds
         if mouths:
             inst.params["mouth"] = mouths
         try:
@@ -604,7 +616,7 @@ def _bus_conns(flat, cat):
             flat.machines[m.key] = m
             inst.machines.append(m.key)
         li = ti = 0
-        for cname, ref, kind, _x in placed:
+        for cname, ref, kind, _x, _t in placed:
             if kind == "mouth":
                 port = lang.Ref([bus, cname], False, ref.line)
                 net = lang.Net(cname, [item], [ref], [port], ref.line)

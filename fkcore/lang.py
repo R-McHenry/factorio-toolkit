@@ -167,7 +167,7 @@ class Inst:
     hints: dict
     line: int
     when: Cond | None = None   # the machine's own enable condition
-    conns: list | None = None  # [(name, Ref)]: a Bus's connection list (2.0.32), in port order
+    conns: list | None = None  # [(name, Ref, kind)]: a Bus's connection list, in port order
 
 
 @dataclass
@@ -654,12 +654,16 @@ class _P:
             conns = []
             if not self.accept(")"):
                 while True:
+                    ckind = None
+                    if (self.peek().text in ("dual", "left", "right")
+                            and self.peek(2).text == ":"):   # left fg: rib.iron, not fg: left.thing
+                        ckind = self.next().text
                     cname = self.name("a connection name").text
                     self.expect(":")
                     cref = self.ref()
-                    if any(n == cname for n, _r in conns):
+                    if any(n == cname for n, _r, _k in conns):
                         self.err(f"connection {cname} given twice")
-                    conns.append((cname, cref))
+                    conns.append((cname, cref, ckind))
                     if self.accept(")"):
                         break
                     self.expect(",")

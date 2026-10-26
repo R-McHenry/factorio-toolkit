@@ -432,7 +432,7 @@ def bus_check(belts, length, loads, taps):
                 owner[t] = name
 
 
-def bus(belts, length, item, loads, taps, used=None, mouths=None):
+def bus(belts, length, item, loads, taps, used=None, mouths=None, tapkinds=None):
     """Rory's bus (agent/docs/examples/bus4.json), in its own frame: ``belts`` belts of ``item``
     run east (rows 1..belts) for ``length`` tiles; row 0 (north) and row belts + 1 (south) are
     where its loads come in and its taps go out. ``loads``/``taps``: [(side, x)], side n or s in
@@ -452,9 +452,11 @@ def bus(belts, length, item, loads, taps, used=None, mouths=None):
     b = belts
     ents, taken = [], set()
     roles = {"pool": Role("pool", "pool", [item], [], [])}
+    tapkinds = list(tapkinds or ())
     for kind, ports in (("load", loads), ("tap", taps)):
         for k, (side, x) in enumerate(ports, 1):
             name = f"{kind}{k}"
+            tkind = tapkinds[k - 1] if kind == "tap" and len(tapkinds) >= k else "dual"
             rows, cells, stub, _empty = _port_tiles(b, kind, side, x)
             climb = side if kind == "load" else ("s" if side == "n" else "n")
             for j, (r0, _r1) in enumerate(rows):
@@ -466,7 +468,11 @@ def bus(belts, length, item, loads, taps, used=None, mouths=None):
             sx, sy = stub
             d = E if kind == "load" else (N if side == "n" else S)
             into = (N if side == "s" else S) if kind == "load" else d
-            ents.append(FEnt(name, "transport-belt", sx + 0.5, sy + 0.5, d, name))
+            if kind == "tap" and tkind == "left":      # 2.0.34: a lone UG exit cuts a lane
+                ents.append(FEnt(name, "underground-belt", sx + 0.5, sy + 0.5, d, name,
+                                 {"ug": "out"}))
+            else:
+                ents.append(FEnt(name, "transport-belt", sx + 0.5, sy + 0.5, d, name))
             roles[name] = Role(name, "in" if kind == "load" else "out", [item], [name],
                                [(sx + 0.5, sy + 0.5, into)])
     for name in (mouths or ()):                 # 2.0.33: the belt end at the head, in line
@@ -506,7 +512,8 @@ def _bus(params):
     rot = int(params.get("_rot", 0))
     loads = [(bus_side(s, rot), x) for s, x in loads]
     taps = [(bus_side(s, rot), x) for s, x in taps]
-    return bus(belts, length, item, loads, taps, params.get("_used"), params.get("_mouths"))
+    return bus(belts, length, item, loads, taps, params.get("_used"), params.get("_mouths"),
+               params.get("tapkind"))
 
 
 #: kind -> how to call the geometry from (params, inputs, outputs)
