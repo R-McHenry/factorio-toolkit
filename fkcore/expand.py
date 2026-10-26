@@ -33,7 +33,7 @@ from . import fkp as fkpmod
 from . import placer
 from .codec import config_text
 from .compose import turn
-from .fragments import FEnt, Fragment, FragmentError, Role, _finish, fragment
+from .fragments import E, N, S, W, FEnt, Fragment, FragmentError, Role, _finish, fragment
 from .templates import CONTACT
 from .terrain import fmt_amount
 
@@ -72,11 +72,73 @@ def belts(flat, key, side):
     return out
 
 
+_PORT_OUT = {"n": N, "e": E, "s": S, "w": W}
+_PORT_IN = {N: S, E: W, S: N, W: E}
+
+
+def _port_tile(port, w, h):
+    """(x, y, the outward direction) of a port's tile: ``pos`` along the side (1-based) when the
+    declaration pinned it, else the middle of that side. 2.0.36: a port is one lane of a belt end,
+    so its tile is one tile on the frame's edge."""
+    side = port.side
+    if side in ("e", "w"):
+        x = w - 1 if side == "e" else 0
+        k = (port.pos - 1) if port.pos else h // 2
+        if not 0 <= k < h:
+            raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame ({h} rows)")
+        return x, k, _PORT_OUT[side]
+    y = 0 if side == "n" else h - 1
+    k = (port.pos - 1) if port.pos else w // 2
+    if not 0 <= k < w:
+        raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame ({w} columns)")
+    return k, y, _PORT_OUT[side]
+
+
+def _module_fragment(flat, path, cat):
+    """A sealed module's ports as the router meets them (2.0.36, PLAN-MODULES phase 3.1): each port
+    is a carrier belt on its declared side's tile, facing in for an ``in`` port and out for an ``out``
+    one. Two roles per port share that tile: the module's own net's role (the inside one, bound to the
+    module net) and the parent's net's role (bound to the parent net), so the crossing is the port and
+    nothing else. The module's children are placed on their own; this only adds the ports."""
+    inst = flat.insts[path]
+    w, h = inst.size
+    ents, roles, binding, seen = [], {}, {}, {}
+    for key in sorted(k for k in flat.ports
+                      if k.startswith(path + "/") and "/" not in k[len(path) + 1:]):
+        port = flat.ports[key]
+        item = port.items[0] if port.items else None
+        x, y, out = _port_tile(port, w, h)
+        if (x, y) in seen:
+            raise FragmentError(f"{path}: ports {seen[(x, y)]} and {port.name} share the tile "
+                                f"{x},{y}: give one a position along the side")
+        seen[(x, y)] = port.name
+        belt = _PORT_IN[out] if port.dir == "in" else out
+        inside_role, outside_role = port.name, port.name + "!"
+        if port.dir == "in":
+            inner, outer = flat._out_hold.get((key, item), []), flat._in_hold.get((key, item), [])
+            inside_side, outside_side = "out", "in"
+        else:
+            inner, outer = flat._in_hold.get((key, item), []), flat._out_hold.get((key, item), [])
+            inside_side, outside_side = "in", "out"
+        ents.append(FEnt(f"port_{port.name}", "transport-belt", x + 0.5, y + 0.5, belt,
+                         inside_role))
+        roles[inside_role] = Role(inside_role, inside_side, [item] if item else [], [key],
+                                  [(x + 0.5, y + 0.5, belt)])
+        roles[outside_role] = Role(outside_role, outside_side, [item] if item else [], [key],
+                                   [(x + 0.5, y + 0.5, belt)])
+        binding[inside_role] = (inner or [None])[0]
+        binding[outside_role] = (outer or [None])[0]
+    params = {k: v for k, v in inst.params.items() if k != "duty"}
+    return _finish(Fragment(inst.kind, params, ents, roles, (w, h))), binding
+
+
 def fragment_of(flat, path, cat):
     """(Fragment, {role: net}) for template instance ``path``."""
     inst = flat.insts[path]
     if inst.kind == "Bus":
         return _bus_fragment(flat, path)
+    if inst.module is not None:
+        return _module_fragment(flat, path, cat)
     keys = inst.machines
     ins, outs = belts(flat, keys[0], "in"), belts(flat, keys[0], "out")
     for k in keys[1:]:
@@ -362,6 +424,19 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
     frames = {}                                 # module path -> its frame, for turned modules
     for path, inst in flat.insts.items():
         if inst.module is not None:
+            # 2.0.36: a sealed module's ports are carriers and attach points, so the router meets it
+            # at its frame's tiles; its children are placed on their own below (frame_of knows the
+            # module's frame either way).
+            if inst.size is None:
+                continue
+            try:
+                frag, binding = _module_fragment(flat, path, cat)
+            except FragmentError as exc:
+                notes.append(f"{path}: {exc}")
+                continue
+            at = _origin(flat, path, cat, frag.size, frames) or (0, 0, 0)
+            for e in _put(lay, path, inst, frag, binding, at, notes, cat):
+                xmax, ymax = _grow(cat, e, xmax, ymax)
             continue
         if inst.kind == "Literal" and inst.literal is not None:
             # imported from a file: placed by its hint like any fragment, keys from the import
