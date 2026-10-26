@@ -197,7 +197,10 @@ module GearRib size 16x10 {
   name a port only in the module that declares it: naming one from outside the module is an error
   that says which `port` line to add.
 - `size WxH` is the module's frame, and every port sits on that frame's edge: one tile per port,
-  at `pos` along the side if the declaration pins one (`@w4`), else the middle. The tiles just inside
+  at `pos` along the side if the declaration pins one (`@w4`: counted from 0, the side's first tile
+  is `@w0`), else the tile of that side facing what the port connects to. The build records the
+  tile in the `.fkp` and keeps it; a pin always wins, and a port moved to another side is chosen
+  again (both a `PORT` line, once). The tiles just inside
   and just outside a port must be free: a machine standing there is a `PORT` line (`fk check`), and
   the route would run through it.
 - Inside a sealed module the internal nets route **inside the frame**; outside, a parent's route ends

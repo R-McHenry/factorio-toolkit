@@ -154,11 +154,12 @@ class PortTileTest(unittest.TestCase):
                                                                "iron-plate"))
 
     def test_a_pinned_port_keeps_its_tile(self):
+        # 2.0.42: a pin counts from 0 along the side, as the PORT check and @n0L do
         flat, lay, r = build(RIB.replace("iron-plate @w", "iron-plate @w2"))
-        self.assertEqual(lay.ports["rib.iron"], fkpmod.PortRec("rib.iron", 0, 1, 4, "R",
+        self.assertEqual(lay.ports["rib.iron"], fkpmod.PortRec("rib.iron", 0, 2, 4, "R",
                                                                "iron-plate"))
         self.assertEqual((lay.entities["rib/port_iron"].x, lay.entities["rib/port_iron"].y),
-                         (40.5, 11.5))
+                         (40.5, 12.5))
         self.assertFalse([ln for ln in r.lines if ln.startswith("PORT")])
 
     def test_a_turned_module_keeps_its_recorded_tile(self):
@@ -209,8 +210,35 @@ class RecordTest(unittest.TestCase):
         lines = [ln for ln in r2.lines if ln.startswith("PORT")]
         self.assertEqual(len(lines), 1, r2.lines)
         self.assertIn("rib/iron", lines[0])
-        self.assertIn("the committed tile 0,4 and the pin @w2 disagree", lines[0])
-        self.assertIn("the pin wins", lines[0])
+        self.assertIn("the committed tile 0,4 is dropped: the pin @w2 moves it to 0,2", lines[0])
+
+    def test_the_pin_wins_over_a_record(self):
+        # 2.0.42: 2.0.41 printed "the pin wins" and kept the carrier on the committed tile
+        _f1, lay1, _r1 = build(RIB)
+        _f2, lay2, r2 = build(RIB.replace("iron-plate @w", "iron-plate @w2"), lay1)
+        self.assertEqual((lay2.entities["rib/port_iron"].x, lay2.entities["rib/port_iron"].y),
+                         (40.5, 12.5))
+        self.assertEqual((lay2.ports["rib.iron"].x, lay2.ports["rib.iron"].y), (0, 2))
+        self.assertEqual(r2.failed, {})
+        # the next build reads the new record: the line is gone
+        _f3, _lay3, r3 = build(RIB.replace("iron-plate @w", "iron-plate @w2"), lay2)
+        self.assertFalse([ln for ln in r3.lines if ln.startswith("PORT")])
+
+    def test_a_port_moved_to_another_side_is_chosen_again(self):
+        _f1, lay1, _r1 = build(RIB)
+        _f2, lay2, r2 = build(RIB.replace("iron-plate @w", "iron-plate @n"), lay1)
+        rec = lay2.ports["rib.iron"]
+        self.assertEqual(rec.y, 0)                              # on the north edge now
+        self.assertEqual(lay2.entities["rib/port_iron"].y, 10.5)
+        lines = [ln for ln in r2.lines if ln.startswith("PORT")]
+        self.assertEqual(len(lines), 1, r2.lines)
+        self.assertIn("not on the n edge", lines[0])
+        self.assertEqual(r2.failed, {})
+
+    def test_a_pin_at_zero_is_the_first_tile(self):
+        _flat, lay, r = build(RIB.replace("iron-plate @w", "iron-plate @w0"))
+        self.assertEqual((lay.ports["rib.iron"].x, lay.ports["rib.iron"].y), (0, 0))
+        self.assertEqual(r.failed, {})
 
     def test_a_record_for_a_port_that_is_gone_is_a_port_check(self):
         _f1, lay1, _r1 = build(RIB)

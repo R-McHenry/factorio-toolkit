@@ -96,7 +96,7 @@ from dataclasses import dataclass, field
 
 from . import connect as connectmod
 from . import fkp as fkpmod
-from .expand import attach_points, frame_of
+from .expand import attach_points, frame_of, record_misfit
 from .steiner import COSTS, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
 
@@ -1596,18 +1596,12 @@ def port_checks(flat, lay, cat):
     out, seen = [], set()
     for key in sorted(getattr(flat, "port_records", ())):
         port = flat.ports.get(key)
-        rec = flat.port_records[key]
-        if port is None or port.pos is None or port.size is None:
+        if port is None:
             continue
-        w, h = port.size
-        if port.side in "ew":
-            pin = (w - 1 if port.side == "e" else 0, port.pos - 1)
-        else:
-            pin = (port.pos - 1, 0 if port.side == "n" else h - 1)
-        if (rec.x, rec.y) != pin:
-            out.append(f"PORT      {key}: the committed tile {rec.x},{rec.y} and the pin "
-                       f"@{port.side}{port.pos} disagree: the pin wins (a rebuild records "
-                       f"{pin[0]},{pin[1]})")
+        rec = flat.port_records[key]
+        why = record_misfit(port, rec)
+        if why is not None:
+            out.append(f"PORT      {key}: the committed tile {rec.x},{rec.y} is dropped: {why}")
     for path, rec in sorted(lay.insts.items()):
         if path not in flat.insts or path not in flat.sealed:
             continue

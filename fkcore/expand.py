@@ -98,23 +98,45 @@ def _unturn(x, y, size, rot):
 
 def _port_tile(port, w, h, choice=None):
     """(x, y, the outward direction) of a port's tile, in the module's own frame: the recorded or
-    chosen tile (``choice``), else ``pos`` along the side (1-based) when the declaration pinned
-    it, else the middle of that side. 2.0.41: the build chooses an unpinned port's tile facing its
-    partner (``_choose_port_tiles``) and records it; this reads the record back."""
+    chosen tile (``choice``), else ``pos`` along the side (0-based, as the ``PORT`` check and
+    2.0.29's ``@n0L`` count) when the declaration pinned it, else the middle of that side.
+    2.0.41: the build chooses an unpinned port's tile facing its partner
+    (``_choose_port_tiles``) and records it; this reads the record back."""
     if choice is not None:
         return choice[0], choice[1], choice[2]
     side = port.side
+    along = h if side in ("e", "w") else w
+    k = port.pos if port.pos is not None else along // 2
+    if not 0 <= k < along:
+        raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame (its {side} edge "
+                            f"runs 0..{along - 1})")
+    return _edge_tile(side, k, w, h) + (_PORT_OUT[side],)
+
+
+def _edge_tile(side, k, w, h):
+    """The tile ``k`` along ``side`` of a ``w`` x ``h`` frame, in its own frame."""
     if side in ("e", "w"):
-        x = w - 1 if side == "e" else 0
-        k = (port.pos - 1) if port.pos else h // 2
-        if not 0 <= k < h:
-            raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame ({h} rows)")
-        return x, k, _PORT_OUT[side]
-    y = 0 if side == "n" else h - 1
-    k = (port.pos - 1) if port.pos else w // 2
-    if not 0 <= k < w:
-        raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame ({w} columns)")
-    return k, y, _PORT_OUT[side]
+        return (w - 1 if side == "e" else 0, k)
+    return (k, 0 if side == "n" else h - 1)
+
+
+def record_misfit(port, rec):
+    """Why a committed port record no longer fits its port's declaration, or None (2.0.42). A pin
+    wins over a record, and a record must stand on the declared side's edge of the module's frame
+    as it is now: a port moved to another side, or a frame that shrank under it, is chosen again."""
+    if port.size is None:
+        return None
+    w, h = port.size
+    if port.pos is not None:
+        pin = _edge_tile(port.side, port.pos, w, h)
+        if (rec.x, rec.y) != pin:
+            return f"the pin @{port.side}{port.pos} moves it to {pin[0]},{pin[1]}"
+        return None
+    along = h if port.side in ("e", "w") else w
+    k = rec.y if port.side in ("e", "w") else rec.x
+    if not 0 <= k < along or (rec.x, rec.y) != _edge_tile(port.side, k, w, h):
+        return f"it is not on the {port.side} edge of the {w}x{h} frame: the port is chosen again"
+    return None
 
 
 def _port_belt(port, out):
@@ -144,6 +166,8 @@ def _port_choice(flat, key):
     if rec is None:
         return None
     port = flat.ports[key]
+    if record_misfit(port, rec) is not None:      # the source moved it: chosen again, recorded anew
+        return None
     choice = (int(rec.x), int(rec.y), _port_out(port, rec.dir % 16), rec.lane)
     flat.port_tiles[key] = choice
     return choice
