@@ -205,7 +205,7 @@ net so: o.gear -> sink
 
 
 class FixesTest(unittest.TestCase):
-    """2.0.40: the quick fixes of the plan review (assessment-20261025\\PLAN-MODULES-REVIEW.md)."""
+    """2.0.40: the quick fixes of the plan review (assessment-20261025\\PLAN-GLOBAL.md)."""
 
     def test_a_parent_net_routes_around_a_sealed_child(self):
         flat, r = routed(NESTED)

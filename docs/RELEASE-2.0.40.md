@@ -1,6 +1,6 @@
 # Toolkit 2.0.40: three fixes to sealed modules (the plan review, 2026-10-26)
 
-Rory, 2026-10-26, on the review of 2.0.28–2.0.39 (`assessment-20261025\PLAN-GLOBAL-REVIEW.md`):
+Rory, 2026-10-26, on the review of 2.0.28–2.0.39 (`assessment-20261025\PLAN-GLOBAL.md`):
 "Go ahead and try and implement the quick fixes ... I agree with all your changes." These are the
 three that had to land before plots become sealed modules.
 
