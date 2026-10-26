@@ -432,11 +432,12 @@ def bus_check(belts, length, loads, taps):
                 owner[t] = name
 
 
-def bus(belts, length, item, loads, taps, used=None):
+def bus(belts, length, item, loads, taps, used=None, mouths=None):
     """Rory's bus (agent/docs/examples/bus4.json), in its own frame: ``belts`` belts of ``item``
     run east (rows 1..belts) for ``length`` tiles; row 0 (north) and row belts + 1 (south) are
     where its loads come in and its taps go out. ``loads``/``taps``: [(side, x)], side n or s in
-    this frame.
+    this frame. ``mouths`` (2.0.33): names ``in1..inN``, one belt end at the head per name, fed in
+    line from outside the frame (no staircase, no entity of its own: the bus's belt is the mouth).
 
     A load at x: its belt (the stub, beside the bus at x) turns east into a staircase of one
     splitter per belt at x + 1 .. x + belts, climbing from its side to the far one with input
@@ -468,6 +469,9 @@ def bus(belts, length, item, loads, taps, used=None):
             ents.append(FEnt(name, "transport-belt", sx + 0.5, sy + 0.5, d, name))
             roles[name] = Role(name, "in" if kind == "load" else "out", [item], [name],
                                [(sx + 0.5, sy + 0.5, into)])
+    for name in (mouths or ()):                 # 2.0.33: the belt end at the head, in line
+        k = int(name[2:])
+        roles[name] = Role(name, "in", [item], [name], [(0.5, k + 0.5, E)])
     for c in range(length):
         for r in range(1, b + 1):
             if (c, r) not in taken:
@@ -502,7 +506,7 @@ def _bus(params):
     rot = int(params.get("_rot", 0))
     loads = [(bus_side(s, rot), x) for s, x in loads]
     taps = [(bus_side(s, rot), x) for s, x in taps]
-    return bus(belts, length, item, loads, taps, params.get("_used"))
+    return bus(belts, length, item, loads, taps, params.get("_used"), params.get("_mouths"))
 
 
 #: kind -> how to call the geometry from (params, inputs, outputs)

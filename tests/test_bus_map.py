@@ -60,6 +60,36 @@ class MapTest(unittest.TestCase):
         self.assertEqual(flat.nets["fg"].consumers, [("rib/iron", "iron-plate")])
         self.assertEqual([c for c in flat.checks if c.code == "ORDER"], [])
 
+    def test_a_mouth_feeds_the_bus_in_line(self):
+        flat = flat_of(RIB + MAP.replace("fe: feed", "in1: feed"))
+        self.assertEqual(flat.insts["bus"].params["mouth"], ["in1"])
+        self.assertEqual(flat.nets["in1"].drivers, [("feed/c0", "iron-plate")])
+        self.assertEqual(flat.nets["in1"].consumers, [("bus/in1", "iron-plate")])
+        self.assertEqual([c for c in flat.checks if c.code == "ORDER"], [])
+
+    def test_a_mouth_is_upstream_of_every_tap(self):
+        flat = flat_of(RIB + MAP.replace("(fe: feed, fg: rib.iron)", "(fg: rib.iron, in1: feed)"))
+        self.assertEqual([c for c in flat.checks if c.code == "ORDER"], [])
+
+    def test_a_mouth_must_be_a_source(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of(RIB + MAP.replace("fe: feed", "in1: rib.iron"))
+        self.assertIn("a mouth is an input", str(cm.exception))
+
+    def test_a_mouth_past_the_belt_count(self):
+        with self.assertRaises(ElabError) as cm:
+            flat_of(RIB + MAP.replace("fe: feed", "in3: feed"))
+        self.assertIn("this bus has belts 1..2", str(cm.exception))
+
+    def test_the_mouth_is_a_belt_end_on_the_head(self):
+        from fkcore import expand
+        flat = flat_of(RIB + MAP.replace("fe: feed", "in1: feed"))
+        lay, notes = expand.expand_factory(flat, CAT)
+        self.assertFalse([n for n in notes if n.startswith("bus")], notes)
+        frag, binding = expand.fragment_of(flat, "bus", CAT)
+        self.assertEqual(binding["in1"], "in1")
+        self.assertEqual(frag.roles["in1"].attach, [(0.5, 1.5, 4)])   # the head tile, facing east
+
     def test_the_bus_pools_the_list_the_way_it_pools_penned_ports(self):
         listed, hand = flat_of(RIB + MAP), flat_of(RIB + HAND)
         for name in ("fe", "fg", "bus"):

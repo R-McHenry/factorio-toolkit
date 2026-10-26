@@ -547,19 +547,30 @@ def _bus_conns(flat, cat):
             _node, keys = _resolve(flat, ref, scope, items=[item], src=flat.path)
             if not keys:
                 raise ElabError(flat.path, ref.line, f"connection {cname}: {ref} names nothing")
-            kinds.append((cname, ref, _conn_direction(flat, keys, ref, item, flat.path)))
-        load = tap = 0
+            kind = _conn_direction(flat, keys, ref, item, flat.path)
+            if cname.startswith("in") and cname[2:].isdigit():
+                if not 1 <= int(cname[2:]) <= belts:
+                    raise ElabError(flat.path, ref.line,
+                                    f"connection {cname}: this bus has belts 1..{belts}")
+                if kind != "load":
+                    raise ElabError(flat.path, ref.line,
+                                    f"connection {cname}: a mouth is an input, so its endpoint must "
+                                    f"make {item} (or be an out port)")
+                kind = "mouth"
+            kinds.append((cname, ref, kind))
+        upstream = any(k == "mouth" for _c, _r, k in kinds)     # a mouth is at the head: always first
         for cname, ref, kind in kinds:
-            if kind == "load":
-                load += 1
-            else:
-                tap += 1
-            if kind == "tap" and load == 0:
+            if kind in ("load", "mouth"):
+                upstream = True
+            elif not upstream:
                 flat.checks.append(Check("ORDER", f"bus {path}",
                                          f"{cname} is a tap before any load: nothing upstream feeds "
                                          "the bus there", ref.line))
         bound, placed = 1, []
         for cname, ref, kind in kinds:
+            if kind == "mouth":
+                placed.append((cname, ref, kind, None))
+                continue
             if kind == "tap":
                 x = bound + 2 + belts
                 band = (x - belts, x)
@@ -576,10 +587,13 @@ def _bus_conns(flat, cat):
         inst.params["length"] = int(given) if given is not None else length
         loads = [f"n{x}" for _c, _r, kind, x in placed if kind == "load"]
         taps = [f"n{x}" for _c, _r, kind, x in placed if kind == "tap"]
+        mouths = [c for c, _r, kind, _x in placed if kind == "mouth"]
         if loads:
             inst.params["load"] = loads
         if taps:
             inst.params["tap"] = taps
+        if mouths:
+            inst.params["mouth"] = mouths
         try:
             specs = template_machines("Bus", {k: v for k, v in inst.params.items() if k != "duty"},
                                       cat)
@@ -591,7 +605,10 @@ def _bus_conns(flat, cat):
             inst.machines.append(m.key)
         li = ti = 0
         for cname, ref, kind, _x in placed:
-            if kind == "load":
+            if kind == "mouth":
+                port = lang.Ref([bus, cname], False, ref.line)
+                net = lang.Net(cname, [item], [ref], [port], ref.line)
+            elif kind == "load":
                 li += 1
                 port = lang.Ref([bus, f"load{li}"], False, ref.line)
                 net = lang.Net(cname, [item], [ref], [port], ref.line)

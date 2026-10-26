@@ -407,14 +407,15 @@ def turret_row(params, cat):
 
 
 def bus(params, cat):
-    """``Bus<belts=4, length, item, load=s11|..., tap=n26|...>``: Rory's bus (2026-10-21, "a river
-    of iron, that you keep adding more iron inputs to, and pull iron out when you need it"). Its
-    ports are its endpoints, ``load1``.. then ``tap1``.., in the order written: a net into
-    ``bus.load1`` puts ``item`` on the bus, a net from ``bus.tap1`` takes it off. A port passes on
-    what reaches it (no rate of its own; a tap's 0 makes it a driver of the item), so the rate
-    model joins every net through the bus into one pool (``fkcore.rates``). The geometry is
-    ``fragments.bus``; a port that doesn't fit is a bad parameter here, before any placement."""
-    _only(params, ("belts", "length", "item", "load", "tap"))
+    """``Bus<belts=4, length, item, load=s11|..., tap=n26|..., mouth=in1|in2>``: Rory's bus
+    (2026-10-21, "a river of iron, that you keep adding more iron inputs to, and pull iron out when
+    you need it"). Its ports are its endpoints, ``load1``.. then ``tap1``.., in the order written: a
+    net into ``bus.load1`` puts ``item`` on the bus, a net from ``bus.tap1`` takes it off. A port
+    passes on what reaches it (no rate of its own; a tap's 0 makes it a driver of the item), so the
+    rate model joins every net through the bus into one pool (``fkcore.rates``). ``mouth=in1..inN``
+    (2.0.33) are the belt ends at the head: a net into ``bus.in1`` feeds belt 1 in line, no staircase.
+    The geometry is ``fragments.bus``; a port that doesn't fit is a bad parameter here."""
+    _only(params, ("belts", "length", "item", "load", "tap", "mouth"))
     try:
         belts, length, item, loads, taps = bus_ports(params)
         bus_check(belts, length, loads, taps)
@@ -422,12 +423,27 @@ def bus(params, cat):
         raise TemplateError(str(exc)) from None
     if cat.is_fluid(item):
         raise TemplateError(f"{item} is a fluid: a bus is belts")
+    mouths = params.get("mouth") or []
+    if isinstance(mouths, str):
+        mouths = [mouths]
+    seen = set()
+    for name in mouths:
+        if not isinstance(name, str) or not name.startswith("in") or not name[2:].isdigit():
+            raise TemplateError(f"mouth={name}: a mouth is named in1..in{belts}")
+        if not 1 <= int(name[2:]) <= belts:
+            raise TemplateError(f"mouth={name}: the bus has belts 1..{belts}")
+        if name in seen:
+            raise TemplateError(f"mouth={name} given twice")
+        seen.add(name)
     out = [MSpec(f"load{k}", "transport-belt", None, {}, {}, frozenset([item]),
                  extra={"port": "load", "item": item, "at": f"{s}{x}"})
            for k, (s, x) in enumerate(loads, 1)]
     out += [MSpec(f"tap{k}", "transport-belt", None, {}, {item: 0.0}, frozenset(),
                   extra={"port": "tap", "item": item, "at": f"{s}{x}"})
             for k, (s, x) in enumerate(taps, 1)]
+    out += [MSpec(name, "transport-belt", None, {}, {}, frozenset([item]),
+                  extra={"port": "load", "item": item, "at": name})
+            for name in mouths]
     return out
 
 

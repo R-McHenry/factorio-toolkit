@@ -159,7 +159,8 @@ def _bus_fragment(flat, path):
             binding[local] = nets[0]
             used.add(local)
     params = {k: v for k, v in inst.params.items() if k != "duty"}
-    params.update(_rot=int((inst.hints.get("at") or (0, 0, 0))[2]), _used=used)
+    params.update(_rot=int((inst.hints.get("at") or (0, 0, 0))[2]), _used=used,
+                  _mouths=sorted(local for local in used if local.startswith("in")))
     return fragment("Bus", params, [], []), binding
 
 
