@@ -167,6 +167,7 @@ class Inst:
     hints: dict
     line: int
     when: Cond | None = None   # the machine's own enable condition
+    conns: list | None = None  # [(name, Ref)]: a Bus's connection list (2.0.32), in port order
 
 
 @dataclass
@@ -648,6 +649,20 @@ class _P:
                     if self.accept(">"):
                         break
                     self.expect(",")
+        conns = None
+        if self.accept("("):                     # a Bus's connection list (2.0.32): name: ref, in order
+            conns = []
+            if not self.accept(")"):
+                while True:
+                    cname = self.name("a connection name").text
+                    self.expect(":")
+                    cref = self.ref()
+                    if any(n == cname for n, _r in conns):
+                        self.err(f"connection {cname} given twice")
+                    conns.append((cname, cref))
+                    if self.accept(")"):
+                        break
+                    self.expect(",")
         while self.peek().text == "@":
             self.next()
             if self.accept("patch"):
@@ -666,7 +681,7 @@ class _P:
                 self.expect(")")
                 hints["at"] = (x, y, rot)
         when = self.cond() if self.accept("when") else None
-        return Inst(tok.text, kind, params, hints, tok.line, when)
+        return Inst(tok.text, kind, params, hints, tok.line, when, conns)
 
     def param(self):
         key = self.name("parameter").text

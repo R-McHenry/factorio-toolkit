@@ -116,6 +116,7 @@ class Inst:
     auto: tuple | None = None      # n=auto: (lo, hi), the bounds of the count in params["n"]
     when: tuple | None = None      # its machines' own enable condition (2.0): (lang.Cond, scope)
     size: tuple | None = None      # a module's declared frame (2.0.28): (W, H)
+    conns: list | None = None      # a Bus's connection list (2.0.32): [(name, lang.Ref)]
 
 
 @dataclass
@@ -232,6 +233,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._lanes = []
     flat._port_named = {}
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
+    _bus_conns(flat, cat)
     _resolve_nets(flat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
@@ -296,7 +298,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,))
             keys = [k for k in flat.machines if k not in before and k not in flat.ports]
             node = Inst(path, inst.kind, inst.params, inst.hints, keys, inst.kind,
-                        flat.scopes[path], inst.line, size=modules[inst.kind].size)
+                        flat.scopes[path], inst.line, size=modules[inst.kind].size,
+                        conns=inst.conns)
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
             auto = _auto(flat, path, inst, src)
@@ -309,6 +312,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                     if isinstance(ents, tuple):
                         imported, ents = ents, ents[0]
                     specs = literal_machines(ents, cat)     # a power plant may have none
+                elif inst.conns and inst.kind == "Bus":
+                    # its connection list builds the ports and their positions (_bus_conns, 2.0.32)
+                    specs = []
                 else:
                     specs = template_machines(inst.kind, params, cat)
             except TemplateError as exc:
@@ -319,7 +325,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                 flat.machines[m.key] = m
                 keys.append(m.key)
             node = Inst(path, inst.kind, inst.params, inst.hints, keys, None, None, inst.line,
-                        imported)
+                        imported, conns=inst.conns)
             if auto is not None:
                 node.params = dict(inst.params, n=auto[2])
                 node.auto = auto[:2]
@@ -484,6 +490,119 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
     if node.path in flat.sealed:
         return _sealed_ref(flat, node, ref, used, items, side, src)
     return node, list(node.machines)
+
+
+def _conn_direction(flat, keys, ref, item, src):
+    """'load' if the endpoint makes the bus's item, 'tap' if it takes it (a port says so itself)."""
+    ports = [flat.ports[k] for k in keys if k in flat.ports]
+    if len(ports) == len(keys):
+        dirs = {p.dir for p in ports}
+        if dirs == {"out"}:
+            return "load"
+        if dirs == {"in"}:
+            return "tap"
+        raise ElabError(src, ref.line,
+                        f"connection {ref}: its port is {'/'.join(sorted(dirs))}; a bus connection "
+                        "needs an in port (a tap) or an out port (a load)")
+    makes = any(item in flat.machines[k].makes for k in keys)
+    takes = any(item in flat.machines[k].needs
+                or (flat.machines[k].sink and (flat.machines[k].takes is None
+                                               or item in flat.machines[k].takes))
+                for k in keys)
+    if makes and takes:
+        raise ElabError(src, ref.line,
+                        f"connection {ref}: it both makes and takes {item}, so the bus cannot tell a "
+                        "load from a tap; name a port instead")
+    if makes:
+        return "load"
+    if takes:
+        return "tap"
+    raise ElabError(src, ref.line, f"connection {ref}: it neither makes nor takes {item}")
+
+
+def _bus_conns(flat, cat):
+    """A Bus's connection list (2.0.32, PLAN-MODULES §4): the named entries are nets, written in port
+    order. Direction comes from the netlist — an out port or a maker is a load, an in port or a taker
+    is a tap — the staircases take their positions from the order (each band clears the one before by
+    two tiles), `length` follows, and a tap written before any load is an ``ORDER`` line."""
+    for path, inst in list(flat.insts.items()):
+        if not inst.conns:
+            continue
+        if inst.kind != "Bus":
+            raise ElabError(flat.path, inst.line,
+                            f"{path}: a connection list is a Bus's port map; {inst.kind} has no ports")
+        if inst.params.get("load") or inst.params.get("tap"):
+            raise ElabError(flat.path, inst.line, f"{path}: a connection list replaces load=/tap=")
+        item = inst.params.get("item")
+        if not isinstance(item, str):
+            raise ElabError(flat.path, inst.line, f"{path}: a Bus needs item= one item")
+        try:
+            belts = int(inst.params.get("belts", 4))
+        except (TypeError, ValueError):
+            raise ElabError(flat.path, inst.line, f"{path}: belts= must be a whole number") from None
+        scope = path.rsplit("/", 1)[0] if "/" in path else ""
+        bus = path.rsplit("/", 1)[-1]
+        kinds = []
+        for cname, ref in inst.conns:
+            _node, keys = _resolve(flat, ref, scope, items=[item], src=flat.path)
+            if not keys:
+                raise ElabError(flat.path, ref.line, f"connection {cname}: {ref} names nothing")
+            kinds.append((cname, ref, _conn_direction(flat, keys, ref, item, flat.path)))
+        load = tap = 0
+        for cname, ref, kind in kinds:
+            if kind == "load":
+                load += 1
+            else:
+                tap += 1
+            if kind == "tap" and load == 0:
+                flat.checks.append(Check("ORDER", f"bus {path}",
+                                         f"{cname} is a tap before any load: nothing upstream feeds "
+                                         "the bus there", ref.line))
+        bound, placed = 1, []
+        for cname, ref, kind in kinds:
+            if kind == "tap":
+                x = bound + 2 + belts
+                band = (x - belts, x)
+            else:
+                x = bound + 2
+                band = (x, x + belts)
+            placed.append((cname, ref, kind, x))
+            bound = band[1]
+        length = bound + 1
+        given = inst.params.get("length")
+        if given is not None and int(given) < length:
+            raise ElabError(flat.path, inst.line,
+                            f"{path}: length={given} is short of the connection list ({length})")
+        inst.params["length"] = int(given) if given is not None else length
+        loads = [f"n{x}" for _c, _r, kind, x in placed if kind == "load"]
+        taps = [f"n{x}" for _c, _r, kind, x in placed if kind == "tap"]
+        if loads:
+            inst.params["load"] = loads
+        if taps:
+            inst.params["tap"] = taps
+        try:
+            specs = template_machines("Bus", {k: v for k, v in inst.params.items() if k != "duty"},
+                                      cat)
+        except TemplateError as exc:
+            raise ElabError(flat.path, inst.line, f"{path} = Bus: {exc}") from None
+        for spec in specs:
+            m = _machine(spec, path, "Bus", 1.0)
+            flat.machines[m.key] = m
+            inst.machines.append(m.key)
+        li = ti = 0
+        for cname, ref, kind, _x in placed:
+            if kind == "load":
+                li += 1
+                port = lang.Ref([bus, f"load{li}"], False, ref.line)
+                net = lang.Net(cname, [item], [ref], [port], ref.line)
+            else:
+                ti += 1
+                port = lang.Ref([bus, f"tap{ti}"], False, ref.line)
+                net = lang.Net(cname, [item], [port], [ref], ref.line)
+            full = _join(scope, cname)
+            if full in flat.nets:
+                raise ElabError(flat.path, ref.line, f"connection {cname}: net {cname} already exists")
+            flat.nets[full] = _Pending(net, scope, flat.path)
 
 
 def _resolve_nets(flat):
