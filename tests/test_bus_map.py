@@ -165,10 +165,22 @@ m = M @(40, 0)
         self.assertEqual(frag.roles["tap1"].attach, [(9.5, 0.5, 0)])   # the stub tile, facing north
         self.assertEqual(binding["tap1"], "fg")
 
-    def test_a_right_tap_is_refused_for_now(self):
-        with self.assertRaises(ElabError) as cm:
-            flat_of(RIB + MAP.replace("fg: rib.iron", "right fg: rib.iron"))
-        self.assertIn("one row outside the bus's frame", str(cm.exception))
+    def test_a_right_tap_is_an_entrance_and_its_exit(self):
+        from fkcore import expand
+        flat = flat_of(RIB + MAP.replace("fg: rib.iron", "right fg: rib.iron"))
+        self.assertEqual(flat.insts["bus"].params["tapkind"], ["right"])
+        frag, binding = expand.fragment_of(flat, "bus", CAT)
+        stub = [e for e in frag.entities if e.local == "tap1"]
+        ex = [e for e in frag.entities if e.local == "tap1x"]
+        self.assertEqual(len(stub), 1)
+        self.assertEqual(stub[0].name, "underground-belt")
+        self.assertEqual(stub[0].attrs, {"ug": "in"})
+        self.assertEqual(stub[0].y, 1.5)             # shifted down: the stub is row 1
+        self.assertEqual(ex[0].attrs, {"ug": "out"})
+        self.assertEqual(ex[0].y, 0.5)               # the exit, one row out
+        self.assertEqual(frag.roles["tap1"].attach, [(9.5, 0.5, 0)])   # the route meets the exit
+        self.assertEqual(frag.size[1], 5)            # belts=2: the frame grew a row
+        self.assertEqual(binding["tap1"], "fg")
 
     def test_a_kind_is_only_for_a_tap(self):
         with self.assertRaises(ElabError) as cm:

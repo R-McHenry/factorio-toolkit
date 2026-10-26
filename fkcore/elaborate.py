@@ -562,10 +562,6 @@ def _bus_conns(flat, cat):
                     raise ElabError(flat.path, ref.line,
                                     f"connection {cname}: a {ckind} kind is for a tap, and this one "
                                     f"is a {kind} (a load is dual; a mouth is a belt end)")
-                if ckind == "right":
-                    raise ElabError(flat.path, ref.line,
-                                    f"connection {cname}: a right tap needs one row outside the bus's "
-                                    "frame, which the fragment does not grow yet")
             kinds.append((cname, ref, kind, ckind))
         upstream = any(k == "mouth" for _c, _r, k, _t in kinds)  # a mouth is at the head: always first
         for cname, ref, kind, _t in kinds:

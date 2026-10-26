@@ -468,13 +468,19 @@ def bus(belts, length, item, loads, taps, used=None, mouths=None, tapkinds=None)
             sx, sy = stub
             d = E if kind == "load" else (N if side == "n" else S)
             into = (N if side == "s" else S) if kind == "load" else d
+            ax, ay = sx + 0.5, sy + 0.5
             if kind == "tap" and tkind == "left":      # 2.0.34: a lone UG exit cuts a lane
-                ents.append(FEnt(name, "underground-belt", sx + 0.5, sy + 0.5, d, name,
+                ents.append(FEnt(name, "underground-belt", ax, ay, d, name, {"ug": "out"}))
+            elif kind == "tap" and tkind == "right":   # 2.0.35: an entrance + its exit, one row out
+                ents.append(FEnt(name, "underground-belt", ax, ay, d, name, {"ug": "in"}))
+                ey = sy - 1 if side == "n" else sy + 1
+                ents.append(FEnt(name + "x", "underground-belt", ax, ey + 0.5, d, name,
                                  {"ug": "out"}))
+                ay = ey + 0.5                          # the route meets the exit's tile
             else:
-                ents.append(FEnt(name, "transport-belt", sx + 0.5, sy + 0.5, d, name))
+                ents.append(FEnt(name, "transport-belt", ax, ay, d, name))
             roles[name] = Role(name, "in" if kind == "load" else "out", [item], [name],
-                               [(sx + 0.5, sy + 0.5, into)])
+                               [(ax, ay, into)])
     for name in (mouths or ()):                 # 2.0.33: the belt end at the head, in line
         k = int(name[2:])
         roles[name] = Role(name, "in", [item], [name], [(0.5, k + 0.5, E)])
@@ -482,7 +488,19 @@ def bus(belts, length, item, loads, taps, used=None, mouths=None, tapkinds=None)
         for r in range(1, b + 1):
             if (c, r) not in taken:
                 ents.append(FEnt(f"b{r}_{c}", "transport-belt", c + 0.5, r + 0.5, E, "pool"))
-    return ents, roles, (length, b + 2)
+    # a right tap's exit sits one row outside the bus's edge rows: grow the frame to hold it,
+    # shifting the whole bus down for a north-side tap (2.0.35). Existing buses have none, so
+    # their frames and entities are untouched.
+    right_n = any(k == "right" and s == "n" for (s, _x), k in zip(taps, tapkinds))
+    right_s = any(k == "right" and s == "s" for (s, _x), k in zip(taps, tapkinds))
+    shift = 1 if right_n else 0
+    extra = (1 if (right_n or right_s) else 0) + (1 if (right_n and right_s) else 0)
+    if shift:
+        for e in ents:
+            e.y += shift
+        for role in roles.values():
+            role.attach = [(ax, ay + shift, ad) for ax, ay, ad in role.attach]
+    return ents, roles, (length, b + 2 + extra)
 
 
 def _config_text(fields):
