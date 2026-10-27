@@ -197,15 +197,18 @@ module GearRib size 16x10 {
   same item twice is one item on both. A fluid port is refused ("pipes have no lanes"), and a net may
   name a port only in the module that declares it: naming one from outside the module is an error
   that says which `port` line to add.
-- `size WxH` is the module's frame, and every port sits on that frame's edge: one tile per port,
-  at `pos` along the side if the declaration pins one (`@w4`: counted from 0, the side's first tile
-  is `@w0`), else the tile of that side facing what the port connects to. The build records the
-  tile in the `.fkp` and keeps it; a pin always wins, and a port moved to another side is chosen
-  again (both a `PORT` line, once). The tiles just inside
-  and just outside a port must be free: a machine standing there is a `PORT` line (`fk check`), and
-  the route would run through it.
-- Inside a sealed module the internal nets route **inside the frame**; outside, a parent's route ends
-  at the port from the other side. A crossing anywhere but a port is a `SEAL` line. The module's
+- `size WxH` is the module's frame, and a port is a place on that frame's **edge**: it takes no
+  tile. The belt crosses the edge there, from the tile just outside to the tile just inside (the
+  other way for an `out` port): the module's own route reaches the tile inside, the parent's the
+  tile outside. The place is `pos` along the side if the declaration pins one (`@w4`: counted from
+  0, the side's first tile is `@w0`), else the one facing what the port connects to. The build
+  records it in the `.fkp` and keeps it; a pin always wins, and a port moved to another side is
+  chosen again (both a `PORT` line, once). A machine standing on the tile inside or outside a port
+  leaves its route nowhere to meet it: a `PORT` line (`fk check`).
+- Inside a sealed module the internal nets route **inside the frame**, every tile of it theirs;
+  outside, a parent's route meets the port from the other side of the edge. Two ports that meet on
+  one edge (one module's `out` port against the next one's `in` port) need nothing laid between
+  them. A crossing anywhere but a port is a `SEAL` line. The module's
   internals are the module's own: a parent change never re-routes them (the same carriers, key for
   key, just moved), and `fk explain rib` shows both the template line and its plain entities.
 - Width: in 2.0 a port is one lane (7.5/s); the two-lane pair is 2.1's multi-lane nets.

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 
 from . import avail as availmod
 from . import fkp as fkpmod
@@ -173,15 +174,19 @@ def _port_choice(flat, key):
     return choice
 
 
-def _ent_of(flat, key):
-    """The layout entity key of a netlist endpoint: a port's is its carrier belt."""
+def _point_of(flat, lay, key, cat):
+    """Where a netlist endpoint stands in the factory frame: its entity's position, or for a port
+    (2.0.48: an edge, no entity of its own) the tile just inside its edge."""
     if key in flat.ports:
-        inst, _slash, name = key.rpartition("/")
-        return f"{inst}/port_{name}"
-    return key
+        if cat is None:
+            return None
+        edge = port_edges(flat, lay, cat).get(key)
+        return None if edge is None else (edge.inside[0] + 0.5, edge.inside[1] + 0.5)
+    e = lay.entities.get(key)
+    return None if e is None else (float(e.x), float(e.y))
 
 
-def _partner_points(flat, lay, key):
+def _partner_points(flat, lay, key, cat=None):
     """The factory positions of the other ends of the nets that name port ``key``: what the port
     faces, and so which tile of its side the build chooses. The **outside** nets come first (the
     parent's end is the partner a plot's port lines up with; the module's own route bends inside
@@ -198,9 +203,9 @@ def _partner_points(flat, lay, key):
                 for k, _it in list(n.drivers) + list(n.consumers):
                     if k == key:
                         continue
-                    e = lay.entities.get(_ent_of(flat, k))
-                    if e is not None:
-                        (inside if mine else outside).append((float(e.x), float(e.y)))
+                    pt = _point_of(flat, lay, k, cat)
+                    if pt is not None:
+                        (inside if mine else outside).append(pt)
     return outside or inside
 
 
@@ -232,22 +237,13 @@ def _port_items_text(port):
     return f"{left}|{','.join(port.right)}"
 
 
-def _move_port(lay, path, port, at, size, x, y, belt):
-    """Put a placed port's carrier on the tile the build chose, in the factory frame."""
-    e = lay.entities.get(f"{path}/port_{port.name}")
-    if e is None:
-        return
-    X, Y, D = turn(x + 0.5, y + 0.5, belt, at[2], size)
-    e.x, e.y, e.dir = _clean(X + at[0]), _clean(Y + at[1]), D
-
-
-def _choose_port_tiles(flat, lay):
+def _choose_port_tiles(flat, lay, cat=None):
     """Choose the tile of every port the declaration does not pin and no record holds, **facing its
     partner** (2.0.41, PLAN-GLOBAL phase A): the tile of the declared side nearest the other end's
     attach point, and for a one-lane port the lane on the partner's side. A recorded tile is kept as
     it is; a pinned one is kept too (a record that disagrees is a ``PORT`` line). Fills
-    ``flat.port_tiles`` (the module's own frame) and moves the carriers, so what is laid is what the
-    record will keep."""
+    ``flat.port_tiles`` (the module's own frame), so what is laid is what the record will keep
+    (2.0.48: a port is an edge, with no carrier to move; its attach points follow the choice)."""
     tiles = getattr(flat, "port_tiles", None)
     if tiles is None:
         return
@@ -271,7 +267,7 @@ def _choose_port_tiles(flat, lay):
             port = flat.ports[key]
             x, y, out = _port_tile(port, w, h)
             own = [_unturn(tx - at[0], ty - at[1], (w, h), at[2])
-                   for tx, ty in _partner_points(flat, lay, key)]
+                   for tx, ty in _partner_points(flat, lay, key, cat)]
             if port.pos is None:
                 cands = _side_tiles(port, w, h, used) or _side_tiles(port, w, h, set())
                 if own:
@@ -288,7 +284,6 @@ def _choose_port_tiles(flat, lay):
                 lane = _lane_facing(belt, (x + 0.5, y + 0.5), own)
             tiles[key] = (x, y, out, lane)
             used.add((x, y))
-            _move_port(lay, path, port, at, (w, h), x, y, belt)
 
 
 def _dist(tile, points):
@@ -323,31 +318,59 @@ def _port_records(flat, lay):
     return recs
 
 
-def _both_lane_labels(flat, lay, path):
-    """An ``X | X`` port is the whole belt end, so its carrier carries the net on both lanes
-    (2.0.41): ``net=A|A``, which says both lanes are the net's. A one-lane port keeps the plain
-    ``net=A`` it had (its lane is the one the route takes; the width is a ``CAPACITY`` line)."""
-    for key in ports_of(flat, path):
-        port = flat.ports[key]
-        if not getattr(port, "both", False):
+@dataclass
+class PortEdge:
+    """Where a port crosses its module's frame (2.0.48): the tile just ``inside`` the edge and the
+    one just ``outside`` it, in the factory frame, and the crossing as the items go, ``src`` ->
+    ``dst`` (outside -> inside for an ``in`` port, inside -> outside for an ``out`` one)."""
+    inside: tuple
+    outside: tuple
+    src: tuple
+    dst: tuple
+
+
+def port_edges(flat, lay, cat):
+    """{port key: PortEdge} of every placed sealed module's ports (2.0.48, Rory 2026-10-26: "our
+    boundaries should be along an edge so that a port occupies zero area"). A port is no entity:
+    the module's own route reaches the tile inside the edge and the parent's the tile outside it,
+    and the belt crosses the edge between them."""
+    out = {}
+    for path in lay.insts:
+        inst = flat.insts.get(path)
+        if inst is None or inst.module is None or inst.size is None:
             continue
-        e = lay.entities.get(f"{path}/port_{port.name}")
-        if e is None or not e.attrs.get("net") or "|" in e.attrs["net"]:
+        try:
+            points = attach_points(flat, lay, path, cat)
+        except FragmentError:
             continue
-        e.attrs["net"] = fkpmod.pair_net(e.attrs["net"], e.attrs["net"])
+        for role, _side, _net, (x, y, d) in points:
+            key = f"{path}/{role}"
+            port = flat.ports.get(key)
+            if port is None or d is None:
+                continue
+            dx, dy = _STEP[d]
+            here = (math.floor(x), math.floor(y))           # the inside role's virtual belt: outside
+            ahead = (here[0] + dx, here[1] + dy)
+            behind = (here[0] - dx, here[1] - dy)
+            if port.dir == "in":
+                out[key] = PortEdge(ahead, here, here, ahead)
+            else:
+                out[key] = PortEdge(behind, here, behind, here)
+    return out
 
 
 def _module_fragment(flat, path, cat):
-    """A sealed module's ports as the router meets them (2.0.36, PLAN-MODULES phase 3.1): each port
-    is a carrier belt on its declared side's tile, facing in for an ``in`` port and out for an ``out``
-    one. Two roles per port share that tile: the module's own net's role (the inside one, bound to the
-    module net) and the parent's net's role (bound to the parent net), so the crossing is the port and
-    nothing else. The module's children are placed on their own; this only adds the ports.
+    """A sealed module's ports as the router meets them: two roles per port and no entity
+    (2.0.48: a port is an edge of the frame, occupying no tile). The inside role, bound to the
+    module's own net, is attached at the tile just **outside** the edge, as the virtual belt that
+    feeds it (an ``in`` port's driver) or that it feeds (an ``out`` port's consumer); the outside
+    role, bound to the parent's net, at the tile just **inside**, the same way round. So the
+    module's route reaches the inside tile, the parent's the outside one, and the belt crosses the
+    edge between them; two ports that meet on one edge (a stack's cells) need nothing laid.
 
-    2.0.41 (PLAN-GLOBAL phase A): an ``X | X`` port is the whole belt end, so its carrier carries
-    the net on **both lanes**, and the tile comes from the .fkp's port record when there is one
-    (``_port_choice``: recorded tiles are in the module's own frame, so a parent move keeps them).
-    """
+    The tile comes from the .fkp's port record when there is one (``_port_choice``, 2.0.41:
+    recorded tiles are in the module's own frame, so a parent move keeps them). 2.0.36-2.0.47 laid
+    a carrier belt on the edge tile itself: a port took a tile of the module and one each side."""
     inst = flat.insts[path]
     w, h = inst.size
     ents, roles, binding, seen = [], {}, {}, {}
@@ -359,7 +382,8 @@ def _module_fragment(flat, path, cat):
             raise FragmentError(f"{path}: ports {seen[(x, y)]} and {port.name} share the tile "
                                 f"{x},{y}: give one a position along the side")
         seen[(x, y)] = port.name
-        belt = _port_belt(port, out)
+        belt = _port_belt(port, out)          # the way the items cross the edge
+        ox, oy = x + _STEP[out][0], y + _STEP[out][1]
         inside_role, outside_role = port.name, port.name + "!"
         if port.dir == "in":
             inner, outer = flat._out_hold.get((key, item), []), flat._in_hold.get((key, item), [])
@@ -367,10 +391,8 @@ def _module_fragment(flat, path, cat):
         else:
             inner, outer = flat._in_hold.get((key, item), []), flat._out_hold.get((key, item), [])
             inside_side, outside_side = "in", "out"
-        ents.append(FEnt(f"port_{port.name}", "transport-belt", x + 0.5, y + 0.5, belt,
-                         inside_role))
         roles[inside_role] = Role(inside_role, inside_side, [item] if item else [], [key],
-                                  [(x + 0.5, y + 0.5, belt)])
+                                  [(ox + 0.5, oy + 0.5, belt)])
         roles[outside_role] = Role(outside_role, outside_side, [item] if item else [], [key],
                                    [(x + 0.5, y + 0.5, belt)])
         binding[inside_role] = (inner or [None])[0]
@@ -684,7 +706,9 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
                 continue
             for e in _put(lay, path, inst, frag, binding, at, notes, cat):
                 xmax, ymax = _grow(cat, e, xmax, ymax)
-            _both_lane_labels(flat, lay, path)
+            # 2.0.48: a port lays nothing, so the frame itself counts toward the layout's size
+            _fx0, _fy0, fx1, fy1 = frame_of(flat, lay, path, cat)
+            xmax, ymax = max(xmax, fx1), max(ymax, fy1)
             continue
         if inst.kind == "Literal" and inst.literal is not None:
             # imported from a file: placed by its hint like any fragment, keys from the import
@@ -735,7 +759,7 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     # 2.0.41 (PLAN-GLOBAL phase A): every port's tile, chosen facing its partner where neither a
     # pin nor a committed record holds it, and recorded in the .fkp under the port's own key
-    _choose_port_tiles(flat, lay)
+    _choose_port_tiles(flat, lay, cat)
     lay.ports = _port_records(flat, lay)
     lay.size = (xmax, ymax)
     return lay, notes

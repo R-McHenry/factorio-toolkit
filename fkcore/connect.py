@@ -256,8 +256,10 @@ class Report:
 
 
 # -- the graph ------------------------------------------------------------------------------------
-def graph(ents, cat) -> Graph:
-    """The directed carrier graph of a Layout, a Surface or a list of entities."""
+def graph(ents, cat, ports=None) -> Graph:
+    """The directed carrier graph of a Layout, a Surface or a list of entities. ``ports``
+    ({port key: expand.PortEdge}, 2.0.48): sealed modules' ports, each a node on the edge its
+    belt crosses (``_port_joints``)."""
     g = Graph()
     rows = ents.entities.values() if hasattr(ents, "entities") else ents
     for e in sorted(rows, key=lambda e: natural_key(e.key)):
@@ -279,11 +281,39 @@ def graph(ents, cat) -> Graph:
             dst = g.at.get(_drill_drop(n, cat))
             if dst is not None and dst != key and _takes(g.nodes[dst]):
                 _edge(g, key, dst, "mine")
+    if ports:
+        _port_joints(g, ports)
     order = {k: i for i, k in enumerate(g.nodes)}
     for adj in (g.succ, g.pred):
         for k in adj:
             adj[k].sort(key=lambda kv: order[kv[0]])
     return g
+
+
+def _port_joints(g, ports):
+    """Thread every sealed module's port into the edge its belt crosses (2.0.48, Rory
+    2026-10-26: "our boundaries should be along an edge so that a port occupies zero area"). A port
+    is no entity: the belt on one side of the frame's edge moves its items onto the belt on the
+    other. That one edge becomes belt -> port -> belt, with the port a node of its own, keyed as
+    the netlist keys it, so it is the consumer of the net its items leave and the driver of the
+    one they enter: a joint, not a LEAK. Two ports on one edge (stacked cells, one's out port
+    meeting the next one's in port) chain, the out port first."""
+    by_edge = {}
+    for key in sorted(ports, key=natural_key):
+        pe = ports[key]
+        by_edge.setdefault((tuple(pe.src), tuple(pe.dst)), []).append(key)
+    for (src, dst), keys in by_edge.items():
+        keys.sort(key=lambda k: (tuple(ports[k].src) != tuple(ports[k].inside), natural_key(k)))
+        a, b = g.at.get(src), g.at.get(dst)
+        if a is not None and b is not None:
+            g.succ[a] = [kv for kv in g.succ.get(a, []) if kv[0] != b]
+            g.pred[b] = [kv for kv in g.pred.get(b, []) if kv[0] != a]
+        for key in keys:
+            g.nodes[key] = Node(key, "port", "port", None, dst[0] + 0.5, dst[1] + 0.5, 0, ())
+        chain = [a] + keys + [b]
+        for u, v in zip(chain, chain[1:]):
+            if u is not None and v is not None:
+                _edge(g, u, v, "belt")
 
 
 def _add_node(g, e, cat):
@@ -491,14 +521,11 @@ def endpoints(flat, surface=None, factory=None):
     table = {netpre + name: ([(pre + k, i) for k, i in n.drivers],
                              [(pre + k, i) for k, i in n.consumers])
              for name, n in flat.nets.items()}
-    # A sealed module's port and a bus's mouth have no entity of their own: the carrier belt at the
-    # port tile (or the bus's own belt under the mouth) is their carrier (2.0.36, PLAN-MODULES
-    # phase 3). Swap the machine key for the carrier key, so the net reaches the carrier and a
-    # crossing there is a joint (a consumer of the net the items leave, a driver of the one they
-    # enter), not a LEAK.
+    # A bus's mouth has no entity of its own: the bus's own belt under the mouth is its carrier.
+    # Swap the machine key for the carrier key, so the net reaches it and a crossing there is a
+    # joint (a consumer of the net the items leave, a driver of the one they enter), not a LEAK.
+    # A sealed module's port is a node of the graph itself (2.0.48, ``_port_joints``).
     alias = {}
-    for key, port in getattr(flat, "ports", {}).items():
-        alias[key] = f"{key.rsplit('/', 1)[0]}/port_{port.name}"
     for path, inst in getattr(flat, "insts", {}).items():
         if inst.kind != "Bus":
             continue
@@ -810,12 +837,13 @@ def one_inserter(ents, cat, nets):
     return out
 
 
-def connect(ents, cat, nets=None) -> Report:
+def connect(ents, cat, nets=None, ports=None) -> Report:
     """Per net: connected yes/no and its LEAKs, over :func:`graph` of ``ents`` (or a Graph).
 
     ``nets``: {net: (drivers, consumers)} of machine keys or (key, item) pairs (see
-    :func:`endpoints`), or a flat netlist; None infers them from the carriers."""
-    g = ents if isinstance(ents, Graph) else graph(ents, cat)
+    :func:`endpoints`), or a flat netlist; None infers them from the carriers. ``ports``: the
+    sealed modules' port edges (2.0.48, ``expand.port_edges``), for a graph built here."""
+    g = ents if isinstance(ents, Graph) else graph(ents, cat, ports)
     if nets is not None and hasattr(nets, "nets"):
         nets = endpoints(nets)
     carried = {}

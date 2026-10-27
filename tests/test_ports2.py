@@ -12,6 +12,7 @@
    ...``, in the module's own frame) and kept like a committed route: a rebuild reads the tile back,
    so a parent change never moves a port, and the module's inside routes stay byte for byte.
 """
+import types
 import unittest
 
 from fkcore import expand, fkp as fkpmod, lang, route, routed
@@ -74,10 +75,19 @@ def build(text, previous=None):
     return flat, lay, route.route_layout(flat, lay, CAT)
 
 
-def carrier(flat, key):
-    """The layout key of a port's carrier belt."""
-    inst, _slash, name = key.rpartition("/")
-    return f"{inst}/port_{name}"
+def port_at(flat, lay, key):
+    """2.0.48: a port is an edge; this is the tile just inside it (as x, y centers) and the
+    direction the items cross it (0 N, 4 E, 8 S, 12 W), as the carrier belt of 2.0.41 had them."""
+    pe = expand.port_edges(flat, lay, CAT)[key]
+    d = {(0, -1): 0, (1, 0): 4, (0, 1): 8, (-1, 0): 12}[(pe.dst[0] - pe.src[0], pe.dst[1] - pe.src[1])]
+    return types.SimpleNamespace(x=pe.inside[0] + 0.5, y=pe.inside[1] + 0.5, dir=d)
+
+
+def inside_belt(flat, lay, key):
+    """The key of the route belt on the tile just inside port ``key``'s edge."""
+    pe = expand.port_edges(flat, lay, CAT)[key]
+    return next(k for k, e in lay.entities.items()
+                if (int(e.x // 1), int(e.y // 1)) == tuple(pe.inside))
 
 
 def inside(r, prefix, oy):
@@ -95,16 +105,18 @@ class BothLaneTest(unittest.TestCase):
         self.assertTrue(port.both)
         self.assertEqual(port.width_of("iron-ore"), 2)
         self.assertEqual(port.width_of("coal"), 0)
-        self.assertEqual(lay.entities["plot/port_ore"].attrs["net"], "plot/dig|plot/dig")
         self.assertEqual(lay.ports["plot.ore"].lane, "LR")
+        lay = _r.layout                       # 2.0.48: no carrier; the route's belt inside the edge
+        self.assertEqual(lay.entities[inside_belt(flat, lay, "plot/ore")].attrs["net"], "plot/dig")
 
     def test_a_one_lane_port_is_one_lane(self):
         flat, lay, _r = build(ONE_LANE)
         port = flat.ports["plot/ore"]
         self.assertFalse(port.both)
         self.assertEqual(port.width_of("iron-ore"), 1)
-        self.assertEqual(lay.entities["plot/port_ore"].attrs["net"], "plot/dig")
         self.assertIn(lay.ports["plot.ore"].lane, ("L", "R"))
+        lay = _r.layout
+        self.assertEqual(lay.entities[inside_belt(flat, lay, "plot/ore")].attrs["net"], "plot/dig")
 
     def test_a_15_s_crossing_routes_through_one_port_on_both_lanes(self):
         flat, _lay, r = build(PLOT)
@@ -112,7 +124,7 @@ class BothLaneTest(unittest.TestCase):
         self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
         rr = routed.solve(flat, r.layout, CAT)
         for key in ("plot/ore", "base/ore"):
-            lanes = [(carrier(flat, key), lane) for lane in ("L", "R")]
+            lanes = [(inside_belt(flat, r.layout, key), lane) for lane in ("L", "R")]
             need = [rr.need.get(nid, {}).get("iron-ore", 0.0) for nid in lanes]
             self.assertEqual([round(x, 3) for x in need], [7.5, 7.5], key)   # 15/s in all
             self.assertEqual([rr.lg.nodes[nid].cap for nid in lanes], [7.5, 7.5])
@@ -135,7 +147,8 @@ class BothLaneTest(unittest.TestCase):
     def test_the_crossing_is_connected_with_no_leak(self):
         from fkcore import connect
         flat, _lay, r = build(PLOT)
-        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat),
+                              expand.port_edges(flat, r.layout, CAT))
         self.assertEqual(rep.leaks, [])
         self.assertEqual({n: x.status for n, x in rep.nets.items()},
                          {n: "connected" for n in rep.nets})
@@ -148,7 +161,7 @@ class PortTileTest(unittest.TestCase):
         flat, lay, _r = build(RIB)
         # the feed stands at y 14.5; the module at (40, 10) is 16x10, so the middle would be 15
         self.assertEqual(flat.port_tiles["rib/iron"], (0, 4, 12, "R"))
-        self.assertEqual((lay.entities["rib/port_iron"].x, lay.entities["rib/port_iron"].y),
+        self.assertEqual((port_at(flat, lay, "rib/iron").x, port_at(flat, lay, "rib/iron").y),
                          (40.5, 14.5))
         self.assertEqual(lay.ports["rib.iron"], fkpmod.PortRec("rib.iron", 0, 4, 4, "R",
                                                                "iron-plate"))
@@ -158,7 +171,7 @@ class PortTileTest(unittest.TestCase):
         flat, lay, r = build(RIB.replace("iron-plate @w", "iron-plate @w2"))
         self.assertEqual(lay.ports["rib.iron"], fkpmod.PortRec("rib.iron", 0, 2, 4, "R",
                                                                "iron-plate"))
-        self.assertEqual((lay.entities["rib/port_iron"].x, lay.entities["rib/port_iron"].y),
+        self.assertEqual((port_at(flat, lay, "rib/iron").x, port_at(flat, lay, "rib/iron").y),
                          (40.5, 12.5))
         self.assertFalse([ln for ln in r.lines if ln.startswith("PORT")])
 
@@ -171,8 +184,8 @@ class PortTileTest(unittest.TestCase):
         self.assertEqual(lay2.ports["rib.iron"], lay1.ports["rib.iron"])
         self.assertEqual(lay2.ports["rib.iron"], fkpmod.PortRec("rib.iron", 0, 4, 4, "R",
                                                                 "iron-plate"))
-        self.assertEqual(lay2.entities["rib/port_iron"].dir, 8)     # E in the own frame, turned
-        self.assertEqual((lay2.entities["rib/port_iron"].x, lay2.entities["rib/port_iron"].y),
+        self.assertEqual(port_at(_f2, lay2, "rib/iron").dir, 8)     # E in the own frame, turned
+        self.assertEqual((port_at(_f2, lay2, "rib/iron").x, port_at(_f2, lay2, "rib/iron").y),
                          (45.5, 10.5))
         self.assertEqual([ln for ln in r2.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
         # a fresh build of the turned design (no record) chooses to face its partner instead
@@ -199,7 +212,7 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(lay2.ports, lay1.ports)                # same tile, own frame
         self.assertEqual(r2.failed, {})
         self.assertEqual(inside(r1, "~rib/", 10), inside(r2, "~rib/", 60))
-        self.assertEqual((lay2.entities["rib/port_iron"].x, lay2.entities["rib/port_iron"].y),
+        self.assertEqual((port_at(_f2, lay2, "rib/iron").x, port_at(_f2, lay2, "rib/iron").y),
                          (40.5, 64.5))
         self.assertEqual([ln for ln in r2.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
 
@@ -216,7 +229,7 @@ class RecordTest(unittest.TestCase):
         # 2.0.42: 2.0.41 printed "the pin wins" and kept the carrier on the committed tile
         _f1, lay1, _r1 = build(RIB)
         _f2, lay2, r2 = build(RIB.replace("iron-plate @w", "iron-plate @w2"), lay1)
-        self.assertEqual((lay2.entities["rib/port_iron"].x, lay2.entities["rib/port_iron"].y),
+        self.assertEqual((port_at(_f2, lay2, "rib/iron").x, port_at(_f2, lay2, "rib/iron").y),
                          (40.5, 12.5))
         self.assertEqual((lay2.ports["rib.iron"].x, lay2.ports["rib.iron"].y), (0, 2))
         self.assertEqual(r2.failed, {})
@@ -229,7 +242,7 @@ class RecordTest(unittest.TestCase):
         _f2, lay2, r2 = build(RIB.replace("iron-plate @w", "iron-plate @n"), lay1)
         rec = lay2.ports["rib.iron"]
         self.assertEqual(rec.y, 0)                              # on the north edge now
-        self.assertEqual(lay2.entities["rib/port_iron"].y, 10.5)
+        self.assertEqual(port_at(_f2, lay2, "rib/iron").y, 10.5)
         lines = [ln for ln in r2.lines if ln.startswith("PORT")]
         self.assertEqual(len(lines), 1, r2.lines)
         self.assertIn("not on the n edge", lines[0])

@@ -3,7 +3,7 @@ inside its frame, and SEAL reports a crossing that is not at a port.
 """
 import unittest
 
-from fkcore import expand, fkp as fkpmod, lang, route
+from fkcore import connect, expand, fkp as fkpmod, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -68,13 +68,18 @@ def routed(text):
 
 
 class PortTileTest(unittest.TestCase):
-    def test_each_port_is_a_carrier_on_its_side_and_two_roles(self):
+    def test_each_port_is_an_edge_with_two_roles(self):
+        # 2.0.48: a port is an edge of the frame and lays nothing. Its inside role is attached at
+        # the tile just outside the edge (the virtual belt across it), its outside role at the
+        # tile just inside, both facing the way the items cross
         flat = flat_of(RIB)
         frag, binding = expand.fragment_of(flat, "rib", CAT)
         self.assertEqual(sorted(frag.roles), ["gear", "gear!", "iron", "iron!"])
-        self.assertEqual(frag.roles["iron"].attach, [(0.5, 4.5, 4)])    # west edge, facing in (east)
-        self.assertEqual(frag.roles["iron!"].attach, [(0.5, 4.5, 4)])
-        self.assertEqual(frag.roles["gear"].attach, [(11.5, 4.5, 4)])   # east edge, facing out (east)
+        self.assertEqual(frag.entities, [])
+        self.assertEqual(frag.roles["iron"].attach, [(-0.5, 4.5, 4)])   # west edge: outside, in (east)
+        self.assertEqual(frag.roles["iron!"].attach, [(0.5, 4.5, 4)])   # inside
+        self.assertEqual(frag.roles["gear"].attach, [(12.5, 4.5, 4)])   # east edge: outside, out (east)
+        self.assertEqual(frag.roles["gear!"].attach, [(11.5, 4.5, 4)])
         self.assertEqual(frag.roles["iron"].side, "out")                # the module net's driver
         self.assertEqual(frag.roles["iron!"].side, "in")                # the parent net's consumer
         self.assertEqual(frag.roles["gear"].side, "in")
@@ -83,21 +88,18 @@ class PortTileTest(unittest.TestCase):
         self.assertEqual(binding["iron!"], "fg")
         self.assertEqual(binding["gear"], "rib/g")
         self.assertEqual(binding["gear!"], "out")
-        belts = {e.local: e for e in frag.entities}
-        self.assertEqual(belts["port_iron"].dir, 4)                     # an in port faces in
-        self.assertEqual(belts["port_gear"].dir, 4)
 
-    def test_the_layout_records_the_module_and_its_port_carriers(self):
-        _flat, lay = lay_of(RIB)
+    def test_the_layout_records_the_module_and_its_port_edges(self):
+        flat, lay = lay_of(RIB)
         self.assertIn("rib", lay.insts)
-        self.assertIn("rib/port_iron", lay.entities)
-        self.assertIn("rib/port_gear", lay.entities)
+        self.assertFalse([k for k in lay.entities if "/port_" in k])    # 2.0.48: no carrier
         # 2.0.41: an unpinned port's tile faces its partner (the feed west, the box east), not
         # the middle of its side, and the tile is recorded in the module's own frame
-        self.assertEqual((lay.entities["rib/port_iron"].x, lay.entities["rib/port_iron"].y),
-                         (40.5, 0.5))
-        self.assertEqual((lay.entities["rib/port_gear"].x, lay.entities["rib/port_gear"].y),
-                         (51.5, 0.5))
+        edges = expand.port_edges(flat, lay, CAT)
+        self.assertEqual((edges["rib/iron"].outside, edges["rib/iron"].inside), ((39, 0), (40, 0)))
+        self.assertEqual((edges["rib/iron"].src, edges["rib/iron"].dst), ((39, 0), (40, 0)))
+        self.assertEqual((edges["rib/gear"].inside, edges["rib/gear"].outside), ((51, 0), (52, 0)))
+        self.assertEqual((edges["rib/gear"].src, edges["rib/gear"].dst), ((51, 0), (52, 0)))
         self.assertEqual(lay.ports["rib.iron"],
                          fkpmod.PortRec("rib.iron", 0, 0, 4, "R", "iron-plate"))
         self.assertEqual(lay.ports["rib.gear"],
@@ -128,26 +130,29 @@ class SealTest(unittest.TestCase):
                 for t in fkpmod.tiles_of(CAT, r.layout.entities[k]):
                     self.assertFalse(x0 <= t[0] < x1 and y0 <= t[1] < y1, (k, t))
 
-    def test_the_route_meets_the_port_tile(self):
-        _flat, r = routed(DESIGN)
-        port = r.layout.entities["rib/port_iron"]
-        self.assertEqual((port.x, port.y), (40.5, 10.5))      # the west edge, facing the bus
+    def test_the_routes_meet_across_the_port_edge(self):
+        # 2.0.48: the parent's belt stands just outside the west edge pointing in, the module's
+        # first belt just inside it: the belt crosses the edge, and connect calls it a joint
+        flat, r = routed(DESIGN)
+        pe = flat._port_edges["rib/iron"]
+        self.assertEqual((pe.outside, pe.inside), ((39, 10), (40, 10)))
         kinds = ("transport-belt", "underground-belt", "splitter")
         last = [e for e in r.layout.entities.values()
-                if e.attrs.get("net") == "fg" and e.name in kinds
-                and e.x == 39.5 and e.y == 10.5]
-        self.assertEqual(len(last), 1)                         # the carrier west of the port
-        self.assertEqual(last[0].dir, 4)                       # facing the port
+                if e.attrs.get("net") == "fg" and e.name in kinds and (e.x, e.y) == (39.5, 10.5)]
+        self.assertEqual(len(last), 1)                         # the parent's, outside the edge
+        self.assertEqual(last[0].dir, 4)                       # pointing across it
         first = [e for e in r.layout.entities.values()
                  if e.attrs.get("net") == "rib/fe" and e.name in kinds
-                 and e.x == 41.5 and e.y == 10.5]
-        self.assertEqual(len(first), 1)                        # the carrier inside it
+                 and (e.x, e.y) == (40.5, 10.5)]
+        self.assertEqual(len(first), 1)                        # the module's own, inside it
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat), flat._port_edges)
+        self.assertEqual(rep.leaks, [])
+        self.assertTrue(rep.nets["fg"].connected and rep.nets["rib/fe"].connected)
 
     def test_a_portless_module_routes_as_one_block(self):
         _flat, r = routed(PLAIN)
         self.assertEqual(r.failed, {})
         self.assertFalse([ln for ln in r.lines if ln.startswith("SEAL")])
-        self.assertFalse([k for k in r.layout.entities if "/port_" in k])
         self.assertIn("rib/g", r.routed)
 
     def test_seal_reports_a_crossing_outside_a_port(self):
@@ -175,9 +180,9 @@ class SealTest(unittest.TestCase):
         self.assertEqual(b.failed, {})
 
     def test_a_port_whose_inside_tile_is_taken_is_a_port_line(self):
-        # the port pinned under the machine: 2.0.41's unpinned port would face its partner and
-        # step aside, so this pins it where the row stands
-        tight = DESIGN.replace("size 16x10", "size 12x8").replace("@(2, 1)", "@(1, 1)") \
+        # the port pinned where the row's assembler stands against the west edge: 2.0.48's port
+        # is an edge, so the tile its route needs is the one just inside it
+        tight = DESIGN.replace("size 16x10", "size 12x8").replace("@(2, 1)", "@(0, 1)") \
                        .replace("iron-plate @w", "iron-plate @w4")
         _flat, r = routed(tight)
         lines = " ".join(ln for ln in r.lines if ln.startswith("PORT"))

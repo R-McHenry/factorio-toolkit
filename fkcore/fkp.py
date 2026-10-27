@@ -618,20 +618,10 @@ def invariants(lay: Layout, cat, nets=None) -> list:
         r = lay.ports[name]
         inst, _dot, _port = name.rpartition(".")
         rec = lay.insts.get(inst)
-        ent = lay.entities.get(f"{inst}/port_{_port}")
-        if ent is None:
-            problems.append(f"port {name}: no {inst}/port_{_port} carrier in the layout")
-        elif rec is not None and rec.rot % 2 == 0:
-            # the record is in the module's own frame: with a quarter-turned module the frame's
-            # size is not in the .fkp, so the position check is only exact unturned
-            t = (math.floor(float(ent.x)), math.floor(float(ent.y)))
-            want = (int(rec.x) + int(r.x), int(rec.y) + int(r.y))
-            if t != want:
-                problems.append(f"port {name}: recorded at {r.x},{r.y} in its frame, its carrier "
-                                f"stands on {t[0] - int(rec.x)},{t[1] - int(rec.y)}")
-            elif int(ent.dir or 0) % 16 != (r.dir + 4 * rec.rot) % 16:
-                problems.append(f"port {name}: recorded facing {DIRS[r.dir % 16]}, its carrier "
-                                f"faces {DIRS[int(ent.dir or 0) % 16]}")
+        if rec is None:
+            problems.append(f"port {name}: no inst line {inst} in the layout")
+        # 2.0.48: a port is an edge of its module's frame and lays no carrier; its record names
+        # the tile just inside that edge, which must lie in the factory's frame
         if lay.size is not None and rec is not None and rec.rot % 2 == 0 \
                 and not (0 <= r.x + int(rec.x) < lay.size[0]
                          and 0 <= r.y + int(rec.y) < lay.size[1]):

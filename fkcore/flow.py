@@ -1191,7 +1191,8 @@ def s_report_checks(ctx, args):
     lines, checks = [], []
     for factory, lay in ctx.layouts.items():
         flat = ctx.flats[factory]
-        rep = connect.connect(lay, ctx.cat, connect.endpoints(flat))
+        ports = expand.port_edges(flat, lay, ctx.cat) if flat.ports else None   # 2.0.48
+        rep = connect.connect(lay, ctx.cat, connect.endpoints(flat), ports)
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
         sink_lines, sink_checks = _sinks(ctx, factory, flat, rep)

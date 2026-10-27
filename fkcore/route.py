@@ -96,7 +96,7 @@ from dataclasses import dataclass, field
 
 from . import connect as connectmod
 from . import fkp as fkpmod
-from .expand import attach_points, frame_of, record_misfit
+from .expand import attach_points, frame_of, port_edges, record_misfit
 from .steiner import COSTS, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
 
@@ -708,6 +708,8 @@ def _settle_leaves(cat, laid, ents, also=frozenset(), allow=frozenset()):
         def bad(d):
             ahead = (tx + _DX[d], ty + _DY[d])
             o = occ.get(ahead)
+            if ((tx, ty), ahead) in allow:        # across a sealed module's port (2.0.48)
+                return False
             return o is not None and o.key not in allow and (o.net != e.net or o.key in also)
 
         if not bad(h):
@@ -799,7 +801,7 @@ def _judge(flat, lay, cat, mine, js):
     """{net: (reason, tiles at fault)} for the nets in ``mine`` (routed this run, in routing
     order) whose route leaks, or leaves a pair of its placed ends apart, by ``fkcore.connect``. A
     LEAK between two routes is the later one's fault."""
-    rep = connectmod.connect(lay, cat, connectmod.endpoints(flat))
+    rep = connectmod.connect(lay, cat, connectmod.endpoints(flat), _ports(flat))
     g = rep.graph
     out = {}
 
@@ -949,7 +951,7 @@ class _Patch:
         """The graph, each member's ends and flows, and the ground with what stands now."""
         cat, net = self.cat, self.net
         allents = self.ents + self.kept + self.added
-        self.g = connectmod.graph(allents, cat)
+        self.g = connectmod.graph(allents, cat, _ports(self.flat))
         self.ends, self.fwd, self.bwd = {}, {}, {}
         for m in self.members:
             self.ends[m] = _ends_of(self.flat, self.table, self.job, self.g, net=m)
@@ -1082,7 +1084,8 @@ class _Patch:
         else:
             words = f"{how[1]} extended"
         also = frozenset(mine) if belt is None else frozenset()
-        settled = _settle_leaves(self.cat, laid, self.ents + self.kept + self.added, also)
+        settled = _settle_leaves(self.cat, laid, self.ents + self.kept + self.added, also,
+                                 _crossings(self.flat))
         if settled is None:
             return None
         laid = self.lay(settled, nets, replaced)
@@ -1185,7 +1188,7 @@ class _Patch:
             return None
         plan, how, _path = got
         settled = _settle_leaves(self.cat, _carriers(self.job, plan, m),
-                                 self.ents + self.kept + self.added)
+                                 self.ents + self.kept + self.added, allow=_crossings(self.flat))
         if settled is None:
             return None
         laid = self.lay(settled, [m])
@@ -1277,7 +1280,7 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     members = fkpmod.net_names(job.net) or [job.net]
     sub = {m: table.get(m, ((), ())) for m in members}
     mine = {e.key for e in old}
-    g = connectmod.graph(list(ents) + list(old), cat)
+    g = connectmod.graph(list(ents) + list(old), cat, _ports(flat))
     serve = set()
     for m in members:
         serve |= _serving(g, m, *_ends_of(flat, table, job, g, routed=False, net=m), mine)
@@ -1356,7 +1359,7 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
     for net in sorted(patch):
         for e in patch[net]:
             new.add(fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
-    g = connectmod.graph(new, cat)
+    g = connectmod.graph(new, cat, _ports(flat))
     rep = connectmod.connect(g, cat, table)
     faulty = {}
     for net in sorted(patch):
@@ -1439,6 +1442,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     nets none of whose ends moved (``route --only stale``): each stands as it is, is patched,
     or is routed again (``_standing``), before the nets with nothing laid are routed."""
     js = jobs(flat, lay, cat)
+    flat._port_edges = port_edges(flat, lay, cat)   # 2.0.48: a port is an edge of its frame
     terrain = frozenset(tuple(t) for t in blocked)
     have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
     patch = {n: ents for n, ents in (patch or {}).items() if n in js and n not in have}
@@ -1473,10 +1477,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 name = m.extra.get("at") or ""
                 if name.startswith("in") and name[2:].isdigit():
                     joints.add(f"{path}/b{int(name[2:])}_0")
-        if flat.insts[path].module is not None:
-            for k in flat.ports:
-                if k.startswith(path + "/") and "/" not in k[len(path) + 1:]:
-                    joints.add(f"{path}/port_{flat.ports[k].name}")
+    joints |= _crossings(flat)          # 2.0.48: a route's belt may point across a port's edge
+    # two ports that meet on one edge (a stack's cells): the net between them lays nothing
+    abut = {n for n in todo if _abuts(js[n])}
+    todo = [n for n in todo if n not in abut]
 
     def net_frames(net):
         """The blocked frames for ``net`` and its box: a net inside a sealed module routes in that
@@ -1564,7 +1568,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     lines = []
     for net in sorted(js, key=fkpmod.natural_key):
         job = js[net]
-        if net in kept:
+        if net in abut:
+            lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, nothing to lay "
+                         "(its ports meet on one edge)")
+        elif net in kept:
             lines.append(f"kept      {net}: its carriers are already laid (pinned)")
         elif net in patched:
             lines.append(f"patched   {net}: {patched[net]}")
@@ -1578,7 +1585,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(f"FAILED    {net}: {failed.get(net)}")
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
-    return Routed(new, lines, sorted(added), failed, kept, passes, patched, again)
+    return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again)
 
 
 def seal_checks(flat, lay, cat):
@@ -1595,8 +1602,6 @@ def seal_checks(flat, lay, cat):
         except Exception:
             continue
         frame = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
-        ports = {f"{path}/port_{flat.ports[k].name}" for k in flat.ports
-                 if k.startswith(path + "/") and "/" not in k[len(path) + 1:]}
         for key, e in lay.entities.items():
             net = e.attrs.get("net")
             tiles = fkpmod.tiles_of(cat, e)
@@ -1611,11 +1616,9 @@ def seal_checks(flat, lay, cat):
             if not net:
                 continue
             mine = net == path or net.startswith(path + "/")
-            if key in ports:
-                continue
             if inside and not mine:
-                out.append(f"SEAL      {key} ({net}) stands inside sealed module {path} and is not "
-                           "one of its ports")
+                out.append(f"SEAL      {key} ({net}) stands inside sealed module {path}: a net "
+                           "crosses a sealed frame only at a port's edge")
             elif mine and not inside:
                 out.append(f"SEAL      {key} ({net}) belongs to sealed module {path} but stands "
                            "outside its frame")
@@ -1623,14 +1626,17 @@ def seal_checks(flat, lay, cat):
 
 
 def port_checks(flat, lay, cat):
-    """PORT (2.0.37, PLAN-MODULES phase 3): the tiles just inside and just outside a sealed module's
-    port must be free for the route to meet the port carrier. A machine standing on one of them (the
-    rib's assembler under the port, say) loses that entity when the design is built: the route is laid
-    through it. One line per taken tile.
+    """PORT, warn and never gate.
+
+    2.0.48: a port is an edge of its module's frame, and the routes meet across it: the module's
+    own on the tile just inside, the parent's on the tile just outside. A machine standing on
+    either of those tiles (the rib's assembler against its port, say) leaves the route nowhere to
+    meet the port. One line per taken tile; another module's route there is fine (a stack's next
+    cell meets the port on the same edge).
 
     2.0.41 (PLAN-GLOBAL phase A): a committed port record and a pin must agree; the pin wins, since
     the source is what someone decided (the rebuild then records the pinned tile)."""
-    out, seen = [], set()
+    out = []
     for key in sorted(getattr(flat, "port_records", ())):
         port = flat.ports.get(key)
         if port is None:
@@ -1639,31 +1645,41 @@ def port_checks(flat, lay, cat):
         why = record_misfit(port, rec)
         if why is not None:
             out.append(f"PORT      {key}: the committed tile {rec.x},{rec.y} is dropped: {why}")
-    for path, rec in sorted(lay.insts.items()):
-        if path not in flat.insts or path not in flat.sealed:
-            continue
-        occ = {}
-        for key, e in lay.entities.items():
-            for t in fkpmod.tiles_of(cat, e):
-                occ.setdefault(t, key)
-        ports = {f"{path}/port_{flat.ports[k].name}" for k in flat.ports
-                 if k.startswith(path + "/") and "/" not in k[len(path) + 1:]}
-        for role, _side, _net, (x, y, d) in attach_points(flat, lay, path, cat):
-            if d is None:
+    occ = {}
+    for key, e in lay.entities.items():
+        for tile in fkpmod.tiles_of(cat, e):
+            occ.setdefault(tile, key)
+    edges = getattr(flat, "_port_edges", None) or port_edges(flat, lay, cat)
+    for key in sorted(edges, key=fkpmod.natural_key):
+        pe = edges[key]
+        name = f"{key.rsplit('/', 1)[0]}.{key.rsplit('/', 1)[1]}"
+        for where, tile in (("inside", pe.inside), ("outside", pe.outside)):
+            other = occ.get(tuple(tile))
+            if other is None or other.startswith("~"):
                 continue
-            k = _H[int(d)]
-            tile = (math.floor(x), math.floor(y))
-            for sign, where in ((1, "inside"), (-1, "outside")):
-                t = (tile[0] + sign * _DX[k], tile[1] + sign * _DY[k])
-                other = occ.get(t)
-                if other is None or other in ports or other.startswith("~"):
-                    continue
-                name = f"{path}.{role.rsplit('!', 1)[0]}"
-                if (name, t, other) in seen:
-                    continue
-                seen.add((name, t, other))
-                out.append(f"PORT      {name}: its {where} tile {t[0]},{t[1]} is taken by {other}")
+            out.append(f"PORT      {name}: the tile {where} its edge, {tile[0]},{tile[1]}, is "
+                       f"taken by {other}")
     return out
+
+
+def _ports(flat):
+    """The sealed modules' port edges of the layout being routed (``expand.port_edges``)."""
+    return getattr(flat, "_port_edges", None) or {}
+
+
+def _crossings(flat):
+    """{(from tile, to tile)}: the edges a belt crosses at a port; a route's belt may point across
+    one into the other side's belt (2.0.48)."""
+    return frozenset((tuple(pe.src), tuple(pe.dst)) for pe in _ports(flat).values())
+
+
+def _abuts(job):
+    """A net whose one driver's belt points straight into its one consumer's first belt: two
+    ports meeting on one edge (2.0.48, a stack's cells). It is connected and lays nothing."""
+    if job.taps or job.sources or len(job.starts) != 1 or len(job.goals) != 1:
+        return False
+    (st, sh), (gt, gh) = job.starts[0], job.goals[0]
+    return sh == gh and tuple(st) == (gt[0] + _DX[gh], gt[1] + _DY[gh])
 
 
 def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain):
@@ -1685,7 +1701,7 @@ def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, t
                 continue
             avoid.setdefault(net, set()).update(tiles)
             got, why = _route_one(cat, js[net], list(new.entities.values()), frames, js, box,
-                                  limit, terrain, avoid[net])
+                                  limit, terrain, avoid[net], allow=_crossings(flat))
             if got is None:
                 failed[net] = f"{reason}; re-routed around it: {why}"
                 continue

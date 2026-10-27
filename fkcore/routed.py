@@ -157,6 +157,9 @@ def solve(flat, lay, cat, model=None, hand=1, bulk_hand=1) -> Routed:
     """The netlist ``flat`` on its layout ``lay`` through the flow solver. ``hand``/``bulk_hand``:
     the force's inserter hand sizes (1 = no research)."""
     model = model or ratesmod.solve(flat)
+    if flat.ports:
+        from .expand import port_edges
+        flat._port_edges = port_edges(flat, lay, cat)       # 2.0.48: ports are edges
     lg = lanesmod.build(lay, cat, hand=hand, bulk_hand=bulk_hand)
     machines, supply, demand, base = _ends(flat, lay, cat, model, lg)
     res = tp.solve(lg, supply=supply, demand=demand, machines=machines)
@@ -520,12 +523,22 @@ def port_capacity(r, where=""):
     (``@e4L``) is one lane of its belt end, 7.5/s on yellow; an ``X | X`` port is the whole belt
     end, both lanes, 15/s, and its carrier says so (``net=A|A``). A crossing net that asks more
     than its port's width is short **at the port**, whatever the route behind it carries: the fix
-    is a second lane (``item | item``) or a second port."""
+    is a second lane (``item | item``) or a second port.
+
+    2.0.48: a port is an edge and lays no belt, so its lanes are those of the belt on the tile
+    just inside its edge (the module's own route, where every item through the port passes)."""
     flat, lg, need = r.flat, r.lg, r.need or {}
     out = []
+    edges = getattr(flat, "_port_edges", None) or {}
+    at = {}
+    for e in r.lay.entities.values():
+        at.setdefault((int(float(e.x) // 1), int(float(e.y) // 1)), e.key)
     for key in sorted(flat.ports):
         port = flat.ports[key]
-        ent = f"{key.rsplit('/', 1)[0]}/port_{port.name}"
+        pe = edges.get(key)
+        ent = at.get(tuple(pe.inside)) if pe is not None else None
+        if ent is None:
+            continue
         lanes = [nid for nid in ((ent, "L"), (ent, "R")) if nid in lg.nodes]
         if not lanes:
             continue
