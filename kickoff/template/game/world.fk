@@ -1,0 +1,10 @@
+# world.fk: your base, one plot (nauvis.fk places it and gives its size; 0,0 here is its top-left).
+#
+# Build each factory as a sealed module: `module NAME size WxH { ... }` with `port` lines on its
+# edges. Its own belts stay inside its frame; the belts between factories are nets written here,
+# from one factory's port to the next one's. A change inside one factory never moves another.
+#   docs\LANGUAGE.md "Modules with ports"   the module, its ports, its contract
+#   docs\EXAMPLES.md busbase.fk             a whole base built this way: smelting, a bus,
+#                                          circuits, a mall and science
+# A factory used in several places (or a big one) can live in a file of its own:
+#   import Smelting from "smelting.fk"

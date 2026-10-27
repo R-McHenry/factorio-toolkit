@@ -1,0 +1,8 @@
+# nauvis.fk: the world design. Each plot is a module placed at map coordinates; its size is its
+# ground. The plant runs from the start. Your base is the world plot: move it and size it to cover
+# the ore you choose (look first), and build every factory inside it, in world.fk.
+import Plant from "plant.fk"
+import World from "world.fk"
+
+plant = Plant @(-34, -39) size 17x16      # the nuclear plant, running from the start
+world = World @(30, -100) size 300x260    # your base

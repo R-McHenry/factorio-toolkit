@@ -1,12 +1,11 @@
-# nauvis.surface: the surface of this run. The nuclear plant (a Literal of the kickoff's design)
-# runs from the start; the starter kit is a claim. Add each factory you make with a place line:
-#   place NAME = MODULE plot X,Y WxH        (MODULE.fk beside this file; the plot is its ground)
+# nauvis.surface: the surface of this run. Where the plots go is the world design, nauvis.fk; this
+# file holds what is true of the world itself: the ground, the starter kit's claim, and how the
+# game watches what is built outside your design.
 surface  nauvis
 mode     play                                   # fair play: you see where you look; alerts come to you
 terrain  map                                    # map.terrain.json: the bare ground, read at kickoff
 catalog  base
-
-place plant = plant plot -34,-39 17x16          # the nuclear plant, running from the start
+design   nauvis.fk                              # the plots: the plant and your world
 
 claim kit box 2,6 23,21 "the starter kit: roboport, solar panels, accumulators, poles, six chests"
 
