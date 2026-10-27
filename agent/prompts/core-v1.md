@@ -39,8 +39,8 @@ repeating.
 - `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
   growing, power, rebuilds): reasons, not rules, so use what fits your map
 - `game\nauvis.fk` is the world design: it places every plot on the map, and they are the plant and
-  your base (`world`, `game\world.fk`). Move or resize your plot there before you build: its
-  `@(x, y)` and `size WxH` are its ground, and looking first tells you where the ore is
+  your base (`world`, `game\world.fk`). Your plot is 2000x2000 tiles, so its edge will never be in
+  your way: the plant and the starter kit stand just west of it, and you build where the ore is
 - `game\nauvis.surface` holds what is true of the world itself: the ground, the starter kit's
   claim, and the alerts
 

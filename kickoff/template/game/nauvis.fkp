@@ -2,7 +2,7 @@ fkp 1 surface nauvis
 cover bridge power
 cover kit robots
 plot plant at -34,-39 rot 0 size 17x16 module=plant
-plot world at 30,-100 rot 0 size 300x260 module=world
+plot world at 26,-1000 rot 0 size 2000x2000 module=world
 claim kit box 2,6 23,21 "the starter kit: roboport, solar panels, accumulators, poles, six chests"
 e bridge/p0 medium-electric-pole -21.5,-21.5
 e bridge/p1 medium-electric-pole -16.5,-16.5

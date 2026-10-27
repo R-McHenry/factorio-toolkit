@@ -108,7 +108,8 @@ out. Growing the base is adding the next piece and repeating.
 - `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
   growing, power, rebuilds): reasons, not rules, so use what fits your map
 - `game\nauvis.fk` is the world design: it places every plot on the map (the plant and the base,
-  `world`), each plot's ground on its line
+  `world`), each plot's ground on its line; the base's plot is 2000x2000 tiles, so its edge never
+  constrains a layout, and the plant and the kit stand just west of it
 - `game\nauvis.surface` holds what is true of the world itself: the ground, the starter kit's claim
   and the alerts
 

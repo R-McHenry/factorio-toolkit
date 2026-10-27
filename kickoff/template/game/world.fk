@@ -1,4 +1,6 @@
 # world.fk: your base, one plot (nauvis.fk places it and gives its size; 0,0 here is its top-left).
+# It is 2000x2000 tiles, and the starter kit and the plant stand just west of its west edge: the
+# ground will not run out, so build where the ore is.
 #
 # Build each factory as a sealed module: `module NAME size WxH { ... }` with `port` lines on its
 # edges. Its own belts stay inside its frame; the belts between factories are nets written here,
@@ -6,5 +8,7 @@
 #   docs\LANGUAGE.md "Modules with ports"   the module, its ports, its contract
 #   docs\EXAMPLES.md busbase.fk             a whole base built this way: smelting, a bus,
 #                                          circuits, a mall and science
+# Two items into one row share a belt, a lane each: `lanes A | B` (the build's LANES check names
+# the pair when you leave them on two belts).
 # A factory used in several places (or a big one) can live in a file of its own:
 #   import Smelting from "smelting.fk"

@@ -13,8 +13,8 @@ fk build                             # the paste
 fk look 68,-42 88,-22
 ```
 
-A factory goes in `world.fk`, your base's plot (`nauvis.fk` places it; you may move or resize it
-before you build). It can have a plot of its own instead: `import Gears from "gears.fk"` and
+A factory goes in `world.fk`, your base's plot (`nauvis.fk` places it: 2000x2000 tiles, so the
+ground is not the limit). It can have a plot of its own instead: `import Gears from "gears.fk"` and
 `gears = Gears @(70, -40) size 16x16` in `nauvis.fk`, at map coordinates, and it keeps its own
 `.fkp`. `size WxH` is the factory's frame; the size in each heading below is what its rows take.
 
