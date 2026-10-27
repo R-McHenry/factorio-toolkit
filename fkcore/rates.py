@@ -459,10 +459,25 @@ def carryover(model):
         for item, takers in sorted(feeds.items()):
             for product in sorted(products - {item}):
                 for sink in dict.fromkeys(sinks):
+                    if _filtered_out(flat, sink, item):
+                        continue          # its hands are filtered: the feed stops at the belt's end
                     row = (name, item, product, sink, takers)
                     if row not in out:
                         out.append(row)
     return out
+
+
+def _filtered_out(flat, sink, item):
+    """Whether a ``set SINK.in: filter=...`` keeps ``item`` out of machine ``sink``."""
+    inst = sink.rsplit("/", 1)[0]
+    for props, scope in getattr(getattr(flat, "circuit", None), "sets", ()) or ():
+        target = f"{scope}/{props.target}" if scope else props.target
+        if target != inst or props.side != "in" or "filter" not in props.attrs:
+            continue
+        allowed = {w.strip() for w in str(props.attrs["filter"]).replace("|", ",").split(",")}
+        if item not in allowed and "circuit" not in allowed:
+            return True
+    return False
 
 
 def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, unbounded):

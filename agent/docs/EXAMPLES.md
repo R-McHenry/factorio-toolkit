@@ -15,7 +15,22 @@ fk look 68,-42 88,-22
 The first three together on plots next to each other give 9 nets, all routed and connected, 0 LEAK.
 Their power joins the plant's grid (`floorplan --bridge-power`).
 
-## smelting.fk: ore to plates (26x26)
+**The current way, and the older examples.** The newest examples build a base the way the
+toolkit now works best: every factory a sealed module with ports, joined by belts between its
+ports, standing across a bus, its cells in straight lines:
+
+- **busbase.fk**: a whole bus base (smelting, circuits, a mall, science), each spine a sealed
+  module across the bus;
+- **blue6.fk**: blue science as a stack of cells (`Stack`), every belt straight, one pinned pole
+  per cell;
+- **smelter-array.fk** (`SmelterArray`) and the circuits in busbase.fk (`CircuitStack`): machines
+  on both sides of their output belt.
+
+The rest are older: written before modules, ports and stacks, each one a single factory fed by
+chests. They still build, and they show the language's pieces one at a time; for a base, start
+from the current ones.
+
+## smelting.fk: ore to plates (26x26) (older)
 
 ```
 ore   = MinerRow<n=4, resource=iron-ore>   @(10, 2, rot 2)
@@ -33,7 +48,7 @@ the furnaces run at 80%, short of ore. The miner rows are turned (`rot 2`) so th
 west, where the router has room. It needs ore and coal under its drills: put its plot on the
 patches.
 
-## shared-belt.fk: ore and coal on one belt (26x23)
+## shared-belt.fk: ore and coal on one belt (26x23) (older)
 
 The same smelting with one input belt: `lanes ore_ | fuel` puts the ore on the belt's left lane
 and the coal on its right.
@@ -57,7 +72,7 @@ up holds only its own item, so there is no `CLOG`. The routed rates show the ore
 its 7.5/s, and that the furnaces are served in belt order: the first 6 run at full speed, the
 7th at 40% and the last gets no ore.
 
-## smelter-array.fk: Rory's smelter stack (33x50)
+## smelter-array.fk: Rory's smelter stack (33x50) (current)
 
 ```
 ore   = MinerRow<n=16, resource=iron-ore>     @(2, 0, rot 2)
@@ -79,7 +94,7 @@ inserters as the critical connectors, at exactly their rate. At 48 furnaces it e
 belt of ore (15/s); more than that, and it grows a second unit east, with its own ore and plate
 belts.
 
-## gears.fk: plates in, gears out, robots at both ends (16x16)
+## gears.fk: plates in, gears out, robots at both ends (16x16) (older)
 
 ```
 inbox = Chest<requester, item=iron-plate, rate=1.25/s> @(2, 2)
@@ -93,7 +108,7 @@ net gear:      gears -> box
 On paper: 37.5 gears/min, limited by the 1.25 plates/s the requester asks for (`rate=`). The
 chest feeds the row with one inserter (a route of one inserter).
 
-## beltless.fk: a first cell with no belts (13x7)
+## beltless.fk: a first cell with no belts (13x7) (older)
 
 ```
 fe   = Chest<requester, item=iron-plate, request=400>  @(0, 0)
@@ -113,7 +128,7 @@ built in the lab it measured 6.00/min against the model at both a one-tile and a
 This is the shape of a first factory: chests in, nothing belted in or out. Give the machines 1 to 3
 free tiles between them and the whole cell routes itself.
 
-## red.fk: red science into labs (30x30)
+## red.fk: red science into labs (30x30) (older)
 
 ```
 iron   = Chest<requester, item=iron-plate, rate=1/s>   @(2, 2)
@@ -134,7 +149,7 @@ On paper: 18 red science/min (three assemblers at full speed), the assert passes
 belts (gears and copper); every row's head is at x = 8, so the router has the columns 0..7 for
 its belts. To grow it: more `red` (n=5), and a second `gears` row feeding the same `gear` net.
 
-## sized.fk: the same red science, counted by the build (42x32)
+## sized.fk: the same red science, counted by the build (42x32) (older)
 
 ```
 iron   = Chest<requester, item=iron-plate, rate=2/s>    @(2, 2)
@@ -160,7 +175,7 @@ its gear, 1 copper), and `SIZE` names the requester that stops it until the `rat
 rows grow east: the 42x32 plot holds 11 of each, and `FIT` says when one runs past it. On paper:
 4 nets, all routed and connected.
 
-## mall.fk: a mall of single machines (34x44)
+## mall.fk: a mall of single machines (34x44) (older)
 
 A mall doesn't need rows: `Assembler<recipe>` stands anywhere, rows and single machines mix, and
 the router lays the belts between them.
@@ -193,7 +208,7 @@ On paper: 8 nets, all routed, 179 entities (126 belts). A chest one tile from it
 around them for its belts: packed tighter, it doesn't route. A requester feeds its net through
 one inserter; a busy net can take a second requester (several drivers merge onto one net).
 
-## early-mall.fk: an early-tier mall (49x24)
+## early-mall.fk: an early-tier mall (49x24) (older)
 
 Yellow and red belts, undergrounds and splitters, inserters (plain, fast, long-handed), assemblers,
 drills, pipes and pipes-to-ground, each into its own chest (`limit=2`). It saves belts by where
@@ -215,7 +230,7 @@ and circuits. Built in the game on a test server, every inserter link moves item
 fills. The file is in `docs\examples\`; it is long, so open it there rather than copying it from
 here.
 
-## compact-mall.fk: rows packed tight, one chest for every product (50x16)
+## compact-mall.fk: rows packed tight, one chest for every product (50x16) (older)
 
 Rory's layout (2026-10-21): "a row with gaps of zero, except 1 for an ingredient dependency", in
 several rows. A well-laid mall needs a few hundred belts at most, never thousands: big gaps between
@@ -251,7 +266,7 @@ while the chest holds 50) and `set x: logistic=inserter<50` (the machine stops c
 `guard` if you switch its recipe (its input inserters take only what the recipe takes). A wire at full length is the starter reactor's fuel saver in
 `LANGUAGE.md` ("Circuits"): a red wire from the reactor's temperature to its fuel inserter.
 
-## bus4.fk: Rory's 4-belt bus, a river of iron (54x25)
+## bus4.fk: Rory's 4-belt bus, a river of iron (54x25) (older)
 
 Rory: "a river of iron, that you keep adding more iron inputs to, and pull iron out when you need
 it". Four belts run east. A load from the south merges into all four by a staircase of four
@@ -275,7 +290,7 @@ and 6 underground ends in all). `bus4.json` is his demo exactly as he placed it 
 (`Literal<file="bus4.json">` pastes it as it is). To grow it: make it longer, add loads and taps
 (`load=s11|s40`), and a net for each.
 
-## busbase.fk: a bus base, smelting, circuits, mall and science (172x82)
+## busbase.fk: a bus base, smelting, circuits, mall and science (172x82) (current)
 
 Three buses run east along the bottom: circuits (1 belt), iron (2 belts), copper (1 belt). Every
 spine factory stands north of them and runs **perpendicular** to the bus: its machines in columns
@@ -312,7 +327,26 @@ To grow it: add a spine north of the buses, beside the last one, and an entry fo
 takes from, in order along the bus; a new item gets a bus of its own, loaded by the spine that
 makes it.
 
-## robot-feed.fk: the kit's robots back into a roboport (12x8)
+## blue6.fk: blue science as a stack of cells (current)
+
+A cell is 18x6: two units of an engine assembler and an advanced circuit assembler handing straight
+into a blue science assembler (a long-handed inserter brings the red circuits over the belt of
+sulfur and packs), and one pinned `Pole` on that belt, which tunnels under it: the one pole powers
+the inserters beside both blue science assemblers, where no other tile reaches. Every belt runs
+straight across the cell. The stack is `Stack<cell=BlueCell6, n=2>`: four blue science assemblers.
+
+```
+blue = Stack<cell=BlueCell6, n=2> @(14, 6)
+net su:  sulf -> blue.t_in                  # sulfur onto the left lane: its inserter drops from the east
+net out: blue.t_out -> packs
+set packs.in: filter=chemical-science-pack  # the packs' chest takes packs, never the sulfur beside them
+```
+
+On the lab (2.0.49): 223 entities, every inserter powered, sulfur on the left lane and packs on the
+right, the chest holding packs only. Without the filter, `CARRYOVER` says the sulfur would fill the
+packs' chest and stop the belt.
+
+## robot-feed.fk: the kit's robots back into a roboport (12x8) (older)
 
 The robots the kit starts with, and the ones a build takes up with a roboport, sit in a storage
 chest as items: nothing flies. This puts them back into service.
@@ -331,7 +365,7 @@ robots; add a second chest with `item="construction-robot"` in the same way if t
 Check it with `fk stats` (robots count as items in a chest) and `fk lua` on the roboport's robot
 inventory.
 
-## steam.fk: a steam power plant, 3.6 MW (16x26)
+## steam.fk: a steam power plant, 3.6 MW (16x26) (older)
 
 ```
 pump = OffshorePump<rate=1200/s>               @(0, 17, rot 3)

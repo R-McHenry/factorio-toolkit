@@ -31,6 +31,7 @@ The templates:
 | `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in | 2 in (1 when the ore and fuel nets share a belt), 1 out |
 | `SmelterArray<n, recipe>` | Rory's smelter stack: n furnaces in columns, each column fed by one belt with ore on one lane and coal on the other, side-loaded at its foot; plain inserters. A unit is 11 tiles wide (two columns around their plate belt) and up to 48 furnaces (24 a column: a yellow lane of ore); more furnaces add units east, sharing the coal. `machine=steel-furnace` (12 a column), `units=K` to choose the units | per unit an ore belt in and a plate belt out at its foot; the coal in at its east end |
 | `CircuitStack<n>` | green circuits on both sides of one output belt: two columns of circuit assemblers around it, each handed cable directly by the two cable assemblers above and below it; iron and copper on the two lanes of its own feed belts, side-loaded at its foot as the smelter stack does. 14 wide, 12 tall per circuit assembler in a column, then 6 for the foot; up to 14 (7 a column) | the iron in at its foot (x 3), the copper in from the east near its foot, the circuits out at its foot (x 6) |
+| `Pole`, `Pole<pole=small-electric-pole>` | one pole, pinned: for a cell packed so tight that its pole's tile is part of its design (the power step keeps it and adds only what is missing) | none |
 | `AsmRow<n, recipe>` | n assemblers, 3 tiles each, 7 to 9 tall | up to 3 in (the third under the product belt, by long-handed inserters), 1 out |
 | `Lab`, `Lab<rate=2/min>` | one lab, its inserters laid like an Assembler's: several Labs around one multi-item requester chest each take their packs by one inserter, no belt | by inserters next to it |
 | `Roboport` | one roboport, 4x4: it takes construction and logistic robots into its robot inventory from a net, so the loader is a `Chest<requester, item="logistic-robot", request=50>` beside it and `net load: chest -> roboport`: the router lays the inserter (2.0.16). The kit's robots come out of a storage chest only into a roboport, so a build that takes up a roboport strands its robots until one of these stands again. `cover robots` counts it as coverage | by an inserter next to it |
@@ -252,6 +253,42 @@ contract bus4ribs: 4 sealed instances
 Each port shows its direction, item and the rate it needs (an `in` port) or makes (an `out` port) at
 full speed, where in the netlist it crosses, and what it actually got — the at-a-glance proof every
 rib is fed through the bus. `agent/docs/examples/bus4ribs.fk` is the four-rib base it was written for.
+
+### Stacks: a line of cells
+
+A **cell** is a sealed module whose ports come in pairs on opposite edges, so that cells stack in a
+line. `stack NEAR -> FAR` pairs a port on the edge toward the line's head (NEAR) with the one on
+the opposite edge at the same tile (FAR); one cell's FAR meets the next one's NEAR on their shared
+edge, and the net between them lays nothing. Items flow as the ports say: a feed `in` at NEAR and
+`out` at FAR runs head to tail, a product the other way runs tail to head.
+
+```
+module Cell size 9x3 {
+  port f_in  : in  iron-plate      @s1       # the feed: in at the south edge,
+  port f_out : out iron-plate      @n1       # on to the next cell at the north edge
+  port g_in  : in  iron-gear-wheel @n7       # the product: from the cell beyond,
+  port g_out : out iron-gear-wheel @s7       # back toward the head
+  stack f_in -> f_out, g_out -> g_in
+  a = Assembler<recipe=iron-gear-wheel> @(3, 0)
+  net f: f_in -> a, f_out
+  net g: g_in, a -> g_out
+}
+line = Stack<cell=Cell, n=12> @(0, 4)         # head=HEAD: a module before the first cell
+net fe:  feed -> line.f_in                     # the first cell's NEAR port
+net out: line.g_out -> box
+```
+
+- `Stack<cell=CELL, n=N, head=HEAD>` places N cells edge to edge, growing toward the FAR edge, and
+  the head (optional) before the first. A head has a FAR port of each pair, as if it were a cell.
+- `line.P` names the head's port P; with no head, the first cell's NEAR port P or the last cell's
+  FAR port P. The last cell's FAR ports are ends: nothing need come out of them.
+- Inside a cell each belt runs **straight across**, port edge to port edge, with one inserter per
+  machine (fast where it reaches, long-handed where only that does). A port of two items
+  (`sulfur | chemical-science-pack`, with `lanes A | B` inside) is one belt that comes in already
+  paired and runs on straight.
+- `Pole` pins a pole where a cell is packed so tight that no other tile reaches its inserters; a
+  straight belt tunnels under it. `docs\examples\blue6.fk` is such a cell.
+- Reports list a stack's cells as `line/0`, `line/1` ...: each cell is an instance of its own.
 
 ## Circuits
 

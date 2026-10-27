@@ -284,6 +284,11 @@ fixing in the source.
   after it) and the `fk plan` line that sizes its drivers
 - `TYPE`: a net names a machine that has no endpoint for the net's items
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
+- `CARRYOVER` (report_rates): a sink at the end of a belt that brings it a product and also a
+  feed, an item machines upstream on the same belt consume (sulfur riding the blue packs' belt
+  into the packs' chest): what they don't take of the feed fills the sink and stops the belt for
+  the product too. Give the product a belt of its own, or filter the sink's hands
+  (`set packs.in: filter=chemical-science-pack`)
 - `CLOG`: a net of two or more items (sushi), or an unlimited chest fed two or more items by
   separate nets: an item that comes faster than it is used can fill it and stop the others. No
   tool can tell whether what feeds a mixed net is limited, so its line goes in two ways only. One:
