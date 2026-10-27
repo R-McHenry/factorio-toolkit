@@ -84,6 +84,7 @@ module Science size 44x50 {
   net ci:     circ -> insm
   net insn:   insm -> green
   net beltn:  beltm -> green
+  lanes insn | beltn                     # the green row's two feeds on one belt, a lane each
   net reds:   red -> redbox
   net greens: green -> greenbox
 }

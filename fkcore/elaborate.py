@@ -1045,6 +1045,18 @@ ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT", "UNDERFED", "LANES"
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
 
 
+#: templates that already share their own feed lanes, two nets side-loaded onto one belt
+#: (``fragments.smelter_array``, ``fragments.circuit_stack``): they need their two nets apart, and
+#: pairing them hands the fragment one belt where it needs two
+_SELF_PAIRED = frozenset(("SmelterArray", "CircuitStack"))
+
+
+def _self_paired(flat, key):
+    """Whether machine ``key`` is a template that side-loads two nets onto its own feed belts."""
+    inst = flat.insts.get(flat.machines[key].inst)
+    return getattr(inst, "kind", None) in _SELF_PAIRED
+
+
 def _unlimited(m):
     return m.sink and m.extra.get("role") in _STORES and m.extra.get("limit") is None
 
@@ -1158,7 +1170,16 @@ def _lane_checks(flat, cat):
     The 0928 player laid a smelter's ore and its coal on two belts, a lane each, and the build said
     nothing: the lane router existed, the design never reached for it. Only pairs with a known,
     finite rate that fits a lane (a requester without ``rate=`` is unbounded, and closing it to one
-    lane would throttle it), and only nets not already paired."""
+    lane would throttle it), and only nets not already paired.
+
+    2.0.50 (Rory, 2026-10-27): it is about the *nets*, not about who drives them. 2.0.17 named only
+    pairs a chest drove, because pairing a machine's product with a net of its own puts that
+    product on two nets; but the waste is the same whoever makes the item, and the runs' lab rows
+    (red packs on one belt, green packs on another) were the case it kept quiet. So a pair of
+    single-item nets into the same machines is named machine-driven or not: pair the nets, and the
+    machine stays on the one net it makes. What stays out is a pair that feeds chests only (two
+    products into one provider chest are not a run's feed, and one belt of two products buys
+    nothing but a mixed chest)."""
     from .lanes import lane_rate
     cap = lane_rate(cat, "transport-belt")
     by_consumers = {}
@@ -1168,11 +1189,12 @@ def _lane_checks(flat, cat):
         item = net.items[0]
         if cat.is_fluid(item) or item in CONTACT or not net.drivers or not net.consumers:
             continue
-        # only feeds that a chest drives: two raw feeds out of the network into one row are the
-        # case (the 0928 smelter's ore and coal); a design's own product belts stay its business
-        drivers = [flat.machines[k] for k, _i in net.drivers]
-        if not all(cat.kind(m.prototype) in ("logistic-container", "container") for m in drivers):
-            continue
+        consumers = frozenset(k for k, _i in net.consumers)
+        if all(cat.kind(flat.machines[k].prototype) in ("logistic-container", "container")
+               for k in consumers):
+            continue                  # a chest takes both: nothing is fed, nothing is wasted
+        if any(_self_paired(flat, k) for k in consumers):
+            continue                  # it shares the lanes of its own feed belts already
         rate = 0.0
         for key, got in net.drivers:
             m = flat.machines[key]
@@ -1182,16 +1204,19 @@ def _lane_checks(flat, cat):
             rate += float(m.makes.get(got, 0.0))
         if rate is None or rate > cap:
             continue
-        by_consumers.setdefault(frozenset(k for k, _i in net.consumers), []).append(
-            (name, item, rate))
+        by_consumers.setdefault(consumers, []).append((name, item, rate))
     for consumers, nets in sorted(by_consumers.items(), key=lambda kv: sorted(n for n, _i, _r in kv[1])):
         nets.sort()
         first = nets[0]
         second = next((n for n in nets[1:] if n[1] != first[1]), None)
         if second is None:
             continue
-        inst = flat.machines[next(iter(consumers))].inst
-        where = inst + (f" ({len(consumers)} machines)" if len(consumers) > 1 else "")
+        # sorted, never a frozenset's own order: the same design must give the same line in every
+        # process (the elaboration baseline is a hash of it)
+        insts = sorted({flat.machines[k].inst for k in consumers})
+        where = ", ".join(insts)
+        if len(consumers) > 1:
+            where += f" ({len(consumers)} machines)"
         flat.checks.append(Check(
             "LANES", f"net {first[0]} and {second[0]}",
             f"both feed {where} on belts of their own, a lane each: one belt carries both "

@@ -37,8 +37,10 @@ class _Joined:
         return sum(self.r.res.delivered.get((k, ""), {}).get("iron-plate", 0.0) for k in keys)
 
     def test_elaborates(self):
-        # the consumers' provider chests have no limit=; nothing else (no DOUBLE, CLOG or TYPE)
-        self.assertEqual({c.code for c in self.flat.checks}, {"UNLIMITED"})
+        # the consumers' provider chests have no limit=; nothing else (no DOUBLE, CLOG or TYPE).
+        # LANES (2.0.50): each iron works' ore and fuel are two miner rows into one smelter row,
+        # the pair the check exists for; pairing them is a change to the bench, not to this test
+        self.assertEqual({c.code for c in self.flat.checks}, {"UNLIMITED", "LANES"})
 
     def test_expands_and_routes(self):
         self.assertEqual(self.notes, [])

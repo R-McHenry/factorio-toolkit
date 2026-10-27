@@ -304,7 +304,9 @@ from the bus, and the next one fits beside it.
   cable directly by the cable assemblers above and below them, loaded onto the circuit bus;
 - **mall**: iron and circuits into belts, inserters, assemblers, drills and pipes, a chest each
   with a slot limit, so each maker stops when its chest is full;
-- **science**: iron, copper and circuits into 30 red and 30 green packs a minute.
+- **science**: iron, copper and circuits into 30 red and 30 green packs a minute. The green row
+  takes its inserters and its belts on one belt, a lane each (`lanes insn | beltn`): the build's
+  `LANES` check would name the pair on two belts.
 
 ```
 cbus  = Bus<belts=1, item=electronic-circuit>(cl: circ.circ, mc: mall.circ, sc: sci.circ) @(70, 66)
@@ -312,9 +314,10 @@ febus = Bus<belts=2, item=iron-plate>(fl: fe.plate, ci: circ.iron, mi: mall.iron
 cubus = Bus<belts=1, item=copper-plate>(kl: cu.plate, cc: circ.copper, sc2: sci.copper) @(0, 79)
 ```
 
-Built on the lab (2.0.47): 35 nets routed in half a second, 1760 entities, all of them standing.
-By game minute 30 science runs at the model's rates (30 red and 30 green a minute), the iron stack
-at its full 7.5 plates/s, and the mall's makers have stopped with their chests full.
+On paper (2.0.50): 38 nets routed in seven seconds and all of them connected, 0 LEAK, 1741
+entities composed; on the lab (2.0.47) it stands whole and by game minute 30 science runs at the
+model's rates (30 red and 30 green a minute), the iron stack at its full 7.5 plates/s, and the
+mall's makers have stopped with their chests full.
 `fk contract busbase.fk`:
 
 ```

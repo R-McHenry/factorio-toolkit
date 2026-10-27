@@ -305,9 +305,12 @@ fixing in the source.
   of many items works best unlimited, with the limit at each maker
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
-- `LANES`: two chest-fed single-item nets feed the same machine set on two belts, a lane each: one
-  belt carries both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them.
-  Only pairs whose flows fit a lane are named (a requester without `rate=` is unbounded)
+- `LANES`: two single-item nets feed the same machines on two belts, a lane each: one belt carries
+  both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them. Whoever
+  drives the nets, so a lab row fed red packs on one belt and green packs on another is named too
+  (2.0.50); what is left alone is a pair into chests only, a pair a `SmelterArray` or a
+  `CircuitStack` feeds (it side-loads its own two nets), and any flow that doesn't fit a lane (a
+  requester without `rate=` is unbounded)
 - `SELECT`: a `set` that matches nothing (no such instance, no hand whose sink is the named one,
   or an `if=` with no chest to read), or an unknown property
 - `GUARD`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)

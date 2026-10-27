@@ -35,7 +35,7 @@ The templates:
 | `AsmRow<n, recipe>` | n assemblers, 3 tiles each, 7 to 9 tall | up to 3 in (the third under the product belt, by long-handed inserters), 1 out |
 | `Lab`, `Lab<rate=2/min>` | one lab, its inserters laid like an Assembler's: several Labs around one multi-item requester chest each take their packs by one inserter, no belt | by inserters next to it |
 | `Roboport` | one roboport, 4x4: it takes construction and logistic robots into its robot inventory from a net, so the loader is a `Chest<requester, item="logistic-robot", request=50>` beside it and `net load: chest -> roboport`: the router lays the inserter (2.0.16). The kit's robots come out of a storage chest only into a roboport, so a build that takes up a roboport strands its robots until one of these stands again. `cover robots` counts it as coverage | by an inserter next to it |
-| `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up | 1 to 3 science belts in (the third by long-handed inserters) |
+| `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up. Two packs to a belt on the two lanes (`lanes packs | greenpacks`) halves the belts, and for many packs a line of lab cells of your own (`Stack<cell=...>`) is the shape: the two are designs, not templates | 1 to 3 science belts in (the third by long-handed inserters), each a pair |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
 | `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request: the request's count is never above it, and a changed request on a standing chest is laid again by the next `fk build`). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said TYPE). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
@@ -142,9 +142,11 @@ lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on th
 - The `.fkp` records a shared belt as `net=ore_|fuel` and its inserters as `net=ore_+fuel`.
 - `SmelterArray` shares its own feed belts: give it its ore and its fuel on two nets of their
   own, and it side-loads them onto its lanes.
-- A row fed two items from two chests (a SmelterRow's ore and coal, an AsmRow's gears and
-  circuits) is the case to pair: two belts there carry a lane each, and half of both is empty. The
-  build's `LANES` check names the pair when you leave it on two belts.
+- A row fed two items on two nets (a SmelterRow's ore and coal, a lab row's packs, an AsmRow's
+  gears and circuits) is the case to pair: two belts there carry a lane each, and half of both is
+  empty. The build's `LANES` check names the pair when you leave it on two belts, whoever drives
+  them; `SmelterArray` and `CircuitStack` are the exception, since they side-load two nets onto
+  their own feed belts and want them apart.
 
 ## A bus
 
