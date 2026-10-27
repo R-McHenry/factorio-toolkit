@@ -113,6 +113,7 @@ _HANDS = (("fast-inserter",), ("fast-inserter", "long-handed-inserter"))
 _REACH = {"fast-inserter": 1, "inserter": 1, "burner-inserter": 1, "long-handed-inserter": 2}
 _HUBS = 8          # hub candidates tried at most
 _HUB_WINS = 3      # stop after this many hubs that route
+_NEAR = 12         # tiles around a net's own ends it is searched in first (2.0.45)
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
 
 
@@ -721,8 +722,44 @@ def _settle_leaves(cat, laid, ents, also=frozenset(), allow=frozenset()):
     return out
 
 
+def _near_box(job, box, margin=None):
+    """The box a net is searched in first (2.0.45): its own ends and machines plus ``_NEAR``
+    tiles and a quarter of their extent, inside ``box``. None when that is ``box`` already.
+
+    Rory, 2026-10-26: "we should be routing a lot of independent small connections so done one at
+    a time ideally it would be just as fast as what we typically have." The hub search ranks every
+    free tile of its box by belt distance from each end, so a short net in a map-sized frame paid
+    for the whole frame: 33 nets took 0.9 s packed and 6.9 s spread over 265x178."""
+    xs, ys = [], []
+    for j in (job,) + tuple(job.parts or ()):
+        for t in j.ends():
+            xs.append(t[0])
+            ys.append(t[1])
+        for _k, r in list(j.sources) + list(j.taps):
+            xs += [r[0], r[2] - 1]
+            ys += [r[1], r[3] - 1]
+    if not xs:
+        return None
+    m = (_NEAR if margin is None else margin) + max(max(xs) - min(xs), max(ys) - min(ys)) // 4
+    near = (max(box[0], min(xs) - m), max(box[1], min(ys) - m),
+            min(box[2], max(xs) + 1 + m), min(box[3], max(ys) + 1 + m))
+    return None if near == tuple(box) else near
+
+
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
                allow=frozenset()):
+    """One net's route in ``box``: first in its own neighbourhood (``_near_box``), then, if that
+    fails, in the whole box, so bounding the search never loses a route the box allowed."""
+    near = _near_box(job, box)
+    if near is not None:
+        got, how = _route_in(cat, job, ents, frames, js, near, limit, terrain, avoid, spans, allow)
+        if got is not None:
+            return got, how
+    return _route_in(cat, job, ents, frames, js, box, limit, terrain, avoid, spans, allow)
+
+
+def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
+              allow=frozenset()):
     if job.parts:
         from . import pairs
         return pairs.route(cat, job, ents, frames, js, box, limit, terrain, avoid, spans)
