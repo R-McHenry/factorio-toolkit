@@ -431,6 +431,40 @@ def underfed(model, margin=0.05):
     return out
 
 
+def carryover(model):
+    """[(net, feed, product, sink, consumers)]: a sink at the end of a belt that brings it a
+    product and also a **feed**, an item machines on the same belt upstream consume (2.0.48, Rory
+    2026-10-26: "the sulfur and blue science are on the same belt which is an issue, and the toolkit
+    should have noticed it too"). What those machines don't take of the feed reaches the sink with
+    the product, fills it, and the belt stops for the product too. Nets joined through a port or a
+    bus are one pool, so a feed that rides a stack's belt from cell to cell is seen at its end. A
+    sink fed one item (the rest of a bus into a chest) is no carryover."""
+    flat = model.flat
+    out = []
+    for name in sorted(flat.nets):
+        net = flat.nets[name]
+        sinks = [k for k, _i in net.consumers if flat.machines[k].sink]
+        if not sinks or len(net.items) < 2:
+            continue
+        feeds, products = {}, set()
+        for item in net.items:
+            pool = model.pools.get((name, item), (name, item))
+            ends = model.ends.get(pool, {})
+            takers = [k for k in ends.get("consumers", ())
+                      if not flat.machines[k].sink and flat.machines[k].needs.get(item, 0) > 0]
+            if takers:
+                feeds[item] = takers
+            if any(flat.machines[k].makes.get(item, 0) > 0 for k in ends.get("drivers", ())):
+                products.add(item)
+        for item, takers in sorted(feeds.items()):
+            for product in sorted(products - {item}):
+                for sink in dict.fromkeys(sinks):
+                    row = (name, item, product, sink, takers)
+                    if row not in out:
+                        out.append(row)
+    return out
+
+
 def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, unbounded):
     """The row of a net a bus pool absorbed: what its own drivers make and its own consumers take
     at the pool's utilizations, its ports passing the balance on. A load's net delivers all its

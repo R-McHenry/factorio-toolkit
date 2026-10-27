@@ -495,6 +495,13 @@ def s_report_rates(ctx, args):
                 f"{item}: its drivers make {can * 60:.1f}/min at most, its consumers would take "
                 f"{want * 60:.1f}/min, so they run at about {can / want:.0%} for it; "
                 f"`fk plan {item} {want * 60:.0f}/min` sizes the drivers"))
+        for net, feed, product, sink, takers in ([] if again else rates.carryover(model)):
+            who = takers[0] + (f" and {len(takers) - 1} more" if len(takers) > 1 else "")
+            checks.append(Check(
+                "CARRYOVER", f"{factory} net {net}",
+                f"{feed} rides the belt into {sink} with {product}: what {who} upstream don't take "
+                f"of it fills {sink}, and the belt stops for {product} too. Give {product} a belt "
+                f"of its own, or end the {feed} lane before the sink"))
         for key, m in flat.machines.items():
             for item, r in m.makes.items():
                 made[item] = made.get(item, 0.0) + r * model.util[key]
