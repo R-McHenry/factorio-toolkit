@@ -130,6 +130,7 @@ class NetJob:
     reserved: list = field(default_factory=list)   # tiles a fluid net's connections need
     anchors: dict = field(default_factory=dict)    # "<inst>.<role>" -> what the route is laid to
     parts: tuple = ()                              # two nets on one belt: (A, B, both) jobs
+    straight: bool = False                         # a stack cell's net: a straight run first
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
@@ -784,6 +785,14 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
     blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
     spans = _ug_spans(cat, ents) if spans is None else spans
     clear = _belt_tiles(cat, ents)
+    if job.straight:
+        # a stack cell's through belt: straight across the cell, port edge to port edge, when it
+        # can (Rory, 2026-10-26: "every belt routing as 3 belts in a row, no bends")
+        straight = _straight(job, _Bounded(blocked, box))
+        if straight is not None:
+            laid = _settle_leaves(cat, _carriers(job, straight, net), ents, allow=allow)
+            if laid is not None:
+                return laid, f"a straight belt, {len(straight)} carriers"
     if job.mode == "hub":
         plan, how = _hub_job(cat, job, blocked, spans, clear, box, limit)
     else:
@@ -803,6 +812,7 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
 
 
 _BELT_NAMES = ("transport-belt", "underground-belt", "splitter")
+_UG_REACH = 5        # a yellow underground's exit at most 5 tiles from its entrance
 
 
 def _prejoined(job):
@@ -836,16 +846,40 @@ def _straight(job, grid):
         if len(tiles) > 64:
             return None
         tiles.append((tiles[-1][0] + _DX[h], tiles[-1][1] + _DY[h]))
+    # a taken tile in the middle (a pinned pole, 2.0.49) is tunnelled under: an entrance on the
+    # tile before it, an exit on the tile after, within an underground's reach
     ends = {tuple(s), tuple(g)}
-    if any(grid.blocked(t) and t not in ends for t in tiles):
-        return None
-    plan = [{"name": "transport-belt", "x": x + 0.5, "y": y + 0.5, "direction": h * 4}
-            for x, y in tiles]
+    kind = {t: "belt" for t in tiles}
+    i = 1
+    while i < len(tiles) - 1:
+        if not grid.blocked(tiles[i]) or tiles[i] in ends:
+            i += 1
+            continue
+        j = i
+        while j < len(tiles) - 1 and grid.blocked(tiles[j]) and tiles[j] not in ends:
+            j += 1
+        if j - (i - 1) > _UG_REACH or kind[tiles[i - 1]] != "belt":
+            return None
+        kind[tiles[i - 1]] = "in"
+        kind[tiles[j]] = "out"
+        for t in tiles[i:j]:
+            kind[t] = None
+        i = j + 1
+    plan = []
+    for x, y in tiles:
+        k = kind[(x, y)]
+        if k == "belt":
+            plan.append({"name": "transport-belt", "x": x + 0.5, "y": y + 0.5, "direction": h * 4})
+        elif k is not None:
+            plan.append({"name": "underground-belt", "x": x + 0.5, "y": y + 0.5,
+                         "direction": h * 4,
+                         "belt_to_ground_type": "input" if k == "in" else "output"})
+    laid = [t for t in tiles if kind[t] is not None]
     taken = set(tiles)
     for want, pairs in ((job.taps, False), (job.sources, True)):
         for _key, rect in want:
             got = None
-            for x, y in tiles:
+            for x, y in laid:
                 belt = (x, y, x + 1, y + 1)
                 got = _direct_pair(rect, belt, grid, taken) if pairs else \
                     _direct_pair(belt, rect, grid, taken)
@@ -1520,6 +1554,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     or is routed again (``_standing``), before the nets with nothing laid are routed."""
     js = jobs(flat, lay, cat)
     flat._port_edges = port_edges(flat, lay, cat)   # 2.0.48: a port is an edge of its frame
+    for name, job in js.items():                      # 2.0.49: a stack cell's nets go straight first
+        job.straight = any(name.startswith(f"{p}/") and name.count("/") > p.count("/") + 1
+                           for p in getattr(flat, "stacks", {}))
     terrain = frozenset(tuple(t) for t in blocked)
     have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
     patch = {n: ents for n, ents in (patch or {}).items() if n in js and n not in have}

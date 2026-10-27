@@ -319,6 +319,20 @@ def constant(params, cat):
     return [MSpec("m0", "constant-combinator", None, {}, {}, frozenset(), extra={"circuit": True})]
 
 
+def pole(params, cat):
+    """``Pole<pole=medium-electric-pole>`` (2.0.49): one electric pole, pinned where the design puts
+    it. Power is the build's own step, and it keeps a pole that stands in the layout; this is for a
+    cell packed so tight that the pole's tile is part of its design (Rory, 2026-10-26: \"a power pole
+    and two undergrounds in every row\"): the routes go round it, or under it, and the power step
+    adds only what it still lacks. It moves no items."""
+    _only(params, ("pole",))
+    name = _word(params, "pole", "medium-electric-pole")
+    if not cat.has_entity(name) or cat.kind(name) != "electric-pole":
+        raise TemplateError(f"pole={name}: not an electric pole (small-electric-pole, "
+                            "medium-electric-pole, big-electric-pole, substation)")
+    return [MSpec("m0", name, None, {}, {}, frozenset(), extra={"pole": True})]
+
+
 def infinity_pipe(params, cat):
     """``InfinityPipe<fluid, rate=>``: a lab-only source of ``fluid`` (the lab's free materials).
     Without a rate it is unbounded (an UNBOUNDED check line)."""
@@ -496,6 +510,7 @@ TEMPLATES = {
     "Reactor": reactor,
     "HeatExchanger": heat_exchanger,
     "Constant": constant,
+    "Pole": pole,
     "InfinityPipe": infinity_pipe,
     "LabRow": lab_row,
     "Lab": lab,

@@ -49,7 +49,7 @@ from .terrain import fmt_amount
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
            "frame_of", "planned_frame"]
 
-_SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump",
+_SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump", "Pole",
            "Boiler", "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger",
            "SteamTurbine", "Constant", "Roboport")
 _NO_DIRECTION = ("infinity-pipe",)          # fluid prototypes the game never turns
