@@ -9,8 +9,9 @@ well and report back what you learned. Rory watches the world and enjoys seeing 
 
 - `fk` is the one command: `bin\fk.cmd <command>` in PowerShell, or `python bin/fk.py <command>` in
   Git Bash. It reaches the game for you, and every command takes `--help`.
-- `game\`: the factories (`NAME.fk`), `nauvis.surface` (where each factory goes on the map) and
-  the build script `nauvis.build.fkb`. The `.fkp` files beside them are layouts the toolkit writes:
+- `game\`: the factories (`NAME.fk`), the world design `nauvis.fk` (where each plot goes on the
+  map) and its plots, `nauvis.surface` (the world's own facts: ground, claims, alerts) and the
+  build script `nauvis.build.fkb`. The `.fkp` files beside them are layouts the toolkit writes:
   read them, never edit them.
 - `docs\FAIR-PLAY.md` has the game's rules, `docs\TOOLKIT.md` the commands (its "When you need
   something" list is the map of the toolkit), `docs\LANGUAGE.md` the factory language,

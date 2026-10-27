@@ -1,7 +1,8 @@
 # The toolkit
 
 `bin\` is on your PATH: `fk` is the one command, and it reaches the game for you. Your world is
-`game\`: the factories (`.fk`), the surface file, the build script. Edit those with normal file
+`game\`: the factories (`.fk`, your base's plot among them), the world design `nauvis.fk` that
+places the plots, the surface file `nauvis.surface`, the build script. Edit those with normal file
 tools. The `.fkp` files beside them are the layouts the toolkit writes: read them, never edit them.
 
 ## The loop
@@ -158,10 +159,10 @@ yield is in its tooltip.
 `fk stage` keeps a plan of stages in git beside `game\`. `main` is what is built; the plan is one
 commit per stage on top of it, and each commit's message is the stage's spec: its goal, what it
 needs first, the rates it should reach, and the test that says it's done. A stage holds source only
-(`.fk` files, the surface file, the build script, and the file each Literal reads, such as
-relay.json), and its layout is computed when it is checked: `fk stage edit` keeps that file in the
-stage it edits, the stages replayed after it get it, and a file outside `game\` or in `out\` is not
-taken. A stage keeps its number however the plan changes.
+(`.fk` files, the world design, the surface file, the build script, and the file each Literal reads,
+such as relay.json), and its layout is computed when it is checked: `fk stage edit` keeps that file
+in the stage it edits, the stages replayed after it get it, and a file outside `game\` or in `out\`
+is not taken. A stage keeps its number however the plan changes.
 
 ```
 fk stage list                    the stages in order, each one's plates per minute and state, and
@@ -218,11 +219,11 @@ builders work and there seems to be nothing to do, the lab and planning (`fk sta
 things worth doing, and workers can do most of the lab work.
 
 ```
-fk lab NAME                      NAME (a factory game\nauvis.surface places, or NAME.fk) built on
+fk lab NAME                      NAME (a factory the world design places, or NAME.fk) built on
                                  its own lab slot: powered, its requester chests filled, burners
                                  given a first load of coal; says where Rory sees it
 fk lab NAME --from stages\4      the same from a stage's folder (or a scratch copy of game\)
-fk lab NAME --size 60x40         its plot size, when no surface file places it (default 100x100)
+fk lab NAME --size 60x40         its plot size, when no plot places it (default 100x100)
 fk lab NAME --measure 60         what its machines really make over 60 s, against the rate model
 fk lab NAME --clear              its slot emptied and freed
 fk lab --list                    the slots in use
@@ -477,23 +478,55 @@ hold stale items, so the next build lays them again.) The link refuses Lua that 
 handler, a command or an interface: that made every save unjoinable once. Reusable helpers go in
 `helpers\` (its README says how).
 
-## The surface file
+## The surface file and the world design
 
-`game\nauvis.surface` places each factory on the map:
+The world is two files. `game\nauvis.surface` says what is true of the world itself, and
+`game\nauvis.fk`, the **world design**, says where the plots go:
 
 ```
-place iron = iron plot 40,-20 30x30          # factory iron, from iron.fk, on its own plot
-place main = main plot 80,0 120x80
-claim kit box 2,6 23,21 "the starter kit"    # a claim: keep it, never build over it
+# nauvis.surface
+surface  nauvis
+mode     play                                 # fair play: you see where you look; alerts come to you
+terrain  map                                  # map.terrain.json: the bare ground, read at kickoff
+catalog  base
+design   nauvis.fk                            # the plots, from the world design
+
+claim kit box 2,6 23,21 "the starter kit"     # a claim: keep it, never build over it
 watch plots:      keep                        # something placed by hand in a plot: kept, listed
 watch sanctioned: mark 2h                     # ... outside every plot: marked for two hours
+notify   nearby                               # alerts for what is built: nearby, all or off
 target automation-science-pack 10/min         # a rate the whole surface should make
 ```
 
-A factory's `@(x, y)` positions are inside its own plot: (0, 0) is the plot's top-left corner.
-Plots never overlap. A factory can be moved by changing its plot alone: the build takes up what
-stood on the old ground. A plot laid over the power bridge (the poles between factories) takes
-its poles, and `floorplan --bridge-power` lays the bridge again around the plots.
+```
+# nauvis.fk: the world design
+import Plant from "plant.fk"
+import World from "world.fk"
+
+plant = Plant @(-34, -39) size 17x16          # the nuclear plant, running from the start
+world = World @(30, -100) size 300x260        # your base: its factories are in world.fk
+```
+
+Every top-level sealed instance of `nauvis.fk` is a **plot**: the instance's name is the factory's
+name, the file it is imported from is the plot's `.fk` (its layout is that file's `.fkp`), `@(x, y)`
+is the plot's corner in **map coordinates**, and `size WxH` (or the file's own `size` line) is its
+ground. `gap N`, `retired`, `temporary until ...` and `@patch(resource)` go on the instance line as
+they went on a `place` line. `design` wins over `place` lines: while it is there, a plot is an
+instance and a `place` line names nothing.
+
+A factory's own `@(x, y)` positions are inside its plot: (0, 0) is the plot's top-left corner.
+Plots never overlap. A plot can be moved by changing its `@(x, y)` alone: the build takes up what
+stood on the old ground. A plot laid over the power bridge (the poles between factories) takes its
+poles, and `floorplan --bridge-power` lays the bridge again around the plots.
+
+Without a `design` line the older form still works, one plot per line:
+
+```
+place iron = iron plot 40,-20 30x30          # factory iron, from iron.fk, on its own plot
+```
+
+`fk migrate-surface` writes a world design from a surface's place lines, and `fk look --source
+design` draws the surface as designed rather than as built.
 
 ## The build script
 

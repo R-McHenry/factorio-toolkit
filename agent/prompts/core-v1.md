@@ -23,9 +23,11 @@ item.
 ## How building works here
 
 The fk toolkit lets you build like an engineer rather than tile by tile. A factory is a short file,
-`game\NAME.fk`: rows of machines and the nets that say which machines feed which. `fk build` lays it
-out, routes the belts, adds the poles, pastes it in one go, and the robots build it from the network's
-stock. Then `fk look` shows you how it turned out. Growing the base is adding the next piece and
+`game\NAME.fk`: rows of machines and the nets that say which machines feed which. Your base is the
+`world` plot, `game\world.fk`; a factory big enough to want its own ground can be a file of its own,
+placed beside it in `game\nauvis.fk`, the world design. `fk build` lays it out, routes the belts,
+adds the poles, pastes it in one go, and the robots build it from the network's stock. Then
+`fk look` shows you how it turned out. Growing the base is adding the next piece and
 repeating.
 
 - `docs\FAIR-PLAY.md` has the game's rules, all on one short page
@@ -36,10 +38,14 @@ repeating.
 - `docs\LANGUAGE.md` describes the factory language
 - `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
   growing, power, rebuilds): reasons, not rules, so use what fits your map
-- `game\nauvis.surface` says where each factory goes on the map
+- `game\nauvis.fk` is the world design: it places every plot on the map, and they are the plant and
+  your base (`world`, `game\world.fk`). Move or resize your plot there before you build: its
+  `@(x, y)` and `size WxH` are its ground, and looking first tells you where the ore is
+- `game\nauvis.surface` holds what is true of the world itself: the ground, the starter kit's
+  claim, and the alerts
 
-The nuclear plant is already in your surface file (`plant`) and the starter kit is a claim: build
-around them.
+The nuclear plant is already a plot in your world design (`plant`), and the starter kit is a claim:
+build around them.
 
 ## You're free to just build
 

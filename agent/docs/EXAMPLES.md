@@ -1,19 +1,25 @@
 # Examples
 
 Small factories that build cleanly, each in `docs\examples\`. Copy one into `game\`, give it
-a plot in `nauvis.surface`, check it on paper, build it:
+ground, check it on paper, build it:
 
 ```
 copy docs\examples\gears.fk game\gears.fk
-# add to game\nauvis.surface:   place gears = gears plot 70,-40 16x16
+# in game\world.fk (your base's plot):   import Gears from "gears.fk"
+#                                        gears = Gears @(6, 6) size 16x16
 fk rates gears.fk
 fk build --to report_checks          # design only: read out\report_checks.txt
 fk build                             # the paste
 fk look 68,-42 88,-22
 ```
 
-The first three together on plots next to each other give 9 nets, all routed and connected, 0 LEAK.
-Their power joins the plant's grid (`floorplan --bridge-power`).
+A factory goes in `world.fk`, your base's plot (`nauvis.fk` places it; you may move or resize it
+before you build). It can have a plot of its own instead: `import Gears from "gears.fk"` and
+`gears = Gears @(70, -40) size 16x16` in `nauvis.fk`, at map coordinates, and it keeps its own
+`.fkp`. `size WxH` is the factory's frame; the size in each heading below is what its rows take.
+
+The first three together, on plots next to each other, give 9 nets, all routed and connected, 0
+LEAK. Their power joins the plant's grid (`floorplan --bridge-power`).
 
 **The current way, and the older examples.** The newest examples build a base the way the
 toolkit now works best: every factory a sealed module with ports, joined by belts between its

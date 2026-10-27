@@ -420,7 +420,9 @@ class FlowTest(unittest.TestCase):
 
     def test_the_kickoff_template_runs_through_the_routed_rates(self):
         # every new run's script (tier, then report_rates again) on its plant, a Literal with
-        # fluids, and a first factory of drills into furnaces; on paper (no terrain read)
+        # fluids, and a first factory of drills into furnaces; on paper (no terrain read).
+        # The template's plots are its world design (nauvis.fk), so the factory goes in
+        # game\world.fk, the plot the base owns, and no `place` line can add one.
         kick = os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game")
         game = os.path.join(self.dir, "kick")
         shutil.copytree(kick, game)
@@ -430,10 +432,10 @@ class FlowTest(unittest.TestCase):
                 text = fh.read()
             self.assertIn(old, text)
             with open(os.path.join(game, name), "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(text.replace(old, new)
-                         + ("place iron = iron plot 40,-20 40x40\n" if name.endswith("surface")
-                            else ""))
-        with open(os.path.join(game, "iron.fk"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text.replace(old, new))
+        with open(os.path.join(game, "nauvis.surface"), encoding="utf-8") as fh:
+            self.assertIn("design   nauvis.fk", fh.read())       # the plots are the world design
+        with open(os.path.join(game, "world.fk"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write("ore   = MinerRow<n=4, resource=iron-ore> @(6, 2)\n"
                      "smelt = SmelterRow<n=4, recipe=iron-plate> @(6, 16)\n"
                      "coal  = Chest<requester, item=coal, rate=1/s> @(30, 16)\n"
@@ -446,10 +448,10 @@ class FlowTest(unittest.TestCase):
             rates_txt = fh.read()
         self.assertEqual(rates_txt.count("# report_rates"), 2)
         self.assertIn("routed plant (V2: the lanes and inserters as laid)", rates_txt)
-        self.assertRegex(rates_txt, r"routed iron \(V2[^\n]*the machines settled in \d+ rounds")
+        self.assertRegex(rates_txt, r"routed world \(V2[^\n]*the machines settled in \d+ rounds")
         self.assertRegex(rates_txt, r"\n  smelt +1\.000 +1\.000 +1\.000  as nominal\n")
         with open(os.path.join(game, "out", "route.txt"), encoding="utf-8") as fh:
-            self.assertIn("iron: 3 routed, 0 kept (0 pinned from the committed .fkp), 0 failed",
+            self.assertIn("world: 3 routed, 0 kept (0 pinned from the committed .fkp), 0 failed",
                           fh.read())
         with open(os.path.join(game, "out", "tier.txt"), encoding="utf-8") as fh:
             self.assertIn("tier minimize (allowed: yellow)", fh.read())
