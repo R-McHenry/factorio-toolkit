@@ -1,6 +1,6 @@
 """Several iron works and several iron consumers joined by ONE net (Rory's question): the toolkit
 elaborates, routes (the producers' belts meet at a hub), hands it and solves it. join-small fits one
-yellow lane; join-big asks twice that, and the routed solver's CAPACITY line says so
+yellow lane; join-big asks twice that, and the routed solver's too-thin line says so
 (games/v2-bench/join-*.fk, CORE-V2.md). The hands are the build's (``fkcore.hands``: the lowest rung,
 raised where the flow needs more), so what binds here is the belt and the hub, not a slow hand."""
 import os
@@ -40,7 +40,7 @@ class _Joined:
         # the consumers' provider chests have no limit=; nothing else (no DOUBLE, CLOG or TYPE).
         # LANES (2.0.50): each iron works' ore and fuel are two miner rows into one smelter row,
         # the pair the check exists for; pairing them is a change to the bench, not to this test
-        self.assertEqual({c.code for c in self.flat.checks}, {"UNLIMITED", "LANES"})
+        self.assertEqual({c.code for c in self.flat.checks}, {"no-limit", "could-pair"})
 
     def test_expands_and_routes(self):
         self.assertEqual(self.notes, [])
@@ -61,7 +61,7 @@ class JoinSmallTest(_Joined, unittest.TestCase):
 
     def test_every_plate_arrives(self):
         self.assertAlmostEqual(self.plates(), 3.75, places=3)
-        self.assertNotIn("CAPACITY", [c.code for c in self.checks])
+        self.assertNotIn("too-thin", [c.code for c in self.checks])
 
 
 class JoinBigTest(_Joined, unittest.TestCase):
@@ -72,7 +72,7 @@ class JoinBigTest(_Joined, unittest.TestCase):
         self.assertAlmostEqual(self.plates(), 7.5, places=3)
         # one line for the trunk's yellow lanes, one for the hub's yellow splitters
         self.assertEqual([(c.code, c.where) for c in self.checks],
-                         [("CAPACITY", "join-big net iron")] * 2)
+                         [("too-thin", "join-big net iron")] * 2)
         lanes_, splitters = sorted((str(c) for c in self.checks), key=lambda s: "splitter" in s)
         self.assertIn("15.00/s required where its yellow lanes carry 7.50/s (ratio 2.00)", lanes_)
         self.assertIn("it delivers 7.50/s of iron-plate to its consumers, 15.00/s nominal", lanes_)

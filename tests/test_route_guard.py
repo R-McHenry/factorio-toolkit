@@ -3,7 +3,7 @@ guard, a merge's spare output, a tapped belt's last tile, other inserters' hands
 that would start a tunnel), on adversarial layouts. Each is judged by fkcore.connect, whose
 underground pairing is the game's (the first end of the same name facing the same way, within
 reach), and by an oracle that pairs ends by geometry alone, so a Literal's ends of unknown type
-(an entity-list import carries no ug=) count too. Done: 0 LEAK and connected, or refused with a
+(an entity-list import carries no ug=) count too. Done: 0 SPILL and connected, or refused with a
 reason.
 
 Most cases: a drill row whose belt starts at 3,3 heading east, a chest at 20,3, and a Literal
@@ -86,7 +86,7 @@ class GuardCase(unittest.TestCase):
         return flat, r, rep
 
     def assert_sound(self, r, rep, nets=("p",)):
-        """Routed, connected, no LEAK; no route tunnel hides another end on its axis, and no
+        """Routed, connected, no SPILL; no route tunnel hides another end on its axis, and no
         route end stands in another tunnel on its axis."""
         self.assertEqual(r.failed, {}, r.lines)
         self.assertEqual(rep.leaks, [], rep.lines())

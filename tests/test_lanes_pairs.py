@@ -141,8 +141,8 @@ class JudgeTest(unittest.TestCase):
         rep = connect.connect(L("""
             e x/b0 transport-belt 0.5,0.5 E net=a|b
             e y/b0 transport-belt 1.5,0.5 E net=a"""), CAT)
-        self.assertEqual([str(c) for c in rep.checks if c.code == "LEAK"],
-                         ["LEAK        net b: x/b0 feeds y/b0 (net a)"])
+        self.assertEqual([str(c) for c in rep.checks if c.code == "SPILL"],
+                         ["SPILL net b: x/b0 feeds y/b0 (net a)"])
 
 
 class RouteTest(unittest.TestCase):
@@ -197,7 +197,7 @@ class RouteTest(unittest.TestCase):
         lines, checks = routed.report(self.rr)
         ore = next(x for x in lines if x.strip().startswith("ore_ "))
         self.assertRegex(ore, r"\.L \(yellow lanes\)")
-        self.assertEqual([c for c in checks if c.code == "LANE"], [])
+        self.assertEqual([c for c in checks if c.code == "WRONG-LANE"], [])
 
     def test_swapped_lanes_draw_lane(self):
         lay = self.r.layout
@@ -209,7 +209,7 @@ class RouteTest(unittest.TestCase):
                 swapped.entities[k] = fkp.Entity(e.key, e.name, e.x, e.y, e.dir,
                                                  dict(e.attrs, net="fuel|ore_"))
         lines = [str(c) for c in routed.lane_checks(routed.solve(self.flat, swapped, CAT))]
-        self.assertTrue(any(x.startswith("LANE        net ore_: its iron-ore reaches the left "
+        self.assertTrue(any(x.startswith("WRONG-LANE net ore_: its iron-ore reaches the left "
                                          "lane of") and "which the layout gives net fuel" in x
                             for x in lines), lines)
 
@@ -369,7 +369,7 @@ class PatchPairTest(unittest.TestCase):
 
 
 class WrongLaneTest(unittest.TestCase):
-    """The live look: an item on a lane whose nets don't carry it is WRONG_ITEM (CORE-V2: no
+    """The live look: an item on a lane whose nets don't carry it is other-item (CORE-V2: no
     leniency for the right belt in the wrong lane)."""
 
     def look(self, lanes_):

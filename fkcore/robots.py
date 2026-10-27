@@ -25,7 +25,7 @@ where none reaches and never moves the network that stands.
 logistic squares meet (centres at most twice the radius apart on both axes); the **main** network
 is the one holding a roboport outside every plot (shared infra: the kit's). Each factory's
 logistic chests must be inside a square of the main network, and each of its entities inside the
-main network's construction area, else a ``NO_ROBOTS`` check line (never a gate). Pure, stdlib only.
+main network's construction area, else a ``no-robots`` check line (never a gate). Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ class RobotReport:
             owner, roboports, chests, covered, uncovered)
         self.served, self.storage, self.no_room = served, list(storage), no_room
         self.pinned = pinned           # of ``roboports``, the committed ones kept where they stand
-        self.checks = [Check("NO_ROBOTS", key, why) for key, why in uncovered]
+        self.checks = [Check("no-robots", key, why) for key, why in uncovered]
 
     def summary(self):
         text = f"cover {self.owner} robots: {len(self.roboports)} roboports"
@@ -319,10 +319,10 @@ def check_surface(s, cat):
                      f"main network, {len(mine) - len(out_con)}/{len(mine)} entities in its "
                      "construction area")
         for c in out_log:
-            checks.append(Check("NO_ROBOTS", f"{s.name} {c.key}", "outside every logistic area of "
+            checks.append(Check("no-robots", f"{s.name} {c.key}", "outside every logistic area of "
                                 "the main network: robots will not serve it"))
         if out_con:
-            checks.append(Check("NO_ROBOTS", f"{s.name} {plot}", f"{len(out_con)} entities are "
+            checks.append(Check("no-robots", f"{s.name} {plot}", f"{len(out_con)} entities are "
                                 "outside the main network's construction area: robots will not "
                                 "build them (a roboport within reach first)"))
     return lines, checks

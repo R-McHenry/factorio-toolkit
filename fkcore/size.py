@@ -7,7 +7,7 @@ is 1..100) has no count in the source. The build gives it the fewest machines th
 nominal rate model's numbers (``fkcore.rates``):
 
 - every ``target ITEM RATE`` of the surface file: what the whole surface makes of the item,
-  counted as ``report_rates``' TARGET line counts it;
+  counted as ``report_rates``' target-not-met line counts it;
 - every ``assert INST.rate >= R`` of the factory (``>`` and ``==`` too; ``<=`` and ``<`` are
   checked, and a count is never grown for one);
 - what its consumers ask (a **feed**): a net an auto row drives carries what the machines on it
@@ -39,8 +39,8 @@ makes ``EDGE`` more than its recipe says, so a tie is always the producer's slac
 meets, it meets within twice that). The flats it hands on are the plain ones.
 
 Rows grow; where they stand is the player's. ``fit`` says when a sized row runs past its plot or
-into another instance (``FIT``), and ``belts`` when a net of a sized row asks more of its belts than
-they carry once routed (``SIZE``, from report_rates after route). Checks warn, never gate. Pure,
+into another instance (``does-not-fit``), and ``belts`` when a net of a sized row asks more of its belts than
+they carry once routed (``size``, from report_rates after route). Checks warn, never gate. Pure,
 stdlib only.
 """
 from __future__ import annotations
@@ -861,7 +861,7 @@ def report(sz, cat=None):
     """-> (report lines, checks). The first line, ``sized: red n=10 (auto), ...``; per row its
     count, its seed, its bounds and what it serves; the constraints at the counts; the nets of
     sized rows that carry more than a yellow lane. A constraint the counts can't meet with an
-    n=auto row on the way is a ``SIZE`` check (else the TARGET or ASSERT line says it all), one
+    n=auto row on the way is a ``size`` check (else the target-not-met or rate-not-met line says it all), one
     per blocker."""
     if not sz.rows:
         return ["no n=auto rows: every count is as written"], []
@@ -900,7 +900,7 @@ def report(sz, cat=None):
         w = ws[0]
         where = w.text if w.factory is None else f"{w.factory} {w.text}"
         also = [x.text for x in ws[1:]]
-        checks.append(Check("SIZE", where, f"{_value(w)}: {w.why}"
+        checks.append(Check("size", where, f"{_value(w)}: {w.why}"
                             + (f"; the same stops {_names(also)}" if also else "")))
     lines += _lanes(sz, cat, name)
     return lines, checks
@@ -931,7 +931,7 @@ def _lanes(sz, cat, name):
 
 
 def fit(sz, places, cat):
-    """``FIT`` lines: a sized row whose frame, at its ``@(x, y)`` hint, runs past its factory's
+    """``does-not-fit`` lines: a sized row whose frame, at its ``@(x, y)`` hint, runs past its factory's
     plot or into another instance's frame. Nothing is moved: rows grow, and the player arranges
     the layout (place stops on two entities on a tile, floorplan on a factory past its plot)."""
     checks = []
@@ -958,7 +958,7 @@ def fit(sz, places, cat):
                 past = [f"x to {_n(x1)}" if x1 > room[0] else "",
                         f"y to {_n(y1)}" if y1 > room[1] else "",
                         "a negative corner" if x0 < 0 or y0 < 0 else ""]
-                checks.append(Check("FIT", f"{f} {r.path}",
+                checks.append(Check("does-not-fit", f"{f} {r.path}",
                                     f"{what}: it runs past plot {f} ({room[0]}x{room[1]} in the "
                                     f"factory's frame), {', '.join(t for t in past if t)}"))
             for other, ob in frames.items():
@@ -967,7 +967,7 @@ def fit(sz, places, cat):
                 w = min(x1, ob[2]) - max(x0, ob[0])
                 h = min(y1, ob[3]) - max(y0, ob[1])
                 if w > 0 and h > 0:
-                    checks.append(Check("FIT", f"{f} {r.path}",
+                    checks.append(Check("does-not-fit", f"{f} {r.path}",
                                         f"{what}: its frame overlaps {other}'s "
                                         f"({_n(ob[2] - ob[0])}x{_n(ob[3] - ob[1])} at "
                                         f"@({_n(ob[0])}, {_n(ob[1])})) on {_n(w)}x{_n(h)} tiles"))
@@ -979,7 +979,7 @@ def _n(v):
 
 
 def belts(sz, factory, r):
-    """``SIZE`` lines after route (report_rates' second run): a net an n=auto row is on whose
+    """``size`` lines after route (report_rates' second run): a net an n=auto row is on whose
     critical connector the design asks more of than it carries, at the sized counts. ``r`` is the
     factory's ``routed.Routed``."""
     from . import routed as routedmod
@@ -998,7 +998,7 @@ def belts(sz, factory, r):
         nid, req, cap, ratio = found
         if ratio <= 1 + 1e-6 or req >= tp.BIG / 2:
             continue
-        out.append(Check("SIZE", f"{factory} net {name}",
+        out.append(Check("size", f"{factory} net {name}",
                          f"at the sized counts ({', '.join(f'{p} n={rows[p].n}' for p in sized)}) "
                          f"it asks {req:.2f}/s where its {routedmod.word(r.lg, nid)} carry "
                          f"{cap:.2f}/s (ratio {ratio:.2f}): a yellow lane carries 7.5/s, red 15, "

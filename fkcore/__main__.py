@@ -8,7 +8,7 @@ use the game link, and only with FK_LINK=on)
                                           the nominal rate model and its asserts; n=auto rows
                                           sized first, as the build's size step sizes them;
                                           then the routed rates on FILE.fkp as last laid out
-                                          (lanes and inserters: CAPACITY, LANE), when it has
+                                          (lanes and inserters: too-thin, WRONG-LANE), when it has
                                           routes
     plan ITEM RATE | plan ITEM --machines N [--asm A] [--furnace F] [--mining-productivity L]
          [--recipe ITEM=RECIPE,...] [--raw ITEM,...]

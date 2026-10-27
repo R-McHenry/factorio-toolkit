@@ -74,8 +74,8 @@ The toolkit can answer most of the questions you will hit. Reach for a command b
 out by hand:
 
 - the design says one thing and the world another → `fk look X0,Y0,X1,Y1`: look small and often
-- a ghost that stays → `fk look` says `GHOST SHORT` (the network has none of that item: make it) or
-  `GHOST LOCKED` (its recipe needs research: `fk tech ITEM` says which)
+- a ghost that stays → `fk look` says `ghost SHORT` (the network has none of that item: make it) or
+  `ghost needs-research` (its recipe needs research: `fk tech ITEM` says which)
 - can you afford the next piece → `fk build` says it before it pastes (`out\report_bom.txt`)
 - how many machines, furnaces and drills the next size takes → `fk plan ITEM 1/s`, or
   `fk plan chemical-science-pack --machines 15`: every step of the recipe tree, down to the drills;
@@ -87,7 +87,7 @@ out by hand:
   recipe switch jam it → `fk fresh X0,Y0,X1,Y1` takes those up, and the next `fk build` lays them
   fresh (a belt or pipe the build lays under another net is renewed by the build itself)
 - a factory makes less than its numbers on paper → after `fk build`, `out\report_rates.txt` has
-  the routed rates: a `CAPACITY` line names the belt lane or inserter that is too thin; `tier
+  the routed rates: a `too-thin` line names the belt lane or inserter that is too thin; `tier
   minimize --allow yellow,red` in the build script lays red belts where yellow is too thin
 - what is the factory really making → `fk stats`
 - **what do you have** → `fk stock`: every item the base holds, chests and roboports apart. A
@@ -124,7 +124,7 @@ Two ways to feed a factory, for two phases of the base. Running both pays for bo
   a belt in the same move.
 - **Both at once is the worst of both worlds**: belts where the shape is still changing, logistic
   chests where the flows grow.
-- **Two items into one row go on one belt, one lane each** (`lanes A | B`); the build's `LANES`
+- **Two items into one row go on one belt, one lane each** (`lanes A | B`); the build's `could-pair`
   check names the pair when you leave them on two belts.
 
 ## Robots and roboports

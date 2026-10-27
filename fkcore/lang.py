@@ -569,7 +569,7 @@ class _P:
         tok = self.name("a wire, network or instance")
         parts = [tok.text]
         if self.peek().text != ".":
-            self.err(f"a condition reads W.SIGNAL, network.ITEM or INSTANCE.SIGNAL, got "
+            self.err(f"a condition reads W.no-signal, network.ITEM or INSTANCE.no-signal, got "
                      f"{tok.text!r}", tok)
         while self.accept("."):
             parts.append(self.word("a signal").text)

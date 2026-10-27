@@ -69,7 +69,7 @@ class ModuleScopeTest(unittest.TestCase):
         pinned, _again = flow._module_pinned(flat2, prev, CAT, "rib0")
         r = route.route_layout(flat2, lay2, CAT, patch=pinned)
         self.assertEqual(r.failed, {})
-        self.assertFalse([ln for ln in r.lines if ln.startswith(("SEAL", "PORT"))], r.lines)
+        self.assertFalse([ln for ln in r.lines if ln.startswith(("crosses-frame", "port"))], r.lines)
         self.assertEqual([lk.text for lk in []], [])
         # rib1's carriers stand exactly where they were, and rib0's moved with it
         for net in ("rib1/fe", "rib1/g", "r1", "g1"):

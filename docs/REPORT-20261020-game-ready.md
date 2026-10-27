@@ -12,13 +12,13 @@ Every lab game, diffed with the merged toolkit (`main` e61ddb9), is 1:1:
 
 | game | where (lab) | what | diff |
 |---|---|---|---|
-| lab-merge | 200,400 | iron + gears, lab rules; Rory's power adopted | OK 122 |
-| lab-play | 200..250, 590..645 | gears + red science, **play rules**: ghosts built by robots from a kit | OK 134 |
-| lab-sense | 310,420 | the live look, notify, alerts (worker sense) | OK 120 |
-| lab-terrain | 460..700, 400..640 | a real iron patch, pond and cliffs transplanted from nauvis (worker terrain) | OK 386 |
-| lab-fluids | 740..860, 400..560 | water -> boilers -> engines, sulfur (worker fluids) | OK 49 |
-| lab-kxm | 880..1010, 400..640 | a 3 -> 2 sushi net through a hub (worker router) | OK 55, MARKED 1 |
-| lab-redgreen | 200,200 | the bench's red-green build; Rory's power kept as his mark | OK 1014, MARKED 1 |
+| lab-merge | 200,400 | iron + gears, lab rules; Rory's power adopted | ok 122 |
+| lab-play | 200..250, 590..645 | gears + red science, **play rules**: ghosts built by robots from a kit | ok 134 |
+| lab-sense | 310,420 | the live look, notify, alerts (worker sense) | ok 120 |
+| lab-terrain | 460..700, 400..640 | a real iron patch, pond and cliffs transplanted from nauvis (worker terrain) | ok 386 |
+| lab-fluids | 740..860, 400..560 | water -> boilers -> engines, sulfur (worker fluids) | ok 49 |
+| lab-kxm | 880..1010, 400..640 | a 3 -> 2 sushi net through a hub (worker router) | ok 55, marked 1 |
+| lab-redgreen | 200,200 | the bench's red-green build; Rory's power kept as his mark | ok 1014, marked 1 |
 
 Measured against the nominal model (`fk measure`, fair play: the area only):
 - red science 15.96/min against 18.00 (0.89) on lab-play;
@@ -31,16 +31,16 @@ Measured against the nominal model (`fk measure`, fair play: the area only):
 kickoff's `setup_v1.py`, a run folder from `new_run.py`, then only the agent's own `fk`:
 - setup: bootstrap 16/16, kit 6 chests with nothing short, 50 + 50 robots, speed 1 / cargo 1;
 - `fk read-terrain`: 256x256 at spawn, 2262 water tiles, the patches;
-- `fk build`: the plant and its pole chain as ghosts, built by robots in 15 s; the live look OK
+- `fk build`: the plant and its pole chain as ghosts, built by robots in 15 s; the live look ok
   29/29; the reactor fed by its own requester (19 cells delivered, 2 in the reactor, 117 C after 45 s);
 - the example gears factory placed outside the kit's logistic square: `cover robots` gave it a
   roboport, the requester asks for iron-plate:75 in a network, robots built it in 20 s, the look
-  OK 34/34; the first gears after 75 s (the early grid is solar), 27 in the next 30 s, `fk measure`
+  ok 34/34; the first gears after 75 s (the early grid is solar), 27 in the next 30 s, `fk measure`
   77.96/min against the model's 37.50; Rory's chat line shows at the end of the next command.
 
 The four rehearsals before it found what the paper could not, all fixed: requesters asked for
 nothing; the blueprint paste refuses the offshore pump; robots flying through a look read as
-MARKED; a chest outside the robot network was never served.
+marked; a chest outside the robot network was never served.
 
 ## What is built (CORE-V1 categories)
 
@@ -53,7 +53,7 @@ MARKED; a chest outside the robot network was never served.
    code too (`fk_chat.lua`, checked on a laptop server).
 4. **Terrain**: `read-terrain` from a live map (nauvis 576x576: water 2906, iron 2 patches, ...),
    `@patch` for MinerRow (6/6 drills on ore), the terrain as an obstacle for routes, poles and
-   bridges (`ON_TERRAIN`, `OFF_ORE`).
+   bridges (`on-water-or-cliff`, `no-ore`).
 5. **The agent side** (drafts in v5): the brief `agent/prompts/core-v1.md`, TOOLKIT, LANGUAGE,
    EXAMPLES; `fk`, the one command; the run template, `new_run.py`, `setup_v1.py`, `kickoff-v1.sh`
    (`docs/AGENT-KIT.md`).
@@ -62,7 +62,7 @@ MARKED; a chest outside the robot network was never served.
 7. **Router gaps**: k->m nets through a hub (spm10's iron 1->26 connects 608/608, the mall 20->1),
    the underground guard (14 adversarial cases, 13 of which the old router failed).
 
-Also new: `cover robots` and `NO_ROBOTS`; `fkcore.apply` (the only world write) with its lab and
+Also new: `cover robots` and `no-robots`; `fkcore.apply` (the only world write) with its lab and
 play rules; `measure`; the CLI of adopt, merge, insert, chests-to-net, net-to-chests.
 
 ## Rory's edits

@@ -11,7 +11,7 @@ the ones set by hand, and placed nothing.
 ``lua_read`` blueprints the area in the game and writes each entity's blueprint fields with its
 position (the game's own export of its settings, as a paste reads them). ``design`` gives the same
 fields for the design's rows (``codec``, as the paste writes them), and ``drifts`` compares them
-for the entities that stand where the design has them (a diff's OK and DRIFT): ``KEYS``
+for the entities that stand where the design has them (a diff's ok and settings-changed): ``KEYS``
 (recipe, control behaviour, filters, requests, a chest's limit) and the circuit wires between
 them. Before comparing, what the game exports by default is dropped. Each difference is a line
 for the hand edits (``sense.hand_edits``): who changed what, and what the paste does about it.
@@ -178,10 +178,10 @@ def design(rows, s):
 
 
 def drifts(want, have, verdicts, users):
-    """The design's entities that stand (a diff's OK or DRIFT verdicts) with other settings than
+    """The design's entities that stand (a diff's ok or settings-changed verdicts) with other settings than
     ``want`` (``design``) has, in ``have`` (``live``): [Drift]. ``users``: {at: last_user}. Wires
     count only between entities both sides judge."""
-    judged = {_at(v.name, v.x, v.y): v for v in verdicts if v.verdict in ("OK", "DRIFT")}
+    judged = {_at(v.name, v.x, v.y): v for v in verdicts if v.verdict in ("ok", "settings-changed")}
     both = {k for k in judged if k in want and k in have}
     out = []
     for k in sorted(both, key=lambda k: (fkpmod.natural_key(judged[k].key or ""), k)):

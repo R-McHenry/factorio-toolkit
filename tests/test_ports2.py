@@ -4,7 +4,7 @@
    since 2.0.30, but 2.0's net was one lane: the port's carrier carried ``net=A`` and the crossing
    route behind it ran one lane at 7.5/s. Now the carrier says ``net=A|A`` (both lanes are the
    net's), so a two-sided source (a ``MinerRow`` drops onto both lanes) crosses at 15/s on yellow,
-   and ``CAPACITY`` rates the **port's width**: an ``X | X`` port is 15/s, a one-lane port (``@e4L``)
+   and ``too-thin`` rates the **port's width**: an ``X | X`` port is 15/s, a one-lane port (``@e4L``)
    7.5/s. A rear: a both-lane port also asks for both lanes' flow.
 2. **A port tile faces its partner unless pinned**: the tile of the declared side nearest the other
    end's attach point, instead of the middle of that side.
@@ -121,7 +121,7 @@ class BothLaneTest(unittest.TestCase):
     def test_a_15_s_crossing_routes_through_one_port_on_both_lanes(self):
         flat, _lay, r = build(PLOT)
         self.assertEqual(r.failed, {})
-        self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
+        self.assertEqual([ln for ln in r.lines if ln.startswith(("crosses-frame", "FRAME", "port"))], [])
         rr = routed.solve(flat, r.layout, CAT)
         for key in ("plot/ore", "base/ore"):
             lanes = [(inside_belt(flat, r.layout, key), lane) for lane in ("L", "R")]
@@ -129,7 +129,7 @@ class BothLaneTest(unittest.TestCase):
             self.assertEqual([round(x, 3) for x in need], [7.5, 7.5], key)   # 15/s in all
             self.assertEqual([rr.lg.nodes[nid].cap for nid in lanes], [7.5, 7.5])
         _lines, checks = routed.report(rr, "t")
-        self.assertEqual([c for c in checks if c.code == "CAPACITY" and c.where.startswith("port")],
+        self.assertEqual([c for c in checks if c.code == "too-thin" and c.where.startswith("port")],
                          [])                      # a both-lane port carries the 15/s it is asked
 
     def test_a_one_lane_port_is_rated_at_one_lane(self):
@@ -137,7 +137,7 @@ class BothLaneTest(unittest.TestCase):
         self.assertEqual(r.failed, {})
         rr = routed.solve(flat, r.layout, CAT)
         _lines, checks = routed.report(rr)
-        ports = [c for c in checks if c.code == "CAPACITY" and c.where.startswith("port")]
+        ports = [c for c in checks if c.code == "too-thin" and c.where.startswith("port")]
         self.assertEqual([c.where for c in ports], ["port base/ore", "port plot/ore"])
         for c in ports:
             self.assertIn("15.00/s asked through it", c.msg)
@@ -173,7 +173,7 @@ class PortTileTest(unittest.TestCase):
                                                                "iron-plate"))
         self.assertEqual((port_at(flat, lay, "rib/iron").x, port_at(flat, lay, "rib/iron").y),
                          (40.5, 12.5))
-        self.assertFalse([ln for ln in r.lines if ln.startswith("PORT")])
+        self.assertFalse([ln for ln in r.lines if ln.startswith("port")])
 
     def test_a_turned_module_keeps_its_recorded_tile(self):
         # the rib turned a quarter turn clockwise: the recorded tile is in its own frame, so it
@@ -187,7 +187,7 @@ class PortTileTest(unittest.TestCase):
         self.assertEqual(port_at(_f2, lay2, "rib/iron").dir, 8)     # E in the own frame, turned
         self.assertEqual((port_at(_f2, lay2, "rib/iron").x, port_at(_f2, lay2, "rib/iron").y),
                          (45.5, 10.5))
-        self.assertEqual([ln for ln in r2.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
+        self.assertEqual([ln for ln in r2.lines if ln.startswith(("crosses-frame", "FRAME", "port"))], [])
         # a fresh build of the turned design (no record) chooses to face its partner instead
         _f3, lay3, _r3 = build(turned)
         self.assertEqual(lay3.ports["rib.iron"].y, 9)
@@ -214,13 +214,13 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(inside(r1, "~rib/", 10), inside(r2, "~rib/", 60))
         self.assertEqual((port_at(_f2, lay2, "rib/iron").x, port_at(_f2, lay2, "rib/iron").y),
                          (40.5, 64.5))
-        self.assertEqual([ln for ln in r2.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
+        self.assertEqual([ln for ln in r2.lines if ln.startswith(("crosses-frame", "FRAME", "port"))], [])
 
     def test_a_pin_and_a_record_that_disagree_is_a_port_line(self):
         _f1, lay1, _r1 = build(RIB)
         # the source now pins the port two rows above the committed tile: the pin wins
         _f2, _lay2, r2 = build(RIB.replace("iron-plate @w", "iron-plate @w2"), lay1)
-        lines = [ln for ln in r2.lines if ln.startswith("PORT")]
+        lines = [ln for ln in r2.lines if ln.startswith("port")]
         self.assertEqual(len(lines), 1, r2.lines)
         self.assertIn("rib/iron", lines[0])
         self.assertIn("the committed tile 0,4 is dropped: the pin @w2 moves it to 0,2", lines[0])
@@ -235,7 +235,7 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(r2.failed, {})
         # the next build reads the new record: the line is gone
         _f3, _lay3, r3 = build(RIB.replace("iron-plate @w", "iron-plate @w2"), lay2)
-        self.assertFalse([ln for ln in r3.lines if ln.startswith("PORT")])
+        self.assertFalse([ln for ln in r3.lines if ln.startswith("port")])
 
     def test_a_port_moved_to_another_side_is_chosen_again(self):
         _f1, lay1, _r1 = build(RIB)
@@ -243,7 +243,7 @@ class RecordTest(unittest.TestCase):
         rec = lay2.ports["rib.iron"]
         self.assertEqual(rec.y, 0)                              # on the north edge now
         self.assertEqual(port_at(_f2, lay2, "rib/iron").y, 10.5)
-        lines = [ln for ln in r2.lines if ln.startswith("PORT")]
+        lines = [ln for ln in r2.lines if ln.startswith("port")]
         self.assertEqual(len(lines), 1, r2.lines)
         self.assertIn("not on the n edge", lines[0])
         self.assertEqual(r2.failed, {})
@@ -261,7 +261,7 @@ class RecordTest(unittest.TestCase):
                      .replace("feed -> rib.iron", "feed -> rib.input")
         f = lang.parse(renamed, "t.fk")
         flat = elaborate(f, dict(f.modules), CAT, "t", layout=lay1)
-        gone = [c for c in flat.checks if c.code == "PORT" and "declares no such port" in c.msg]
+        gone = [c for c in flat.checks if c.code == "port" and "declares no such port" in c.msg]
         self.assertEqual(len(gone), 1, flat.checks)
         self.assertIn("rib/iron", gone[0].where)
 

@@ -32,7 +32,7 @@ read_terrain    none
 elaborate
 place           --keep pinned
 route           --only stale --effort normal --hand any
-hands           {mode}
+hands {mode}
 report_checks
 write_layout
 """

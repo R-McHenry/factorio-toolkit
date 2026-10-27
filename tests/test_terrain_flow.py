@@ -1,5 +1,5 @@
 """The flow on a fixture terrain: @patch on ore, routes and poles round water and cliffs, and
-ON_TERRAIN on a bad placement (a check, never a gate). No game."""
+on-water-or-cliff on a bad placement (a check, never a gate). No game."""
 import os
 import shutil
 import tempfile
@@ -132,13 +132,13 @@ class TerrainFlowTest(unittest.TestCase):
             fh.write(src)
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)                    # a check, not a gate
-        on = [c for _s, c in ctx.checks if c.code == "ON_TERRAIN"]
+        on = [c for _s, c in ctx.checks if c.code == "on-water-or-cliff"]
         self.assertTrue(on)
         self.assertTrue(all(c.where.startswith("nauvis:iron/") for c in on), [str(c) for c in on])
         self.assertIn("stone-furnace at 33,34 stands on 4 water tiles (first 32,33)",
                       [c.msg for c in on])
         self.assertEqual(sum(c.where.startswith("nauvis:iron/smelt/") for c in on), 20)
-        self.assertIn("ON_TERRAIN", self.read("report_checks.txt"))
+        self.assertIn("on-water-or-cliff", self.read("report_checks.txt"))
 
     def test_off_water_fires_for_a_pump_on_dry_ground(self):
         # 1.4.2: the lead world's plant pump stood where world 3 had a lake
@@ -147,8 +147,8 @@ class TerrainFlowTest(unittest.TestCase):
                 fh.write(IRON + f"pump = OffshorePump<rate=1200/s> {at}\n")
             code, ctx = self.build()
             self.assertEqual(code, 0, ctx.log)
-            off = [c.msg for _s, c in ctx.checks if c.code == "OFF_WATER"]
-            on = [c.msg for _s, c in ctx.checks if c.code == "ON_TERRAIN"]
+            off = [c.msg for _s, c in ctx.checks if c.code == "no-water"]
+            on = [c.msg for _s, c in ctx.checks if c.code == "on-water-or-cliff"]
             self.assertEqual(on, [])
             if dry:
                 self.assertEqual(off, ["offshore-pump at 50.5,40.5: 6 of the 6 tiles it pumps "
@@ -162,7 +162,7 @@ class TerrainFlowTest(unittest.TestCase):
             fh.write(src)
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
-        off = [c for _s, c in ctx.checks if c.code == "OFF_ORE"]
+        off = [c for _s, c in ctx.checks if c.code == "no-ore"]
         self.assertEqual(len(off), 4, [str(c) for c in off])
         self.assertIn("0/4 drills with ore under every tile", self.read("floorplan.txt"))
 

@@ -6,7 +6,7 @@ an apply pasted (its key, name, position, direction and, for a carrier, its surf
 ``<factory>/<net>``). With it:
 
 - an entity of the toolkit's that the design has dropped (a row replaced, a plot moved, shrunk or
-  emptied, a place line removed) is ``NOBODY`` in a diff or a look, whatever the watch policy
+  emptied, a place line removed) is ``unowned`` in a diff or a look, whatever the watch policy
   says, and the next apply orders it out, an unbuilt ghost included (``fkcore.sense``). A player
   who touched it (a ``last_user``) makes it a foreign change again, under the policy. The 0534 run
   (2026-10-20) kept its own dropped rows under ``watch plots: keep``, left 166 entities standing
@@ -146,7 +146,7 @@ def rows_of(s):
 
 
 def resettled(record, s, verdicts):
-    """The verdicts (OK, DRIFT or GHOST: it stands or is pending) of entities the record shows
+    """The verdicts (ok, settings-changed or ghost: it stands or is pending) of entities the record shows
     pasted with other circuit settings than the design ``s`` has now: the next apply lays them
     fresh. A row the record has no signature for (``UNKNOWN``) is left alone."""
     if not record:
@@ -154,7 +154,7 @@ def resettled(record, s, verdicts):
     design = rows_of(s)
     out = []
     for v in verdicts:
-        if v.verdict not in ("OK", "DRIFT", "GHOST"):
+        if v.verdict not in ("ok", "settings-changed", "ghost"):
             continue
         k = at(v.name, v.x, v.y)
         row, now = record.get(k), design.get(k)

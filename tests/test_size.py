@@ -221,7 +221,7 @@ class NetsTest(unittest.TestCase):
                                          "at 1.000/s (its rate=) (through net gear: "), w.why)
         checks = size.report(sz, CAT)[1]
         self.assertEqual([(c.code, c.where) for c in checks],
-                         [("SIZE", "target automation-science-pack 1/s")])
+                         [("size", "target automation-science-pack 1/s")])
         self.assertIn("plates is a requester chest at 1.000/s", checks[0].msg)
 
     def test_an_unbounded_requester_leaves_the_row_at_its_low_bound(self):
@@ -246,7 +246,7 @@ class BoundsTest(unittest.TestCase):
         lines, checks = size.report(sz, CAT)
         self.assertIn("red n=5 (auto 1..5, at its top)", lines[0])
         self.assertEqual([(c.code, c.where, c.msg) for c in checks],
-                         [("SIZE", "target automation-science-pack 1/s",
+                         [("size", "target automation-science-pack 1/s",
                            "0.500/s: red is at n=5, the top of its auto 1..5")])
 
     def test_a_low_bound_is_kept(self):
@@ -292,9 +292,9 @@ class FitTest(unittest.TestCase):
         self.assertEqual(counts(sz), {"ore": 12, "smelt": 20})
         checks = size.fit(sz, self.PLACES, CAT)
         self.assertEqual([(c.code, c.where, c.msg) for c in checks], [
-            ("FIT", "t ore", "n=12 (auto) makes it 18x7 at @(0, 0): its frame overlaps coal's "
+            ("does-not-fit", "t ore", "n=12 (auto) makes it 18x7 at @(0, 0): its frame overlaps coal's "
                             "(3x4 at @(16, 0)) on 2x4 tiles"),
-            ("FIT", "t smelt", "n=20 (auto) makes it 40x7 at @(0, 10): its frame overlaps box's "
+            ("does-not-fit", "t smelt", "n=20 (auto) makes it 40x7 at @(0, 10): its frame overlaps box's "
                               "(1x1 at @(30, 12)) on 1x1 tiles")])
         small = sized(text.replace("rate=6/s", "rate=1/s"))   # 4 furnaces, 2 drills: room enough
         self.assertEqual(size.fit(small, self.PLACES, CAT), [])
@@ -307,7 +307,7 @@ class FitTest(unittest.TestCase):
 
 
 class FlowTest(unittest.TestCase):
-    """The step in a build: out/size.txt, the counts placed, a rebuild that keeps them, FIT, the
+    """The step in a build: out/size.txt, the counts placed, a rebuild that keeps them, does-not-fit, the
     belts after route, and a script without the step."""
 
     def setUp(self):
@@ -353,7 +353,7 @@ class FlowTest(unittest.TestCase):
                              and e.name == "assembling-machine-1"), 10)
         self.assertIn("target automation-science-pack 60/min: met", self.read("out",
                                                                               "report_rates.txt"))
-        self.assertEqual([c.code for _s, c in ctx.checks if c.code in ("SIZE", "FIT", "TARGET")],
+        self.assertEqual([c.code for _s, c in ctx.checks if c.code in ("size", "does-not-fit", "target-not-met")],
                          [])
         first = self.read("main.fkp")
         self.build(script)
@@ -388,12 +388,12 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(code, 1)                               # place: two entities on a tile
         self.assertEqual(ctx.sized.counts("main"), dict(iron_ore=8, copper_ore=4, coal=1, iron=13,
                                                         copper=7, gears=2, red=20))
-        fit = [c for s, c in ctx.checks if c.code == "FIT"]
+        fit = [c for s, c in ctx.checks if c.code == "does-not-fit"]
         self.assertEqual([(c.where, c.msg) for c in fit], [
             ("main iron", "n=13 (auto) makes it 26x7 at @(16, 14): its frame overlaps copper's "
                           "(14x7 at @(40, 14)) on 2x7 tiles")])
         self.assertTrue(ctx.log[-1].startswith("[ 6/9] place"), ctx.log)
-        self.assertEqual({c.code for s, c in ctx.checks if s == "place"}, {"INVARIANT"})
+        self.assertEqual({c.code for s, c in ctx.checks if s == "place"}, {"malformed"})
 
     def test_a_sized_net_past_a_yellow_lane_says_so_after_route(self):
         fk = ("ore   = MinerRow<n=auto, resource=iron-ore>      @(16, 2, rot 2)\n"
@@ -407,8 +407,8 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(ctx.sized.counts("main"), {"ore": 20, "coal": 2, "iron": 32})
         self.assertIn("net iron_p: 10.000/s at these counts (sized: iron), more than a yellow lane "
                       "carries (7.5/s)", self.read("out", "size.txt"))
-        size_lines = [c for s, c in ctx.checks if c.code == "SIZE"]
-        self.assertEqual([(s, c.where) for s, c in ctx.checks if c.code == "SIZE"],
+        size_lines = [c for s, c in ctx.checks if c.code == "size"]
+        self.assertEqual([(s, c.where) for s, c in ctx.checks if c.code == "size"],
                          [("report_rates", "main net iron_p")])
         self.assertIn("at the sized counts (iron n=32) it asks 10.00/s where its yellow lanes "
                       "carry 7.50/s (ratio 1.33)", size_lines[0].msg)
@@ -417,7 +417,7 @@ class FlowTest(unittest.TestCase):
         script = self.game(RED, "target automation-science-pack 1/s\n",
                            script="read_surface nauvis\nread_terrain none\nelaborate\n")
         ctx = self.build(script)
-        size_checks = [c for _s, c in ctx.checks if c.code == "SIZE"]
+        size_checks = [c for _s, c in ctx.checks if c.code == "size"]
         self.assertEqual(len(size_checks), 1)
         self.assertIn("no size step in the build script: each keeps the count its .fkp laid out "
                       "last, else its low bound", size_checks[0].msg)
@@ -440,15 +440,15 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(ctx.sized.counts("main"), {"gears": 1, "red": 10, "labs": 10})
         self.assertIn("main: 4 routed, 0 kept (0 pinned from the committed .fkp), 0 failed",
                       self.read("out", "route.txt"))
-        self.assertEqual([c.code for _s, c in ctx.checks if c.code in ("SIZE", "FIT", "UNROUTED",
-                                                                        "CAPACITY")], [])
+        self.assertEqual([c.code for _s, c in ctx.checks if c.code in ("size", "does-not-fit", "no-route",
+                                                                        "too-thin")], [])
         # 1.5 packs/s: the requesters give what 1/s takes (2 iron, 1 copper a second)
         with open(os.path.join(self.dir, "nauvis.surface"), "a", encoding="utf-8") as fh:
             fh.write("target automation-science-pack 1.5/s\n")
         code, ctx = flow.run(script, cat=CAT, echo=lambda _line: None, to="size")
         self.assertEqual(code, 0)
-        checks = [(c.code, c.where, c.msg) for _s, c in ctx.checks if c.code in ("SIZE", "FIT")]
-        self.assertEqual([c[:2] for c in checks], [("SIZE", "target automation-science-pack 90/min")])
+        checks = [(c.code, c.where, c.msg) for _s, c in ctx.checks if c.code in ("size", "does-not-fit")]
+        self.assertEqual([c[:2] for c in checks], [("size", "target automation-science-pack 90/min")])
         self.assertIn("copper is a requester chest at 1.000/s (its rate=)", checks[0][2])
         self.assertEqual(ctx.sized.counts("main"), {"gears": 1, "red": 10, "labs": 10})
 

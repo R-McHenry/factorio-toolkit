@@ -8,7 +8,7 @@ sets (CORE.md "Objects"):
 else the drivers' products), 4. explicit consumers, 5. ``X.*`` consumers (free input endpoints).
 
 A ref adds only endpoints of the net's items. The checks are report lines and never stop anything:
-TYPE, SUSHI_SINK, UNFED, UNCONSUMED, DOUBLE, UNBOUNDED. Malformed source (an unknown template, a
+cannot-carry, SUSHI_SINK, no-feed, no-taker, two-nets, no-rate. Malformed source (an unknown template, a
 ref that resolves to nothing, a bad parameter) raises ElabError: no netlist exists for it.
 
 An ``n=auto`` row (1.6, ``AUTO_KINDS``) is elaborated with the count ``sizes`` gives it (the
@@ -23,8 +23,8 @@ gears``), and the bus joins them. A port no net names is in none, and no check l
 
 Circuits (2.0): the ``signal``, ``wire``, ``behave`` and ``expect`` statements of every scope, a
 net's ``when`` and an instance's ``when`` are kept with their scope, and ``fkcore.circuits``
-resolves them into ``Flat.circuit`` after the nets, with its own checks (SIGNAL, WIRE, GATED,
-REQUIRE, LIMIT, GUARD).
+resolves them into ``Flat.circuit`` after the nets, with its own checks (no-signal, no-wire, gate-open,
+require-not-met, LIMIT, cannot-filter).
 
 ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can share a belt) pairs two
 nets of the same module: ``Flat.pairs`` maps the pair's ``.fkp`` net (``A|B``, A on the left lane)
@@ -99,7 +99,10 @@ class Check:
     line: int = 0
 
     def __str__(self):
-        return f"{self.code:<11} {self.where}: {self.msg}"
+        # 2.0.52: no fixed column. The codes run from `ok` to `not-where-designed`, and a padded
+        # column of them was the loud look this release is about; the code now reads as the first
+        # word of the line
+        return f"{self.code} {self.where}: {self.msg}"
 
 
 @dataclass
@@ -152,7 +155,7 @@ class PortInst:
 
     def width_of(self, item):
         """How many of the port's lanes carry ``item``: 2 for ``X | X``, 1 for a pair's lane or a
-        one-lane port (the capacity ``CAPACITY`` rates the port at)."""
+        one-lane port (the capacity ``too-thin`` rates the port at)."""
         lanes = self.lanes()
         return sum(1 for _lane, items in lanes if item in items)
 
@@ -505,7 +508,7 @@ def _sealed_msg(flat, node, ref, items, side):
     ports = [p for p in flat.ports.values() if p.scope == node.path]
     item = ", ".join(items) if items else "ITEM"
     want = "out" if side == "driver" else "in"
-    example = f"{node.path}.{ports[0].name}" if ports else f"{node.path}.PORT"
+    example = f"{node.path}.{ports[0].name}" if ports else f"{node.path}.port"
     return (f"{ref}: {node.path} is a sealed module ({node.kind}), and its ports are "
             f"{_ports_text(flat, node)}. Name a port (e.g. {example}), or add one to module "
             f"{node.kind}: `port NAME : {want} {item} @SIDE`, and give it a net inside")
@@ -753,7 +756,7 @@ def _bus_conns(flat, cat):
     """A Bus's connection list (2.0.32, PLAN-MODULES §4): the named entries are nets, written in port
     order. Direction comes from the netlist — an out port or a maker is a load, an in port or a taker
     is a tap — the staircases take their positions from the order (each band clears the one before by
-    two tiles), `length` follows, and a tap written before any load is an ``ORDER`` line."""
+    two tiles), `length` follows, and a tap written before any load is an ``tap-too-early`` line."""
     shared = {}                                 # scope -> how many of its buses have a mouth
     for path, inst in flat.insts.items():
         if any(c.startswith("in") and c[2:].isdigit() for c, _r, _k in inst.conns or ()):
@@ -802,7 +805,7 @@ def _bus_conns(flat, cat):
             if kind in ("load", "mouth"):
                 upstream = True
             elif not upstream:
-                flat.checks.append(Check("ORDER", f"bus {path}",
+                flat.checks.append(Check("tap-too-early", f"bus {path}",
                                          f"{cname} is a tap before any load: nothing upstream feeds "
                                          "the bus there", ref.line))
         # 2.0.46: a staircase stands where its endpoint stands along the bus (``_conn_want``), never
@@ -883,11 +886,11 @@ def _resolve_nets(flat):
         return keys
 
     def port_items_check(name, ref, w, keys):
-        """``PORT``: a port named by a net that carries none of the port's items (2.0.28)."""
+        """``port``: a port named by a net that carries none of the port's items (2.0.28)."""
         port = flat.ports[keys[0]]
         flat._port_named.setdefault(keys[0], set()).add(name)
         flat.checks.append(Check(
-            "PORT", f"port {ref}",
+            "port", f"port {ref}",
             f"net {name} carries {_items_text(w['items'])}, and port {port.name} is "
             f"{port.dir} {_port_items(port)}", ref.line))
 
@@ -914,7 +917,7 @@ def _resolve_nets(flat):
             if keys and all(k in flat.ports for k in keys) and not free_only:
                 port_items_check(name, ref, w, keys)
             else:
-                flat.checks.append(Check("TYPE", f"net {name}", f"driver {ref} makes no "
+                flat.checks.append(Check("cannot-carry", f"net {name}", f"driver {ref} makes no "
                                          + _items_text(w["items"]) + (" that is still free"
                                                                       if free_only else ""),
                                          ref.line))
@@ -939,7 +942,7 @@ def _resolve_nets(flat):
             if keys and all(k in flat.ports for k in keys) and not free_only:
                 port_items_check(name, ref, w, keys)
             else:
-                flat.checks.append(Check("TYPE", f"net {name}", f"consumer {ref} takes no "
+                flat.checks.append(Check("cannot-carry", f"net {name}", f"consumer {ref} takes no "
                                          + _items_text(w["items"]) + (" that is still free"
                                                                       if free_only else ""),
                                          ref.line))
@@ -961,7 +964,7 @@ def _resolve_nets(flat):
             made = {item for _key, item in w["drivers"]}
             for item in w["items"]:
                 if item not in made:
-                    flat.checks.append(Check("TYPE", f"net {name}",
+                    flat.checks.append(Check("cannot-carry", f"net {name}",
                                              f"expects {item} but no driver makes it", p.net.line))
     for star in (False, True):
         for name, p in pending:
@@ -1040,7 +1043,7 @@ def _group(rows):
 _STORES = ("provider", "storage")
 #: the 1.1 check lines about limited production, and 2.0.1's UNDERFED (a rate fact about the
 #: design): advice that tests of other things, and fk stage check's list, leave out
-ADVICE = ("CLOG", "UNLIMITED", "SHARED_SINK", "SUSHI_LIMIT", "UNDERFED", "LANES")
+ADVICE = ("CLOG", "no-limit", "SHARED_SINK", "SUSHI_LIMIT", "short-feed", "could-pair")
 #: chests that take any item that reaches them
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
 
@@ -1076,7 +1079,7 @@ def _clog_checks(flat, in_hold, fed):
       only requester chests drive as limited, and 1.7 a net into chests that take
       anything; both went, a requester refills what its belt takes and a full chest stops the
       belt.
-    - ``UNLIMITED``: provider or storage chests without ``limit=`` (one line per factory): what
+    - ``no-limit``: provider or storage chests without ``limit=`` (one line per factory): what
       reaches them goes into the logistic network without end (the 0534 run's network held 4800
       iron and 5300 copper plates). 1.7 (Rory, 2026-10-21: a multi-item sink chest should
       generally have no limit; the limiting happens at the makers): a chest a mixed belt of
@@ -1089,7 +1092,7 @@ def _clog_checks(flat, in_hold, fed):
       belt backs up with every item on it, so the limit only brings the stop sooner.
 
     A net written ``limited`` (1.7) says the source limits each of its makers: no ``CLOG`` and
-    no ``UNLIMITED`` for it. It only silences them; no tool can tell whether a source is limited.
+    no ``no-limit`` for it. It only silences them; no tool can tell whether a source is limited.
     """
     sushi_in = {}                          # chest key -> the mixed nets of makers it takes
     for name, net in flat.nets.items():
@@ -1139,14 +1142,14 @@ def _clog_checks(flat, in_hold, fed):
                          and not all(flat.nets[n].limited for n in nets)})
     if sushi_open:
         flat.checks.append(Check(
-            "UNLIMITED", ", ".join(sushi_open),
+            "no-limit", ", ".join(sushi_open),
             "a mixed belt of makers fills " + ("them" if len(sushi_open) > 1 else "it") + " without "
             "end, unless each maker is limited: what one makes faster than it is taken fills the "
             "chest, and then the belt stops for the others too. A slot limit only brings that sooner "
             "(SUSHI_LIMIT); `net NAME limited:` says the source limits the makers"))
     if open_:
         flat.checks.append(Check(
-            "UNLIMITED", ", ".join(open_),
+            "no-limit", ", ".join(open_),
             "no limit=: what reaches " + ("them" if len(open_) > 1 else "it") + " goes into the "
             "logistic network without end. A limit= stops what feeds a chest once it holds that "
             "much"))
@@ -1218,14 +1221,14 @@ def _lane_checks(flat, cat):
         if len(consumers) > 1:
             where += f" ({len(consumers)} machines)"
         flat.checks.append(Check(
-            "LANES", f"net {first[0]} and {second[0]}",
+            "could-pair", f"net {first[0]} and {second[0]}",
             f"both feed {where} on belts of their own, a lane each: one belt carries both "
             f"(`lanes {first[0]} | {second[0]}`), one lane each, and each machine takes from both. "
             "Two half-empty belts otherwise", flat.nets[first[0]].line))
 
 
 def _port_checks(flat):
-    """``PORT`` (2.0.28, lane-level in 2.0.29; PLAN-MODULES), warn and never gate: a port no net
+    """``port`` (2.0.28, lane-level in 2.0.29; PLAN-MODULES), warn and never gate: a port no net
     uses on a side, a use against its direction, a declared item nothing carries, an item on one
     side only, a tile off its module's frame, and two ports on one lane of one tile.
 
@@ -1248,7 +1251,7 @@ def _port_checks(flat):
             other = lanes_taken.get(at)
             if other is not None:
                 flat.checks.append(Check(
-                    "PORT", f"port {key}",
+                    "port", f"port {key}",
                     f"@{port.side}{port.pos}{lane} is already {other}'s lane: one port a lane, "
                     "two lanes a tile", port.line))
             else:
@@ -1265,15 +1268,15 @@ def _port_checks(flat):
         named_in = {n for n in named.get(key, ()) if flat.nets[n].scope == port.scope}
         named_out = {n for n in named.get(key, ()) if flat.nets[n].scope != port.scope}
         if not uses and not named.get(key):
-            flat.checks.append(Check("PORT", f"port {key}",
+            flat.checks.append(Check("port", f"port {key}",
                                      f"no net names it: {port.dir} {_port_items(port)}", port.line))
             continue
         if not inside and not named_in:
-            flat.checks.append(Check("PORT", f"port {key}",
+            flat.checks.append(Check("port", f"port {key}",
                                      f"no net inside {port.module} uses it, so nothing carries "
                                      f"{_port_items(port)} through it", port.line))
         if not outside and not named_out and key not in flat.stack_ends:
-            flat.checks.append(Check("PORT", f"port {key}",
+            flat.checks.append(Check("port", f"port {key}",
                                      f"no net outside {port.scope} uses it: the interface is "
                                      "declared but not wired yet", port.line))
         bad = []
@@ -1284,14 +1287,14 @@ def _port_checks(flat):
                 bad.append(f"net {name} {'drives' if side == 'drivers' else 'takes from'} it "
                            f"{'inside' if own else 'outside'}")
         if bad:
-            flat.checks.append(Check("PORT", f"port {key}",
+            flat.checks.append(Check("port", f"port {key}",
                                      f"used against its direction ({port.dir}): " + "; ".join(bad),
                                      port.line))
         carried = {item for _n, _s, item in uses}
         declared = list(dict.fromkeys(port.all_items))     # one item twice is both lanes
         missing = [i for i in declared if i not in carried]
         if missing:
-            flat.checks.append(Check("PORT", f"port {key}",
+            flat.checks.append(Check("port", f"port {key}",
                                      f"nothing carries {', '.join(missing)} through it", port.line))
         # an item on one side and not the other is a hole in the interface, not a dead port: the
         # outside must bring what the inside takes, and take what the inside brings
@@ -1300,10 +1303,10 @@ def _port_checks(flat):
         if inside and outside:
             for item in declared:
                 if item in inside_items and item not in outside_items and not named_out:
-                    flat.checks.append(Check("PORT", f"port {key}",
+                    flat.checks.append(Check("port", f"port {key}",
                                              f"nothing outside brings {item} to it", port.line))
                 elif item in outside_items and item not in inside_items and not named_in:
-                    flat.checks.append(Check("PORT", f"port {key}",
+                    flat.checks.append(Check("port", f"port {key}",
                                              f"nothing inside {port.module} takes {item} from it",
                                              port.line))
         if port.pos is not None and port.size is not None:
@@ -1311,14 +1314,14 @@ def _port_checks(flat):
             along = w if port.side in "ns" else h
             if not 0 <= port.pos < along:
                 flat.checks.append(Check(
-                    "PORT", f"port {key}",
+                    "port", f"port {key}",
                     f"@{port.side}{port.pos} is off the module's frame: {port.module} is "
                     f"{w}x{h}, so its {port.side} edge runs 0..{along - 1}", port.line))
     # 2.0.41 (PLAN-GLOBAL phase A): a committed port tile whose port is gone
     for key in sorted(getattr(flat, "port_records", ())):
         if key not in flat.ports:
             flat.checks.append(Check(
-                "PORT", f"port {key}",
+                "port", f"port {key}",
                 "the committed .fkp records its tile, but this design declares no such port: "
                 "drop the port line"))
 
@@ -1328,7 +1331,7 @@ def _endpoint_checks(flat, cat):
     for side, hold in (("out", out_hold), ("in", in_hold)):
         for (key, item), nets in hold.items():
             if len(nets) > 1:
-                flat.checks.append(Check("DOUBLE", key, f"{item} ({side}) is on {len(nets)} "
+                flat.checks.append(Check("two-nets", key, f"{item} ({side}) is on {len(nets)} "
                                          "nets: " + ", ".join(nets)))
     fed = {key for key, _item in in_hold}
     unfed, unconsumed = [], []
@@ -1345,10 +1348,10 @@ def _endpoint_checks(flat, cat):
             if (key, item) not in out_hold:
                 unconsumed.append((m.inst, item, key))
     for inst, item, n in _group(unfed):
-        flat.checks.append(Check("UNFED", inst, f"{item} has no net"
+        flat.checks.append(Check("no-feed", inst, f"{item} has no net"
                                  + (f" ({n} machines)" if n > 1 else "")))
     for inst, item, n in _group(unconsumed):
-        flat.checks.append(Check("UNCONSUMED", inst, f"{item} goes on no net"
+        flat.checks.append(Check("no-taker", inst, f"{item} goes on no net"
                                  + (f" ({n} machines)" if n > 1 else "")))
     for name, net in flat.nets.items():
         if not net.sushi:
@@ -1383,4 +1386,4 @@ def _endpoint_checks(flat, cat):
                 msg += (f". The {n} machine{'s' if n > 1 else ''} on it "
                         f"take{'s' if n == 1 else ''} {take:g}/s: `fk stock` says what the network "
                         "holds, so compare that with this need before you size it")
-            flat.checks.append(Check("UNBOUNDED", m.inst, msg))
+            flat.checks.append(Check("no-rate", m.inst, msg))

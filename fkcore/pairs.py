@@ -19,7 +19,7 @@ two nets together once and lay them on together from there. It lays the pair as 
   stays on the left lane all the way. Every carrier of it is ``net=A|B``; a tap inserter
   ``net=A+B`` (it takes from both lanes what its machine accepts).
 
-So each net is one lane: at most 7.5/s on yellow, and the routed rates' ``CAPACITY`` says so where
+So each net is one lane: at most 7.5/s on yellow, and the routed rates' ``too-thin`` says so where
 a net brings more (a two-sided MinerRow's ore side-loaded onto one lane). Every carrier is keyed
 under the pair (``~A|B/b3``; A's own ``~A|B/lb3``, B's ``~A|B/rb3``), so a rebuild keeps or lays
 again the three parts together (``route --only stale``: one signature). The joins are tried best

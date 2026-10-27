@@ -49,7 +49,7 @@ Kept current through the night; the last check-in is the last line of the timeli
   101..126) that no robot would ever build; told in one line, the player moved its blue block into
   coverage within two minutes.
 - 02:11 toolkit 1.4.2 (`ba0b9ce`, `docs/RELEASE-1.4.2.md`): fixes for what the players wrote in
-  their FRICTION.md (fk syncs by content, UNREACHED in the world line, OFF_WATER, a bare entity
+  their FRICTION.md (fk syncs by content, UNREACHED in the world line, no-water, a bare entity
   list for a Literal, `trash` on a requester). Both loops restarted onto it.
 - 02:28 four consoles that said "The player loop has stopped" were the windows of loops I had
   restarted (and one of yesterday's 0534 run), not stopped runs: closed. `restart-loop.sh` (in
@@ -138,7 +138,7 @@ Kept current through the night; the last check-in is the last line of the timeli
   - A shop assembler crafted the silo, and 50 rocket parts followed.
   - Steel was the slow part: it had to be hauled about 150 tiles from the iron outpost.
 - It pressed the silo's button (`launch_rocket()` by `fk lua`), so rockets_launched is 1, and it
-  told you in chat. Your OK for the button came a minute later.
+  told you in chat. Your ok for the button came a minute later.
 - The rocket went up empty. For the next one, your note and the numbers reached the player: a
   space platform starter pack is 20 steel, 20 processing units and 60 foundations. That is about
   1220 steel and 1200 copper cable, and the network holds 1641 steel and 3942 cable.
@@ -183,7 +183,7 @@ Kept current through the night; the last check-in is the last line of the timeli
   carries the rest, two items at a time.
 - No item was added, nothing was changed by script, and no rule was bent.
 - 14:40 toolkit 1.6 (`469416f`, tag `v1.6`) went to both runs, merged from the `size` and `bus`
-  branches (529 tests OK). Both runs' designs lay out byte for byte as before (checked on copies).
+  branches (529 tests ok). Both runs' designs lay out byte for byte as before (checked on copies).
 
 ## For you
 

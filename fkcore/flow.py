@@ -27,16 +27,16 @@ never moves the rest of the base.
 
 ``size`` (1.6, ``fkcore.size``) gives every ``n=auto`` row its count: the fewest machines that
 meet the surface's targets, the factories' asserts and what each row's consumers ask, all the
-factories together, before anything is placed. Its report says what each count serves; ``FIT``
+factories together, before anything is placed. Its report says what each count serves; ``does-not-fit``
 says when a row grown that way runs past its plot or into another instance (rows grow, the
-player arranges them), and report_rates after route says (``SIZE``) when a net of a sized row
+player arranges them), and report_rates after route says (``size``) when a net of a sized row
 asks more of its belts than they carry.
 
 The terrain (``read_terrain <name>``: ``<name>.terrain.json``, ``fkcore.terrain``) is the bare
 world every layout step designs against: ``place`` puts each ``@patch`` MinerRow on its ore inside
 its plot, ``route`` and ``cover power`` keep their carriers and poles off its blocked tiles
-(water, cliffs), each factory's in its own frame, and ``floorplan`` reports ``ON_TERRAIN`` for a
-composed entity on blocked ground and ``OFF_ORE`` for a drill with no ore of its resource in
+(water, cliffs), each factory's in its own frame, and ``floorplan`` reports ``on-water-or-cliff`` for a
+composed entity on blocked ground and ``no-ore`` for a drill with no ore of its resource in
 reach. They are checks, never gates. With a terrain, a lab ``apply`` seeds no ore: the ore is
 the terrain's.
 
@@ -94,7 +94,7 @@ class Ctx:
     composed: compose.Surface | None = None
     terrain: set = field(default_factory=set)        # blocked ground tiles (none on paper)
     ground: object = None                            # the terrain.Terrain, when one is read
-    stop_on: set = field(default_factory=lambda: {"INVARIANT"})
+    stop_on: set = field(default_factory=lambda: {"malformed"})
     log: list = field(default_factory=list)          # one summary line per step run
     checks: list = field(default_factory=list)       # [(step, Check)] of every step run so far
     link: object = None                              # the game link (fkcore.link.Rcon), on use
@@ -224,7 +224,7 @@ def layout_source_changes(game):
     """What changed in the source of the placed factories (their modules' ``.fk``, the surface
     file) since write_layout last wrote the ``.fkp`` files, one line each; [] when nothing did or
     no build has said what it wrote from. 2.0.4: ``fk look`` judges against the ``.fkp`` files,
-    and after a paste from stale checkpoints it said OK while the machine ran the old recipe (the
+    and after a paste from stale checkpoints it said ok while the machine ran the old recipe (the
     second lead run, 2026-10-22); a look now says when the .fkp is not the source's."""
     try:
         with open(os.path.join(game, "out", _LAID_FILE), encoding="utf-8") as fh:
@@ -282,7 +282,7 @@ def _save_hands(ctx, r):
 
 
 def _save_standing(ctx, rep):
-    """The poles the diff finds built (OK) in ``out/standing.json``, updated over the diff's
+    """The poles the diff finds built (ok) in ``out/standing.json``, updated over the diff's
     scope and kept elsewhere: the next build's cover step runs where there is no game link, and
     keeps a built pole of another kind than its own (2.0.1)."""
     path = os.path.join(ctx.out, _STANDING_FILE)
@@ -294,7 +294,7 @@ def _save_standing(ctx, rep):
         if not v.key or not ctx.cat.has_entity(v.name) \
                 or ctx.cat.kind(v.name) != "electric-pole":
             continue
-        if v.verdict.split()[0] == "OK":
+        if v.verdict.split()[0] == "ok":
             poles[v.key] = v.name
         else:
             poles.pop(v.key, None)
@@ -326,7 +326,7 @@ def _factories(ctx):
 
 
 def _invariant_checks(where, problems):
-    return [Check("INVARIANT", where, p) for p in problems]
+    return [Check("malformed", where, p) for p in problems]
 
 
 # -- steps: each returns (report lines, checks) ---------------------------------------------------
@@ -351,7 +351,7 @@ def s_read_surface(ctx, args):
                      + f" ({p.lifecycle})")
     for item, r in sf.targets.items():
         lines.append(f"  target {item} {r * 60:g}/min")
-    checks = [Check("DESIGN", f"{sf.name} plot {note.split(':', 1)[0]}",
+    checks = [Check("design", f"{sf.name} plot {note.split(':', 1)[0]}",
                     note.split(": ", 1)[-1]) for note in sf.design_notes]
     for p in sf.places.values():
         prev = os.path.join(ctx.root, f"{p.module}.fkp")
@@ -367,7 +367,7 @@ def s_read_terrain(ctx, args):
     path = os.path.join(ctx.root, f"{name}.terrain.json")
     if not os.path.exists(path):
         return [f"terrain {name}: no {name}.terrain.json in the game codebase"], [
-            Check("TERRAIN", name, "no terrain file; the layout is not checked against the ground")]
+            Check("no-terrain", name, "no terrain file; the layout is not checked against the ground")]
     t = terrainmod.load(path)
     ctx.ground = t
     ctx.terrain = set(t.blocked)
@@ -375,7 +375,7 @@ def s_read_terrain(ctx, args):
     if ctx.surface is None:
         return lines, checks
     if t.surface != ctx.surface.name:
-        checks.append(Check("TERRAIN", name, f"read from surface {t.surface}; this surface is "
+        checks.append(Check("no-terrain", name, f"read from surface {t.surface}; this surface is "
                                              f"{ctx.surface.name}"))
     x0, y0, x1, y1 = t.area
     for p in _factories(ctx):
@@ -383,7 +383,7 @@ def s_read_terrain(ctx, args):
                                * max(0, min(y1, p.y + p.h) - max(y0, p.y)))
         lines.append("  " + _plot_ground(t, p))
         if outside:
-            checks.append(Check("TERRAIN", f"{name} plot {p.factory}",
+            checks.append(Check("no-terrain", f"{name} plot {p.factory}",
                                 f"{outside} of its {p.w * p.h} tiles are outside the terrain's "
                                 "area: unknown ground"))
     return lines, checks
@@ -411,7 +411,7 @@ def s_run_models(ctx, args):
     if not found:
         return ["no model scripts (<module>.model.py); parameters are as written in the .fk"], []
     return [f"model scripts found but not run in V1 yet: {', '.join(found)}"], [
-        Check("MODEL", ", ".join(found), "model scripts are not run yet")]
+        Check("model", ", ".join(found), "model scripts are not run yet")]
 
 
 def s_elaborate(ctx, args):
@@ -421,7 +421,7 @@ def s_elaborate(ctx, args):
         try:
             flat = elaborate_file(path, ctx.cat, name=p.module, layout=ctx.previous.get(p.factory))
         except (FkSyntaxError, ElabError, OSError) as exc:
-            return lines, [Check("INVARIANT", p.factory, f"no netlist: {exc}")]
+            return lines, [Check("malformed", p.factory, f"no netlist: {exc}")]
         ctx.flats[p.factory] = flat
         sushi = sum(n.sushi for n in flat.nets.values())
         autos = [path for path, inst in flat.insts.items() if inst.auto]
@@ -431,7 +431,7 @@ def s_elaborate(ctx, args):
                         "low bound, until the size step counts them)" if autos else ""))
         checks += [Check(c.code, f"{p.factory} {c.where}", c.msg, c.line) for c in flat.checks]
         if autos and "size" not in ctx.steps:
-            checks.append(Check("SIZE", p.factory, f"n=auto rows ({', '.join(autos)}) and no size "
+            checks.append(Check("size", p.factory, f"n=auto rows ({', '.join(autos)}) and no size "
                                 "step in the build script: each keeps the count its .fkp laid "
                                 "out last, else its low bound"))
     return lines, checks
@@ -441,7 +441,7 @@ def s_size(ctx, args):
     """The counts of the ``n=auto`` rows (``fkcore.size``): the fewest machines that meet the
     surface's targets, the factories' asserts and what each row's consumers ask, every factory
     together. The report says what each count serves; a constraint no count can meet is a
-    ``SIZE`` line, a sized row that runs past its plot or into another instance a ``FIT`` line.
+    ``size`` line, a sized row that runs past its plot or into another instance a ``does-not-fit`` line.
     Rows grow; where they stand is the player's (and ``place`` stops on two entities on a
     tile)."""
     from . import size as sizemod
@@ -470,11 +470,11 @@ def s_size(ctx, args):
 def s_report_rates(ctx, args):
     """The nominal rate model per factory (V1); once a factory is laid out (after ``place`` and
     ``route``), also its routed rates (V2, ``fkcore.routed``: the lanes and inserters as laid,
-    ``CAPACITY`` where a carrier binds). ``--hand N`` / ``--bulk-hand N``: the inserter hand
+    ``too-thin`` where a carrier binds). ``--hand N`` / ``--bulk-hand N``: the inserter hand
     sizes (1 + the research bonus); ``auto`` (the default) reads the force's over the game link.
     Run again later in the script (after ``route``), it reports in full but adds as checks only
-    what is new: ``CAPACITY``, and a ``TARGET`` the nominal rates met and the routed ones don't
-    (the ``ASSERT`` and ``TARGET`` lines of the nominal model are the first run's)."""
+    what is new: ``too-thin``, and a ``target-not-met`` the nominal rates met and the routed ones don't
+    (the ``rate-not-met`` and ``target-not-met`` lines of the nominal model are the first run's)."""
     o = _opts(args, hand="auto", bulk_hand="auto")
     for key in ("hand", "bulk_hand"):
         if o[key] != "auto":
@@ -488,17 +488,17 @@ def s_report_rates(ctx, args):
         lines += rates.report(model, factory).splitlines() + [""]
         for text, ok, value, target, op in model.asserts:
             if not ok and not again:
-                checks.append(Check("ASSERT", factory, f"{text}: {value * 60:.3f}/min"))
+                checks.append(Check("rate-not-met", factory, f"{text}: {value * 60:.3f}/min"))
         for net, item, can, want in ([] if again else rates.underfed(model)):
             checks.append(Check(
-                "UNDERFED", f"{factory} net {net}",
+                "short-feed", f"{factory} net {net}",
                 f"{item}: its drivers make {can * 60:.1f}/min at most, its consumers would take "
                 f"{want * 60:.1f}/min, so they run at about {can / want:.0%} for it; "
                 f"`fk plan {item} {want * 60:.0f}/min` sizes the drivers"))
         for net, feed, product, sink, takers in ([] if again else rates.carryover(model)):
             who = takers[0] + (f" and {len(takers) - 1} more" if len(takers) > 1 else "")
             checks.append(Check(
-                "CARRYOVER", f"{factory} net {net}",
+                "feed-rides-on", f"{factory} net {net}",
                 f"{feed} rides the belt into {sink} with {product}: what {who} upstream don't take "
                 f"of it fills {sink}, and the belt stops for {product} too. Give {product} a belt "
                 f"of its own, or end the {feed} lane before the sink"))
@@ -534,7 +534,7 @@ def s_report_rates(ctx, args):
                 text += f", {rgot * 60:.3f}/min routed"
             lines.append(f"target {item} {want * 60:g}/min: {'met' if ok else 'NOT met'}, {text}")
             if not ok and not (again and not nominal_ok):
-                checks.append(Check("TARGET", item, f"{text}, target {want * 60:g}/min"))
+                checks.append(Check("target-not-met", item, f"{text}, target {want * 60:g}/min"))
     if hands is not None:
         lines.append(hands[2])
     return lines, checks
@@ -613,7 +613,7 @@ def s_place(ctx, args):
                      + ", ".join(f"{n} {c}" for c, n in sorted(count.items())))
         lines += [f"  {path}: {c}" for path, c in sorted(cls.items()) if c != "unchanged"]
         lines += [f"  placed {line}" for line in placed]
-        checks += [Check("UNPLACED", p.factory, n) for n in notes]
+        checks += [Check("no-position", p.factory, n) for n in notes]
         checks += _invariant_checks(p.factory, fkp.invariants(lay, ctx.cat))
     return lines, checks
 
@@ -758,8 +758,8 @@ def s_route(ctx, args):
                          f"{'s' if rehanded != 1 else ''} robots cannot build, to {hand}")
         lines += [f"  {l}" for l in r.lines]
         lines += _one_inserter(ctx, factory, flat, r.layout)
-        checks += [Check("UNROUTED", f"{factory} net {n}", why) for n, why in r.failed.items()]
-        checks += [Check("UNROUTED", f"{factory} net {l.split(':')[0].split()[-1]}",
+        checks += [Check("no-route", f"{factory} net {n}", why) for n, why in r.failed.items()]
+        checks += [Check("no-route", f"{factory} net {l.split(':')[0].split()[-1]}",
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]
         checks += _invariant_checks(factory, fkp.invariants(r.layout, ctx.cat, nets=flat.nets))
     return lines, checks
@@ -769,7 +769,7 @@ def _rehand(lay, cat, hand):
     """The standing route's inserters that robots cannot build now take ``hand`` instead: -> (new
     layout, how many changed). A route that stands keeps its carriers (2.0), so ``--hand any`` alone
     would leave the fast inserter a run pasted while none was researched exactly where it was: the
-    2026-10-25 run's four LOCKED ghosts, on a net that never changes. Only a short hand becomes
+    2026-10-25 run's four needs-research ghosts, on a net that never changes. Only a short hand becomes
     another short hand (the footprint is one tile either way), only one the network cannot build
     now is touched, and only when it can build ``hand``: an inserter that stands built is left
     alone, since it works and its speed is not worth losing."""
@@ -945,7 +945,7 @@ def s_cover_robots(ctx, args):
         ("storage-chest" if o["storage"] is True else o["storage"])
     if storage and not ctx.cat.has_entity(storage):
         return [f"cover robots: no {storage} in the catalog; nothing placed"], [
-            Check("NO_ROBOTS", "cover robots", f"--storage {storage}: not an entity")]
+            Check("no-robots", "cover robots", f"--storage {storage}: not an entity")]
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
     lines, checks = [], []
@@ -971,7 +971,7 @@ def _bridge_in_plots(ents, sf, cat):
     """The bridge's own poles that stand in a plot of the surface file: -> (the entities without
     them, their keys). A plot laid over an old bridge takes its poles, and ``--bridge-power``
     lays the bridge again around the plots (1.2: the 0534 run's new plot stopped the build with
-    INVARIANT shared infrastructure)."""
+    malformed shared infrastructure)."""
     boxes = [(p.x, p.y, p.x + p.w, p.y + p.h) for p in sf.places.values()
              if p.lifecycle != "retired"]
     keep, gone = {}, []
@@ -1083,10 +1083,10 @@ def s_floorplan(ctx, args):
 
 
 def _on_terrain(t, s, cat):
-    """``ON_TERRAIN``: a composed entity on blocked ground (water, cliff); ``OFF_ORE``: a drill
-    with no ore of its resource in its mining area (the game would not place it); ``OFF_WATER``
+    """``on-water-or-cliff``: a composed entity on blocked ground (water, cliff); ``no-ore``: a drill
+    with no ore of its resource in its mining area (the game would not place it); ``no-water``
     (1.4.2): an offshore pump whose water tiles are dry ground (the lead world's kickoff plant
-    stood where world 3 had a lake: no water, no power, and every look said OK). -> (report
+    stood where world 3 had a lake: no water, no power, and every look said ok). -> (report
     lines, checks); checks, never gates."""
     lines, checks, hits = [], [], 0
     for key in sorted(s.entities, key=fkp.natural_key):
@@ -1099,7 +1099,7 @@ def _on_terrain(t, s, cat):
         hits += 1
         first = min(tiles & t.blocked, key=lambda q: (q[1], q[0]))
         what = ", ".join(f"{n} {k}" for n, k in parts if n)
-        checks.append(Check("ON_TERRAIN", key,
+        checks.append(Check("on-water-or-cliff", key,
                             f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)} stands on {what} "
                             f"tile{'s' if sum(n for n, _k in parts) != 1 else ''} (first "
                             f"{first[0]},{first[1]})"))
@@ -1112,7 +1112,7 @@ def _on_terrain(t, s, cat):
                 and (q[0] // 32, q[1] // 32) not in unknown}
         dry = sorted(seen - t.water, key=lambda q: (q[1], q[0]))
         if dry:
-            checks.append(Check("OFF_WATER", key,
+            checks.append(Check("no-water", key,
                                 f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)}: {len(dry)} of the "
                                 f"{len(wet)} tiles it pumps from are not water (first "
                                 f"{dry[0][0]},{dry[0][1]}): it gives no water"))
@@ -1127,7 +1127,7 @@ def _on_terrain(t, s, cat):
         under += len(body)
         amount += sum(body)
         if not any(q in ore for q in placer.mining_area(e.name, float(e.x), float(e.y))):
-            checks.append(Check("OFF_ORE", e.key,
+            checks.append(Check("no-ore", e.key,
                                 f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)}: no "
                                 f"{e.attrs['resource']} in its mining area"))
     lines.append(f"terrain: {hits} of {len(s.entities)} entities on blocked ground; "
@@ -1137,7 +1137,7 @@ def _on_terrain(t, s, cat):
 
 
 def _bootstrap_checks(ctx, factory, flat, lay):
-    """BOOTSTRAP (2.0.4, the live run's mall): a net whose own route needs a building item (a
+    """bootstrap (2.0.4, the live run's mall): a net whose own route needs a building item (a
     belt, an underground, a splitter, an inserter ...: a carrier whose name is also an item) that
     only makers fed from that same net make. Then the route cannot be built before its makers,
     and its makers cannot run before the route is built.
@@ -1189,7 +1189,7 @@ def _bootstrap_checks(ctx, factory, flat, lay):
                                in zip(rows, clauses))
             msg = (f"its route needs {needs}: {detail}: stock what the route needs first, or "
                    "build those makers first")
-        out.append(Check("BOOTSTRAP", f"net {factory}/{net.name}", msg))
+        out.append(Check("bootstrap", f"net {factory}/{net.name}", msg))
     return out
 
 
@@ -1206,7 +1206,7 @@ def s_report_checks(ctx, args):
         lines += sink_lines
         checks += sink_checks
         checks += _invariant_checks(factory, fkp.invariants(lay, ctx.cat, nets=flat.nets))
-        seen = {c.where for _step, c in ctx.checks if c.code == "BOOTSTRAP"}
+        seen = {c.where for _step, c in ctx.checks if c.code == "bootstrap"}
         checks += [c for c in _bootstrap_checks(ctx, factory, flat, lay) if c.where not in seen]
     if ctx.composed is not None:
         checks += _invariant_checks(ctx.surface.name, ctx.composed.problems)
@@ -1225,9 +1225,9 @@ _MAKERS = ("assembling-machine", "furnace", "mining-drill")
 
 
 def _sinks(ctx, factory, flat, rep):
-    """2.0.12: does each maker's product reach a sink? One report line, and ``NO_SINK`` for a
+    """2.0.12: does each maker's product reach a sink? One report line, and ``no-destination`` for a
     maker whose product reaches none of the consumers of a net it drives while the net's other
-    pairs connect (a net none of whose pairs connect has its UNROUTED line). The solo run's Mall4
+    pairs connect (a net none of whose pairs connect has its no-route line). The solo run's Mall4
     went out with its products belt unrouted and its makers had no output (2026-10-23 23:23)."""
     def maker(m):
         try:
@@ -1245,7 +1245,7 @@ def _sinks(ctx, factory, flat, rep):
     if cut:
         line += ("; none reached: " + ", ".join(f"{k} (net {n})" for k, n, _c in cut[:4])
                  + (f" ... {len(cut) - 4} more" if len(cut) > 4 else ""))
-    checks = [Check("NO_SINK", f"{factory} {k}",
+    checks = [Check("no-destination", f"{factory} {k}",
                     f"what it makes reaches none of the {c} consumer{'s' if c != 1 else ''} of net "
                     f"{n}: it has nowhere to go")
               for k, n, c in cut if rep.nets[n].reached]
@@ -1253,12 +1253,12 @@ def _sinks(ctx, factory, flat, rep):
 
 
 def _to_build(ctx):
-    """{entity: count} still to build: after a diff its MISSING, GHOST and WRONG entities, else
+    """{entity: count} still to build: after a diff its not-placed, ghost and other-entity entities, else
     the whole composed design."""
     need = {}
     if ctx.last_diff is not None:
         for v in ctx.last_diff.verdicts:
-            if v.verdict.split()[0] in ("MISSING", "GHOST", "WRONG"):
+            if v.verdict.split()[0] in ("not-placed", "ghost", "other-entity"):
                 need[v.name] = need.get(v.name, 0) + 1
         return need, "what the last diff found missing, ghosted or wrong"
     for e in (ctx.composed.entities.values() if ctx.composed is not None else ()):
@@ -1268,7 +1268,7 @@ def _to_build(ctx):
 
 def _bom_live(ctx):
     """report_bom --stock live: what still has to be built against the network's stock, and every
-    item and machine recipe against what is researched (LOW_STOCK, LOCKED). The first V1 run
+    item and machine recipe against what is researched (short-stock, needs-research). The first V1 run
     (2026-10-20) waited on 295 ghosts the network held nothing for."""
     from . import supply
     r = _link(ctx)
@@ -1288,15 +1288,15 @@ def _bom_live(ctx):
               f"  {supply.research_line(sup.research)}"] + lines[1:])
     # the first lead run (2026-10-21): a paste took up the burner row before the 137 belts its
     # replacement needed were made (23 in stock), and iron stood still until they were
-    short = [c.where for c in checks if c.code == "LOW_STOCK"]
+    short = [c.where for c in checks if c.code == "short-stock"]
     running = _machines_taken_up(ctx) if short else []
     if running:
         warn = (f"the paste takes up {len(running)} machine{'s' if len(running) != 1 else ''} "
                 f"that stand now while {len(short)} kind{'s' if len(short) != 1 else ''} it lays "
                 f"are SHORT ({', '.join(short[:6])}): what they make stops until those are made; "
-                "`stop_on LOW_STOCK` in the build script holds the paste until the network has them")
+                "`stop_on short-stock` in the build script holds the paste until the network has them")
         lines.append(f"  {warn}")
-        checks.append(Check("RIP", ctx.surface.name, warn))
+        checks.append(Check("taken-up", ctx.surface.name, warn))
     return lines, checks
 
 
@@ -1306,8 +1306,8 @@ _MACHINE_KINDS = ("assembling-machine", "furnace", "mining-drill", "lab", "boile
 
 
 def _machines_taken_up(ctx):
-    """The built machines the last diff says the paste takes up: a NOBODY one that is no ghost,
-    and what stands built under a WRONG verdict. [name]."""
+    """The built machines the last diff says the paste takes up: a unowned one that is no ghost,
+    and what stands built under a other-entity verdict. [name]."""
     if ctx.last_diff is None:
         return []
 
@@ -1319,9 +1319,9 @@ def _machines_taken_up(ctx):
     out = []
     for v in ctx.last_diff.verdicts:
         head = v.verdict.split()[0]
-        if head == "NOBODY" and not v.ghost and machine(v.name):
+        if head == "unowned" and not v.ghost and machine(v.name):
             out.append(v.name)
-        elif head == "WRONG":
+        elif head == "other-entity":
             out += [u[0] for u in v.under if len(u) > 4 and not u[4] and machine(u[0])]
     return out
 
@@ -1349,7 +1349,7 @@ def s_report_bom(ctx, args):
         have = None if stock is None else int(stock.get(name, 0))
         lines.append(f"  {name:<28} {need[name]:>5}" + ("" if have is None else f"  have {have}"))
         if have is not None and have < need[name]:
-            checks.append(Check("LOW_STOCK", name, f"need {need[name]}, have {have}"))
+            checks.append(Check("short-stock", name, f"need {need[name]}, have {have}"))
     lines.append(f"  {'total':<28} {sum(need.values()):>5}")
     return lines, checks
 
@@ -1440,13 +1440,13 @@ def s_diff(ctx, args):
         _save_standing(ctx, rep)       # for the next build's cover step, on the laptop
     except (OSError, ValueError):
         pass
-    ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "GHOST"})
+    ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "ghost"})
     if ghosts:
         from . import supply
         supply.mark_ghosts(rep.verdicts, supply.read(r, _force(ctx), ctx.surface.name, ghosts))
     ctx.last_diff = rep
-    checks = [Check("DIFF", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
-              if k != "OK"]
+    checks = [Check("diff", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
+              if k != "ok"]
     lines = rep.lines()
     # 2.0 (Rory, 2026-10-21): a hand change the build would replace is said before the paste
     from . import sense
@@ -1455,7 +1455,7 @@ def s_diff(ctx, args):
         lines.append(f"hand: {len(hand)} hand edits that the apply would replace, remove or set "
                      "back:")
         lines += [f"  {line}" for line in hand]
-        checks += [Check("HAND", ctx.surface.name, line) for line in hand]
+        checks += [Check("by-hand", ctx.surface.name, line) for line in hand]
     turned = _turned(ctx, rep)
     if turned:
         lines.append(f"  {turned.msg}")
@@ -1477,27 +1477,27 @@ def s_diff(ctx, args):
             line, warn = applymod.rip_report(load, applymod.moved(rep))
             lines.append(line)
             if warn:
-                checks.append(Check("RIP", ctx.surface.name, warn))
+                checks.append(Check("taken-up", ctx.surface.name, warn))
     return lines, checks
 
 
 #: the diff's verdicts the paste lays an entity for
-_TO_LAY = ("MISSING", "GHOST", "WRONG")
+_TO_LAY = ("not-placed", "ghost", "other-entity")
 
 
 def _turned(ctx, rep):
-    """A ``TURNED`` check for the belts, undergrounds, splitters, inserters (and pipes-to-ground,
+    """A ``re-laid`` check for the belts, undergrounds, splitters, inserters (and pipes-to-ground,
     pumps, drills) that stand, or wait as ghosts, on their design entity's position under its name
     but facing another way or as the other underground end, or None. Their lines stop there. 2.0.5
     (the 2.0 run's south iron array, 2026-10-22): a factory built over another kept the old one's
     belts wherever the names matched, facing the old ways; on uncharted ground the paste turns
-    nothing, so every build kept them, and the diff's DRIFT count said so only as a number. The
+    nothing, so every build kept them, and the diff's settings-changed count said so only as a number. The
     apply now orders them out and lays them fresh as designed."""
     bad = [v for v in rep.verdicts if v.turned]
     if not bad:
         return None
     shown = ", ".join(f"{(v.key or v.name).split(':', 1)[-1]} "
-                      f"({'a ghost' if v.verdict.startswith('GHOST') else v.detail})"
+                      f"({'a ghost' if v.verdict.startswith('ghost') else v.detail})"
                       for v in bad[:4])
     names = sorted({v.name for v in bad})
     msg = (f"{len(bad)} {', '.join(names)} stand on their design tiles facing another way or as "
@@ -1505,7 +1505,7 @@ def _turned(ctx, rep):
            f"{' ...' if len(bad) > 4 else ''}): the apply lays them fresh as designed (ordered "
            "out, robots take each up and build it again). A factory built over another keeps the "
            "old one's belts where the names match, facing the old ways")
-    return Check("TURNED", ctx.surface.name, msg)
+    return Check("re-laid", ctx.surface.name, msg)
 
 
 def _unreached(ctx, r, rep, batch=80):
@@ -1583,13 +1583,13 @@ def s_apply(ctx, args):
     if rep.hand:
         # 2.0: what this build replaced or removed that was placed by hand, for the player (the
         # Claude loop hands out/hand.txt's new lines to the lead the way it hands it chat)
-        checks += [Check("HAND", ctx.surface.name, line) for line in rep.hand]
+        checks += [Check("by-hand", ctx.surface.name, line) for line in rep.hand]
         _hand_file(ctx, rep.hand)
     if rep.misplaced:
-        checks.append(Check("MISPLACED", ctx.surface.name, f"{rep.misplaced} ghosts are not where "
+        checks.append(Check("not-where-designed", ctx.surface.name, f"{rep.misplaced} ghosts are not where "
                                                            "the design says"))
     if rep.present < rep.design:
-        checks.append(Check("UNPLACED", ctx.surface.name, f"{rep.design - rep.present} of "
+        checks.append(Check("no-position", ctx.surface.name, f"{rep.design - rep.present} of "
                                                           f"{rep.design} designed entities are not "
                                                           "there as ghost or entity"))
     return rep.lines(), checks
@@ -1603,6 +1603,21 @@ def _hand_file(ctx, lines):
         fh.write(f"# {time.strftime('%Y-%m-%d %H:%M')} fk build ({os.path.basename(ctx.script)}): "
                  f"{len(lines)} hand edits this build replaced, removed or set back\n")
         fh.writelines(f"  {line}\n" for line in lines)
+
+
+#: what a script may still say for a check renamed in 2.0.52: the old word keeps its meaning, so an
+#: upgraded run's script (or a pinned one) stops on the same things it did before
+_OLD_STOPS = {"invariant": "malformed", "unrouted": "no-route", "no_sink": "no-destination",
+              "unfed": "no-feed", "underfed": "short-feed", "unconsumed": "no-taker",
+              "unlimited": "no-limit", "low_stock": "short-stock", "locked": "needs-research",
+              "no_robots": "no-robots", "off_ore": "no-ore", "off_water": "no-water",
+              "on_terrain": "on-water-or-cliff"}
+
+
+def _stop_code(word):
+    """A ``stop_on`` word as the check code it names (case folded, old names mapped)."""
+    w = str(word).strip().lower()
+    return _OLD_STOPS.get(w, w)
 
 
 def s_stop_on(ctx, args):
@@ -1684,7 +1699,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
     ctx.steps = [ln.cmd for ln in lines]
     for ln in lines:
         if ln.cmd == "stop_on":
-            ctx.stop_on |= {a.upper() for a in ln.args}
+            ctx.stop_on |= {_stop_code(a) for a in ln.args}
     names = [ln.cmd for ln in lines]
     first = _at(names, frm) if frm else 0
     last = _at(names, to) if to else len(lines) - 1
@@ -1715,7 +1730,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
                 _report, checks = STEPS[ln.cmd](ctx, ln.args)
                 ctx.checks += [(ln.cmd, c) for c in checks]
                 _write_checkpoint(ctx, ln.cmd, lines[:j + 1])
-                stops = [c for c in checks if c.code.upper() in ctx.stop_on]
+                stops = [c for c in checks if c.code.lower() in ctx.stop_on]
                 if stops:
                     echo(f"stopped at line {ln.n} ({ln.cmd}), laid out again: {len(stops)} "
                          f"{stops[0].code} line(s), first: {stops[0]}")
@@ -1743,7 +1758,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
         written.add(ln.cmd)
         if ln.cmd in _LAYOUT or ln.cmd == "floorplan":
             _write_checkpoint(ctx, ln.cmd, lines[:i + 1])
-        stops = [c for c in checks if c.code.upper() in ctx.stop_on]
+        stops = [c for c in checks if c.code.lower() in ctx.stop_on]
         head = report[0] if report else ""
         summary = (f"[{i + 1:>2}/{width}] {ln.text:<44} {head[:70]}"
                    + (f"  ({len(checks)} check lines)" if checks else ""))

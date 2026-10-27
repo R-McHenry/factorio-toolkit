@@ -185,7 +185,7 @@ both.
   worlds."
 - **When a factory you are keeping goes onto belts, pair the two feeds of a row**: one belt carries
   both items, one lane each (`lanes A | B`). Two single-item belts there leave half of each empty.
-  The build's `LANES` check names the pair when you miss it.
+  The build's `could-pair` check names the pair when you miss it.
 
 ## Chests and buffers
 

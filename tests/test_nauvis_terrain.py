@@ -95,7 +95,7 @@ class BadPlacementTest(unittest.TestCase):
             code, ctx = flow.run(os.path.join(folder, "nauvis.build.fkb"), cat=CAT,
                                  echo=lambda _l: None)
             self.assertEqual(code, 0, ctx.log)                     # a check, never a gate
-            on = [c for _s, c in ctx.checks if c.code == "ON_TERRAIN"]
+            on = [c for _s, c in ctx.checks if c.code == "on-water-or-cliff"]
             smelt = [c for c in on if c.where.startswith("nauvis:iron/smelt/")]
             # 77 of the row's 100 entities; the rest stand on the shore
             self.assertEqual(len(smelt), 77, [str(c) for c in on][:5])

@@ -6,16 +6,16 @@ only. That is fair play's attention: nothing outside the area is read or reporte
 
 Every layout entity in the area gets one verdict, matched to the world by position + name:
 
-- ``OK``: there, as designed;
-- ``GHOST``: its ghost is there (pending);
-- ``DRIFT``: there, but turned, the other underground end, or another recipe; a belt, an
+- ``ok``: there, as designed;
+- ``ghost``: its ghost is there (pending);
+- ``settings-changed``: there, but turned, the other underground end, or another recipe; a belt, an
   underground, a splitter, an inserter, a pipe-to-ground, a pump or a drill that stands turned
   or as the other end is also ``turned`` (2.0.5): the next apply lays it fresh as designed (a
   ghost of an older design facing another way too);
-- ``WRONG``: another entity stands on its tiles;
-- ``MISSING``: nothing there (never built, or destroyed: the next apply restores it).
+- ``other-entity``: another entity stands on its tiles;
+- ``not-placed``: nothing there (never built, or destroyed: the next apply restores it).
 
-A carrier that holds an item (or a fluid) its net doesn't expect is also ``WRONG_ITEM``, lane by
+A carrier that holds an item (or a fluid) its net doesn't expect is also ``other-item``, lane by
 lane for a belt whose ``net=`` gives each lane its nets (2.0, ``iron|copper``: copper on the left
 lane is wrong there; no leniency for the right belt in the wrong lane, CORE-V2); when the
 toolkit's record (``own``) shows it was pasted under another net, the verdict says so
@@ -23,18 +23,18 @@ toolkit's record (``own``) shows it was pasted under another net, the verdict sa
 entity ordered for deconstruction, the ghost is the design's (the entity is being replaced).
 Every world entity in the area that no layout entity explains is one of:
 
-- ``CLAIMED``: inside a claim;
-- ``MARKED``: under a mark;
+- ``claimed``: inside a claim;
+- ``marked``: under a mark;
 - a foreign change, handled by the surface's watch policy for its region (plots: ``keep``,
   sanctioned space: ``mark <duration>``, or ``revert`` / ``strict``). It is attributed to its
   ``last_user``. ``keep`` and ``mark`` write a mark (``<actor>@<tick>``, its tiles, no expiry for
-  keep), so the next look says ``MARKED``, not ``NOBODY``. One actor's ``keep`` and ``mark`` in
+  keep), so the next look says ``marked``, not ``unowned``. One actor's ``keep`` and ``mark`` in
   one look are two marks, so a name already taken (in this look or on the surface) gets a
-  suffix, ``<actor>@<tick>.2``. ``revert`` leaves it ``NOBODY`` for the next apply to
-  steamroll, and ``strict`` leaves it ``NOBODY``, loud.
+  suffix, ``<actor>@<tick>.2``. ``revert`` leaves it ``unowned`` for the next apply to
+  steamroll, and ``strict`` leaves it ``unowned``, loud.
 
 The toolkit's own entities (``own``, the record of what the applies pasted, ``fkcore.own``) are
-no foreign change: one the design has dropped is ``NOBODY`` (the next apply removes it) whatever
+no foreign change: one the design has dropped is ``unowned`` (the next apply removes it) whatever
 the policy says, unless a claim or a mark covers it or a player touched it (a ``last_user``).
 
 Enemies and nature (neutral force) are separate and never judged. Each foreign change gets a
@@ -94,13 +94,13 @@ class Verdict:
         if self.detail:
             text += f": {self.detail}"
         if self.turned:
-            text += "; TURNED: the next build lays it fresh as designed"
+            text += "; re-laid: the next build lays it fresh as designed"
         if self.wrong_items:
-            text += f"; WRONG_ITEM {', '.join(self.wrong_items)}"
+            text += f"; other-item {', '.join(self.wrong_items)}"
             if self.renet:
                 text += (f" (laid under net {self.renet} before: the next apply takes it up and "
                          "lays it fresh)")
-        return text + (who if self.verdict in ("MARKED", "NOBODY") and self.actor else "")
+        return text + (who if self.verdict in ("marked", "unowned") and self.actor else "")
 
 
 @dataclass
@@ -123,7 +123,7 @@ class SenseReport:
         for v in self.verdicts:
             out[v.verdict] = out.get(v.verdict, 0) + 1
             if v.wrong_items:
-                out["WRONG_ITEM"] = out.get("WRONG_ITEM", 0) + 1
+                out["other-item"] = out.get("other-item", 0) + 1
         return out
 
     def lines(self):
@@ -131,7 +131,7 @@ class SenseReport:
         head = (f"sense {_area_text(self.area)} tick {self.tick}: "
                 + (", ".join(f"{k} {c[k]}" for k in sorted(c)) or "nothing here"))
         # a carrier with stale items is listed too, so a look says where they are (1.1)
-        out = [head] + [f"  {v}" for v in self.verdicts if v.verdict != "OK" or v.wrong_items]
+        out = [head] + [f"  {v}" for v in self.verdicts if v.verdict != "ok" or v.wrong_items]
         if self.changes:
             out += ["changes here:"] + [f"  {l}" for l in self.changes]
         if self.marks:
@@ -187,7 +187,7 @@ def _policy(text):
 def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None) -> SenseReport:
     """``policy``: a ``surface.SurfaceFile`` (its watch and notify settings) or a dict
     {"plots": "keep", "sanctioned": "mark 2h", "notify": "nearby"}. ``net_items``: {net: items}
-    for WRONG_ITEM, with surface net names (``<factory>/<net>``). ``own``: the toolkit's own
+    for other-item, with surface net names (``<factory>/<net>``). ``own``: the toolkit's own
     entities ({``own.at``: ``own.Row``}, ``fkcore.own.load``), or None."""
     if hasattr(policy, "watch"):
         watch, notify = dict(policy.watch), policy.notify_mode
@@ -224,14 +224,14 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             t = things[i]
             owners[i] = e.key.rsplit("/", 1)[0]
             if t["ghost"]:
-                v = Verdict("GHOST", e.name, e.x, e.y, e.key, "pending")
+                v = Verdict("ghost", e.name, e.x, e.y, e.key, "pending")
                 v.turned = cat.kind(e.name) in TURN_KINDS and bool(
                     turn(cat, e.name, e.dir, e.attrs.get("ug"), t["direction"], t["ug"]))
                 verdicts.append(v)
                 continue
             turned = turn(cat, e.name, e.dir, e.attrs.get("ug"), t["direction"], t["ug"])
             drift = "; ".join(turned + _recipe_drift(e, t, cat))
-            v = Verdict("DRIFT" if drift else "OK", e.name, e.x, e.y, e.key, drift)
+            v = Verdict("settings-changed" if drift else "ok", e.name, e.x, e.y, e.key, drift)
             v.turned = bool(turned) and cat.kind(e.name) in TURN_KINDS
             if v.turned and t.get("last_user"):
                 v.actor = t["last_user"]          # a player turned it (or placed it so)
@@ -248,7 +248,7 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
         others = sorted({i for tile in e.tiles for i in at_tile.get(tuple(tile), ()) if i not in used})
         if others:
             names = ", ".join(sorted({things[i]["name"] for i in others}))
-            v = Verdict("WRONG", e.name, e.x, e.y, e.key, f"{names} stands there")
+            v = Verdict("other-entity", e.name, e.x, e.y, e.key, f"{names} stands there")
             for i in others:
                 t = things[i]
                 mine = own.get((t["name"], round(t["x"], 3), round(t["y"], 3))) if own else None
@@ -256,7 +256,7 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
                                 mine is not None))
             verdicts.append(v)
             continue
-        verdicts.append(Verdict("MISSING", e.name, e.x, e.y, e.key,
+        verdicts.append(Verdict("not-placed", e.name, e.x, e.y, e.key,
                                 "not built or destroyed; the next apply restores it"))
 
     pending, changes = {}, []         # (actor, action) -> the mark it writes, named at the end
@@ -272,11 +272,11 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
         kind, detail = surface.whose(t["x"], t["y"])
         if kind == "claim":
             owners[i] = detail["key"]
-            verdicts.append(Verdict("CLAIMED", t["name"], t["x"], t["y"], detail["key"]))
+            verdicts.append(Verdict("claimed", t["name"], t["x"], t["y"], detail["key"]))
             continue
         if kind == "mark":
             owners[i] = detail["key"]
-            verdicts.append(Verdict("MARKED", t["name"], t["x"], t["y"], detail["key"],
+            verdicts.append(Verdict("marked", t["name"], t["x"], t["y"], detail["key"],
                                     actor=detail["key"].rsplit("/", 1)[1].split("@")[0]))
             continue
         cx, cy = math.floor(t["x"]), math.floor(t["y"])
@@ -289,10 +289,10 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
         what = f"{'a ghost of ' if t['ghost'] else ''}{t['name']} at {_fmt(t['x'])},{_fmt(t['y'])}"
         mine = own.get((t["name"], round(t["x"], 3), round(t["y"], 3))) if own else None
         if mine is not None and not t.get("last_user"):
-            owners[i] = "NOBODY"
+            owners[i] = "unowned"
             why = ("ordered out: robots take it up" if t.get("decon") else
                    "dropped from the design: the next apply removes it")
-            verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], mine.key,
+            verdicts.append(Verdict("unowned", t["name"], t["x"], t["y"], mine.key,
                                     f"the toolkit's own, {why}", None, "own",
                                     ghost=bool(t["ghost"])))
             changes.append(f"{what}: the toolkit's own ({mine.key}), {why.split(':')[0]} "
@@ -307,15 +307,15 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
             for tile in t["tiles"]:
                 if (tile[0], tile[1]) not in p["mark"].tiles:
                     p["mark"].tiles.append((tile[0], tile[1]))
-            v = Verdict("MARKED", t["name"], t["x"], t["y"], None,
+            v = Verdict("marked", t["name"], t["x"], t["y"], None,
                         "kept in the plot until its owner decides" if action == "keep"
                         else f"TEMP {actor}, marked for {dur or DEFAULT_MARK}", actor, action)
             p["verdicts"].append(v)
             p["things"].append(i)
             verdicts.append(v)
         else:
-            owners[i] = "NOBODY"
-            verdicts.append(Verdict("NOBODY", t["name"], t["x"], t["y"], None,
+            owners[i] = "unowned"
+            verdicts.append(Verdict("unowned", t["name"], t["x"], t["y"], None,
                                     "the next apply removes it" if action == "revert" else
                                     "unattributed (strict)", actor, action,
                                     ghost=bool(t["ghost"])))
@@ -350,7 +350,7 @@ def hand_edits(rep, held=()):
 
     - a thing on a design entity's tiles that the toolkit did not paste (the ``own`` record does
       not have it): the paste goes over it, kept by the watch policy or not;
-    - a foreign ``NOBODY`` (``revert`` / ``strict``) the apply orders out, unless ``held``
+    - a foreign ``unowned`` (``revert`` / ``strict``) the apply orders out, unless ``held``
       (scaffolding, {(name, x, y)});
     - a ``turned`` one a player touched last (2.0.5): the build lays it fresh as designed;
     - a standing entity whose settings differ from the design's (2.0.12, ``rep.settings``): a
@@ -361,13 +361,13 @@ def hand_edits(rep, held=()):
     toolkit's own, so "the game names no one" is said, not guessed."""
     out = []
     for v in rep.verdicts:
-        if v.verdict == "WRONG":
+        if v.verdict == "other-entity":
             for name, x, y, user, ghost, mine in v.under:
                 if mine:
                     continue
                 out.append(f"{_who(user)} {'a ghost of ' if ghost else ''}{name} at {_fmt(x)},"
                            f"{_fmt(y)} on {_local(v.key)}'s tile; this build replaces it")
-        elif v.verdict == "NOBODY" and v.action in ("revert", "strict") \
+        elif v.verdict == "unowned" and v.action in ("revert", "strict") \
                 and (v.name, v.x, v.y) not in held:
             out.append(f"{_who(v.actor)} {'a ghost of ' if v.ghost else ''}{v.name} at "
                        f"{_fmt(v.x)},{_fmt(v.y)}, which the design doesn't have; this build "

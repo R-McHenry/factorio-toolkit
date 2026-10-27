@@ -127,19 +127,19 @@ class LookTest(unittest.TestCase):
     def test_the_applied_design_is_ok_n_of_n_and_renders_the_same(self):
         lk = self.report()
         self.assertEqual((lk.ok, lk.designed), (120, 120))
-        self.assertEqual(lk.rep.counts(), {"OK": 120})
+        self.assertEqual(lk.rep.counts(), {"ok": 120})
         lines, differ = look.side_by_side(lk.design, lk.live, AREA)
         self.assertEqual(differ, 0)
         self.assertEqual(lk.design, lk.live)                      # look parity
         text = "\n".join(lk.lines())
-        self.assertIn("OK 120/120 designed entities (notify all", text)
+        self.assertIn("ok 120/120 designed entities (notify all", text)
         self.assertIn("0 tiles differ", text)
         row = next(l for l in lines if l.startswith("  422 "))    # the drill row, both renders
         self.assertEqual(row.split(" | ")[0][6:], row.split(" | ")[1])
 
     def test_foreign_belts_are_marked_kept_and_strict_says_nobody(self):
         lk = self.report(self.foreign)
-        marked = [v for v in lk.rep.verdicts if v.verdict == "MARKED"]
+        marked = [v for v in lk.rep.verdicts if v.verdict == "marked"]
         self.assertEqual(len(marked), 2)
         temp = next(v for v in marked if (v.x, v.y) == SANCTIONED)
         self.assertEqual((temp.actor, temp.action, temp.key),
@@ -152,9 +152,9 @@ class LookTest(unittest.TestCase):
         self.assertTrue(any("looks like a fix" in c for c in lk.rep.changes))
         self.assertEqual(lk.ok, 120)                              # the design is untouched
         strict = self.report(self.foreign, watch="strict")
-        self.assertEqual(strict.rep.counts().get("NOBODY"), 2)
+        self.assertEqual(strict.rep.counts().get("unowned"), 2)
         self.assertEqual((strict.rep.marks, strict.policy["plots"]), ([], "strict"))
-        self.assertIn("  NOBODY   transport-belt 307.5,430.5: unattributed (strict) by Rory_618",
+        self.assertIn("  unowned  transport-belt 307.5,430.5: unattributed (strict) by Rory_618",
                       strict.lines())
 
     def test_a_render_shows_the_foreign_belt_where_it_stands(self):
@@ -186,7 +186,7 @@ class LookTest(unittest.TestCase):
         lay = fkp.load(os.path.join(self.dir, "lab.fkp"))
         self.assertEqual(sorted(lay.marks), [f"Rory_618@{TICK}", f"unknown@{TICK}"])
         r, again = self.run_look(self.foreign)
-        self.assertEqual(again.rep.counts(), {"OK": 120, "MARKED": 2})
+        self.assertEqual(again.rep.counts(), {"ok": 120, "marked": 2})
         self.assertEqual((again.rep.marks, again.rep.changes, again.pushed, r.said()),
                          ([], [], [], []))
 
@@ -200,7 +200,7 @@ class LookTest(unittest.TestCase):
         self.assertEqual(lay.marks[f"unknown@{TICK}"].until, None)              # kept
         r, again = self.run_look(both)
         self.assertEqual((again.rep.counts(), again.rep.changes, r.said()),
-                         ({"OK": 120, "MARKED": 2}, [], []))
+                         ({"ok": 120, "marked": 2}, [], []))
 
     def test_fair_play_a_play_look_needs_an_area(self):
         path = os.path.join(self.dir, "lab.surface")

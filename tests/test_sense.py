@@ -41,7 +41,7 @@ def find(live, name, x, y):
 
 
 def verdicts(rep):
-    return {(v.verdict, v.key or v.name) for v in rep.verdicts if v.verdict != "OK"}
+    return {(v.verdict, v.key or v.name) for v in rep.verdicts if v.verdict != "ok"}
 
 
 class HandEditsTest(unittest.TestCase):
@@ -70,7 +70,7 @@ class SenseTest(unittest.TestCase):
 
     def test_the_design_built_is_all_ok(self):
         rep = self.run_sense()
-        self.assertEqual(rep.counts(), {"OK": 20})       # 19 mini entities + the roboport
+        self.assertEqual(rep.counts(), {"ok": 20})       # 19 mini entities + the roboport
         self.assertEqual((rep.changes, rep.marks, rep.push), ([], [], []))
 
     def test_layout_verdicts(self):
@@ -85,13 +85,13 @@ class SenseTest(unittest.TestCase):
         belt.update(name="iron-chest", type="container")
         rep = self.run_sense(live)
         self.assertEqual(verdicts(rep), {
-            ("MISSING", "nauvis:mini/~iron/b0"), ("GHOST", "nauvis:mini/~iron/b1"),
-            ("DRIFT", "nauvis:mini/gears/i0"), ("DRIFT", "nauvis:mini/gears/m1"),
-            ("DRIFT", "nauvis:mini/~iron/u1"), ("WRONG", "nauvis:mini/~iron/b3"),
-            ("MARKED", "nauvis:mark/unknown@4200000")})
+            ("not-placed", "nauvis:mini/~iron/b0"), ("ghost", "nauvis:mini/~iron/b1"),
+            ("settings-changed", "nauvis:mini/gears/i0"), ("settings-changed", "nauvis:mini/gears/m1"),
+            ("settings-changed", "nauvis:mini/~iron/u1"), ("other-entity", "nauvis:mini/~iron/b3"),
+            ("marked", "nauvis:mark/unknown@4200000")})
         wrong = next(v for v in rep.verdicts if v.wrong_items)
         self.assertEqual((wrong.key, wrong.wrong_items), ("nauvis:mini/~iron/b2", ["copper-plate"]))
-        drift = {v.key: v.detail for v in rep.verdicts if v.verdict == "DRIFT"}
+        drift = {v.key: v.detail for v in rep.verdicts if v.verdict == "settings-changed"}
         self.assertEqual(drift["nauvis:mini/gears/i0"], "faces 0, designed 8")
         self.assertEqual(drift["nauvis:mini/gears/m1"],
                          "recipe pipe, designed iron-gear-wheel")
@@ -107,7 +107,7 @@ class SenseTest(unittest.TestCase):
         (mark,) = rep.marks
         self.assertEqual((mark.name, mark.tiles, mark.until),
                          ("Rory_618@4200000", [(25, 3)], 4200000 + 2 * 3600 * 60))
-        v = next(v for v in rep.verdicts if v.verdict == "MARKED")
+        v = next(v for v in rep.verdicts if v.verdict == "marked")
         self.assertEqual(v.detail, "TEMP Rory_618, marked for 2h")
         self.assertEqual(rep.changes, ["transport-belt at 25.5,3.5: built by Rory_618 "
                                        "(sanctioned, mark)"])
@@ -142,7 +142,7 @@ class SenseTest(unittest.TestCase):
             del surface_lay.marks[name]
         s = compose.compose(surface_lay, {"mini": mini}, CAT)
         again = sense.sense(s, live, CAT, AREA, WATCH, net_items=NETS)
-        self.assertEqual(again.counts(), {"OK": 21})          # the fix is design now
+        self.assertEqual(again.counts(), {"ok": 21})          # the fix is design now
         self.assertEqual((again.marks, again.changes), ([], []))
         with self.assertRaises(adopt.AdoptError):
             adopt.adopt(mini, surface_lay.plots["mini"],
@@ -157,7 +157,7 @@ class SenseTest(unittest.TestCase):
         rep = self.run_sense(live)
         self.assertEqual([(m.name, m.until) for m in rep.marks],
                          [("unknown@4200000", None), ("unknown@4200000.2", 4200000 + 432000)])
-        keys = {v.key for v in rep.verdicts if v.verdict == "MARKED"}
+        keys = {v.key for v in rep.verdicts if v.verdict == "marked"}
         self.assertEqual(keys, {"nauvis:mark/unknown@4200000", "nauvis:mark/unknown@4200000.2"})
         surface_lay = fkp.loads(SURFACE)
         for m in rep.marks:
@@ -165,8 +165,8 @@ class SenseTest(unittest.TestCase):
         s = compose.compose(fkp.loads(fkp.dumps(surface_lay)), {"mini": fkp.loads(MINI)}, CAT)
         again = sense.sense(s, live, CAT, AREA, WATCH, net_items=NETS)
         self.assertEqual((again.counts(), again.marks, again.changes),
-                         ({"OK": 20, "MARKED": 2}, [], []))
-        self.assertEqual({v.actor for v in again.verdicts if v.verdict == "MARKED"}, {"unknown"})
+                         ({"ok": 20, "marked": 2}, [], []))
+        self.assertEqual({v.actor for v in again.verdicts if v.verdict == "marked"}, {"unknown"})
         # a name the surface already holds is not reused either
         surface_lay = fkp.loads(SURFACE + "mark unknown@4200000 tiles 45,13\n")
         s = compose.compose(surface_lay, {"mini": fkp.loads(MINI)}, CAT)
@@ -181,8 +181,8 @@ class SenseTest(unittest.TestCase):
                  scene.thing(name="tree-01", x=22.5, y=11.5, force="neutral")]
         live["things"] += extra
         rep = self.run_sense(live)
-        self.assertEqual(verdicts(rep), {("CLAIMED", "nauvis:claim/boom-test"),
-                                         ("MARKED", "nauvis:mark/Rory_618@4000000")})
+        self.assertEqual(verdicts(rep), {("claimed", "nauvis:claim/boom-test"),
+                                         ("marked", "nauvis:mark/Rory_618@4000000")})
         self.assertEqual(rep.expired, ["Rory_618@4000000"])     # until 4100000 < tick 4200000
         self.assertEqual(rep.marks, [])
         n = len(live["things"])
@@ -193,7 +193,7 @@ class SenseTest(unittest.TestCase):
         live["things"].append(scene.thing(name="transport-belt", x=45.5, y=12.5, last_user="x"))
         live["things"].remove(find(live, "transport-belt", 10.5, 0.5))
         rep = self.run_sense(live, area=[0, 5, 50, 14])          # the south half only
-        self.assertNotIn("MISSING", rep.counts())                # the gap is outside the look
+        self.assertNotIn("not-placed", rep.counts())                # the gap is outside the look
         self.assertEqual(len(rep.marks), 1)                      # the belt at 45,12 is inside
 
     def test_revert_strict_and_notify_all(self):
@@ -201,12 +201,12 @@ class SenseTest(unittest.TestCase):
         live["things"].append(scene.thing(name="transport-belt", x=25.5, y=3.5, last_user="Rory_618"))
         rep = self.run_sense(live, watch={"plots": "keep", "sanctioned": "revert",
                                           "notify": "all"})
-        v = next(v for v in rep.verdicts if v.verdict == "NOBODY")
+        v = next(v for v in rep.verdicts if v.verdict == "unowned")
         self.assertEqual((v.action, v.detail), ("revert", "the next apply removes it"))
         self.assertEqual(rep.marks, [])
         self.assertEqual(rep.push, rep.changes)                  # lab mode: pushed
         rep = self.run_sense(live, watch={"plots": "keep", "sanctioned": "strict"})
-        self.assertEqual(next(v for v in rep.verdicts if v.verdict == "NOBODY").action, "strict")
+        self.assertEqual(next(v for v in rep.verdicts if v.verdict == "unowned").action, "strict")
 
     def test_from_capture(self):
         dump = {"tick": 5, "area": [0, 0, 4, 4], "nests": [],

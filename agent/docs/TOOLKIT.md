@@ -10,7 +10,7 @@ tools. The `.fkp` files beside them are the layouts the toolkit writes: read the
 ```
 fk rates main.fk                 the factory's numbers on paper: every machine's utilization, every
                                  net's supply and demand, what limits it (the binding chain)
-fk check main.fk                 the netlist checks (UNFED, UNCONSUMED, TYPE, ...)
+fk check main.fk                 the netlist checks (no-feed, no-taker, cannot-carry, ...)
 fk build                         the whole build script: lay out, route, power, check, paste
 fk build --to report_checks      design only: everything up to the checks, nothing pasted
 fk build --to diff               a dry run: the design against the world and what the build would
@@ -46,7 +46,7 @@ row carries at most 7.5/s on yellow, and the routed rates count it so: each net'
 connector is its own lane. Two nets can share a belt, one on each lane (`lanes ore_ | fuel`,
 LANGUAGE.md): one belt to lay instead of two, and the two never stop each other, since a full
 lane holds only its own items. A net on both lanes (a two-sided MinerRow's ore) gets one lane
-when it is side-loaded onto a shared belt: 7.5/s there, and `CAPACITY` says so where it brings
+when it is side-loaded onto a shared belt: 7.5/s there, and `too-thin` says so where it brings
 more.
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
@@ -105,8 +105,8 @@ under SETTINGS: set it in the game, or build again once a radar charts the groun
 
 After `fk build`, the ghosts are in the game and the robots build them from the network's stock.
 Before the paste, `out\report_bom.txt` says what the network can't cover: its `STOCK:` line, and
-LOW_STOCK / LOCKED per item. A ghost that stays is a blocked build, not a slow one: `fk look`
-marks it GHOST SHORT or GHOST LOCKED (below), and waiting won't change that.
+short-stock / needs-research per item. A ghost that stays is a blocked build, not a slow one: `fk look`
+marks it ghost SHORT or ghost needs-research (below), and waiting won't change that.
 
 Every command ends with the game's new alerts (grouped per kind), Rory's new chat lines and the
 research line (`RESEARCH: NONE` when nothing researches).
@@ -247,49 +247,42 @@ fk lab --list                    the slots in use
 
 Every designed entity in the area gets a verdict:
 
-- `OK`: there, as designed
-- `GHOST`: its ghost is there and the network holds the item: robots are on their way
-- `GHOST SHORT`: its ghost is there and the network holds none (or too few) of the item: robots
+- `ok`: there, as designed
+- `ghost`: its ghost is there and the network holds the item: robots are on their way
+- `ghost SHORT`: its ghost is there and the network holds none (or too few) of the item: robots
   can't build it until you make the item (an assembler row into a provider chest) or bring it
-- `GHOST LOCKED`: its ghost is there and the item's recipe isn't researched: `fk tech ITEM` says
+- `ghost needs-research`: its ghost is there and the item's recipe isn't researched: `fk tech ITEM` says
   which technology opens it and what it costs
-- `MISSING`: nothing there (destroyed, or never built; the next build restores it)
-- `WRONG`: something else stands on its tiles
-- `DRIFT`: there but turned, or with another recipe. A belt, underground, splitter, inserter,
+- `not-placed`: nothing there (destroyed, or never built; the next build restores it)
+- `other-entity`: something else stands on its tiles
+- `settings-changed`: there but turned, or with another recipe. A belt, underground, splitter, inserter,
   pipe-to-ground, pump or drill that stands turned (or as the other underground end) says
-  `TURNED`: the next build orders it out and robots lay it again as designed
+  `re-laid`: the next build orders it out and robots lay it again as designed
 - `UNPAIRED`: a built underground belt with no partner in reach, or with another end of the same
   kind (two outputs) so no tunnel forms; the line gives its position. A ghost pair is not built
   and is not reported
-- `WRONG_ITEM`: a belt or pipe holds an item or fluid its net doesn't (old items from a
+- `other-item`: a belt or pipe holds an item or fluid its net doesn't (old items from a
   rebuild); on a belt two nets share, lane by lane (copper on the iron lane is wrong there). One
   the build laid under another net says so, and the next build renews it by itself; for the
   others, `fk fresh X0,Y0,X1,Y1` takes those belts up, and the next build lays them fresh
 
 Anything in the area that the design doesn't explain is:
 
-- `CLAIMED`: inside a claim (the starter kit)
-- `MARKED`: something placed by hand, kept for now (it is listed under "changes here", with who
+- `claimed`: inside a claim (the starter kit)
+- `marked`: something placed by hand, kept for now (it is listed under "changes here", with who
   placed it, and a hint when it looks like a fix to a net)
-- `NOBODY`: nobody owns it; the next build removes it. This is also what the toolkit built and
+- `unowned`: nobody owns it; the next build removes it. This is also what the toolkit built and
   your design no longer has ("the toolkit's own, dropped from the design")
 
 ## The checks
 
-Checks are report lines, never errors: the build goes on and tells you. Read them; most are worth
-fixing in the source.
+Checks are report lines, never errors: the build goes on and tells you. Read them; most are
+worth fixing in the source. They come in two voices, and the capitals are the point.
 
-- `UNFED` / `UNCONSUMED`: a machine's input has no net feeding it / its output goes nowhere
-- `UNDERFED` (report_rates): a net's drivers make less than its consumers would take, so they
-  run below speed; it names the net where the shortage starts (a short ore patch, not every step
-  after it) and the `fk plan` line that sizes its drivers
-- `TYPE`: a net names a machine that has no endpoint for the net's items
-- `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
-- `CARRYOVER` (report_rates): a sink at the end of a belt that brings it a product and also a
-  feed, an item machines upstream on the same belt consume (sulfur riding the blue packs' belt
-  into the packs' chest): what they don't take of the feed fills the sink and stops the belt for
-  the product too. Give the product a belt of its own, or filter the sink's hands
-  (`set packs.in: filter=chemical-science-pack`)
+### The loud ones: something will stop working
+
+A belt that fills, machines that starve, a build that never happens. Read these now.
+
 - `CLOG`: a net of two or more items (sushi), or an unlimited chest fed two or more items by
   separate nets: an item that comes faster than it is used can fill it and stop the others. No
   tool can tell whether what feeds a mixed net is limited, so its line goes in two ways only. One:
@@ -297,75 +290,95 @@ fixing in the source.
   sink accepts (a requester beside a one-off crafter, `Lab`s around a requester of packs); the route
   step says so. A belt in between, or a second inserter, and it can clog again. Two: your design
   says it limits what goes on the net (`net NAME limited:`), which limits nothing itself
-- `UNLIMITED`: provider or storage chests without `limit=`: what reaches them goes into the
-  network without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops when it
-  is full. A chest a mixed belt of makers feeds gets a line of its own: it fills unless each maker
-  is limited (`net NAME limited:` says your design limits them)
+- `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
+  fill, so the machines can starve
+- `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
 - `SUSHI_LIMIT`: a `limit=` on a chest a mixed belt of makers feeds: when the chest holds that
   much the belt backs up with every item on it, so the limit only brings the stop sooner. A chest
   of many items works best unlimited, with the limit at each maker
-- `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
-  fill, so the machines can starve
-- `LANES`: two single-item nets feed the same machines on two belts, a lane each: one belt carries
-  both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them. Whoever
-  drives the nets, so a lab row fed red packs on one belt and green packs on another is named too
-  (2.0.50); what is left alone is a pair into chests only, a pair a `SmelterArray` or a
-  `CircuitStack` feeds (it side-loads its own two nets), and any flow that doesn't fit a lane (a
-  requester without `rate=` is unbounded)
-- `SELECT`: a `set` that matches nothing (no such instance, no hand whose sink is the named one,
-  or an `if=` with no chest to read), or an unknown property
-- `GUARD`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)
-- `SIGNAL` / `WIRE`: a condition reads a signal nothing on its wire makes, or a name that is no
-  signal / a wire nothing drives or reads, or a belt reading on no wire (its reading reaches
-  nothing until the belt is wired)
-- `WIRE_REACH` / `WIRE_LEAK`: two entities of a wire further apart than a wire reaches (9 tiles)
-  / two wires of one colour on one entity, so their signals add
-- `GATED` / `REQUIRE`: a gated net the rate model takes as always open (no `behave` cycle on its
-  wire) / a `behave` block's `require` that doesn't hold
-- `RIP`: the build takes up a lot, and the robots need minutes for it (the structures, the items
-  in them, and how long: `out\diff.txt`). It goes faster if you stop what feeds it first and let
-  it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a
-  factory moved: `fk merge` joins factories where they stand
-- `DOUBLE`: one machine input or output on two nets
-- `ASSERT` / `TARGET`: a rate you asserted, or the surface's target, is not met on paper (or,
-  after a build, as routed)
-- `SIZE`: an `n=auto` row can't meet a target, an assert or what its consumers ask (the line says
-  what stops it: the row is at the top of its bounds, a requester chest gives its rate, a row with
-  a written count runs at full speed); after the routing, a net of a sized row that asks more
-  than its belts or inserters carry
-- `FIT`: a sized row runs past its plot or into another instance's frame at the count it got;
-  the build stops at `place` when their entities would overlap
-- `CAPACITY`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
-  and some of the net's belt lanes or inserters run full: the line says what is required there,
-  what they carry, and who runs short. Lanes count one at a time (7.5/s yellow); on a belt two
-  nets share, each net has its own. A chest without a rate beside machines on a net takes what
-  they leave, so it is never short and asks nothing of the belts. The ways past one: `tier
-  minimize --allow yellow,red` in the build script (red lanes carry 15/s), a second row, or a
-  second belt
-- `LANE`: items on a lane the layout gives other nets (a belt of two nets with its lanes the
+- `SPILL`: a net's route touches another net, so its items end up on a belt that isn't its own
+- `WRONG-LANE`: items on a lane the layout gives other nets (a belt of two nets with its lanes the
   wrong way round), nets on one lane that go to different sinks, or items on the closed side of a
   belt side-loaded onto an underground: only the lane on its open side gets through, and the other
   stops there
-- `UNROUTED`: no belt route was found for a net (the reason follows: often a row is boxed in;
-  leave a few tiles free around a row's head, where its belts attach). The default build script
-  stops on it, so nothing is pasted
-- `NO_SINK` (report_checks): a maker whose product reaches none of the consumers of its net, so
-  what it makes has nowhere to go. The default build script stops on it too; report_checks'
-  `sinks` line counts the makers that reach a sink
-- `UNUSED`: a declared net that no machine and no belt uses
-- `OPEN` / `LEAK`: a net's route doesn't reach every machine / touches another net
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
   in the build script joins it to the plant's grid)
 - `UNREACHED` (diff, before the paste): entities the paste lays where no powered roboport's
   construction area reaches, counting the roboports the paste lays where robots reach: robots
   never build them. It names power-bridge poles among them, since a roboport powered only through
   such a bridge never gets its power
-- `BOOTSTRAP` (report_checks): a net's own route needs a building item (a belt, an underground, a
+
+
+
+### The rest: what is where
+
+These describe a state - what is missing, what stands elsewhere, what happened - and the usual
+answer is the next build. Nothing here is broken by itself.
+
+- `no-feed` / `no-taker`: a machine's input has no net feeding it / its output goes nowhere
+- `short-feed` (report_rates): a net's drivers make less than its consumers would take, so they
+  run below speed; it names the net where the shortage starts (a short ore patch, not every step
+  after it) and the `fk plan` line that sizes its drivers
+- `cannot-carry`: a net names a machine that has no endpoint for the net's items
+- `feed-rides-on` (report_rates): a sink at the end of a belt that brings it a product and also a
+  feed, an item machines upstream on the same belt consume (sulfur riding the blue packs' belt
+  into the packs' chest): what they don't take of the feed fills the sink and stops the belt for
+  the product too. Give the product a belt of its own, or filter the sink's hands
+  (`set packs.in: filter=chemical-science-pack`)
+- `no-limit`: provider or storage chests without `limit=`: what reaches them goes into the
+  network without end. `Chest<provider, limit=4>` keeps 4 stacks, and what feeds it stops when it
+  is full. A chest a mixed belt of makers feeds gets a line of its own: it fills unless each maker
+  is limited (`net NAME limited:` says your design limits them)
+- `could-pair`: two single-item nets feed the same machines on two belts, a lane each: one belt carries
+  both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them. Whoever
+  drives the nets, so a lab row fed red packs on one belt and green packs on another is named too
+  (2.0.50); what is left alone is a pair into chests only, a pair a `SmelterArray` or a
+  `CircuitStack` feeds (it side-loads its own two nets), and any flow that doesn't fit a lane (a
+  requester without `rate=` is unbounded)
+- `no-match`: a `set` that matches nothing (no such instance, no hand whose sink is the named one,
+  or an `if=` with no chest to read), or an unknown property
+- `cannot-filter`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)
+- `no-signal` / `no-wire`: a condition reads a signal nothing on its wire makes, or a name that is no
+  signal / a wire nothing drives or reads, or a belt reading on no wire (its reading reaches
+  nothing until the belt is wired)
+- `wire-too-far` / `wires-share`: two entities of a wire further apart than a wire reaches (9 tiles)
+  / two wires of one colour on one entity, so their signals add
+- `gate-open` / `require-not-met`: a gated net the rate model takes as always open (no `behave` cycle on its
+  wire) / a `behave` block's `require` that doesn't hold
+- `taken-up`: the build takes up a lot, and the robots need minutes for it (the structures, the items
+  in them, and how long: `out\diff.txt`). It goes faster if you stop what feeds it first and let
+  it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a
+  factory moved: `fk merge` joins factories where they stand
+- `two-nets`: one machine input or output on two nets
+- `rate-not-met` / `target-not-met`: a rate you asserted, or the surface's target, is not met on paper (or,
+  after a build, as routed)
+- `size`: an `n=auto` row can't meet a target, an assert or what its consumers ask (the line says
+  what stops it: the row is at the top of its bounds, a requester chest gives its rate, a row with
+  a written count runs at full speed); after the routing, a net of a sized row that asks more
+  than its belts or inserters carry
+- `does-not-fit`: a sized row runs past its plot or into another instance's frame at the count it got;
+  the build stops at `place` when their entities would overlap
+- `too-thin`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
+  and some of the net's belt lanes or inserters run full: the line says what is required there,
+  what they carry, and who runs short. Lanes count one at a time (7.5/s yellow); on a belt two
+  nets share, each net has its own. A chest without a rate beside machines on a net takes what
+  they leave, so it is never short and asks nothing of the belts. The ways past one: `tier
+  minimize --allow yellow,red` in the build script (red lanes carry 15/s), a second row, or a
+  second belt
+- `no-route`: no belt route was found for a net (the reason follows: often a row is boxed in;
+  leave a few tiles free around a row's head, where its belts attach). The default build script
+  stops on it, so nothing is pasted
+- `no-destination` (report_checks): a maker whose product reaches none of the consumers of its net, so
+  what it makes has nowhere to go. The default build script stops on it too; report_checks'
+  `sinks` line counts the makers that reach a sink
+- `unused`: a declared net that no machine and no belt uses
+- `partly-connected`: a net's route doesn't reach every machine (the line says how many of its driver->consumer pairs connect)
+- `bootstrap` (report_checks): a net's own route needs a building item (a belt, an underground, a
   splitter, an inserter) whose only maker in the factory takes an item from that same net, so
   neither can be built first. The line names the item, how many the route lays, the maker and what
   it takes from the net: stock that item first, or build that maker first. No line when the item
   comes from outside or another maker is fed elsewhere
-- `NO_ROBOTS`: a logistic chest outside every logistic area of the main robot network (robots
+- `no-robots`: a logistic chest outside every logistic area of the main robot network (robots
   won't serve it), or entities outside its construction area (robots won't build them). The kit's
   roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`
   gives a factory a roboport only for the chests no roboport of that network reaches yet (the
@@ -373,9 +386,9 @@ fixing in the source.
   another one on both axes. It puts a storage chest beside each roboport it places, so what the
   robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
   the chest out). Grow outward: the next factory within reach of the last.
-- `ON_TERRAIN`: something designed stands on water or a cliff
-- `OFF_WATER`: an offshore pump whose water side is dry ground (it gives no water)
-- `HAND`: the build replaces or removes something someone placed by hand: who (when the game
+- `on-water-or-cliff`: something designed stands on water or a cliff
+- `no-water`: an offshore pump whose water side is dry ground (it gives no water)
+- `by-hand`: the build replaces or removes something someone placed by hand: who (when the game
   names them), what, where, and on which design entity's tile. The design wins, so the build goes
   on; adopt it into your source, leave it out, or come back to it. A Claude lead hears it like
   chat (`out\hand.txt` keeps every one). It also names settings changed by hand on what the
@@ -383,17 +396,18 @@ fixing in the source.
   logistic=copper-plate>7 (the paste sets logistic=iron-plate<50)`. A paste writes the design's
   condition, request, chest limit and recipe over the one set by hand; a wire or condition the
   design lacks stays. To keep it, write it into the source (`logistic=copper-plate>7`);
-  `stop_on HAND` holds a paste until you have
-- `TURNED` (diff, before the paste): belts, undergrounds, splitters or inserters stand on their
+  `stop_on by-hand` holds a paste until you have
+- `re-laid` (diff, before the paste): belts, undergrounds, splitters or inserters stand on their
   design tiles under the right name but facing another way (or as the other underground end), so
   their line stops there. A factory built over another keeps the old one's belts wherever the
   names match, facing the old ways. The build orders each out and lays it fresh; `out\apply.txt`
-  lists them under TURNED. One a player turned by hand is also a `HAND` line
-- `MISPLACED` / `UNPLACED`: the paste did not land where the design says
-- `LOW_STOCK`: the network holds fewer of an item than the build still needs
-- `LOCKED`: an item to build, or a machine's recipe, isn't researched (the technology and its
+  lists them under re-laid. One a player turned by hand is also a `by-hand` line
+- `not-where-designed` / `no-position`: the paste did not land where the design says
+- `short-stock`: the network holds fewer of an item than the build still needs
+- `needs-research`: an item to build, or a machine's recipe, isn't researched (the technology and its
   cost follow)
 
+These describe a state - what is missing, what stands elsewhere, what happened - and the usual
 ## When you need something
 
 ```
@@ -534,8 +548,8 @@ design` draws the surface as designed rather than as built.
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
-`stop_on UNROUTED NO_SINK` holds a paste with a net unrouted or a maker whose product reaches no
-sink; add `stop_on UNFED` before a big paste so that check stops it too (`stop_on LOW_STOCK`
+`stop_on no-route no-destination` holds a paste with a net unrouted or a maker whose product reaches no
+sink; add `stop_on no-feed` before a big paste so that check stops it too (`stop_on short-stock`
 holds the paste until the network has what it lays: report_bom says when a paste would take up
 running machines while their replacements are short). `size`, after `elaborate`, counts
 the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --to

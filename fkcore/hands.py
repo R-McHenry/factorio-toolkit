@@ -9,7 +9,7 @@ asks of it: the flow through an inserter with every machine at its nominal rate 
 capacities** (``fkcore.routed.required``), against ``fkcore.lanes.inserter_rate`` of each rung with
 the force's hand sizes and the drop-onto-a-belt derating. The required flows do not depend on the
 hand that is laid (they are the design's demand), so the answer is not circular, and it is the same
-question ``tiers`` asks of a belt lane and ``CAPACITY`` already reports for inserters.
+question ``tiers`` asks of a belt lane and ``too-thin`` already reports for inserters.
 
 Rungs, lowest first: ``inserter`` then ``fast-inserter`` (``--allow`` names others, and a rung the
 network cannot build now is skipped: ``fkcore.avail``). ``minimize`` (the default) never puts a hand
@@ -20,7 +20,7 @@ What the model does not see, and why the pass is raise-only by default: an inser
 moving belt is slower and more erratic than one picking from a chest, and a connector that binds on
 paper may be buffered in the game; a bulk or stack inserter is modelled (``lanes._BULK``,
 ``bulk_hand``) but the router does not lay one yet, so the ladder stops at fast. A connector that
-binds at the top rung is named here and reported again as ``CAPACITY``. Pure, stdlib only.
+binds at the top rung is named here and reported again as ``too-thin``. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from . import fkp as fkpmod
 from . import lanes as lanesmod
 from . import routed as routedmod
 
-__all__ = ["HANDS", "assign", "choose"]
+__all__ = ["hands", "assign", "choose"]
 
 #: the rungs of a short hand, lowest first: what a row or the router lays, and what this raises
 HANDS = ("inserter", "fast-inserter")
@@ -154,7 +154,7 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
         lines.append(f"  {name} is not buildable now ({len(keys)} hands would take it): they stay "
                      f"{lower}" + (f" ({speed:.2f}/s a hand vs {rates[next(iter(keys))][lower]:.2f})"
                                    if speed and rates[next(iter(keys))].get(lower) else "")
-                     + "; CAPACITY says what that costs")
+                     + "; too-thin says what that costs")
     if over:
         top = max(n for _k, n, _r in over)
         lines.append(f"  {_many(len(over), 'connector')} need more than {hands[-1]} carries (up to "

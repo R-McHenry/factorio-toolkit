@@ -45,7 +45,7 @@ cover robots
 cover power     --pole medium-electric-pole
 floorplan
 report_checks
-diff            --scope stale
+diff --scope stale
 report_bom      --stock none
 write_layout
 apply           --scope stale
@@ -112,11 +112,11 @@ class FlowTest(unittest.TestCase):
         # belts its routes are built from: BOOTSTRAP names them, one line per net they feed
         self.assertEqual([(s, c.code, c.where) for s, c in ctx.checks if c.code not in ADVICE],
                          [("floorplan", "NO_POWER", "nauvis main"),
-                          ("report_checks", "BOOTSTRAP", "net main/iron"),
-                          ("report_checks", "BOOTSTRAP", "net main/gear"),
+                          ("report_checks", "bootstrap", "net main/iron"),
+                          ("report_checks", "bootstrap", "net main/gear"),
                           # 2.0.15: its route needs plain inserters, and the only maker of one
                           # (main/ins) is fed by this same net
-                          ("report_checks", "BOOTSTRAP", "net main/circ")])
+                          ("report_checks", "bootstrap", "net main/circ")])
         lay = fkp.load(os.path.join(self.dir, "main.fkp"))
         flat = elaborate_file(os.path.join(self.dir, "main.fk"), CAT)
         self.assertEqual(fkp.invariants(lay, CAT, nets=flat.nets), [])
@@ -164,7 +164,7 @@ class FlowTest(unittest.TestCase):
         self.assertIn("routed    packs:", route_txt)
         kept = int(re.search(r"(\d+) kept", route_txt).group(1))
         self.assertGreaterEqual(kept, 10)                     # the rest stay where they were
-        self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 LEAK",
+        self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 SPILL",
                       self.read("out/report_checks.txt"))
 
     def test_a_moved_row_keeps_the_poles_that_stand(self):
@@ -210,7 +210,7 @@ class FlowTest(unittest.TestCase):
                                   "automation-science-pack 1000/min"))
         code, ctx = self.build(to="report_rates:2")
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual([s for s, c in ctx.checks if c.code == "TARGET"], ["report_rates"])
+        self.assertEqual([s for s, c in ctx.checks if c.code == "target-not-met"], ["report_rates"])
         self.assertEqual(self.read("out/report_rates.txt").count("NOT met"), 2)
         code, ctx = self.build(frm="report_rates:2", to="report_rates:2")
         self.assertEqual(code, 0, ctx.log)
@@ -269,9 +269,9 @@ class FlowTest(unittest.TestCase):
         area = look.default_area(new, CAT)
         lk = look.report(new, scene.design_scene(old, CAT, area), CAT, area, look.policy(sf))
         self.assertEqual((lk.ok, lk.designed), (9, 10))
-        self.assertEqual([(v.verdict, v.detail) for v in lk.rep.verdicts if v.verdict != "OK"],
-                         [("DRIFT", "recipe iron-gear-wheel, designed iron-stick")])
-        self.assertIn("DRIFT", "\n".join(lk.lines()))
+        self.assertEqual([(v.verdict, v.detail) for v in lk.rep.verdicts if v.verdict != "ok"],
+                         [("settings-changed", "recipe iron-gear-wheel, designed iron-stick")])
+        self.assertIn("settings-changed", "\n".join(lk.lines()))
         self.assertIn("designed iron-stick", "\n".join(lk.lines()))
         # the same source again: the checkpoints are taken as they stand, nothing is laid again
         said = []
@@ -336,11 +336,11 @@ class FlowTest(unittest.TestCase):
             fh.write(src)
         code, ctx = self.build()                              # UNFED is a warning by default
         self.assertEqual(code, 0)
-        self.assertTrue(any(c.code == "UNFED" for _s, c in ctx.checks))
+        self.assertTrue(any(c.code == "no-feed" for _s, c in ctx.checks))
         with open(self.script, "a", encoding="utf-8") as fh:
-            fh.write("stop_on UNFED\n")
+            fh.write("stop_on no-feed\n")
         self.assertIn("routed    belt", self.read("out/route.txt"))
-        self.assertIn("stop_on INVARIANT: a check of these stops the run; none has stopped it so "
+        self.assertIn("stop_on malformed: a check of these stops the run; none has stopped it so "
                       "far", self.read("out/stop_on.txt"))
         code, ctx = self.build()
         self.assertEqual(code, 1)
@@ -357,12 +357,12 @@ class FlowTest(unittest.TestCase):
         from fkcore.sense import Verdict
 
         class Rep:
-            verdicts = [Verdict("NOBODY", "burner-mining-drill", 1, 1),
-                        Verdict("NOBODY", "assembling-machine-1", 5.5, 5.5, ghost=True),
-                        Verdict("NOBODY", "transport-belt", 2.5, 2.5),
-                        Verdict("WRONG", "transport-belt", 9.5, 9.5,
+            verdicts = [Verdict("unowned", "burner-mining-drill", 1, 1),
+                        Verdict("unowned", "assembling-machine-1", 5.5, 5.5, ghost=True),
+                        Verdict("unowned", "transport-belt", 2.5, 2.5),
+                        Verdict("other-entity", "transport-belt", 9.5, 9.5,
                                 under=[("stone-furnace", 9, 9, None, False, True)]),
-                        Verdict("OK", "electric-mining-drill", 20.5, 20.5)]
+                        Verdict("ok", "electric-mining-drill", 20.5, 20.5)]
         ctx = flow.Ctx(self.dir, self.script, CAT, os.path.join(self.dir, "out"))
         self.assertEqual(flow._machines_taken_up(ctx), [])
         ctx.last_diff = Rep
@@ -375,10 +375,10 @@ class FlowTest(unittest.TestCase):
         from fkcore.sense import Verdict
 
         class Rep:
-            verdicts = [Verdict("GHOST", "medium-electric-pole", 63.5, 34.5, "nauvis:bridge/p0"),
-                        Verdict("MISSING", "roboport", 100, 100, "nauvis:out/robots/r0"),
-                        Verdict("MISSING", "assembling-machine-1", 130.5, 100.5, "nauvis:out/a/m0"),
-                        Verdict("OK", "roboport", 57, 52, "nauvis:relay/r0")]
+            verdicts = [Verdict("ghost", "medium-electric-pole", 63.5, 34.5, "nauvis:bridge/p0"),
+                        Verdict("not-placed", "roboport", 100, 100, "nauvis:out/robots/r0"),
+                        Verdict("not-placed", "assembling-machine-1", 130.5, 100.5, "nauvis:out/a/m0"),
+                        Verdict("ok", "roboport", 57, 52, "nauvis:relay/r0")]
 
         class Link:
             def __init__(self, far):
@@ -406,14 +406,14 @@ class FlowTest(unittest.TestCase):
         self.assertIsNone(flow._standing(ctx, "main"))           # no diff yet: as before
 
         class Rep:
-            verdicts = [Verdict("OK", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0"),
-                        Verdict("GHOST", "medium-electric-pole", 9.5, 0.5, "nauvis:main/power/p1"),
-                        Verdict("OK", "small-electric-pole", 1.5, 0.5, "nauvis:coal/power/p0"),
-                        Verdict("OK", "assembling-machine-1", 1.5, 1.5, "nauvis:main/a/m0")]
+            verdicts = [Verdict("ok", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0"),
+                        Verdict("ghost", "medium-electric-pole", 9.5, 0.5, "nauvis:main/power/p1"),
+                        Verdict("ok", "small-electric-pole", 1.5, 0.5, "nauvis:coal/power/p0"),
+                        Verdict("ok", "assembling-machine-1", 1.5, 1.5, "nauvis:main/a/m0")]
         flow._save_standing(ctx, Rep)
         self.assertEqual(flow._standing(ctx, "main"), {"power/p0"})
         self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})
-        Rep.verdicts = [Verdict("MISSING", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0")]
+        Rep.verdicts = [Verdict("not-placed", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0")]
         flow._save_standing(ctx, Rep)                            # gone since: no longer standing
         self.assertEqual(flow._standing(ctx, "main"), set())
         self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})   # outside the scope: kept
@@ -496,7 +496,7 @@ class FlowTest(unittest.TestCase):
         self.assertIn("stale     p: routed again: its ends moved since the committed .fkp "
                       "(dst.in1)", route_txt)
         self.assertIn("routed    p:", route_txt)
-        self.assertNotIn("UNROUTED", checks_txt)
+        self.assertNotIn("no-route", checks_txt)
         self.assertIn("1 nets: 1 connected", checks_txt)
 
     def test_a_row_added_is_patched_into_the_routes_that_stand(self):
@@ -531,7 +531,7 @@ class FlowTest(unittest.TestCase):
         # a new driver: its belt side-loads onto the gear belt before its first split
         self.assertRegex(route_txt, r"patched   gear: 2 -> 3, gears2\.out: \d+ belts.*, "
                                     r"side-loaded onto ~gear/b\d+; 69 of 69 carriers kept\n")
-        self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 LEAK",
+        self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 SPILL",
                       self.read("out/report_checks.txt"))
         now = routes()
         self.assertEqual({n: len(first[n] & now[n]) for n in first},
@@ -574,11 +574,11 @@ class FlowTest(unittest.TestCase):
         with open(os.path.join(small, "shop.fk"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(shop + "net packs: X -> px\n")
         route_txt, checks_txt = build()
-        self.assertIn("stale     packs: routed again: its committed route would LEAK: ~packs/i0 "
+        self.assertIn("stale     packs: routed again: its committed route would SPILL: ~packs/i0 "
                       "drops into lab/m0, which is not a consumer of packs", route_txt)
         self.assertIn("routed    packs: 1 -> 1, 1 inserter (direct insertion)", route_txt)
         self.assertIn("kept      xin: its carriers are already laid (pinned)", route_txt)
-        self.assertIn("2 nets: 2 connected, 0 open, 0 unrouted; 0 LEAK", checks_txt)
+        self.assertIn("2 nets: 2 connected, 0 open, 0 unrouted; 0 SPILL", checks_txt)
         lay = fkp.load(os.path.join(small, "shop.fkp"))
         g = connect.graph(lay, CAT)
         self.assertEqual([k for k, _via in g.pred.get("lab/m0", ())], [])  # nothing feeds the lab
@@ -620,7 +620,7 @@ class FlowTest(unittest.TestCase):
         # 2.0.4 A12 (the live run's mall): its last ghosts were underground belts carrying the
         # mall's own iron, and the only maker of underground belts sat behind them
         ctx = self.build_bootstrap_factory()
-        boot = [c for _step, c in ctx.checks if c.code == "BOOTSTRAP"]
+        boot = [c for _step, c in ctx.checks if c.code == "bootstrap"]
         self.assertEqual([c.where for c in boot], ["net boot/iron"])
         n = len(self.bootstrap_undergrounds())
         self.assertGreaterEqual(n, 2)                # the route really tunnels under the fuel
@@ -628,17 +628,17 @@ class FlowTest(unittest.TestCase):
         self.assertIn("the only maker (boot/ug)", boot[0].msg)
         self.assertIn("takes iron-plate from this same net", boot[0].msg)
         self.assertIn("stock the underground-belt first", boot[0].msg)
-        self.assertIn("BOOTSTRAP", self.read(os.path.join("boot", "out", "report_checks.txt")))
+        self.assertIn("bootstrap", self.read(os.path.join("boot", "out", "report_checks.txt")))
         # one line per net per run: report_checks again adds no matching line
         _lines, again = flow.s_report_checks(ctx, [])
-        self.assertFalse([c for c in again if c.code == "BOOTSTRAP"])
+        self.assertFalse([c for c in again if c.code == "bootstrap"])
 
     def test_a_building_item_from_outside_is_no_bootstrap(self):
         # the same design, with a requester chest of underground belts: a maker independent of
         # the net (the item comes from outside), so the net can be built from stock
         ctx = self.build_bootstrap_factory(
             "ugc  = Chest<requester, item=underground-belt>      @(0, 30)\n")
-        self.assertEqual([c for _step, c in ctx.checks if c.code == "BOOTSTRAP"], [])
+        self.assertEqual([c for _step, c in ctx.checks if c.code == "bootstrap"], [])
         self.assertGreaterEqual(len(self.bootstrap_undergrounds()), 2)   # the same design
 
     def test_a_malformed_script_is_refused(self):

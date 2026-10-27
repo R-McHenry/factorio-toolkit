@@ -16,7 +16,7 @@ class WorldLineTest(unittest.TestCase):
             "research": {"name": "robotics", "pct": 40}})
         self.assertIn("15 ghosts wait for the robots", line)
         self.assertIn("5 gun-turret (SHORT", line)
-        self.assertIn("1 requester-chest (LOCKED", line)
+        self.assertIn("1 requester-chest (needs-research", line)
         self.assertEqual(key, "gun-turret:short,requester-chest:locked")
 
     def test_ghosts_no_powered_roboport_reaches(self):

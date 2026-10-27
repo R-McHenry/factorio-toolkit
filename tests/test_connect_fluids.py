@@ -34,7 +34,7 @@ class FluidConnectTest(unittest.TestCase):
         rep = connect.connect(L(self.PUMP_TO_CHEM.replace("e ~w/p1 pipe 1.5,2.5 net=w", "")), CAT,
                               self.NETS)
         self.assertEqual(rep.nets["w"].status, "unrouted")
-        self.assertTrue(str(rep.checks[0]).startswith("UNROUTED    net w: 0 of 1"))
+        self.assertTrue(str(rep.checks[0]).startswith("no-route net w: 0 of 1"))
 
     def test_the_wrong_box_is_not_reached(self):
         # the pipe ends on the gas input (the right one): the water box is not reached, a LEAK
@@ -44,16 +44,16 @@ class FluidConnectTest(unittest.TestCase):
             e ~w/p1 pipe 3.5,2.5 net=w
             e c/m chemical-plant 2.5,4.5 N recipe=sulfur"""), CAT, self.NETS)
         self.assertEqual(rep.nets["w"].status, "unrouted")
-        self.assertEqual([str(c) for c in rep.checks if c.code == "LEAK"],
-                         ["LEAK        net w: ~w/p1 joins c/m (its petroleum-gas box), which is not "
+        self.assertEqual([str(c) for c in rep.checks if c.code == "SPILL"],
+                         ["SPILL net w: ~w/p1 joins c/m (its petroleum-gas box), which is not "
                           "an endpoint of w"])
 
     def test_two_nets_side_by_side_leak(self):
         rep = connect.connect(L("""
             e ~a/p0 pipe 0.5,0.5 net=a
             e ~b/p0 pipe 1.5,0.5 net=b"""), CAT)
-        self.assertEqual([str(c) for c in rep.checks if c.code == "LEAK"],
-                         ["LEAK        net a: ~a/p0 joins ~b/p0 (net b)"])
+        self.assertEqual([str(c) for c in rep.checks if c.code == "SPILL"],
+                         ["SPILL net a: ~a/p0 joins ~b/p0 (net b)"])
 
     def test_pipe_to_ground_pairs_as_measured(self):
         def pairs(text):

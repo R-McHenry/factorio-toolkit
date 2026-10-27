@@ -4,7 +4,7 @@
 carriers into the owning factory's .fkp as the net's own carriers (``~<net>/a<k>``, ``net=<net>``),
 moved from surface coordinates into the factory frame through its plot, and returns the marks
 that only covered them, so the caller can drop those from the surface .fkp. The next ``sense`` of
-the area says OK instead of MARKED, and the next ``apply`` keeps the fix because it is now design.
+the area says ok instead of marked, and the next ``apply`` keeps the fix because it is now design.
 V1 adopts carriers into an existing net of a factory on an unturned plot; new endpoints (a machine
 someone added) still go into the .fk by hand. Pure, stdlib only.
 """

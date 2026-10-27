@@ -151,7 +151,7 @@ def parse_condition(text, where="condition"):
     """``S<N`` / ``S>=T`` -> (signal, source comparator, number or signal)."""
     m = _CONDITION.match(str(text))
     if not m:
-        raise CodecError(f"{where}: a condition is SIGNAL<op>NUMBER or SIGNAL<op>SIGNAL "
+        raise CodecError(f"{where}: a condition is no-signal<op>NUMBER or no-signal<op>no-signal "
                          f"(op one of {', '.join(_COMPARATOR)}), got {text!r}")
     b = m.group("b")
     return m.group("a"), m.group("op"), int(b) if re.fullmatch(r"-?\d+", b) else b

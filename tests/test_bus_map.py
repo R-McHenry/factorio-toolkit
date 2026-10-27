@@ -2,7 +2,7 @@
 
 The named entries are nets, written in port order; direction comes from the netlist; the staircases
 take their positions from the order and `length` follows; a tap written before any load is an
-``ORDER`` line. The taps are the dual kind (the lab measured 15/s on both lanes); the mouth ports and
+``tap-too-early`` line. The taps are the dual kind (the lab measured 15/s on both lanes); the mouth ports and
 the left/right UG taps come next.
 """
 import unittest
@@ -58,18 +58,18 @@ class MapTest(unittest.TestCase):
         self.assertEqual(flat.nets["fe"].consumers, [("bus/load1", "iron-plate")])
         self.assertEqual(flat.nets["fg"].drivers, [("bus/tap1", "iron-plate")])
         self.assertEqual(flat.nets["fg"].consumers, [("rib/iron", "iron-plate")])
-        self.assertEqual([c for c in flat.checks if c.code == "ORDER"], [])
+        self.assertEqual([c for c in flat.checks if c.code == "tap-too-early"], [])
 
     def test_a_mouth_feeds_the_bus_in_line(self):
         flat = flat_of(RIB + MAP.replace("fe: feed", "in1: feed"))
         self.assertEqual(flat.insts["bus"].params["mouth"], ["in1"])
         self.assertEqual(flat.nets["in1"].drivers, [("feed/c0", "iron-plate")])
         self.assertEqual(flat.nets["in1"].consumers, [("bus/in1", "iron-plate")])
-        self.assertEqual([c for c in flat.checks if c.code == "ORDER"], [])
+        self.assertEqual([c for c in flat.checks if c.code == "tap-too-early"], [])
 
     def test_a_mouth_is_upstream_of_every_tap(self):
         flat = flat_of(RIB + MAP.replace("(fe: feed, fg: rib.iron)", "(fg: rib.iron, in1: feed)"))
-        self.assertEqual([c for c in flat.checks if c.code == "ORDER"], [])
+        self.assertEqual([c for c in flat.checks if c.code == "tap-too-early"], [])
 
     def test_a_mouth_must_be_a_source(self):
         with self.assertRaises(ElabError) as cm:
@@ -103,7 +103,7 @@ class MapTest(unittest.TestCase):
 
     def test_a_tap_before_any_load_is_an_order_line(self):
         flat = flat_of(RIB + MAP.replace("(fe: feed, fg: rib.iron)", "(fg: rib.iron, fe: feed)"))
-        order = [c for c in flat.checks if c.code == "ORDER"]
+        order = [c for c in flat.checks if c.code == "tap-too-early"]
         self.assertEqual(len(order), 1)
         self.assertIn("fg is a tap before any load", order[0].msg)
 

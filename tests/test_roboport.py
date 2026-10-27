@@ -15,7 +15,7 @@ from fkcore.elaborate import elaborate
 CAT = Catalog.load()
 
 SRC = """
-port  = Roboport @(0, 0)
+port = Roboport @(0, 0)
 botin = Chest<requester, item="logistic-robot", request=50, rate=1/s> @(5, 1)
 net load: botin -> port
 """
@@ -53,7 +53,7 @@ class RoboportTest(unittest.TestCase):
         """A roboport with no robot net is a coverage roboport; it is not missing an input."""
         f = lang.parse("port = Roboport @(0, 0)\n", "t.fk")
         flat = elaborate(f, dict(f.modules), CAT, "t")
-        self.assertEqual([c for c in flat.checks if c.code == "UNFED"], [])
+        self.assertEqual([c for c in flat.checks if c.code == "no-feed"], [])
 
 
 if __name__ == "__main__":

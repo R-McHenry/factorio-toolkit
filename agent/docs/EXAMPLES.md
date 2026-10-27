@@ -19,7 +19,7 @@ limit. It can have a plot of its own instead: `import Gears from "gears.fk"` and
 `.fkp`. `size WxH` is the factory's frame; the size in each heading below is what its rows take.
 
 The first three together, next to the kit (whose grid the reactor feeds), give 9 nets, all routed
-and connected, 0 LEAK.
+and connected, 0 SPILL.
 
 **The current way, and the older examples.** The newest examples build a base the way the
 toolkit now works best: every factory a sealed module with ports, joined by belts between its
@@ -177,8 +177,8 @@ assert red.rate >= 60/min
 they take, and ten labs at 6 packs a minute each (a 10 s research unit) take what the red rows
 make. A higher assert, or a `target automation-science-pack 1.5/s` line in the surface file,
 grows them as far as the plates allow: the requesters' rates are what 1 pack/s takes (2 iron for
-its gear, 1 copper), and `SIZE` names the requester that stops it until the `rate=` go up. The
-rows grow east: the 42x32 plot holds 11 of each, and `FIT` says when one runs past it. On paper:
+its gear, 1 copper), and `size` names the requester that stops it until the `rate=` go up. The
+rows grow east: the 42x32 plot holds 11 of each, and `does-not-fit` says when one runs past it. On paper:
 4 nets, all routed and connected.
 
 ## mall.fk: a mall of single machines (34x44) (older)
@@ -312,7 +312,7 @@ from the bus, and the next one fits beside it.
   with a slot limit, so each maker stops when its chest is full;
 - **science**: iron, copper and circuits into 30 red and 30 green packs a minute. The green row
   takes its inserters and its belts on one belt, a lane each (`lanes insn | beltn`): the build's
-  `LANES` check would name the pair on two belts.
+  `could-pair` check would name the pair on two belts.
 
 ```
 cbus  = Bus<belts=1, item=electronic-circuit>(cl: circ.circ, mc: mall.circ, sc: sci.circ) @(70, 66)
@@ -320,7 +320,7 @@ febus = Bus<belts=2, item=iron-plate>(fl: fe.plate, ci: circ.iron, mi: mall.iron
 cubus = Bus<belts=1, item=copper-plate>(kl: cu.plate, cc: circ.copper, sc2: sci.copper) @(0, 79)
 ```
 
-On paper (2.0.50): 38 nets routed in seven seconds and all of them connected, 0 LEAK, 1741
+On paper (2.0.50): 38 nets routed in seven seconds and all of them connected, 0 SPILL, 1741
 entities composed; on the lab (2.0.47) it stands whole and by game minute 30 science runs at the
 model's rates (30 red and 30 green a minute), the iron stack at its full 7.5 plates/s, and the
 mall's makers have stopped with their chests full.
@@ -352,7 +352,7 @@ set packs.in: filter=chemical-science-pack  # the packs' chest takes packs, neve
 ```
 
 On the lab (2.0.49): 223 entities, every inserter powered, sulfur on the left lane and packs on the
-right, the chest holding packs only. Without the filter, `CARRYOVER` says the sulfur would fill the
+right, the chest holding packs only. Without the filter, `feed-rides-on` says the sulfur would fill the
 packs' chest and stop the belt.
 
 ## robot-feed.fk: the kit's robots back into a roboport (12x8) (older)

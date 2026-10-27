@@ -38,7 +38,7 @@ The templates:
 | `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up. Two packs to a belt on the two lanes (`lanes packs | greenpacks`) halves the belts, and for many packs a line of lab cells of your own (`Stack<cell=...>`) is the shape: the two are designs, not templates | 1 to 3 science belts in (the third by long-handed inserters), each a pair |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
-| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request: the request's count is never above it, and a changed request on a standing chest is laid again by the next `fk build`). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said TYPE). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
+| `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request: the request's count is never above it, and a changed request on a standing chest is laid again by the next `fk build`). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said cannot-carry). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
 | `OffshorePump<rate=1200/s>` | water from the lake: it stands on the shore, open to the water (rot 3 faces west, water west of it) | pipes |
 | `Boiler<fuel=coal>` | one boiler, 3x2: water in and out at its short ends, steam out of its long north side (rot 0), coal by an inserter beside it; 60 steam/s on 0.45 coal/s | pipes |
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
@@ -86,15 +86,15 @@ ore   = MinerRow<n=auto, resource=iron-ore>           @(16, 2, rot 2)
 
 `fk build --to size` shows the counts without laying anything out: `out\size.txt` lists each
 row's count and what it serves (`net gear: iron-gear-wheel for red`, `target ... 1/s`), and
-says when a constraint can't be met (`SIZE`: a row at the top of its bounds, a requester chest at
+says when a constraint can't be met (`size`: a row at the top of its bounds, a requester chest at
 its rate, a row whose count you wrote at full speed). `fk rates FILE.fk` sizes the same way before
 it shows the rates. Counts sized to a rate balance a net exactly, so `fk rates` may name either
 side of it as what binds (the ore is exactly what the furnaces' output needs).
 
 Rows grow, and you arrange them: a row that grows runs further east (at rot 0), so leave it
 room. When a sized row runs past its plot or into another instance, the size step says so
-(`FIT`, both rows and how far), and the build stops at `place` if their entities overlap. After
-the routing, `report_rates` says (`SIZE`) when a net of a sized row asks more than its belts
+(`does-not-fit`, both rows and how far), and the build stops at `place` if their entities overlap. After
+the routing, `report_rates` says (`size`) when a net of a sized row asks more than its belts
 carry: a yellow lane carries 7.5 items/s.
 
 ## Nets
@@ -112,7 +112,7 @@ share, below): the drivers put items on it, the consumers take them.
   chest goes best without `limit=`, since a full chest stops the whole belt (`SUSHI_LIMIT`), and
   the limit belongs at each maker.
 - `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
-  on the net. It only quiets `CLOG` and `UNLIMITED` for it: it limits nothing itself. The limits
+  on the net. It only quiets `CLOG` and `no-limit` for it: it limits nothing itself. The limits
   are `set` properties on the makers' hands (Properties on objects, below).
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction.
@@ -144,7 +144,7 @@ lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on th
   own, and it side-loads them onto its lanes.
 - A row fed two items on two nets (a SmelterRow's ore and coal, a lab row's packs, an AsmRow's
   gears and circuits) is the case to pair: two belts there carry a lane each, and half of both is
-  empty. The build's `LANES` check names the pair when you leave it on two belts, whoever drives
+  empty. The build's `could-pair` check names the pair when you leave it on two belts, whoever drives
   them; `SmelterArray` and `CircuitStack` are the exception, since they side-load two nets onto
   their own feed belts and want them apart.
 
@@ -172,9 +172,9 @@ order: `bus.load1`, `bus.tap1`, `bus.tap2`.
   keeps its staircase and gets no belt.
 - The bus is a net of its own, named as the instance. `fk rates` treats it as a pool: what the
   loads bring is what the taps share, by appetite. In the game the first tap along the bus takes
-  its fill first, and a load after a tap never reaches it (`OPEN` on the bus's net says so).
+  its fill first, and a load after a tap never reaches it (`partly-connected` on the bus's net says so).
 - A yellow belt carries 15/s on its two lanes, 7.5 each. A smelter row puts its plates on one
-  lane, so one row into a load brings at most 7.5/s; the routed rates and `CAPACITY` say where
+  lane, so one row into a load brings at most 7.5/s; the routed rates and `too-thin` say where
   a lane is full. Grow a bus longer and add ports; a second item is a second bus beside it (a
   gap row between them), and a net crosses a 4-belt bus by an underground from one of its outer
   rows to the other.
@@ -206,12 +206,12 @@ module GearRib size 16x10 {
   tile outside. The place is `pos` along the side if the declaration pins one (`@w4`: counted from
   0, the side's first tile is `@w0`), else the one facing what the port connects to. The build
   records it in the `.fkp` and keeps it; a pin always wins, and a port moved to another side is
-  chosen again (both a `PORT` line, once). A machine standing on the tile inside or outside a port
-  leaves its route nowhere to meet it: a `PORT` line (`fk check`).
+  chosen again (both a `port` line, once). A machine standing on the tile inside or outside a port
+  leaves its route nowhere to meet it: a `port` line (`fk check`).
 - Inside a sealed module the internal nets route **inside the frame**, every tile of it theirs;
   outside, a parent's route meets the port from the other side of the edge. Two ports that meet on
   one edge (one module's `out` port against the next one's `in` port) need nothing laid between
-  them. A crossing anywhere but a port is a `SEAL` line. The module's
+  them. A crossing anywhere but a port is a `crosses-frame` line. The module's
   internals are the module's own: a parent change never re-routes them (the same carriers, key for
   key, just moved), and `fk explain rib` shows both the template line and its plain entities.
 - Width: in 2.0 a port is one lane (7.5/s); the two-lane pair is 2.1's multi-lane nets.
@@ -240,7 +240,7 @@ bus = Bus<belts=4, item=iron-plate>(
 - `left NAME: …` and `right NAME: …` before the entry's name choose the tap kind (2.0.34): `dual` is
   the belt strap, two lanes, 15/s; `left` is a lone underground exit at the stub, `right` an
   underground entrance with its exit one row out, each one lane, 7.5/s, both delivering on the left.
-- A tap written before any load is an `ORDER` line; a mouth is at the head, so it always counts first.
+- A tap written before any load is an `tap-too-early` line; a mouth is at the head, so it always counts first.
 
 ### The contract
 
@@ -320,7 +320,7 @@ set pipe.out            : logistic=pipe<100             # a row, all its output 
   condition; name the chest with `-> CHEST` so it reads that chest), `filter=`, `read=`, `signal=`,
   `signals=`.
 - Every `set` reports the hands it hit (`on 2 hands (~out/i0, ~out/i1)`), and one that matches
-  nothing is a `SELECT` line, never a silent no-op.
+  nothing is a `no-match` line, never a silent no-op.
 - A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
   `limited`.
 
@@ -356,7 +356,7 @@ x = Assembler<recipe=iron-gear-wheel, guard>   @(10, 4)
 `guard`: the machine puts its recipe's ingredients on a red wire to every inserter that feeds it,
 and they take only those (their filters come from the wire). Switch the recipe and what they
 carry follows in the game, so no hand is left holding the old item. A plain `inserter` can't
-filter (`GUARD` says so); the fast inserters the router lays can.
+filter (`cannot-filter` says so); the fast inserters the router lays can.
 
 ### Wires, signals and conditions
 
@@ -375,17 +375,17 @@ gears = Assembler<recipe=iron-gear-wheel> @(9, 0) when network.iron-gear-wheel <
   `Constant<signals="S=N, T=M">` its signals, a net (one of its belts reads what is on it; the
   reading reaches nothing until the belt is on a wire).
 - `when A < N` on a net gates it: every inserter and pump of its route moves items only while it
-  holds. On an instance, it enables the machine itself. `A` is `WIRE.SIGNAL` (that wire),
-  `network.ITEM` (the logistic network's count, no wire) or `INSTANCE.SIGNAL` (what that chest
+  holds. On an instance, it enables the machine itself. `A` is `no-wire.no-signal` (that wire),
+  `network.ITEM` (the logistic network's count, no wire) or `INSTANCE.no-signal` (what that chest
   or machine puts out, on a red wire of its own). The comparisons are `<`, `>`, `<=`, `>=`, `=`
   and `!=`, against a whole number or another signal on the same wire.
 - Signals are virtual signals (`signal-A`, `signal-T`), items or fluids, by name, or the names
   you declare with `signal`.
 - The build wires each wire net's entities by the shortest wires; a wire reaches 9 tiles
-  (`WIRE_REACH` when two are further apart). Two wires of one colour on one entity are one
-  network in the game and their signals add (`WIRE_LEAK`).
-- `SIGNAL` says a condition reads a signal nothing on its wire makes, or a name that is no
-  signal; `WIRE` a wire nothing drives or reads.
+  (`wire-too-far` when two are further apart). Two wires of one colour on one entity are one
+  network in the game and their signals add (`wires-share`).
+- `no-signal` says a condition reads a signal nothing on its wire makes, or a name that is no
+  signal; `no-wire` a wire nothing drives or reads.
 
 ### What a loop is meant to do: `behave`
 
@@ -401,14 +401,14 @@ behave fuel_saver on fuel_ctl {
 
 A control loop makes states a rate model can't show, such as a hot reactor with no fuel. A
 `behave` block names them where you will look: `require` lines with numbers the catalog knows are
-checked (`REQUIRE`), and a gated net whose wire has no `cycle` is a `GATED` line (the rate model
+checked (`require-not-met`), and a gated net whose wire has no `cycle` is a `gate-open` line (the rate model
 takes it as always open). The fuel saver above is the starter plant's: the reactor loads a cell
 only below 550 C, so its fuel slot is empty while it coasts, and that is normal.
 
 ## Checks on paper
 
 `assert INST.rate >= 10/min` (or `/s`, `/h`): checked by the rate model (`fk rates`); a failed one
-is an `ASSERT` line, not an error. With `n=auto` rows the build sizes them to meet it.
+is an `rate-not-met` line, not an error. With `n=auto` rows the build sizes them to meet it.
 
 ## Modules and imports
 

@@ -335,7 +335,7 @@ def pole(params, cat):
 
 def infinity_pipe(params, cat):
     """``InfinityPipe<fluid, rate=>``: a lab-only source of ``fluid`` (the lab's free materials).
-    Without a rate it is unbounded (an UNBOUNDED check line)."""
+    Without a rate it is unbounded (an no-rate check line)."""
     _only(params, ("fluid", "rate"))
     fluid = _word(params, "fluid")
     if not cat.is_fluid(fluid):
@@ -392,12 +392,12 @@ def chest(params, cat):
 
     provider / storage (the default is provider): the end of a net into the logistic network, a
     sink for whatever reaches it, up to ``rate``. requester: the logistic network feeding a net with
-    ``item``, at ``rate`` or unbounded (an UNBOUNDED check line); ``request`` is how many the
+    ``item``, at ``rate`` or unbounded (an no-rate check line); ``request`` is how many the
     chest asks the robots to keep in it (default: a minute of ``rate``, at least 10; else 100).
     ``item="a,b"`` (1.1, from the 0534 player's own patch): a requester asks for several items,
     each at ``rate``, and feeds them all onto its net (a one-off crafter's single chest).
     ``limit`` (1.1): the chest's slots, its inventory bar in the game. A limited chest stops taking
-    when full, so what feeds it stops too: limited production (no UNLIMITED or SHARED_SINK line).
+    when full, so what feeds it stops too: limited production (no no-limit or SHARED_SINK line).
     ``trash`` (1.4.2, a requester): the game's "trash unrequested", so items it no longer asks
     for go back to the network (the 2005 player's stone requester kept 101 copper plates).
     2.0: ``max`` (a requester) is the request's upper bound, as the starter plant's requester asks

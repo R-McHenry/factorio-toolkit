@@ -1,4 +1,4 @@
-"""2.0.5 TURNED: a factory built over another keeps the old one's belts where the names match,
+"""2.0.5 re-laid: a factory built over another keeps the old one's belts where the names match,
 facing the old ways; on uncharted ground the paste turns nothing, so the apply lays them fresh.
 
 The 2.0 run (20261022-1036-lead-v2) built its south factory (``south.fkp``: the 24-furnace
@@ -7,10 +7,10 @@ SmelterArray ``ism``, its drills ``iore`` and their routes) over the burner iron
 map is uncharted (no radar, no character), so ``build_blueprint`` places nothing there and every
 row goes through the single-ghost fallback, which took a same-name entity on a row's position as
 placed whichever way it faced. The diff after four builds: 26 belts and one inserter of the old
-block on south's tiles, facing the old block's ways (``DRIFT faces 12, designed 4``): the drills'
+block on south's tiles, facing the old block's ways (``settings-changed faces 12, designed 4``): the drills'
 ore belt ran west into a pole, the array's feed belts turned east and west mid-column, the coal
 splitter fed a belt facing south. 17 more of the old block's belts had stood there too: their old
-items didn't fit their new net, so the 1.2 rule (``renet`` with ``WRONG_ITEM``) laid them fresh;
+items didn't fit their new net, so the 1.2 rule (``renet`` with ``other-item``) laid them fresh;
 these 26 held what their new net carries (ore on the ore belts, coal on the fuel belts) or
 nothing.
 """
@@ -127,9 +127,9 @@ class TurnedTest(unittest.TestCase):
         relaid = {local(v.key) for v in rep.verdicts if v.renet and v.wrong_items}
         # every turned one is a DRIFT that says how it faces, and a belt or an inserter
         self.assertEqual(len(turned), 43)
-        self.assertTrue(all(v.verdict == "DRIFT" and v.detail.startswith("faces ")
+        self.assertTrue(all(v.verdict == "settings-changed" and v.detail.startswith("faces ")
                             for v in rep.verdicts if v.turned))
-        self.assertIn("faces 12, designed 4; TURNED", str(next(
+        self.assertIn("faces 12, designed 4; re-laid", str(next(
             v for v in rep.verdicts if v.key == "nauvis:south/iore/outb0")))
         # the 1.2 rule laid fresh the 17 whose old items their new net doesn't carry; the live
         # world's 26 are exactly the rest
@@ -160,7 +160,7 @@ class TurnedTest(unittest.TestCase):
         for name, x, y in turned_order:
             self.assertEqual(alone[(name, x, y)].get("direction", 0),
                              design[(name, x, y)].dir or 0, (name, x, y))
-        self.assertIn("TURNED 26 stood on their design tiles facing another way",
+        self.assertIn("re-laid 26 stood on their design tiles facing another way",
                       "\n".join(rep.lines()))
         # robots take the old ones up and build the ghosts: the next diff has nothing turned, and
         # the next apply orders nothing out for a turn
@@ -227,7 +227,7 @@ class TurnedTest(unittest.TestCase):
         rep = self.sense_old_block()
         ctx = SimpleNamespace(surface=SimpleNamespace(name="nauvis", mode="play"))
         check = flow._turned(ctx, rep)
-        self.assertEqual(check.code, "TURNED")
+        self.assertEqual(check.code, "re-laid")
         self.assertTrue(check.msg.startswith(
             "43 inserter, transport-belt, underground-belt stand on their design tiles facing "
             "another way or as the other underground end, so their lines stop there (south/iore/"

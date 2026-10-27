@@ -18,7 +18,7 @@ class MarkDefaultTest(unittest.TestCase):
                           net_items=NETS)
         (mark,) = rep.marks
         self.assertEqual(mark.until, TICK + 2 * 3600 * 60)
-        self.assertIn("marked for 2h", str(next(v for v in rep.verdicts if v.verdict == "MARKED")))
+        self.assertIn("marked for 2h", str(next(v for v in rep.verdicts if v.verdict == "marked")))
 
 
 if __name__ == "__main__":

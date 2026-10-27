@@ -1,4 +1,4 @@
-"""fkcore.connect: the directed carrier graph of a layout, and per net: connected yes/no, LEAK.
+"""fkcore.connect: the directed carrier graph of a layout, and per net: connected yes/no, SPILL.
 
 :func:`graph` takes an entity list (a factory :class:`fkcore.fkp.Layout`, a composed
 :class:`fkcore.compose.Surface`, or any entities with key, name, x, y, dir, attrs) and the catalog.
@@ -11,7 +11,7 @@ Every entity is a node; an edge is one way items move from one entity into anoth
   input (nothing from behind), else a side-load.
 - ``ug_sideload``: the same into the side of an underground (either end). Only the incoming lane
   on the open side gets through (Rory); this graph has no lanes, so the edge counts, and the lane
-  graph (``fkcore.lanes``, the routed rates' ``LANE`` line) says when a net's items are on the
+  graph (``fkcore.lanes``, the routed rates' ``WRONG-LANE`` line) says when a net's items are on the
   closed side. 1.x warned ``UG_SIDELOAD`` on every one; 2.0 tracks lanes, and that line went.
 - ``ug``: an underground input to the output the game pairs it with. Both ends face the flow. The
   input looks ahead, up to the prototype's ``max_distance`` (catalog), through any other entity;
@@ -51,14 +51,14 @@ leave their factory.
 :func:`connect` checks every net (CORE-V1.md §4.5). Its drivers and consumers are the netlist's
 endpoints (:func:`endpoints`) or, without a netlist, the machines its carriers pick from and drop
 into. A net is **connected** when every driver reaches every consumer through the net's own
-carriers. Report lines (``elaborate.Check``), never raised: ``UNROUTED`` (no driver reaches a
-consumer; ``UNUSED`` when the net has no driver, consumer or carrier), ``OPEN`` (some pairs
-connect, not all), ``LEAK`` (an edge from one net's carrier into a carrier that does not carry
+carriers. Report lines (``elaborate.Check``), never raised: ``no-route`` (no driver reaches a
+consumer; ``unused`` when the net has no driver, consumer or carrier), ``partly-connected`` (some pairs
+connect, not all), ``SPILL`` (an edge from one net's carrier into a carrier that does not carry
 that net: a belt or side-load feeding another net's belt, an inserter picking from another net's
 belt, an underground the game pairs with another net's; with a netlist
 also a carrier moving items into a machine that is not a consumer of any of its nets, or out of
 one that drives none of them). A net's belt side-loaded onto a belt of two nets that carries it
-(``ore`` onto ``ore|fuel``) is no LEAK: that is how two nets come to share a belt. A fluid LEAK
+(``ore`` onto ``ore|fuel``) is no SPILL: that is how two nets come to share a belt. A fluid SPILL
 is any join between two nets: a pipe or pipe-to-ground of one fluid net joined to another's, and
 with a netlist also to a machine box that is not its endpoint, or two machines' boxes of
 different nets joined directly.
@@ -66,7 +66,7 @@ different nets joined directly.
 A **joint** is where one net hands its items to another on purpose: a bus port (Rory's bus,
 ``fkcore.fragments.bus``), a belt that is a consumer of one net and a driver of the next. A load's
 belt is its net's last carrier and feeds the bus's first splitter; the bus's last splitter feeds a
-tap's belt, its net's first. With a netlist, an edge between two nets' carriers is no LEAK where
+tap's belt, its net's first. With a netlist, an edge between two nets' carriers is no SPILL where
 one of its ends is such a port of both nets (a consumer of the net the items leave, a driver of
 the one they enter), and a net's consumer that is another net's carrier counts as reached.
 
@@ -246,7 +246,7 @@ class Report:
                  for s in ("connected", "open", "unrouted")}
         edges = sum(len(v) for v in self.graph.succ.values())
         text = (f"{len(self.nets)} nets: {count['connected']} connected, {count['open']} open, "
-                f"{count['unrouted']} unrouted; {len(self.leaks)} LEAK; "
+                f"{count['unrouted']} unrouted; {len(self.leaks)} SPILL; "
                 f"{len(self.graph.nodes)} entities, {edges} edges, "
                 f"{len(self.graph.pairs) // 2} underground pairs")
         if self.graph.boxes:
@@ -296,7 +296,7 @@ def _port_joints(g, ports):
     is no entity: the belt on one side of the frame's edge moves its items onto the belt on the
     other. That one edge becomes belt -> port -> belt, with the port a node of its own, keyed as
     the netlist keys it, so it is the consumer of the net its items leave and the driver of the
-    one they enter: a joint, not a LEAK. Two ports on one edge (stacked cells, one's out port
+    one they enter: a joint, not a SPILL. Two ports on one edge (stacked cells, one's out port
     meeting the next one's in port) chain, the out port first."""
     by_edge = {}
     for key in sorted(ports, key=natural_key):
@@ -779,15 +779,15 @@ def _status_line(r):
     if not r.drivers and not r.consumers and not r.carriers:
         # 2.0.12: a declared net that nothing uses has nothing to route; as UNROUTED it would
         # hold every paste now that the build script stops on UNROUTED by default
-        return Check("UNUSED", f"net {r.name}", msg)
-    return Check("UNROUTED" if r.reached == 0 else "OPEN", f"net {r.name}", msg)
+        return Check("unused", f"net {r.name}", msg)
+    return Check("no-route" if r.reached == 0 else "partly-connected", f"net {r.name}", msg)
 
 
 def cut_off(rep, makers):
     """The makers among ``makers`` (machine keys) whose product reaches none of the consumers of a
     net they drive, from a :func:`connect` report: [(maker, net, consumers)], in net order. One
-    consumer reached is enough (the net's OPEN line names the pairs it misses). A net with no
-    consumers is UNROUTED already; a maker not in the layout is the net's "not in the layout".
+    consumer reached is enough (the net's partly-connected line names the pairs it misses). A net with no
+    consumers is no-route already; a maker not in the layout is the net's "not in the layout".
 
     2.0.12 (the solo run, 2026-10-23 23:23): Mall4 went out with its products belt unrouted, and
     its makers had no output."""
@@ -903,8 +903,8 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
         reports[name] = r
         if not r.connected:
             checks.append(_status_line(r))
-        checks += [Check("LEAK", f"net {name}", lk.text) for lk in r.leaks]
-    checks += [Check("LEAK", f"net {lk.net}" if lk.net else "no net", lk.text)
+        checks += [Check("SPILL", f"net {name}", lk.text) for lk in r.leaks]
+    checks += [Check("SPILL", f"net {lk.net}" if lk.net else "no net", lk.text)
                for lk in leaks if lk.net not in reports]
     return Report(g, reports, leaks, checks)
 

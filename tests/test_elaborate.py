@@ -33,8 +33,8 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(iron.drivers, [("smelt/m0", "iron-plate"), ("smelt/m1", "iron-plate")])
         self.assertEqual(iron.consumers, [("gears/m0", "iron-plate"), ("belts/m0", "iron-plate")])
         self.assertEqual(gear.consumers, [("belts/m0", "iron-gear-wheel")])
-        self.assertIn("UNFED", codes(flat))           # the smelters' ore and coal
-        self.assertIn("UNCONSUMED", codes(flat))      # the belts
+        self.assertIn("no-feed", codes(flat))           # the smelters' ore and coal
+        self.assertIn("no-taker", codes(flat))      # the belts
 
     def test_type(self):
         flat = flat_of("""
@@ -43,7 +43,7 @@ class EndpointTest(unittest.TestCase):
             net iron: smelt -> red
             net x items copper-plate: smelt -> red
         """)
-        msgs = [c.msg for c in flat.checks if c.code == "TYPE"]
+        msgs = [c.msg for c in flat.checks if c.code == "cannot-carry"]
         self.assertIn("consumer red takes no iron-plate", msgs)
         self.assertIn("expects copper-plate but no driver makes it", msgs)
 
@@ -66,7 +66,7 @@ class EndpointTest(unittest.TestCase):
             net a: smelt -> pipes
             net b: smelt -> pipes
         """)
-        self.assertEqual(codes(flat).count("DOUBLE"), 2)
+        self.assertEqual(codes(flat).count("two-nets"), 2)
 
     def test_duty_reaches_every_machine_of_a_module(self):
         flat = flat_of("""

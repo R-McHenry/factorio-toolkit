@@ -1,4 +1,4 @@
-"""`LANES` (2.0.17, widened 2.0.50): a design that feeds one row on two belts gets told that one
+"""`could-pair` (2.0.17, widened 2.0.50): a design that feeds one row on two belts gets told that one
 belt carries both, one lane each.
 
 Rory, 2026-10-25: the 0928 player's smelter "had two separate belts with one lane each, a big red
@@ -69,7 +69,7 @@ net ca: b -> c
 
 def lanes_checks(src):
     f = lang.parse(src, "t.fk")
-    return [c for c in elaborate(f, dict(f.modules), CAT, "t").checks if c.code == "LANES"]
+    return [c for c in elaborate(f, dict(f.modules), CAT, "t").checks if c.code == "could-pair"]
 
 
 class LanesCheckTest(unittest.TestCase):

@@ -1,5 +1,5 @@
 """A factory's netlist on its routed layout, through the V2 flow solver (fkcore.routed, CORE-V2.md):
-the routed rates and the CAPACITY lines that report_rates adds once a factory is laid out."""
+the routed rates and the too-thin lines that report_rates adds once a factory is laid out."""
 import os
 import unittest
 
@@ -40,7 +40,7 @@ class CircuitRowTest(unittest.TestCase):
 
     def test_the_inserters_bind(self):
         self.assertEqual([(c.code, c.where) for c in self.checks],
-                         [("CAPACITY", "t net cable_in"), ("CAPACITY", "t net cable_in")])
+                         [("too-thin", "t net cable_in"), ("too-thin", "t net cable_in")])
         fast, long_ = sorted((str(c) for c in self.checks), key=lambda s: "long" in s)
         # what the design asks: the row at its nominal 0.75, 9 cables/s, 2.25 an assembler
         self.assertIn("9.00/s required where its fast-inserters carry 2.50/s (ratio 3.60): "
@@ -68,7 +68,7 @@ class CircuitRowTest(unittest.TestCase):
 
 
 class RedgreenRoutedTest(unittest.TestCase):
-    """The committed redgreen layout delivers what the nominal model says: no CAPACITY line. Its
+    """The committed redgreen layout delivers what the nominal model says: no too-thin line. Its
     circuit row's long-handed cable inserters (1.2/s) do bind one assembler, but the other takes
     up its share (belt order), so nothing downstream is short."""
 

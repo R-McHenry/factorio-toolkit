@@ -172,7 +172,7 @@ class StageTest(unittest.TestCase):
         self.write("game/out/report_bom.txt",
                    "STOCK: robots can build 1 of 2 kinds now\n"
                    "  assembling-machine-1         need     2  network      3\n"
-                   "  requester-chest              need     1  network      0  LOCKED\n")
+                   "  requester-chest              need     1  network      0  needs-research\n")
         self.fk("insert", "gears")
         self.add_gears(1)
         out = self.fk("check", "1", "--render")
@@ -183,7 +183,7 @@ class StageTest(unittest.TestCase):
         self.assertIn("+2 assembling-machine-1: no maker before it: from stock, the shop, or a "
                       "stage that makes it; the network held 3", out)
         self.assertIn("+1 requester-chest: no maker before it: from stock, the shop, or a stage "
-                      "that makes it; the network held 0, LOCKED", out)
+                      "that makes it; the network held 0, needs-research", out)
         self.assertIn("as game\\'s last build read it", out)
         self.assertIn("stages\\1\\out\\render.txt draws it", self.fk("check", "1"))
         self.assertIn("area 0,0,4,2:", self.fk("check", "1", "--render", "0,0,4,2"))

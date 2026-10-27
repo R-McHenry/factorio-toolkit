@@ -11,7 +11,7 @@ TEMPLATE = os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", 
                         "nauvis.build.fkb")
 OLD = ("elaborate\nsize\nreport_checks\n"
        "write_layout                              # write the .fkp files (commit them)\n"
-       "diff            --scope stale\nreport_bom      --stock live\n"
+       "diff --scope stale\nreport_bom      --stock live\n"
        "apply           --scope stale\nstop_on         invariant\n")
 
 
@@ -45,30 +45,30 @@ class WriteLastTest(unittest.TestCase):
 
 
 class StopsTest(unittest.TestCase):
-    """2.0.12: the template stops on UNROUTED and NO_SINK, so a paste with a net unrouted (the solo
+    """2.0.12: the template stops on no-route and no-destination, so a paste with a net unrouted (the solo
     run's Mall4, 2026-10-23 23:15) doesn't go out; an upgrade adds the stops a script lacks."""
 
     def test_the_template_stops_on_an_unrouted_net_and_a_maker_without_a_sink(self):
         from fkcore import flow
         with open(TEMPLATE, encoding="utf-8") as fh:
             lines = flow.parse(fh.read(), TEMPLATE)
-        codes = {a.upper() for ln in lines if ln.cmd == "stop_on" for a in ln.args}
-        self.assertEqual(codes, {"INVARIANT", "UNROUTED", "NO_SINK"})
+        codes = {a.lower() for ln in lines if ln.cmd == "stop_on" for a in ln.args}
+        self.assertEqual(codes, {"malformed", "no-route", "no-destination"})
         with open(TEMPLATE, encoding="utf-8") as fh:
             self.assertIsNone(upgrade_run._stops(fh.read()))
 
     def test_an_old_script_gets_the_stops_it_lacks(self):
         new = upgrade_run._stops(OLD)
-        self.assertEqual(new.splitlines()[-1], "stop_on         UNROUTED NO_SINK          # and no "
+        self.assertEqual(new.splitlines()[-1], "stop_on         no-route no-destination   # and no "
                          "paste with a net unrouted, or a maker whose product reaches no sink")
         self.assertIsNone(upgrade_run._stops(new))
         # the solo player's own line (23:15): only NO_SINK comes, after its last stop_on
-        solo = OLD.replace("apply ", "stop_on         UNROUTED\napply ")
+        solo = OLD.replace("apply ", "stop_on         no-route\napply ")
         new = upgrade_run._stops(solo)
         self.assertEqual(steps(new)[-2:], ["stop_on", "stop_on"])
-        self.assertIn("stop_on         NO_SINK ", new)
-        self.assertNotIn("UNROUTED NO_SINK", new)
-        self.assertIn("stop_on         invariant\nstop_on         NO_SINK", new)
+        self.assertIn("stop_on         no-destination ", new)
+        self.assertNotIn("no-route no-destination", new)
+        self.assertIn("stop_on         invariant\nstop_on         no-destination", new)
 
 
 class PolesTest(unittest.TestCase):

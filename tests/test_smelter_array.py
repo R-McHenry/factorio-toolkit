@@ -129,7 +129,7 @@ class RatesTest(unittest.TestCase):
         self.assertEqual(set(rr.res.flow[west]), {"iron-ore"})
         self.assertEqual(set(rr.res.flow[("smelt/feed0m2", "R")]), {"coal"})
         _lines, checks = routed.report(rr)
-        self.assertEqual([c for c in checks if c.code in ("CAPACITY", "LANE")], [])
+        self.assertEqual([c for c in checks if c.code in ("too-thin", "WRONG-LANE")], [])
 
     def test_a_25th_per_column_starves(self):
         # 32 drills (16/s) for 50 furnaces in one unit: a column's ore lane feeds 24, and its
@@ -142,7 +142,7 @@ class RatesTest(unittest.TestCase):
         lines, checks = routed.report(rr)
         self.assertIn("2 of 50 starved of iron-ore; 2 of 50 blocked (output backs up)",
                       next(x for x in lines if x.strip().startswith("smelt ")))
-        where = {(c.where, c.msg.split(": ", 1)[0]) for c in checks if c.code == "CAPACITY"}
+        where = {(c.where, c.msg.split(": ", 1)[0]) for c in checks if c.code == "too-thin"}
         self.assertIn(("net ore_", "7.81/s required where its yellow splitters (a lane a side) "
                                    "carry 7.50/s (ratio 1.04)"), where)
         self.assertIn(("net plates", "7.81/s required where its yellow lanes carry 7.50/s "
@@ -163,7 +163,7 @@ class ExampleTest(unittest.TestCase):
         self.assertTrue(all(abs(rr.util(k) - 1) < 1e-6 for k in flat.insts["smelt"].machines))
         lines, checks = routed.report(rr)
         self.assertIn("~plates/i", next(x for x in lines if x.strip().startswith("plates ")))
-        self.assertEqual([c for c in checks if c.code in ("CAPACITY", "LANE")], [])
+        self.assertEqual([c for c in checks if c.code in ("too-thin", "WRONG-LANE")], [])
 
 
 class AutoTest(unittest.TestCase):

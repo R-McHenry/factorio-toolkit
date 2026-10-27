@@ -69,7 +69,7 @@ report_checks
 report_bom      --stock none
 write_layout
 apply           --scope all               # lab: chunks generated, ore seeded, revived at once
-diff            --scope all               # all OK is 1:1
+diff --scope all               # all ok is 1:1
 stop_on         invariant
 """
 

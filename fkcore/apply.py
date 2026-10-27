@@ -6,18 +6,18 @@ it goes through ``link.paste`` (superforced: ghosts go over what stands in the w
 marks that for deconstruction). Then, by mode:
 
 - ``play``: ghosts only; robots build them. A world entity in the area that the design does not
-  explain and the watch policy leaves to the apply (``NOBODY``) is ordered for deconstruction, an
-  unbuilt ghost too (the game removes a ghost ordered out at once); ``MARKED`` and ``CLAIMED``
-  ones stay. The paste must land where designed: a shifted paste is reported (``MISPLACED``),
-  never cleaned up. Scaffolding (1.7, :func:`scaffold`): a ``NOBODY`` pole or roboport on no
+  explain and the watch policy leaves to the apply (``unowned``) is ordered for deconstruction, an
+  unbuilt ghost too (the game removes a ghost ordered out at once); ``marked`` and ``claimed``
+  ones stay. The paste must land where designed: a shifted paste is reported (``not-where-designed``),
+  never cleaned up. Scaffolding (1.7, :func:`scaffold`): a ``unowned`` pole or roboport on no
   tile of the design stays up while the design's own poles (or roboports) in the area are not
   all built, so a rebuild doesn't cut power or the robot network; the first apply after they
   stand takes it up.
 - ``own`` (1.2, ``fkcore.own``): the record of what the applies pasted. The toolkit's own
-  entities that the design dropped are ``NOBODY`` whatever the watch policy says, so a moved,
+  entities that the design dropped are ``unowned`` whatever the watch policy says, so a moved,
   shrunk or emptied plot, or a replaced row, leaves nothing behind; with no ``area`` the scope
   reaches them wherever they stand. A carrier the record shows under another net that holds
-  what its new net doesn't carry (``renet`` with ``WRONG_ITEM``: the old net's items on a belt,
+  what its new net doesn't carry (``renet`` with ``other-item``: the old net's items on a belt,
   its fluid in a pipe) is ordered out before the paste, and the paste lays a fresh ghost on it:
   robots take the old one up with what it holds and build the new one (``relaid``; the game
   keeps both, checked on a laptop test server, 2.0.77). ``ApplyReport.own`` is the record after
@@ -51,13 +51,13 @@ and one inserter were on the array's tiles under the same names, and every build
 facing the old block's ways, so ore and coal stopped at them.
 
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
-(or a lab revive) it is all ``OK``, which is 1:1. Nothing here registers anything; every game
+(or a lab revive) it is all ``ok``, which is 1:1. Nothing here registers anything; every game
 call is one RCON command with the link's 5 s timeout.
 
 The rip estimate (1.1, Rory 2026-10-20): what the next apply takes up (``rip_points`` of a diff:
-NOBODY is ordered out, WRONG is pasted over), read with ``link.lua_rip_load``, and
+unowned is ordered out, other-entity is pasted over), read with ``link.lua_rip_load``, and
 ``rip_report``: how many structures, the items they hold, and about how long the network's
-construction robots need to carry it all to storage. A big one is a ``RIP`` check, with the way to
+construction robots need to carry it all to storage. A big one is a ``taken-up`` check, with the way to
 make it faster (stop the input and let the factory drain first) and, when the taken-up things come
 back as new ghosts of the same names, the hint that a factory moved (``fk merge`` joins
 factories where they stand).
@@ -82,7 +82,7 @@ __all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_
 #: a rip worth a RIP check: this many minutes of robot time, or this many structures
 RIP_WARN_MIN, RIP_WARN_N = 3.0, 100
 #: what the next apply takes up: NOBODY is ordered for deconstruction, WRONG is pasted over
-RIP_VERDICTS = ("NOBODY", "WRONG")
+RIP_VERDICTS = ("unowned", "other-entity")
 #: taken-up structures coming back as new ghosts of the same names: a factory moved
 MOVED_N = 30
 #: kinds an apply leaves standing until the design's own of that kind stand (1.7, scaffolding)
@@ -127,7 +127,7 @@ class ApplyReport:
                        f"{self.revived} revived, {self.revive_failed} not revivable"
                        + (f", paste corrected by {self.corrected}" if self.corrected else ""))
         else:
-            out.append(f"  play: {self.decon} NOBODY entities ordered for deconstruction"
+            out.append(f"  play: {self.decon} unowned entities ordered for deconstruction"
                        + (f" ({self.dropped} of them the toolkit's own, dropped from the design)"
                           if self.dropped else "") + "; robots build the ghosts")
             if self.held:
@@ -135,7 +135,7 @@ class ApplyReport:
                            "design's own stand here, so power and robots keep running; the "
                            "first apply after that takes them up")
             if self.hand:
-                out.append(f"  HAND: {len(self.hand)} placed by hand, replaced or removed by "
+                out.append(f"  by-hand: {len(self.hand)} placed by hand, replaced or removed by "
                            "this build (adopt into the design, leave out, or come back to it):")
                 out += [f"    {line}" for line in self.hand]
         if self.relaid:
@@ -147,7 +147,7 @@ class ApplyReport:
                        "wire): ordered up, and the paste lays them fresh with the new ones")
         if self.turned:
             shown = ", ".join(k.split(":", 1)[-1] for k in self.turned[:6])
-            out.append(f"  TURNED {len(self.turned)} stood on their design tiles facing another way "
+            out.append(f"  re-laid {len(self.turned)} stood on their design tiles facing another way "
                        f"or as the other underground end ({shown}"
                        f"{' ...' if len(self.turned) > 6 else ''}): ordered out, and laid fresh "
                        "as designed")
@@ -159,7 +159,7 @@ class ApplyReport:
                        "build again once a radar charts the ground): "
                        + ", ".join(f"{k} x{n}" for k, n in sorted(self.alone_missed.items())))
         if self.misplaced:
-            out.append(f"  MISPLACED {self.misplaced} ghosts are not where the design says")
+            out.append(f"  not-where-designed {self.misplaced} ghosts are not where the design says")
         out += [f"  {n}" for n in self.notes]
         out.append(f"  {self.seconds:.1f} s")
         return out
@@ -319,17 +319,17 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         held = scaffold(before, s, cat, area)
         rep.hand = sense.hand_edits(before, held)
         gone = [v for v in before.verdicts
-                if v.verdict == "NOBODY" and (v.name, v.x, v.y) not in held]
+                if v.verdict == "unowned" and (v.name, v.x, v.y) not in held]
         # the toolkit's own that still stand stay in the record: ordered out, or held up
         standing = [ownmod.at(v.name, v.x, v.y) for v in before.verdicts
-                    if v.verdict == "NOBODY" and v.action == "own"]
+                    if v.verdict == "unowned" and v.action == "own"]
         rep.dropped = sum(1 for v in gone if v.action == "own")
         rep.held = len(held)
         rep.decon = _decon(r, s.name, force, [(v.name, v.x, v.y) for v in gone])
         # ordered out before the paste, so the paste lays a fresh one on each (a paste over the
         # same entity not ordered out places nothing, and the old items stay)
         rep.relaid = [v for v in before.verdicts if v.renet and v.wrong_items
-                      and v.verdict in ("OK", "DRIFT")]
+                      and v.verdict in ("ok", "settings-changed")]
         _decon(r, s.name, force, [(v.name, v.x, v.y) for v in rep.relaid])
         # 2.0: settings the design changed (the record shows what was pasted) are laid fresh
         rep.resettled = [v for v in ownmod.resettled(own, s, before.verdicts)
@@ -405,7 +405,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
 def scaffold(before, s, cat, area):
     """What an apply leaves standing for now (1.7, Rory 2026-10-21: old poles and roboports stay
     up until the new grid stands, so a rebuild doesn't cut power or the robot network; both
-    overnight players lost power to a re-laid grid): the built ``NOBODY`` poles and roboports on
+    overnight players lost power to a re-laid grid): the built ``unowned`` poles and roboports on
     no tile of the design, while a pole (or roboport) the design has in ``area`` is not built
     yet (a ghost, missing, or under something else). One under a design tile goes as before (the
     paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}."""
@@ -416,7 +416,7 @@ def scaffold(before, s, cat, area):
             return None
 
     waiting = {kind(v.name) for v in before.verdicts
-               if v.verdict in ("GHOST", "MISSING", "WRONG") and kind(v.name) in SCAFFOLD_KINDS}
+               if v.verdict in ("ghost", "not-placed", "other-entity") and kind(v.name) in SCAFFOLD_KINDS}
     if not waiting:
         return set()
     taken = set()
@@ -425,7 +425,7 @@ def scaffold(before, s, cat, area):
             taken |= {tuple(t) for t in e.tiles}
     out = set()
     for v in before.verdicts:
-        if v.verdict != "NOBODY" or v.ghost or kind(v.name) not in waiting:
+        if v.verdict != "unowned" or v.ghost or kind(v.name) not in waiting:
             continue
         tiles = {tuple(t) for t in cat.tiles(v.name, float(v.x), float(v.y), 0)}
         if not tiles & taken:
@@ -447,7 +447,7 @@ def _decon(r, surface, force, things):
 
 def rip_points(rep):
     """The positions of what the next apply takes up, from a diff (a ``sense.SenseReport``):
-    NOBODY and WRONG, and the carriers it lays fresh under another net (1.2)."""
+    unowned and other-entity, and the carriers it lays fresh under another net (1.2)."""
     return [(v.x, v.y) for v in rep.verdicts if v.verdict.split()[0] in RIP_VERDICTS
             or (v.renet and v.wrong_items)]
 
@@ -481,20 +481,20 @@ def rip_minutes(load):
 
 
 def moved(rep):
-    """How many taken-up structures come back as new ones of the same name (MISSING or GHOST)
+    """How many taken-up structures come back as new ones of the same name (not-placed or ghost)
     in the same diff: the sign of a factory that moved."""
     gone, new = {}, {}
     for v in rep.verdicts:
         head = v.verdict.split()[0]
         if head in RIP_VERDICTS:
             gone[v.name] = gone.get(v.name, 0) + 1
-        elif head in ("MISSING", "GHOST"):
+        elif head in ("not-placed", "ghost"):
             new[v.name] = new.get(v.name, 0) + 1
     return sum(min(c, new.get(name, 0)) for name, c in gone.items())
 
 
 def rip_report(load, moved_n=0):
-    """-> (the report line, the RIP check text or None) for a load from ``link.lua_rip_load``."""
+    """-> (the report line, the taken-up check text or None) for a load from ``link.lua_rip_load``."""
     n, items = int(load.get("n") or 0), int(load.get("items") or 0)
     minutes = rip_minutes(load)
     dist = load.get("dist")

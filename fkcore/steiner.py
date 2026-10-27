@@ -10,7 +10,7 @@ carriers. Changes since the copy:
 - For a tree laid reversed (a collector), set on its Grid by route.py: ``Grid.keep_clear``, tiles a
   split may not leave its spare output on (reversed, every splitter is a merge facing back, whose
   second output points at the tile beside the split's feed; a foreign belt there would take half
-  the merged items, a LEAK); ``Grid.drop_taps``: a tap's inserter drops onto its belt, and an
+  the merged items, a SPILL); ``Grid.drop_taps``: a tap's inserter drops onto its belt, and an
   underground exit takes no drop (fkcore.connect, v4 B-120), so a tapped belt never starts a
   tunnel (which, reversed, is an exit).
 

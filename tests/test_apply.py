@@ -75,7 +75,7 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual((rep.force, rep.misplaced, rep.revived), ("player", 19, 0))
         # (the paste's own script inventory is destroyed; no entity is)
         self.assertFalse(any("e.destroy()" in c or "g.revive()" in c for c in r.calls))
-        self.assertIn("MISPLACED 19", "\n".join(rep.lines()))
+        self.assertIn("not-where-designed 19", "\n".join(rep.lines()))
 
     def test_lab_seeds_ore_only_without_a_terrain(self):
         # a real terrain (transplanted ore) is under the drills already: nothing is seeded

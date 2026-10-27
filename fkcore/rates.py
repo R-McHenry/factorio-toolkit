@@ -24,7 +24,7 @@ its nets, one grant per endpoint. Per net and item:
   fraction of their duty, water-filled.
 - What-if: ``unbounded=[net, ...]`` treats those nets' supply as unlimited (their drivers then run
   at what the consumers take), which is how a hand calc isolates one part of a factory.
-- An input with no net, or an output with no net, stops the machine (UNFED / UNCONSUMED say so).
+- An input with no net, or an output with no net, stops the machine (no-feed / no-taker say so).
 
 Each side is judged against the other side's potential, not its throttled state; judging both
 sides by the current state (as flow.py does) has a fixed point at every S = D, so a consumer and
@@ -663,5 +663,5 @@ def report(model, title=None) -> str:
     if model.asserts:
         lines += ["", "  asserts"]
         for text, ok, value, target, op in model.asserts:
-            lines.append(f"  {'PASS' if ok else 'ASSERT'} {text}: {_f(value, 60)}/min")
+            lines.append(f"  {'PASS' if ok else 'rate-not-met'} {text}: {_f(value, 60)}/min")
     return "\n".join(lines)

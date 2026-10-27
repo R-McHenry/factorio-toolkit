@@ -113,7 +113,7 @@ expect spent.fill < 1 within 289 h at full_load
         self.assertIn("t.fk:1", str(cm.exception))
         with self.assertRaises(lang.FkSyntaxError) as cm:
             lang.parse("net a: x -> y when ctl < 3\n", "t.fk")
-        self.assertIn("W.SIGNAL, network.ITEM or INSTANCE.SIGNAL", str(cm.exception))
+        self.assertIn("W.no-signal, network.ITEM or INSTANCE.no-signal", str(cm.exception))
 
 
 class SetPropsTest(unittest.TestCase):
@@ -143,12 +143,12 @@ class SetPropsTest(unittest.TestCase):
 
     def test_a_selector_that_matches_nothing_is_a_check_not_a_silent_no_op(self):
         _flat, _lay, _lines, cks = laid(mall(gear="") + "set gear.out -> bbox: if=x<5\n")
-        self.assertEqual([c.code for c in cks], ["SELECT"])
+        self.assertEqual([c.code for c in cks], ["no-match"])
         self.assertIn("matches no hand or machine", cks[0].msg)
 
     def test_an_if_without_a_chest_to_read_is_a_check(self):
         _flat, _lay, _lines, cks = laid(mall(belt="") + "set belt.out: if=transport-belt<20\n")
-        self.assertEqual([c.code for c in cks], ["SELECT"])
+        self.assertEqual([c.code for c in cks], ["no-match"])
         self.assertIn("if= reads a wire", cks[0].msg)
 
     def test_a_changed_property_changes_the_layout_and_a_removed_set_clears_it(self):
@@ -184,7 +184,7 @@ class SetPropsTest(unittest.TestCase):
 
     def test_an_unknown_property_is_a_check(self):
         _flat, _lay, _lines, cks = laid(mall(belt="") + "set belt.out: colour=red\n")
-        self.assertEqual([c.code for c in cks], ["SELECT"])
+        self.assertEqual([c.code for c in cks], ["no-match"])
         self.assertIn("unknown property colour", cks[0].msg)
 
     def test_a_set_limit_does_not_silence_clog(self):
@@ -220,7 +220,7 @@ class GuardTest(unittest.TestCase):
         lay, _n = expand.expand_factory(flat, CAT)
         r = route.route_layout(flat, lay, CAT, hand="inserter")
         _out, _lines, cks = circuits.lay(flat, r.layout, CAT)
-        self.assertEqual([c.code for c in cks], ["GUARD"])
+        self.assertEqual([c.code for c in cks], ["cannot-filter"])
         self.assertIn("can't filter", cks[0].msg)
 
 
@@ -242,15 +242,15 @@ wire ctl red: k -> gate
 
     def test_a_signal_no_driver_makes_and_an_unknown_one(self):
         flat = flat_of(self.SRC.replace("ctl.stop > 0", "ctl.signal-Q > 0"))
-        sig, = [c for c in flat.checks if c.code == "SIGNAL"]
+        sig, = [c for c in flat.checks if c.code == "no-signal"]
         self.assertIn("no driver on ctl puts signal-Q on it", sig.msg)
         flat = flat_of(self.SRC.replace("ctl.stop > 0", "ctl.nonsense > 0"))
         self.assertIn("nonsense is no declared signal and no game signal",
-                      " ".join(c.msg for c in flat.checks if c.code == "SIGNAL"))
+                      " ".join(c.msg for c in flat.checks if c.code == "no-signal"))
 
     def test_a_wire_nothing_reads(self):
         flat = flat_of(self.SRC.replace(" when ctl.stop > 0", "").replace("k -> gate", "k"))
-        self.assertEqual(checks(flat, "WIRE"), [("WIRE", "wire ctl")])
+        self.assertEqual(checks(flat, "no-wire"), [("no-wire", "wire ctl")])
 
     def test_auto_signals_come_from_the_pool(self):
         flat = flat_of("signal a\nsignal b = down-arrow\n" + self.SRC)
@@ -258,7 +258,7 @@ wire ctl red: k -> gate
 
     def test_a_wire_too_long_is_a_wire_reach_line(self):
         _flat, _lay, _lines, cks = laid(self.SRC.replace("@(3, 0)", "@(30, 0)"))
-        self.assertEqual([c.code for c in cks], ["WIRE_REACH"])
+        self.assertEqual([c.code for c in cks], ["wire-too-far"])
 
     def test_two_red_nets_with_other_drivers_on_one_entity_leak(self):
         src = self.SRC + """
@@ -266,7 +266,7 @@ k2   = Constant<signals="signal-B=1"> @(0, 2)
 wire ctl2 red: k2 -> gate
 """
         _flat, _lay, _lines, cks = laid(src)
-        self.assertIn("WIRE_LEAK", [c.code for c in cks])
+        self.assertIn("wires-share", [c.code for c in cks])
 
     BELT = """
 src  = Chest<requester, item=iron-plate, rate=1/s> @(0, 0)
@@ -286,7 +286,7 @@ wire jam red: feed -> gate
     def test_a_belt_on_no_wire_keeps_no_reading_in_the_game(self):
         src = self.BELT.replace(" when jam.iron-plate > 5", "").replace("feed -> gate", "feed")
         _flat, _lay, _lines, cks = laid(src)
-        self.assertEqual([c.code for c in cks], ["WIRE"])
+        self.assertEqual([c.code for c in cks], ["no-wire"])
         self.assertIn("a belt that is on no wire", cks[0].msg)
 
     def test_a_network_condition_on_a_machine(self):
@@ -310,12 +310,12 @@ wire ctl red: k -> feed
         flat, lay, lines, cks = laid(self.SRC)
         self.assertEqual(with_attr(lay, "if"), {"~feed/i0": "signal-L>0"})
         self.assertEqual(lay.wires, [fkp.Wire("ctl", "red", "k/m0", "~feed/i0")])
-        self.assertIn(("GATED", "net feed"), checks(flat, "GATED"))   # no behave cycle
+        self.assertIn(("gate-open", "net feed"), checks(flat, "gate-open"))   # no behave cycle
         self.assertEqual(cks, [])
 
     def test_a_behave_cycle_on_its_wire_answers_gated(self):
         flat = flat_of(self.SRC + "behave b on ctl {\n  cycle open: 1 s on, 1 s off\n}\n")
-        self.assertEqual(checks(flat, "GATED"), [])
+        self.assertEqual(checks(flat, "gate-open"), [])
 
     def test_an_instance_condition_reads_it_on_a_wire_of_its_own(self):
         src = self.SRC.replace("when ctl.low > 0", "when src.iron-plate > 10").replace(

@@ -59,7 +59,7 @@ class CircuitStackTest(unittest.TestCase):
     def test_it_routes_and_judges_clean(self):
         self.assertEqual(self.r.failed, {})
         rep = connect.connect(self.r.layout, CAT, connect.endpoints(self.flat))
-        self.assertEqual([ln for ln in rep.lines() if "LEAK" in ln], [])
+        self.assertEqual([ln for ln in rep.lines() if "SPILL" in ln], [])
 
     def test_the_rate_model_feeds_it_iron_and_copper(self):
         model = rates.solve(self.flat)

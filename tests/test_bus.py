@@ -4,7 +4,7 @@ agent/docs/examples/bus4.json is his demo as he placed it in the lead world: fou
 feeder from the south that merges into all four by a staircase of splitters, two taps that pull out
 by staircases, one north, one south. The template at his parameters lays the same bus. A bus is a
 net of its own; its loads and taps are ports, the endpoints other nets name. The router routes into
-a load and out of a tap and never lays the bus; connect reads a port as a joint, not a LEAK; the
+a load and out of a tap and never lays the bus; connect reads a port as a joint, not a SPILL; the
 rate model pools every net through the bus; the routed rates see its lanes and its splitters'
 priorities.
 """
@@ -146,7 +146,7 @@ class TemplateTest(unittest.TestCase):
             cu  = Chest<requester, item=copper-plate, rate=1/s> @(0, 12)
             net c: cu -> bus.load1
         """)
-        self.assertEqual([c.code for c in flat.checks], ["TYPE"])
+        self.assertEqual([c.code for c in flat.checks], ["cannot-carry"])
         self.assertIn("consumer bus.load1 takes no copper-plate", str(flat.checks[0]))
 
     def test_turned(self):
@@ -504,7 +504,7 @@ class BusFlowTest(unittest.TestCase):
 
 
 class RoutedTest(unittest.TestCase):
-    """The routed report: a bus port is no machine; CAPACITY names what binds beyond it."""
+    """The routed report: a bus port is no machine; too-thin names what binds beyond it."""
 
     def test_port_rows_count_what_crosses_the_belt(self):
         flat, lay, _notes = laid(LOADED)
@@ -543,7 +543,7 @@ class RoutedTest(unittest.TestCase):
         self.assertEqual(r.failed, {}, r.lines)
         rr = routed.solve(flat, r.layout, CAT)
         _lines, checks = routed.report(rr)
-        cap = {c.where: c.msg for c in checks if c.code == "CAPACITY"}
+        cap = {c.where: c.msg for c in checks if c.code == "too-thin"}
         self.assertEqual(sorted(cap), ["net bus", "net fe", "net iron1"])
         self.assertIn("8.12/s required where its yellow lanes carry 7.50/s", cap["net iron1"])
         self.assertIn("gears/m4 runs at 0.00, 0.81 nominal", cap["net iron1"])
@@ -556,7 +556,7 @@ class RoutedTest(unittest.TestCase):
                          ["bus/load1s0", "bus/load1s1", "bus/tap1s2", "bus/tap1s3"])
         self.assertFalse(any(k.startswith("bus/b") for k in changed))
         rr = routed.solve(flat, new, CAT)
-        self.assertEqual([c for c in routed.report(rr, "t")[1] if c.code == "CAPACITY"], [])
+        self.assertEqual([c for c in routed.report(rr, "t")[1] if c.code == "too-thin"], [])
         self.assertAlmostEqual(sum(rr.res.flow.get(("bus/tap1", lane), {}).get(PLATE, 0.0)
                                    for lane in ("L", "R")), 8.125)
 

@@ -54,7 +54,7 @@ class ModuleRotTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.flat0, cls.lay0, cls.notes0 = placed(0)
-        assert all("no net (UNFED/UNCONSUMED)" in n for n in cls.notes0), cls.notes0  # the gears
+        assert all("no net (no-feed/no-taker)" in n for n in cls.notes0), cls.notes0  # the gears
         # the module's frame: its origin to the far edges of its rows' frames
         boxes = [expand.frame_of(cls.flat0, cls.lay0, p, CAT) for p in ROWS]
         cls.size = (max(b[2] for b in boxes) - X0, max(b[3] for b in boxes) - Y0)

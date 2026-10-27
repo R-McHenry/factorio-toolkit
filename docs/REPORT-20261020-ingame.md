@@ -9,7 +9,7 @@ with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
 ## The shelve and the test map
 
 - The running world (tick 6,171,302) was saved as `server/factorio/saves/shelved-20261020.zip`
-  (2.34 MB, zip test OK). The other session re-saved it at 04:29:59 just before it stopped the
+  (2.34 MB, zip test ok). The other session re-saved it at 04:29:59 just before it stopped the
   service, and kept `instance/saves/world-shelved-20261020.zip`, which is md5-identical to
   `instance/saves/world.zip`. The old world's 5 autosaves (03:40 to 04:20 UTC) are copied to
   `server/factorio/saves/shelved-20261020-autosaves/`, made before the lab map's first autosave.
@@ -34,10 +34,10 @@ with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
 |---|---|
 | scenario | level `fk-play`; surfaces nauvis + lab; forces player, enemy, neutral, lab; lab force 252 of 275 technologies researched; lab surface peaceful with lab tiles |
 | game link | snapshot of empty ground = 0; a 3-entity named paste lands exactly where designed (offset 0,0); revive 3, decon marks 3, destroy 3, 0 left |
-| **apply + diff** | games/redgreen main (1014 entities) composed onto a lab plot: one superforced paste, **1014/1014 ghosts where designed** (no correction), 1014 revived (lab: free materials), 0 failed, 2.5 s. **Diff after the build: OK 1014, nothing else: 1:1** |
+| **apply + diff** | games/redgreen main (1014 entities) composed onto a lab plot: one superforced paste, **1014/1014 ghosts where designed** (no correction), 1014 revived (lab: free materials), 0 failed, 2.5 s. **Diff after the build: ok 1014, nothing else: 1:1** |
 | look parity | live and design rendered by the same renderer over 53 rows: **identical, 0 tiles differ** |
-| watcher | an unkeyed belt in sanctioned space: marked `unknown@10150` until tick 442150 (2 h); an unkeyed fix in the plot next to net `belt`: kept (mark, no expiry), hint "looks like a fix to it"; the same look with strict policy: **2 NOBODY**; notify all pushed 2 lines |
-| adopt | the fix adopted as `~belt/a0`: the next look is **OK 1015, MARKED 1** (the sanctioned belt), 0 invariant failures |
+| watcher | an unkeyed belt in sanctioned space: marked `unknown@10150` until tick 442150 (2 h); an unkeyed fix in the plot next to net `belt`: kept (mark, no expiry), hint "looks like a fix to it"; the same look with strict policy: **2 unowned**; notify all pushed 2 lines |
+| adopt | the fix adopted as `~belt/a0`: the next look is **ok 1015, marked 1** (the sanctioned belt), 0 invariant failures |
 | measure | one gear assembler fed by an infinity chest on an energy interface: **0.997 gears/s against the model's 1.0** (10 crafts in 602 ticks) |
 | alerts | a damaged chest on nauvis gives Rory (connected, player force) 1 alert in `LuaPlayer.get_alerts`; the lab force has 0 players and `LuaForce` has no `get_alerts`: **alerts are per player only** |
 
@@ -48,7 +48,7 @@ with a 5 s timeout. The bench is `tools/lab_bench.py`, deployed as
 2. **17 drills were not placed** (997 of 1014). The game places a drill only on ore, and the lab
    has none. `link.lua_seed` puts each drill row's designed resource under its tiles (153 tiles),
    and the paste then placed all 1014.
-3. **22 furnaces read as DRIFT** ("recipe None"). A furnace reports no recipe while idle and has no
+3. **22 furnaces read as settings-changed** ("recipe None"). A furnace reports no recipe while idle and has no
    recipe setting, so `sense` no longer compares furnace recipes.
 4. **The pasted poles were not wired.** All 40 of the layout's poles came out with 0 copper wires,
    one electric network each: a blueprint without wires builds unwired poles. That answers the

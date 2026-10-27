@@ -14,15 +14,15 @@ netlist machine whose entity the layout holds on it (``fkcore.throughput``):
 ``report(routed)`` -> (lines, checks). The lines: per instance its nominal utilization (V1) and
 its routed one (mean, and the lowest machine), and what limits it; per net and item what its
 consumers asked and got, and its critical connector (the largest required ratio). The checks:
-``CAPACITY`` per net and kind of connector that binds (it runs at capacity while more is required
+``too-thin`` per net and kind of connector that binds (it runs at capacity while more is required
 through it): the required flow, what the connector carries, the ratio and the consumers it starves
 — and, 2.0.41, per **port** its declared width (one lane 7.5/s, an ``X | X`` port both, 15/s).
 Checks warn, never gate. Pure, stdlib only.
 
 A net is one lane (2.0): a belt written ``net=A|B`` gives its left lane to A and its right to B
-(``fkcore.fkp``), so each net's critical connector and ``CAPACITY`` line count only its own lane,
+(``fkcore.fkp``), so each net's critical connector and ``too-thin`` line count only its own lane,
 7.5/s on yellow; a V1 ``net=A`` gives A both lanes, and an inserter ``A+B`` counts for both nets
-(they share its one hand). ``LANE`` (a warning) is the lane-level ``LEAK``: what the design asks of
+(they share its one hand). ``WRONG-LANE`` (a warning) is the lane-level ``SPILL``: what the design asks of
 a lane carries an item none of its nets carries (a pair's lanes swapped), a lane holds nets that go
 to different sinks, or a net's items reach the closed side of a side-loaded underground, where they
 stop (only the lane on its open side gets through: Rory; ``connect``'s 1.x ``UG_SIDELOAD`` line is
@@ -276,7 +276,7 @@ def _consumers(flat, net):
 
 
 def report(r: Routed, factory=None):
-    """-> (report lines, CAPACITY checks)."""
+    """-> (report lines, too-thin checks)."""
     flat, res, lg = r.flat, r.res, r.lg
     where = f"{factory} " if factory else ""
     head = (f"routed {factory or flat.name} (V2: the lanes and inserters as laid): "
@@ -439,7 +439,7 @@ def _short(r, net):
 
 
 def _capacity(r, net, mine, where):
-    """``CAPACITY`` lines of one net: one per kind of connector that binds on it, when the net
+    """``too-thin`` lines of one net: one per kind of connector that binds on it, when the net
     leaves something short of its nominal rate."""
     res, lg = r.res, r.lg
     short = _short(r, net)
@@ -458,7 +458,7 @@ def _capacity(r, net, mine, where):
                f"{cap:.2f}/s (ratio {r.ratio(top):.2f}): {_keys(nids)}; "
                + "; ".join(short[:_SHOW + 1])
                + (f" and {len(short) - _SHOW - 1} more" if len(short) > _SHOW + 1 else ""))
-        out.append(Check("CAPACITY", f"{where}net {net}", msg))
+        out.append(Check("too-thin", f"{where}net {net}", msg))
     return out
 
 
@@ -466,7 +466,7 @@ _SIDE = {"L": "left", "R": "right"}
 
 
 def lane_checks(r, where=""):
-    """``LANE`` lines (a warning, the lane-level LEAK): per item and lane what the design asks of a
+    """``WRONG-LANE`` lines (a warning, the lane-level SPILL): per item and lane what the design asks of a
     lane that none of its nets carries; a lane given to nets that go to different sinks; the items
     that reach the closed side of a side-loaded underground."""
     flat, lg, lay, need = r.flat, r.lg, r.lay, r.need or {}
@@ -494,11 +494,11 @@ def lane_checks(r, where=""):
         there = f"which the layout gives net {' and '.join(nets)}" if nets else \
             "which the layout gives no net"
         who = net or (nets[0] if nets else "-")
-        out.append(Check("LANE", f"{where}net {who}",
+        out.append(Check("WRONG-LANE", f"{where}net {who}",
                          f"its {item} reaches the {_SIDE[lane]} lane of {_keys(nids)}, {there}: "
                          "a lane carries its own nets' items only"))
     for (nets, lane), nids in sorted(mixed.items(), key=str):
-        out.append(Check("LANE", f"{where}net {nets[0]}",
+        out.append(Check("WRONG-LANE", f"{where}net {nets[0]}",
                          f"nets {' and '.join(nets)} share the {_SIDE[lane]} lane of "
                          f"{_keys(nids)} but go to different sinks: one lane reaches the same "
                          "sinks for every net on it"))
@@ -509,7 +509,7 @@ def lane_checks(r, where=""):
         e = lay.entities.get(lane_nid[0])
         net = (e.attrs.get("net") if e is not None else None) or "no net"
         other = "R" if lane_nid[1] == "L" else "L"
-        out.append(Check("LANE", f"{where}net {net}",
+        out.append(Check("WRONG-LANE", f"{where}net {net}",
                          f"{', '.join(items)} on the {_SIDE[lane_nid[1]]} lane of {lane_nid[0]} "
                          f"reach underground {ug} from its closed side and stop there: only the "
                          f"{_SIDE[other]} lane of a belt side-loaded onto an underground gets "
@@ -518,7 +518,7 @@ def lane_checks(r, where=""):
 
 
 def port_capacity(r, where=""):
-    """``CAPACITY`` lines for a sealed module's **ports** (2.0.41, PLAN-GLOBAL phase A): what the
+    """``too-thin`` lines for a sealed module's **ports** (2.0.41, PLAN-GLOBAL phase A): what the
     design asks through a port against the width the declaration gives it. A one-lane port
     (``@e4L``) is one lane of its belt end, 7.5/s on yellow; an ``X | X`` port is the whole belt
     end, both lanes, 15/s, and its carrier says so (``net=A|A``). A crossing net that asks more
@@ -558,7 +558,7 @@ def port_capacity(r, where=""):
                 msg = (f"{req:.2f}/s asked through it, and a both-lane port carries {cap:.2f}/s "
                        f"(both {what} lanes of its belt end): give it a wider belt or a second "
                        f"port")
-            out.append(Check("CAPACITY", f"{where}port {key}", msg))
+            out.append(Check("too-thin", f"{where}port {key}", msg))
     return out
 
 

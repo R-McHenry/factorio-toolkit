@@ -206,7 +206,7 @@ class CoverTest(unittest.TestCase):
         self.assertEqual(audit(lay, poles, wall), ([], 2))
         self.assertEqual(rep.splits, [["power/p1"]])
         self.assertEqual(rep.lines(), [
-            "POWER_SPLIT cover power: power/p1 (1 pole) cannot be wired to the main grid: no chain "
+            "power-split cover power: power/p1 (1 pole) cannot be wired to the main grid: no chain "
             "of free spots at most 9 tiles apart joins them"])
         self.assertFalse(rep.ok)
         self.assertEqual(fkp.invariants(apply_cover(lay, CAT, keep_out=wall), CAT), [])
@@ -221,7 +221,7 @@ class CoverTest(unittest.TestCase):
         reason = ("all 49 spots a medium-electric-pole could power it from are taken: 9 on "
                   "entities (b, i); 40 outside the 3x3 frame")
         self.assertEqual(rep.uncovered, [("i/x", reason)])
-        self.assertEqual(rep.lines(), ["NO_POWER    i/x: " + reason])
+        self.assertEqual(rep.lines(), ["NO_POWER i/x: " + reason])
         self.assertEqual(fkp.invariants(apply_cover(lay, CAT), CAT), [])
 
     def test_keep_out_blocks_like_an_entity(self):

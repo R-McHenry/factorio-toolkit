@@ -22,7 +22,7 @@ ghost, and the first V1 run (2026-10-20) got hundreds, each naming only ``entity
 player read them as "the queue". A ghost's alert now names the entity the ghost stands for, and a
 type with more than a few alerts is one line, its targets counted, each with what the network
 holds of it and whether its recipe is researched (``fkcore.supply``): "no_material_for_construction
-x220: 204 transport-belt (the network holds 0), 18 electric-mining-drill (LOCKED: research ...)". The cadence
+x220: 204 transport-belt (the network holds 0), 18 electric-mining-drill (needs-research: research ...)". The cadence
 is the surface file's ``remind`` (default 10min, **a placeholder: the default is still open with
 Rory**). ``poll(r, game_dir)`` is what every agent command calls, as it reads the chat journal
 today: read the panel of the surface mode's force (lab -> ``lab``, play -> ``player``), track it
@@ -167,13 +167,13 @@ GROUP_AT = 3
 
 
 def lines(new, reminders, cleared, tick, sup=None):
-    """The push lines: ALERT once, REMINDER while it persists, CLEARED once; a type with more
+    """The push lines: alert once, reminder while it persists, CLEARED once; a type with more
     than ``GROUP_AT`` alerts in one of them is one line (``sup``: a ``supply.Supply`` with the
     targets' stock and recipes, for what the network holds)."""
     out = []
-    out += _push("ALERT", new, tick, sup,
+    out += _push("alert", new, tick, sup,
                  lambda e: f"(raised at tick {e['alert']['tick']})")
-    out += _push("REMINDER", reminders, tick, sup,
+    out += _push("reminder", reminders, tick, sup,
                  lambda e: f"still there, first seen {age(tick - e['first'])} ago (tick {e['first']})")
     out += _push("CLEARED", cleared, tick, sup,
                  lambda e: f"(seen for {age(tick - e['first'])})")
@@ -189,7 +189,7 @@ def _push(word, entries, tick, sup, tail):
         es = by_type[typ]
         if len(es) <= GROUP_AT:
             for e in es:
-                sep = ": " if word == "REMINDER" else " "
+                sep = ": " if word == "reminder" else " "
                 out.append(f"{word} {describe(e['alert'])}{sep}{tail(e)}")
             continue
         counts = {}
@@ -199,24 +199,24 @@ def _push(word, entries, tick, sup, tail):
         parts = [f"{n} {t}{_held(sup, t, n, typ)}" for t, n in
                  sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
         first = min(e["first"] for e in es)
-        when = (f"; the oldest first seen {age(tick - first)} ago" if word == "REMINDER" else "")
+        when = (f"; the oldest first seen {age(tick - first)} ago" if word == "reminder" else "")
         more = f", ... {len(parts) - 10} more kinds" if len(parts) > 10 else ""
         out.append(f"{word} {typ} x{len(es)}: {', '.join(parts[:10])}{more}{when}")
     return out
 
 
 def _held(sup, target, n, typ):
-    """' (the network holds 0)', ' (LOCKED: ...)' for a target the supply read covers."""
+    """' (the network holds 0)', ' (needs-research: ...)' for a target the supply read covers."""
     if sup is None or target not in getattr(sup, "entities", {}):
         return ""
     from .supply import ghost_state, tech_brief
     state, _why = ghost_state(sup, target, n)
     row = sup.entities[target]
     stock = int(row.get("stock") or 0)
-    if state == "LOCKED":
+    if state == "needs-research":
         t = row.get("tech")
-        return f" (LOCKED: research {tech_brief(t)}; the network holds {stock})" if t else \
-            f" (LOCKED, nothing unlocks it; the network holds {stock})"
+        return f" (needs-research: research {tech_brief(t)}; the network holds {stock})" if t else \
+            f" (needs-research, nothing unlocks it; the network holds {stock})"
     return f" (the network holds {stock})"
 
 

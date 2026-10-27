@@ -28,7 +28,7 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
   has it keeps its own. The host's toolkit must be 1.7 too: it runs `write_layout` now.
 - 2.0 (in progress): a run with workers (run.json `workers`) gets the new worker brief in
   `.claude\\agents\\worker.md` (the old one kept in `.upgrade-<old sha>\\`).
-- 2.0.12: the build script gets the template's `stop_on UNROUTED NO_SINK` (the stops it lacks),
+- 2.0.12: the build script gets the template's `stop_on no-route no-destination` (the stops it lacks),
   and a Claude player's `.toolkit` the loop's watchdog (watchdog.py), which the loop starts.
 
 It prints what the player should be told: which commands are new, which docs to read again.
@@ -72,7 +72,7 @@ def _script(text):
     del lines[bom[0]]
     d = [i for i, l in enumerate(lines) if l.startswith("diff ")][0]
     lines.insert(d + 1, "report_bom      --stock live              # still to build vs the "
-                        "network's stock and research (LOW_STOCK, LOCKED)\n")
+                        "network's stock and research (short-stock, needs-research)\n")
     return "".join(lines)
 
 
@@ -113,7 +113,11 @@ def _write_last(text):
 
 #: the template's second stop_on line (2.0.12): no paste with a net unrouted, or a maker whose
 #: product reaches no sink
-STOPS = ("UNROUTED", "NO_SINK")
+STOPS = ("no-route", "no-destination")
+#: what an older run's script may still say for a stop (2.0.52's rename): read either way, so an
+#: upgrade adds only the stops the run really lacks
+OLD_STOPS = {"unrouted": "no-route", "no_sink": "no-destination", "no sink": "no-destination",
+             "invariant": "malformed"}
 
 
 def _stops(text):
@@ -121,7 +125,8 @@ def _stops(text):
     its last stop_on line or at its end (None: nothing to change)."""
     lines = text.splitlines(True)
     steps = [line.split("#")[0].split() for line in lines]
-    have = {a.upper() for s in steps if s[:1] == ["stop_on"] for a in s[1:]}
+    have = {OLD_STOPS.get(a.lower(), a.lower())
+            for s in steps if s[:1] == ["stop_on"] for a in s[1:]}
     need = [c for c in STOPS if c not in have]
     if not need:
         return None
@@ -219,7 +224,7 @@ def upgrade(run, sha, dry=False):
         stops = _stops(new_script or text)
         if stops:
             new_script = stops
-            changes.append("stop_on UNROUTED NO_SINK (no paste with a net unrouted)")
+            changes.append("stop_on no-route no-destination (no paste with a net unrouted)")
         hand = _hand(new_script or text)
         if hand:
             new_script = hand
@@ -315,10 +320,10 @@ TELL = """Tell the player (its next message; a Claude player's INBOX.md):
   you write it, every step of the recipe tree down to the drills; the world line says which pack
   the labs wait for; docs\\examples has compact-mall.fk and Rory's bus (bus4.json).
   It has 1.4.2: fk syncs by content (a background fk no longer undoes an edit), the world
-  line names ghosts no powered roboport reaches (UNREACHED), OFF_WATER flags a dry offshore pump,
+  line names ghosts no powered roboport reaches (UNREACHED), no-water flags a dry offshore pump,
   a Literal reads a bare entity list, and `trash` on a requester sends back what it no longer
   asks for. It has 1.4.1: The routed rates in out\\report_rates.txt settle now (its first line says
-  so), CAPACITY names only what runs short of a net's item, and `tier` never lowers a belt's tier
+  so), too-thin names only what runs short of a net's item, and `tier` never lowers a belt's tier
   (unless --downgrade) and allows only yellow unless you add --allow.
   It has 1.4: Machines that stand within 3 tiles of each other are now joined by an
   inserter, not a belt, whenever one machine feeds several (or several feed one): place a
@@ -326,7 +331,7 @@ TELL = """Tell the player (its next message; a Claude player's INBOX.md):
   is an early-tier mall built that way (24 of its 30 nets are single inserters; 83 belts).
   It also has 1.3: The build can now say what your belts and inserters as laid let through: add
   a line `report_rates` after `route` in game\\nauvis.build.fkb, and out\\report_rates.txt gets
-  the routed rates; a CAPACITY line names a belt lane, splitter or inserter that is too thin for
+  the routed rates; a too-thin line names a belt lane, splitter or inserter that is too thin for
   what your design asks (a yellow lane carries 7.5/s, a fast inserter 2.5/s). To lay red belts
   where yellow is too thin, add `tier minimize --allow yellow,red` after `route` (`--red 20` caps
   how many). A module placed with rot now turns its whole contents. Details in

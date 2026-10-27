@@ -1,4 +1,4 @@
-"""Connectivity (CORE-V1.md §9): the carrier graph, per-net connected yes/no, and LEAK lines.
+"""Connectivity (CORE-V1.md §9): the carrier graph, per-net connected yes/no, and SPILL lines.
 
 Each case is a small hand-built layout in .fkp text. Directions follow the .fkp: N E S W; an
 inserter faces the side it picks from (v4 convention), a long-handed one reaches two tiles; both
@@ -26,7 +26,7 @@ def succ(g, key):
 
 
 def leaks(rep):
-    return [str(c) for c in rep.checks if c.code == "LEAK"]
+    return [str(c) for c in rep.checks if c.code == "SPILL"]
 
 
 class BeltTest(unittest.TestCase):
@@ -214,7 +214,7 @@ class NetTest(unittest.TestCase):
         self.assertEqual((net.pairs, net.reached, net.unreached), (2, 1, [("m/a", "m/c")]))
         self.assertEqual(net.segments, 2)                           # r/f1 stands alone
         self.assertEqual([str(c) for c in rep.checks],
-                         ["OPEN        net p: 1 of 2 driver->consumer pairs connected; unreached "
+                         ["partly-connected net p: 1 of 2 driver->consumer pairs connected; unreached "
                           "m/a -> m/c; 2 segments, 8 carriers"])
 
     def test_closing_the_gap_connects(self):
@@ -232,9 +232,9 @@ class NetTest(unittest.TestCase):
         self.assertEqual((net.status, net.pairs, net.reached, net.missing),
                          ("unrouted", 2, 0, ["ins/m0"]))
         self.assertEqual([str(c) for c in rep.checks],
-                         ["UNROUTED    net p: 0 of 2 driver->consumer pairs connected; 2 segments, "
+                         ["no-route net p: 0 of 2 driver->consumer pairs connected; 2 segments, "
                           "8 carriers; not in the layout: ins/m0",
-                          "LEAK        net p: r/f0 drops into m/b, which is not a consumer of p"])
+                          "SPILL net p: r/f0 drops into m/b, which is not a consumer of p"])
 
     def test_an_underground_side_load_connects_and_draws_no_line(self):
         # 2.0: whether its items get through is the lane graph's to say (the routed LANE line);
@@ -280,21 +280,21 @@ class LeakTest(unittest.TestCase):
         rep = connect(L("""
             e a/b0 transport-belt 0.5,0.5 E net=a
             e b/b0 transport-belt 1.5,0.5 E net=b"""), CAT)
-        self.assertEqual(leaks(rep), ["LEAK        net a: a/b0 feeds b/b0 (net b)"])
+        self.assertEqual(leaks(rep), ["SPILL net a: a/b0 feeds b/b0 (net b)"])
 
     def test_a_side_load_onto_another_nets_belt(self):
         rep = connect(L("""
             e b/b0 transport-belt 0.5,1.5 E net=b
             e b/b1 transport-belt 1.5,1.5 E net=b
             e a/s0 transport-belt 1.5,0.5 S net=a"""), CAT)
-        self.assertEqual(leaks(rep), ["LEAK        net a: a/s0 side-loads onto b/b1 (net b)"])
+        self.assertEqual(leaks(rep), ["SPILL net a: a/s0 side-loads onto b/b1 (net b)"])
 
     def test_a_side_load_onto_another_nets_underground(self):
         rep = connect(L("""
             e a/s0 transport-belt 0.5,0.5 E net=a
             e b/u0 underground-belt 1.5,0.5 S net=b ug=in"""), CAT)
-        self.assertEqual([str(c) for c in rep.checks if c.code != "UNROUTED"],
-                         ["LEAK        net a: a/s0 side-loads onto b/u0 (net b)"])
+        self.assertEqual([str(c) for c in rep.checks if c.code != "no-route"],
+                         ["SPILL net a: a/s0 side-loads onto b/u0 (net b)"])
 
     def test_a_splitter_feeds_another_nets_belt(self):
         rep = connect(L("""
@@ -302,14 +302,14 @@ class LeakTest(unittest.TestCase):
             e a/sp splitter 2.5,1 E net=a
             e a/o0 transport-belt 3.5,0.5 E net=a
             e b/b0 transport-belt 3.5,1.5 E net=b"""), CAT)
-        self.assertEqual(leaks(rep), ["LEAK        net a: a/sp feeds b/b0 (net b)"])
+        self.assertEqual(leaks(rep), ["SPILL net a: a/sp feeds b/b0 (net b)"])
 
     def test_an_inserter_picks_from_another_nets_belt(self):
         rep = connect(L("""
             e a/b0 transport-belt 1.5,0.5 N net=a
             e b/i0 fast-inserter 2.5,0.5 W net=b
             e m/m assembling-machine-1 4.5,1.5 recipe=iron-gear-wheel"""), CAT)
-        self.assertEqual(leaks(rep), ["LEAK        net a: b/i0 (net b) picks from a/b0"])
+        self.assertEqual(leaks(rep), ["SPILL net a: b/i0 (net b) picks from a/b0"])
 
     def test_an_inserter_feeds_a_machine_of_another_net(self):
         rep = connect(L("""
@@ -317,7 +317,7 @@ class LeakTest(unittest.TestCase):
             e a/i0 fast-inserter 2.5,0.5 W net=a
             e m/m assembling-machine-1 4.5,1.5 recipe=iron-gear-wheel"""), CAT,
             {"a": ([], [("m/other", "iron-plate")]), "b": ([], [("m/m", "iron-plate")])})
-        self.assertEqual(leaks(rep), ["LEAK        net a: a/i0 drops into m/m, which is not a "
+        self.assertEqual(leaks(rep), ["SPILL net a: a/i0 drops into m/m, which is not a "
                                       "consumer of a"])
 
     def test_an_underground_pairs_with_another_nets(self):
@@ -326,7 +326,7 @@ class LeakTest(unittest.TestCase):
             e b/u1 underground-belt 2.5,0.5 E net=b ug=out
             e a/u1 underground-belt 5.5,0.5 E net=a ug=out"""), CAT)
         self.assertEqual(rep.graph.pairs, {"a/u0": "b/u1", "b/u1": "a/u0"})
-        self.assertEqual(leaks(rep), ["LEAK        net a: a/u0 pairs underground with b/u1 "
+        self.assertEqual(leaks(rep), ["SPILL net a: a/u0 pairs underground with b/u1 "
                                       "(net b)"])
         self.assertEqual(rep.nets["a"].unpaired, ["a/u1"])
 
@@ -339,7 +339,7 @@ class LeakTest(unittest.TestCase):
                             "plot boot at 3,0 rot 0 size 3x1\n")
         rep = connect(compose.compose(surface, {"main": main, "boot": boot}, CAT), CAT)
         self.assertEqual(sorted(rep.nets), ["boot/a", "main/a"])
-        self.assertEqual(leaks(rep), ["LEAK        net main/a: s:main/x/b2 feeds s:boot/x/b0 "
+        self.assertEqual(leaks(rep), ["SPILL net main/a: s:main/x/b2 feeds s:boot/x/b0 "
                                       "(net boot/a)"])
 
 
@@ -383,7 +383,7 @@ class RedgreenTest(unittest.TestCase):
             "gear": (4, 37, 21), "cable": (2, 23, 8), "circ": (2, 11, 2), "belt": (2, 28, 6),
             "ins_": (2, 27, 6), "packs": (3, 84, 110)})
         self.assertEqual([r.missing for r in self.rep.nets.values()], [[]] * 12)
-        self.assertEqual(self.rep.summary(), "12 nets: 0 connected, 0 open, 12 unrouted; 0 LEAK; "
+        self.assertEqual(self.rep.summary(), "12 nets: 0 connected, 0 open, 12 unrouted; 0 SPILL; "
                          "566 entities, 617 edges, 0 underground pairs")
 
     def test_the_same_on_a_surface(self):
@@ -400,8 +400,8 @@ class RedgreenTest(unittest.TestCase):
 
 class SinkTest(unittest.TestCase):
     """2.0.12: each maker's product reaches a sink (the solo run's Mall4 went out with its
-    products belt unrouted, 2026-10-23 23:23), and a net nothing uses is UNUSED, not UNROUTED (the
-    build script stops on UNROUTED by default now)."""
+    products belt unrouted, 2026-10-23 23:23), and a net nothing uses is unused, not no-route (the
+    build script stops on no-route by default now)."""
 
     MAKERS = """
         e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel
@@ -435,7 +435,7 @@ class SinkTest(unittest.TestCase):
         self.assertEqual(lines, ["  sinks     1 of 2 makers on a net reach a sink with what they "
                                  "make; none reached: m/z (net g)"])
         self.assertEqual([str(c) for c in checks],
-                         ["NO_SINK     mall m/z: what it makes reaches none of the 1 consumer of "
+                         ["no-destination mall m/z: what it makes reaches none of the 1 consumer of "
                           "net g: it has nowhere to go"])
         # a net none of whose pairs connect: its UNROUTED line says it, the report line too
         lines, checks = flow._sinks(ctx, "mall", flat, connect(L(self.MAKERS.replace(
@@ -447,11 +447,11 @@ class SinkTest(unittest.TestCase):
         rep = connect(L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel"), CAT,
                       {"coalin": ([], [])})
         self.assertEqual([str(c) for c in rep.checks],
-                         ["UNUSED      net coalin: no driver->consumer pair to connect (0 drivers, "
+                         ["unused net coalin: no driver->consumer pair to connect (0 drivers, "
                           "0 consumers); 0 segments, 0 carriers"])
         rep = connect(L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel"), CAT,
                       {"g": ([("m/a", "iron-gear-wheel")], [])})
-        self.assertEqual([c.code for c in rep.checks], ["UNROUTED"])     # it makes, nothing takes
+        self.assertEqual([c.code for c in rep.checks], ["no-route"])     # it makes, nothing takes
 
 
 if __name__ == "__main__":

@@ -670,7 +670,7 @@ def measure_folder(folder, cat):
         return {"plates": 0.0, "spm": {}, "made": {}, "errors": [f"{type(exc).__name__}: {exc}"]}
     got = measure_flats(ctx.flats)
     got["errors"] = [f"{c.where}: {c.msg}".replace(os.path.join(folder, ""), "")
-                     for _s, c in ctx.checks if c.code == "INVARIANT"] + got["errors"]
+                     for _s, c in ctx.checks if c.code == "malformed"] + got["errors"]
     return got
 
 
@@ -960,7 +960,7 @@ def _built_evidence(p, files):
                      "build of it still to come?")
     with open(report, encoding="utf-8", errors="replace") as fh:
         text = fh.read()
-    for code in ("skipped", "MISPLACED", "UNPLACED"):
+    for code in ("skipped", "not-where-designed", "no-position"):
         if code in text:
             notes.append(f"the last paste's report says {code} (out\\apply.txt)")
     return notes
@@ -1225,7 +1225,7 @@ def cmd_check(p, a, out):
                 + (f"made at {per_min(rate)}/min before it ({k / rate:.0f} min of it)" if rate
                    else "no maker before it: from stock, the shop, or a stage that makes it")
                 + ("" if held is None else f"; the network held {held[0]}"
-                   + (", LOCKED" if held[1] else "")))
+                   + (", needs-research" if held[1] else "")))
     render = _render(p, st, ctx, a.render)
     if render:
         with open(os.path.join(path, OUT, "render.txt"), "w", encoding="utf-8") as fh:
@@ -1259,7 +1259,7 @@ def last_stock(game):
     except OSError:
         return {}, None
     found = {m.group(1): (int(m.group(2)), bool(m.group(3))) for m in re.finditer(
-        r"^\s+(\S+)\s+need\s+\d+\s+network\s+(\d+)(\s+LOCKED)?\s*$", text, re.M)}
+        r"^\s+(\S+)\s+need\s+\d+\s+network\s+(\d+)(\s+needs-research)?\s*$", text, re.M)}
     return found, time.strftime("%H:%M", time.localtime(os.path.getmtime(path)))
 
 

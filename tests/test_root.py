@@ -183,7 +183,7 @@ class FlowTest(World):
         with open(os.path.join(self.dir, "out", "read_surface.txt"), encoding="utf-8") as fh:
             report = fh.read()
         self.assertIn("design nauvis.fk: 3 plots from its top-level sealed instances", report)
-        self.assertEqual([(s, c) for s, c in now.checks if c.code == "DESIGN"], [])
+        self.assertEqual([(s, c) for s, c in now.checks if c.code == "design"], [])
         # `fk look` reads the same world: the derived plots, the committed surface .fkp
         sf, _lay, _path, seen = look.composed(self.dir, CAT)
         self.assertEqual(sf.design, "nauvis.fk")

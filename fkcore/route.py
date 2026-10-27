@@ -70,7 +70,7 @@ an exit, which takes no drop); a tapped belt's last tile never points into anoth
 
 Nets are routed one at a time, each seeing the ones before it; a net that fails moves to the
 front and the pass is retried, and the pass that routes the most nets is kept. ``fkcore.connect``
-is the judge: a routed layout is done when every net is connected with no LEAK. The router runs it
+is the judge: a routed layout is done when every net is connected with no SPILL. The router runs it
 on its own result: a net whose route leaks or does not connect is re-routed around the tiles at
 fault (twice at most), else refused with the judge's line.
 
@@ -911,7 +911,7 @@ def _guarded(cat, job, ents, frames, js, box, limit, terrain):
 def _judge(flat, lay, cat, mine, js):
     """{net: (reason, tiles at fault)} for the nets in ``mine`` (routed this run, in routing
     order) whose route leaks, or leaves a pair of its placed ends apart, by ``fkcore.connect``. A
-    LEAK between two routes is the later one's fault."""
+    SPILL between two routes is the later one's fault."""
     rep = connectmod.connect(lay, cat, connectmod.endpoints(flat), _ports(flat))
     g = rep.graph
     out = {}
@@ -926,7 +926,7 @@ def _judge(flat, lay, cat, mine, js):
         if blame is None:
             continue
         key = lk.dst if blame == b else lk.src
-        _reason, tiles = out.setdefault(blame, (f"its route would LEAK: {lk.text}", set()))
+        _reason, tiles = out.setdefault(blame, (f"its route would SPILL: {lk.text}", set()))
         tiles |= set(g.nodes[key].tiles)
     for name in mine:
         rs = [rep.nets[n] for n in fkpmod.net_names(name) if n in rep.nets]   # a pair: both
@@ -1382,7 +1382,7 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     inserter straight off a belt (or a driver machine) into it; a new driver joins where it
     reaches every consumer: side-loaded onto a belt, into the back of a belt nothing feeds, or an
     inserter onto it. Each branch is the router's own search (``steiner``), on the router's
-    ground, and ``fkcore.connect`` judges the result: every pair joined, no LEAK.
+    ground, and ``fkcore.connect`` judges the result: every pair joined, no SPILL.
 
     A lane pair (``A|B``, 2.0.2; the lead's merge of V2 lanes, 2026-10-22, routed a changed pair
     again whole) is patched by its two nets: a new consumer of both branches off the belt of both
@@ -1398,7 +1398,7 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     rep = connectmod.connect(g, cat, sub)
     leak = next((lk for lk in rep.leaks if lk.src in serve or lk.dst in serve), None)
     if leak is not None:
-        return None, f"what stands of its route would LEAK: {leak.text}"
+        return None, f"what stands of its route would SPILL: {leak.text}"
     kept = [e for e in old if e.key in serve]
     p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
     p.used |= mine
@@ -1436,7 +1436,7 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     keys = p.route_keys()
     leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
     if leak is not None:
-        return None, f"the patch would LEAK: {leak.text}"
+        return None, f"the patch would SPILL: {leak.text}"
     for m in members:
         r = rep.nets.get(m)
         drivers, consumers = p.ends[m]
@@ -1465,7 +1465,7 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
 
     2.0: the netlist decides, not the net's name. The first lead run changed a net's sink and
     kept its name (``net packs: X -> lab`` to ``X -> px``): the route stood as it was, the build
-    said OK, and the old inserter still fed the lab."""
+    said ok, and the old inserter still fed the lab."""
     table = connectmod.endpoints(flat)
     for net in sorted(patch):
         for e in patch[net]:
@@ -1489,7 +1489,7 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
                                    keys)
         idle = [] if js[net].fluid else sorted(keys - served, key=fkpmod.natural_key)
         if leak is not None:
-            faulty[net] = f"its committed route would LEAK: {leak.text}"
+            faulty[net] = f"its committed route would SPILL: {leak.text}"
         elif apart:
             more = len(apart) - 1
             faulty[net] = (f"its committed route does not join {apart[0][0]} -> {apart[0][1]}"
@@ -1703,7 +1703,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
 
 
 def seal_checks(flat, lay, cat):
-    """SEAL (PLAN-MODULES phase 3): a net's carrier inside a sealed module's frame that the net does
+    """crosses-frame (PLAN-MODULES phase 3): a net's carrier inside a sealed module's frame that the net does
     not belong to -- a crossing that is not at a port -- or one of the module's own nets' carriers
     outside its frame. One line per carrier at fault; none when every sealed module is sealed.
     FRAME (2.0.40): an entity of the module's own (a machine, a template's belt) outside its frame."""
@@ -1731,16 +1731,16 @@ def seal_checks(flat, lay, cat):
                 continue
             mine = net == path or net.startswith(path + "/")
             if inside and not mine:
-                out.append(f"SEAL      {key} ({net}) stands inside sealed module {path}: a net "
+                out.append(f"crosses-frame      {key} ({net}) stands inside sealed module {path}: a net "
                            "crosses a sealed frame only at a port's edge")
             elif mine and not inside:
-                out.append(f"SEAL      {key} ({net}) belongs to sealed module {path} but stands "
+                out.append(f"crosses-frame      {key} ({net}) belongs to sealed module {path} but stands "
                            "outside its frame")
     return out
 
 
 def port_checks(flat, lay, cat):
-    """PORT, warn and never gate.
+    """port, warn and never gate.
 
     2.0.48: a port is an edge of its module's frame, and the routes meet across it: the module's
     own on the tile just inside, the parent's on the tile just outside. A machine standing on
@@ -1758,7 +1758,7 @@ def port_checks(flat, lay, cat):
         rec = flat.port_records[key]
         why = record_misfit(port, rec)
         if why is not None:
-            out.append(f"PORT      {key}: the committed tile {rec.x},{rec.y} is dropped: {why}")
+            out.append(f"port      {key}: the committed tile {rec.x},{rec.y} is dropped: {why}")
     occ = {}
     for key, e in lay.entities.items():
         for tile in fkpmod.tiles_of(cat, e):
@@ -1771,7 +1771,7 @@ def port_checks(flat, lay, cat):
             other = occ.get(tuple(tile))
             if other is None or other.startswith("~"):
                 continue
-            out.append(f"PORT      {name}: the tile {where} its edge, {tile[0]},{tile[1]}, is "
+            out.append(f"port      {name}: the tile {where} its edge, {tile[0]},{tile[1]}, is "
                        f"taken by {other}")
     return out
 

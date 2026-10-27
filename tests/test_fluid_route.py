@@ -115,11 +115,11 @@ class LabFluidsFlowTest(unittest.TestCase):
     def test_it_builds_with_only_the_known_warnings(self):
         self.assertEqual(self.code, 0, self.ctx.log)
         self.assertEqual(sorted((c.code, c.where) for _s, c in self.ctx.checks),
-                         [("UNCONSUMED", "sulfur chem"), ("UNFED", "steam b1"),
-                          ("UNFED", "steam b2")])
+                         [("no-feed", "steam b1"), ("no-feed", "steam b2"),
+                          ("no-taker", "sulfur chem")])
         text = self.read("out/report_checks.txt")
-        self.assertIn("steam: 2 nets: 2 connected, 0 open, 0 unrouted; 0 LEAK", text)
-        self.assertIn("sulfur: 2 nets: 2 connected, 0 open, 0 unrouted; 0 LEAK", text)
+        self.assertIn("steam: 2 nets: 2 connected, 0 open, 0 unrouted; 0 SPILL", text)
+        self.assertIn("sulfur: 2 nets: 2 connected, 0 open, 0 unrouted; 0 SPILL", text)
         self.assertIn("power: 1 wire network, 1 with generation", self.read("out/floorplan.txt"))
 
     def test_the_committed_layouts_are_what_the_flow_writes(self):

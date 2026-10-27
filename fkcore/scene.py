@@ -57,7 +57,7 @@ Thing (made with :func:`thing`; every key is always present)::
 Annotations added later (absent until then)::
 
     owner     "<design>/<src without its last segment>" | "keep/<name>" | "temp/<id>"
-              | "NOBODY" | "enemy" | "nature" | "-"
+              | "unowned" | "enemy" | "nature" | "-"
     zone      "<design>/<block>" (designated area containing the centre tile) | "sanctioned"
     trespass  bool
     paired    bool (underground belts only; geometric or game truth), pair_at [x, y] | None
@@ -82,21 +82,21 @@ MODES = ("entity", "state", "owner", "zone", "threat", "items", "flow", "power",
          "robots")
 
 #: Loud marker words, in the fixed order they are printed.
-MARKERS = ("ATTACK", "TRESPASS", "NOBODY", "EMPTY", "WRONG_ITEM", "WRONG_TYPE", "WRONG_LANE",
+MARKERS = ("ATTACK", "TRESPASS", "unowned", "EMPTY", "other-item", "WRONG_TYPE", "WRONG_LANE",
            "SHORT", "UNCOVERED", "NO_NETWORK", "FLUID_DRY", "FLUID_OPEN", "FULL", "DAMAGED",
-           "GHOST", "DECON", "UNPAIRED", "NET_SPLIT", "THREAT:hot", "THREAT:close")
+           "ghost", "DECON", "UNPAIRED", "NET_SPLIT", "THREAT:hot", "THREAT:close")
 
 #: Which markers a single mode shows (full shows all).
 MODE_MARKERS = {
     "entity": (),
-    "state": ("EMPTY", "WRONG_ITEM", "DAMAGED", "GHOST", "DECON"),
-    "owner": ("TRESPASS", "NOBODY"),
+    "state": ("EMPTY", "other-item", "DAMAGED", "ghost", "DECON"),
+    "owner": ("TRESPASS", "unowned"),
     "zone": ("TRESPASS",),
     "threat": ("ATTACK", "THREAT:hot", "THREAT:close"),
-    "items": ("WRONG_ITEM", "FULL"),
+    "items": ("other-item", "FULL"),
     "flow": ("UNPAIRED", "WRONG_TYPE", "WRONG_LANE"),
     "power": (),
-    "build": ("SHORT", "UNCOVERED", "NO_NETWORK", "GHOST"),
+    "build": ("SHORT", "UNCOVERED", "NO_NETWORK", "ghost"),
     "fluid": ("FLUID_OPEN", "FLUID_DRY"),
     "robots": ("NO_NETWORK", "NET_SPLIT"),
 }

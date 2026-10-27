@@ -15,7 +15,7 @@ docs/LAB-LANES-20261020.md (2.0.77):
 - ``ug_side``: a belt into the side of an underground (either end): only its lane on the open
   side goes through (an entrance is open upstream, an exit downstream), onto the near lane; the
   lane on the closed side is blocked, so it has no edge (``LaneGraph.closed`` lists it, for the
-  routed rates' ``LANE`` line).
+  routed rates' ``WRONG-LANE`` line).
 - ``pickup``: an inserter picks from both lanes of a belt tile, or from a machine.
 - ``drop``: an inserter across a belt fills the far lane; along it (in line), always the right
   lane. Onto a turn, a splitter half and both underground ends alike: an exit takes drops from

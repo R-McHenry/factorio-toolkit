@@ -5,7 +5,7 @@ machines at V1's nominal rates and no capacities (``fkcore.routed.required``), s
 today still shows what it would carry. Every belt, underground pair and splitter on a net gets:
 
 - ``minimize``: the slowest allowed tier whose lane carries its required flow (the fastest allowed
-  where none does: ``CAPACITY`` reports it after);
+  where none does: ``too-thin`` reports it after);
 - ``maximize``: the fastest allowed tier, on every one that carries anything;
 - ``yellow``: only yellow, what the router lays.
 

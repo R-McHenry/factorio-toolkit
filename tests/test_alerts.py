@@ -89,9 +89,9 @@ class TrackTest(unittest.TestCase):
         rd = alerts.normalise(raw(5000, ATTACK, SPEAKER))
         new, _r, _c, st = alerts.track(None, rd, 5000, REMIND)
         self.assertEqual(alerts.lines(new, [], [], 5000), [
-            'ALERT custom "fk5 sense: speaker test" [item/iron-plate]: programmable-speaker at '
+            'alert custom "fk5 sense: speaker test" [item/iron-plate]: programmable-speaker at '
             'lab 390.5,520.5 (raised at tick 4000)',
-            "ALERT entity_under_attack: wooden-chest at lab 385.5,520.5 (raised at tick 4990)"])
+            "alert entity_under_attack: wooden-chest at lab 385.5,520.5 (raised at tick 4990)"])
         _n, rem, _c, st = alerts.track(st, rd, 5000 + REMIND, REMIND)
         self.assertIn("still there, first seen 20s ago (tick 5000)",
                       alerts.lines([], rem, [], 5000 + REMIND)[0])
@@ -168,9 +168,9 @@ class PollTest(unittest.TestCase):
     def test_poll_tracks_in_out_and_pushes_when_notify_is_all(self):
         r, p = self.poll(raw(5000, ATTACK, SPEAKER))
         self.assertEqual((len(p.new), len(p.lines), len(r.said())), (2, 2, 2))
-        self.assertTrue(all("[fk lab] ALERT " in c for c in r.said()))
+        self.assertTrue(all("[fk lab] alert " in c for c in r.said()))
         with open(os.path.join(self.game, "out", "inbox.txt"), encoding="utf-8") as fh:
-            self.assertTrue(fh.read().startswith("5000 alert: ALERT custom"))
+            self.assertTrue(fh.read().startswith("5000 alert: alert custom"))
         with open(alerts.state_path(self.game), encoding="utf-8") as fh:
             self.assertEqual(len(json.load(fh)["lab"]["alerts"]), 2)
         r, p = self.poll(raw(5100, ATTACK, SPEAKER))              # nothing new

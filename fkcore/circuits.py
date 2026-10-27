@@ -26,16 +26,16 @@ What the source says, and what the layout gets:
   ``read`` / ``signal`` / ``signals``. This replaced the ``keep=`` / ``fill=`` macros: they chose
   hands by where they pointed (two output hands on a shared belt both took one number, and the belt
   one held a consumer row back), which is what the run hit on 2026-10-25. A ``set`` reports the
-  hands it hit and a selector that matches nothing is a ``SELECT`` line, never a silent no-op.
+  hands it hit and a selector that matches nothing is a ``no-match`` line, never a silent no-op.
 - ``guard`` on a crafter: it reads its recipe's ingredients (``read=ingredients``) onto a red wire
   to every inserter that feeds it, which sets its filters from them (``filter=circuit``). A
   recipe changed in the game changes what they carry, with no script and no new paste of them.
 
 The wires of a wire net are a minimum spanning tree over its entities, centre to centre, each
-within both ends' reach (9 tiles, a pole's wire reach): a longer one is a ``WIRE_REACH`` line
+within both ends' reach (9 tiles, a pole's wire reach): a longer one is a ``wire-too-far`` line
 (wires are not routed through poles yet). ``behave`` blocks keep their lines: a ``require`` with
-numbers from the catalog is checked (``REQUIRE``), a gated net with no ``cycle`` on its wire is a
-``GATED`` line (the rate model takes it as always open), ``expect`` lines are reported.
+numbers from the catalog is checked (``require-not-met``), a gated net with no ``cycle`` on its wire is a
+``gate-open`` line (the rate model takes it as always open), ``expect`` lines are reported.
 
 :func:`resolve` (elaborate, on paper) -> :class:`Circuit` and its check lines; :func:`lay` (the
 build, before the floorplan composes) -> the layout with its circuit settings and ``wire`` / ``w``
@@ -165,24 +165,24 @@ class _Resolver:
         for sig, scope in self.flat.circuit_src.get("signals", ()):
             full = _join(scope, sig.name)
             if full in self.declared:
-                self.check("SIGNAL", f"signal {full}", "declared twice", sig.line)
+                self.check("no-signal", f"signal {full}", "declared twice", sig.line)
                 continue
             self.declared[full] = sig
             if sig.game is None:
                 autos.append(full)
                 continue
             if not _known(sig.game, self.cat):
-                self.check("SIGNAL", f"signal {full}", f"{sig.game} is no game signal (a virtual "
+                self.check("no-signal", f"signal {full}", f"{sig.game} is no game signal (a virtual "
                            "signal like signal-T, an item or a fluid)", sig.line)
             elif sig.game in NON_TRANSMITTING:
-                self.check("SIGNAL", f"signal {full}", f"{sig.game} never goes out on a wire "
+                self.check("no-signal", f"signal {full}", f"{sig.game} never goes out on a wire "
                            "(the game takes it and sends nothing)", sig.line)
             self.c.signals[full] = sig.game
             taken.add(sig.game)
         pool = [n for n in auto_pool() if n not in taken]
         for k, full in enumerate(autos):
             if k >= len(pool):
-                self.check("SIGNAL", f"signal {full}", "no free virtual signal left for it")
+                self.check("no-signal", f"signal {full}", "no free virtual signal left for it")
                 continue
             self.c.signals[full] = self.c.autos[full] = pool[k]
         if self.c.autos:
@@ -196,15 +196,15 @@ class _Resolver:
             if full in self.c.signals:
                 return self.c.signals[full]
         if not _known(name, self.cat):
-            self.check("SIGNAL", where, f"{name} is no declared signal and no game signal",
+            self.check("no-signal", where, f"{name} is no declared signal and no game signal",
                        line)
         elif name in NON_TRANSMITTING:
-            self.check("SIGNAL", where, f"{name} never goes out on a wire", line)
+            self.check("no-signal", where, f"{name} never goes out on a wire", line)
         return name
 
     # wires
     def member(self, ref, scope, where, line):
-        """A wire end as written -> [("machine", key), ...] or [("net", name)]; [] and a WIRE
+        """A wire end as written -> [("machine", key), ...] or [("net", name)]; [] and a no-wire
         line when it names nothing."""
         node, keys = self.flat.resolve_ref(ref, scope)
         if keys:
@@ -214,14 +214,14 @@ class _Resolver:
                 net = _join(s, ref.parts[0])
                 if net in self.flat.nets:
                     return [("net", net)]
-        self.check("WIRE", where, f"{ref} names no instance or net", line)
+        self.check("no-wire", where, f"{ref} names no instance or net", line)
         return []
 
     def wires(self):
         for w, scope in self.flat.circuit_src.get("wires", ()):
             full = _join(scope, w.name)
             if full in self.c.wires:
-                self.check("WIRE", f"wire {full}", "declared twice", w.line)
+                self.check("no-wire", f"wire {full}", "declared twice", w.line)
                 continue
             d = WireDef(full, w.colour, line=w.line)
             for ref in w.drivers:
@@ -256,7 +256,7 @@ class _Resolver:
             if wire is None:
                 node, keys = self.flat.resolve_ref(lang.Ref(left.source, False, cond.line), scope)
                 if not keys:
-                    self.check("SIGNAL", where, f"when {cond}: {'.'.join(left.source)} names no "
+                    self.check("no-signal", where, f"when {cond}: {'.'.join(left.source)} names no "
                                "wire, instance or network", cond.line)
                     return None
                 wire = self.implicit(node.path if node is not None else keys[0], keys)
@@ -264,15 +264,15 @@ class _Resolver:
         right = cond.right
         if isinstance(right, lang.Operand):
             if right.source != left.source:
-                self.check("SIGNAL", where, f"when {cond}: a condition compares two signals on "
+                self.check("no-signal", where, f"when {cond}: a condition compares two signals on "
                            "one wire", cond.line)
             right = self.game(right.signal, scope, where, cond.line)
         elif not isinstance(right, int):
-            self.check("SIGNAL", where, f"when {cond}: the game compares with whole numbers",
+            self.check("no-signal", where, f"when {cond}: the game compares with whole numbers",
                        cond.line)
             right = int(right)
         if kind == "network" and not self.cat.is_item(sig):
-            self.check("SIGNAL", where, f"when {cond}: the logistic network counts items, and "
+            self.check("no-signal", where, f"when {cond}: the logistic network counts items, and "
                        f"{sig} is none", cond.line)
         if wire is not None and consumer not in self.c.wires[wire].consumers:
             self.c.wires[wire].consumers.append(consumer)
@@ -288,7 +288,7 @@ class _Resolver:
             if inst.when is None:
                 continue
             if inst.module is not None:
-                self.check("SIGNAL", path, "a module instance has no condition of its own; "
+                self.check("no-signal", path, "a module instance has no condition of its own; "
                            "write when on its machines", inst.line)
                 continue
             if not inst.machines:
@@ -362,11 +362,11 @@ class _Resolver:
                                         "",))
             if p.get("guard") is not None:
                 if p["guard"] is not True:
-                    self.check("GUARD", path, "guard is a flag: write it bare, Assembler<recipe=x, "
+                    self.check("cannot-filter", path, "guard is a flag: write it bare, Assembler<recipe=x, "
                                "guard>", inst.line)
                 recipes = {self.flat.machines[k].recipe for k in inst.machines}
                 if recipes == {None}:
-                    self.check("GUARD", path, f"guard: {inst.kind} has no recipe to read",
+                    self.check("cannot-filter", path, f"guard: {inst.kind} has no recipe to read",
                                inst.line)
                     continue
                 self.c.guards.append(path)
@@ -414,7 +414,7 @@ class _Resolver:
         for b, scope in self.flat.circuit_src.get("behaves", ()):
             wire = self.wire_named(b.wire, scope)
             if wire is None:
-                self.check("WIRE", f"behave {b.name}", f"on {b.wire}: no such wire", b.line)
+                self.check("no-wire", f"behave {b.name}", f"on {b.wire}: no such wire", b.line)
             behaved.setdefault(wire, []).append(b)
             self.c.behaves.append((b, scope))
             for kind, text, line in b.lines:
@@ -427,13 +427,13 @@ class _Resolver:
             if w.implicit:
                 continue
             if not w.drivers:
-                self.check("WIRE", f"wire {name}", "nothing drives it", w.line)
+                self.check("no-wire", f"wire {name}", "nothing drives it", w.line)
             if not w.consumers:
-                self.check("WIRE", f"wire {name}", "nothing reads it", w.line)
+                self.check("no-wire", f"wire {name}", "nothing reads it", w.line)
             for kind, ref in w.consumers:
                 if kind == "net" and (ref not in self.c.gates or self.c.gates[ref].wire != name):
-                    self.check("WIRE", f"wire {name}", f"net {ref} reads it but has no when on "
-                               f"it (net {ref}: ... when {name}.SIGNAL < N)", w.line)
+                    self.check("no-wire", f"wire {name}", f"net {ref} reads it but has no when on "
+                               f"it (net {ref}: ... when {name}.no-signal < N)", w.line)
         for where, cd in [(f"net {n}", g) for n, g in self.c.gates.items()] + \
                          [(p, e) for p, e in self.c.enables.items()]:
             if cd.wire is None:
@@ -441,7 +441,7 @@ class _Resolver:
             sigs = self.c.wires[cd.wire].signals
             for s in [cd.signal] + ([cd.right] if isinstance(cd.right, str) else []):
                 if sigs is not None and s not in sigs and s not in _WILDCARDS:
-                    self.check("SIGNAL", where, f"when {cd.text}: no driver on {cd.wire} puts "
+                    self.check("no-signal", where, f"when {cd.text}: no driver on {cd.wire} puts "
                                f"{s} on it (it carries {', '.join(sorted(sigs)) or 'nothing'})",
                                cd.line)
         for name, g in sorted(self.c.gates.items()):
@@ -449,7 +449,7 @@ class _Resolver:
             if cycles:
                 self.c.notes.append(f"gated net {name} ({g.text}): " + "; ".join(cycles))
             else:
-                self.check("GATED", f"net {name}", f"gated ({g.text}): the rate model takes it as "
+                self.check("gate-open", f"net {name}", f"gated ({g.text}): the rate model takes it as "
                            "always open" + ("" if g.wire is None else
                                             f"; a behave block on {g.wire} with a cycle says how "
                                             "often it runs"), self.flat.nets[name].line)
@@ -466,7 +466,7 @@ class _Resolver:
         ok = {"<": a < z, ">": a > z, "<=": a <= z, ">=": a >= z, "=": a == z, "==": a == z,
               "!=": a != z}[op]
         if not ok:
-            self.check("REQUIRE", f"behave {b.name}", f"require {text}: {a:g} {op} {z:g} does "
+            self.check("require-not-met", f"behave {b.name}", f"require {text}: {a:g} {op} {z:g} does "
                        "not hold", line)
         else:
             self.c.notes.append(f"behave {b.name}: require {text}: holds ({a:g} {op} {z:g})")
@@ -569,7 +569,7 @@ class _Layer:
                                if e.attrs.get("net") == net and self.kind(k) in _GATED),
                               key=fkpmod.natural_key)
             if not carriers:
-                self.check("GATED", f"net {net}", f"gated ({cd.text}), but its route has no "
+                self.check("gate-open", f"net {net}", f"gated ({cd.text}), but its route has no "
                            "inserter or pump to gate: it runs ungated")
                 continue
             attr, value = cd.attr()
@@ -605,12 +605,12 @@ class _Layer:
                 (" -> " + p.into) if p.into else "")
             unknown = [a for a in p.attrs if a not in PROP_ATTRS]
             if unknown:
-                self.check("SELECT", label, f"unknown property {unknown[0]}: one of "
+                self.check("no-match", label, f"unknown property {unknown[0]}: one of "
                            f"{', '.join(PROP_ATTRS)}")
                 continue
             inst = self.flat.insts.get(path)
             if inst is None:
-                self.check("SELECT", label, f"no instance {p.target} to set at {path}")
+                self.check("no-match", label, f"no instance {p.target} to set at {path}")
                 continue
             keys = []
             if p.side is None:
@@ -625,7 +625,7 @@ class _Layer:
             if p.into is not None:
                 sink = _join(scope, p.into)
                 if p.side is None:
-                    self.check("SELECT", label, "-> narrows hands: write NAME.out -> CHEST, not a "
+                    self.check("no-match", label, "-> narrows hands: write NAME.out -> CHEST, not a "
                                "set on the machine itself")
                     continue
                 sinks = set(self.flat.insts[sink].machines) if sink in self.flat.insts else {sink}
@@ -640,7 +640,7 @@ class _Layer:
                             and self.drop(k) in sinks]
                 chest = next((k for k in sinks if self.store(k)), None)
             if not keys:
-                self.check("SELECT", label, "matches no hand or machine: the route has nothing "
+                self.check("no-match", label, "matches no hand or machine: the route has nothing "
                            "there")
                 continue
             wire = None
@@ -650,7 +650,7 @@ class _Layer:
                     keys_ = list(self.flat.insts[p.wire].machines)
                     chest = next((k for k in keys_ if self.store(k)), None)
                 if chest is None:
-                    self.check("SELECT", label, "if= reads a wire: name the chest it reads "
+                    self.check("no-match", label, "if= reads a wire: name the chest it reads "
                                "(set NAME.out -> CHEST: if=...) or use logistic=")
                     continue
                 wire = IMPLICIT.format(self.flat.machines[chest].inst)
@@ -685,7 +685,7 @@ class _Layer:
                               + ("s carry" if hands != 1 else " carries")
                               + " only what its recipe takes (filters from its ingredients)")
             if plain:
-                self.check("GUARD", path, f"{', '.join(plain)}: a "
+                self.check("cannot-filter", path, f"{', '.join(plain)}: a "
                            f"{self.lay.entities[plain[0]].name} can't filter; a fast inserter "
                            "can (the router's default hand)")
 
@@ -702,7 +702,7 @@ class _Layer:
                     continue
                 belt = self.reader(ref, name)
                 if belt is None:
-                    self.check("WIRE", f"wire {name}", f"net {ref} has no belt to read")
+                    self.check("no-wire", f"wire {name}", f"net {ref} has no belt to read")
                 elif self.set(belt, "read", "hold", f"wire {name}"):
                     self.join(name, belt)
 
@@ -749,7 +749,7 @@ class _Layer:
                 reach = min(self.cat.circuit_reach(self.lay.entities[a].name),
                             self.cat.circuit_reach(self.lay.entities[b].name))
                 if d > reach + 1e-9:
-                    self.check("WIRE_REACH", f"wire {name}", f"{a} to {b} is {d:.1f} tiles; a "
+                    self.check("wire-too-far", f"wire {name}", f"{a} to {b} is {d:.1f} tiles; a "
                                f"wire reaches {reach:g}: move them closer, or put a pole between")
                 self.lay.wires.append(fkpmod.Wire(name, colour, a, b).canonical())
                 laid += 1
@@ -766,11 +766,11 @@ class _Layer:
             e = self.lay.entities[key]
             if e.attrs.get("read") in ("hold", "pulse") and key not in wired \
                     and self.kind(key) == "transport-belt":
-                self.check("WIRE", key, f"read={e.attrs['read']} on a belt that is on no wire: "
+                self.check("no-wire", key, f"read={e.attrs['read']} on a belt that is on no wire: "
                            "its reading reaches nothing until the belt is wired to something")
 
     def leaks(self):
-        """``WIRE_LEAK``: two wire nets of one colour on one entity are one network in the game,
+        """``wires-share``: two wire nets of one colour on one entity are one network in the game,
         so their signals add; a line when a consumer would see a driver its net doesn't have."""
         touch = {}
         for w in self.lay.wires:
@@ -784,7 +784,7 @@ class _Layer:
                 continue
             union = set().union(*(drivers.get(n, set()) for n in nets))
             if any(drivers.get(n, set()) != union for n in nets):
-                self.check("WIRE_LEAK", key, f"the {colour} wires of {', '.join(sorted(nets))} "
+                self.check("wires-share", key, f"the {colour} wires of {', '.join(sorted(nets))} "
                            "meet here, so they are one network and their signals add; give one "
                            "of them the other colour")
 

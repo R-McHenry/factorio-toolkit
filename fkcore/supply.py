@@ -23,9 +23,9 @@ The game (each one RCON call; big replies through script-output, ``link.read_out
 
 Pure, from a read:
 - ``research_line``: the footer of every command, loud when nothing researches;
-- ``ghost_state``: SHORT (the network holds none, or too few, of the item), LOCKED (its recipe is
+- ``ghost_state``: SHORT (the network holds none, or too few, of the item), needs-research (its recipe is
   not researched), or None (robots can build it);
-- ``bom``: LOW_STOCK and LOCKED check lines and one summary line;
+- ``bom``: short-stock and needs-research check lines and one summary line;
 - ``tech_lines`` and ``recipe_lines``.
 
 The Lua follows v4's ``fk/tactics.py`` (``technologies``, ``recipes``, ``research``; copied, not
@@ -403,7 +403,7 @@ def research_line(state):
 
 
 def ghost_state(sup, entity, ghosts=1):
-    """(state, why) for ``ghosts`` waiting ghosts of ``entity``: ('SHORT', ...), ('LOCKED', ...),
+    """(state, why) for ``ghosts`` waiting ghosts of ``entity``: ('SHORT', ...), ('needs-research', ...),
     or (None, ...) when the network holds enough for robots to build them."""
     row = sup.entities.get(entity)
     if row is None:
@@ -414,25 +414,25 @@ def ghost_state(sup, entity, ghosts=1):
     if row.get("known") and not row.get("enabled"):
         t = row.get("tech")
         how = f"research {_tech_brief(t)}" if t else "no technology unlocks it here"
-        return "LOCKED", f"{row.get('item')} is not researched: {how}; the network holds {stock}"
+        return "needs-research", f"{row.get('item')} is not researched: {how}; the network holds {stock}"
     have = f"the network holds {stock}" + (f" of {ghosts}" if ghosts > 1 else "")
     make = "make it (an assembler) or bring it" if row.get("known") else "it has no recipe: bring it"
     return "SHORT", f"{have} {row.get('item')}: {make}"
 
 
 def mark_ghosts(verdicts, sup):
-    """GHOST -> GHOST SHORT / GHOST LOCKED (with why) for a ghost robots cannot build now: a
+    """ghost -> ghost SHORT / ghost needs-research (with why) for a ghost robots cannot build now: a
     ghost that stays is a blocked build, not a slow one. Changes ``verdicts`` in place."""
     per = {}
     for v in verdicts:
-        if v.verdict == "GHOST":
+        if v.verdict == "ghost":
             per[v.name] = per.get(v.name, 0) + 1
     states = {name: ghost_state(sup, name, n) for name, n in per.items()}
     for v in verdicts:
-        if v.verdict == "GHOST":
+        if v.verdict == "ghost":
             state, why = states[v.name]
             if state:
-                v.verdict = f"GHOST {state}"
+                v.verdict = f"ghost {state}"
                 v.detail = why
     return verdicts
 
@@ -440,7 +440,7 @@ def mark_ghosts(verdicts, sup):
 def bom(need, sup, recipes_used=()):
     """(lines, checks): ``need`` {entity: count still to build} against the network's stock, and
     every machine recipe in ``recipes_used`` against what is researched. checks: [(code, where,
-    msg)]: LOW_STOCK per short item, LOCKED per item or recipe not researched."""
+    msg)]: short-stock per short item, needs-research per item or recipe not researched."""
     from .elaborate import Check
     lines, checks, short, locked_items, ok = [], [], [], [], 0
     for ent in sorted(need, key=lambda e: (-need[e], e)):
@@ -455,15 +455,15 @@ def bom(need, sup, recipes_used=()):
             continue
         if stock < n:
             short.append(f"{n - stock} {item}")
-            checks.append(Check("LOW_STOCK", item, f"need {n}, the network holds {stock}"))
-        if state == "LOCKED":
+            checks.append(Check("short-stock", item, f"need {n}, the network holds {stock}"))
+        if state == "needs-research":
             locked_items.append(item)
-            checks.append(Check("LOCKED", item, why))
+            checks.append(Check("needs-research", item, why))
     for rec in sorted(set(recipes_used)):
         row = sup.recipes.get(rec)
         if row and row.get("known") and not row.get("enabled"):
             t = row.get("tech")
-            checks.append(Check("LOCKED", f"recipe {rec}", "a machine is set to it, and it is not "
+            checks.append(Check("needs-research", f"recipe {rec}", "a machine is set to it, and it is not "
                                 f"researched: research {_tech_brief(t)}" if t else
                                 "a machine is set to it, and nothing unlocks it here"))
             locked_items.append(f"recipe {rec}")
@@ -471,7 +471,7 @@ def bom(need, sup, recipes_used=()):
     if short or locked_items:
         head = (f"STOCK: robots can build {ok} of {kinds} kinds now; SHORT {', '.join(short[:8])}"
                 + (" ..." if len(short) > 8 else "")
-                + (f"; LOCKED {', '.join(locked_items[:8])}" if locked_items else "")
+                + (f"; needs-research {', '.join(locked_items[:8])}" if locked_items else "")
                 + " (fk tech ITEM says what opens a locked one)")
     else:
         head = f"stock: the network holds enough for all {kinds} kinds still to build"
@@ -490,7 +490,7 @@ def tech_lines(data):
         if kind == "recipe":
             rec = ask.get("recipe")
             alias = f" (the item that places it: {rec})" if rec != ask.get("asked") else ""
-            state = "enabled: it can be made" if ask.get("enabled") else "LOCKED: research it first"
+            state = "enabled: it can be made" if ask.get("enabled") else "needs-research: research it first"
             techs = _list(ask.get("techs"))
             out.append(f"{ask.get('asked')}{alias}: recipe {state}"
                        + ("" if techs or ask.get("enabled") else "; no technology unlocks it"))
@@ -532,7 +532,7 @@ def recipe_lines(data, enabled=False):
         by = r.get("by")
         how = (f"by {by} ({'researched' if r.get('by_researched') else 'not researched'})" if by
                else "no technology")
-        out.append(f"  {r['name']:<36} {'enabled' if r.get('enabled') else 'LOCKED':<8} {how}")
+        out.append(f"  {r['name']:<36} {'enabled' if r.get('enabled') else 'needs-research':<8} {how}")
     if len(shown) > RECIPES_SHOWN:
         out.append(f"  ... {len(shown) - RECIPES_SHOWN} more: name the recipes you need "
                    "(fk recipes NAME...), or ask fk tech ITEM")

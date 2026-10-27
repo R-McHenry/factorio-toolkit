@@ -3,13 +3,13 @@
 ``python -m fkcore look GAME --source world --area X0,Y0,X1,Y1`` composes the game codebase's
 layout (``composed``), snapshots the area through the link (``link.snapshot``), judges it with
 ``sense.sense`` under the surface file's watch and notify settings, and prints the verdict
-summary, every verdict that is not OK, the "changes here" list, and the live render next to the
+summary, every verdict that is not ok, the "changes here" list, and the live render next to the
 design render (``compose.render_scene`` of ``scene.from_capture`` and of ``scene.design_scene``;
 after a finished apply both render the same text: look parity). A built underground belt with no
 partner (or with an end of the same kind, so no tunnel forms) also gets a warning line,
 ``UNPAIRED``, with its position: a report line, never a gate. ``--write-marks`` writes the new
 marks into the surface ``.fkp``, as the offline ``sense`` command does, so the next look says
-``MARKED`` for them.
+``marked`` for them.
 
 Notify (the surface file's ``notify``, or ``--notify``):
 
@@ -36,7 +36,7 @@ from . import surface as surfacemod
 __all__ = ["LookError", "Look", "composed", "net_items", "policy", "default_area", "report",
            "side_by_side", "unpaired", "run"]
 
-_LAYOUT_VERDICTS = ("OK", "GHOST", "DRIFT", "WRONG", "MISSING")
+_LAYOUT_VERDICTS = ("ok", "ghost", "settings-changed", "other-entity", "not-placed")
 _ACTIONS = ("keep", "revert", "strict", "mark")
 #: Two renders side by side up to this many columns, else one above the other.
 MAX_WIDTH = 160
@@ -61,17 +61,17 @@ class Look:
 
     @property
     def designed(self):
-        """Layout entities in the area (each has one layout verdict; GHOST SHORT is a GHOST)."""
+        """Layout entities in the area (each has one layout verdict; ghost SHORT is a ghost)."""
         return sum(1 for v in self.rep.verdicts if v.verdict.split()[0] in _LAYOUT_VERDICTS)
 
     @property
     def ok(self):
-        return sum(1 for v in self.rep.verdicts if v.verdict == "OK")
+        return sum(1 for v in self.rep.verdicts if v.verdict == "ok")
 
     def lines(self):
         p = self.policy
         a = ",".join(str(int(v)) for v in self.area)
-        out = [f"look {self.surface} --source world, area {a}, tick {self.rep.tick}: OK "
+        out = [f"look {self.surface} --source world, area {a}, tick {self.rep.tick}: ok "
                f"{self.ok}/{self.designed} designed entities (notify {p['notify']}; watch plots "
                f"{p['plots']}, sanctioned {p['sanctioned']})"]
         out += self.rep.lines()
@@ -81,11 +81,11 @@ class Look:
         relay = sum(1 for v in self.rep.verdicts if v.wrong_items and v.renet)
         if stale > relay:
             out.append(f"{stale - relay} belts or pipes here carry items their net doesn't "
-                       f"(WRONG_ITEM): fk fresh {a} takes them up, and the next fk build lays "
+                       f"(other-item): fk fresh {a} takes them up, and the next fk build lays "
                        "them fresh")
         if relay:
             out.append(f"{relay} belts or pipes here hold what the net they were laid under before "
-                       "carried (WRONG_ITEM): the next fk build takes them up and lays them fresh "
+                       "carried (other-item): the next fk build takes them up and lays them fresh "
                        "by itself")
         out += side_by_side(self.design, self.live, self.area)[0]
         if p["notify"] == "all":
@@ -116,7 +116,7 @@ def composed(game, cat):
 
 
 def net_items(game, sf, cat):
-    """({<factory>/<net>: items}, notes) from each placed factory's source, for WRONG_ITEM."""
+    """({<factory>/<net>: items}, notes) from each placed factory's source, for other-item."""
     from .elaborate import ElabError, elaborate_file
     from .lang import FkSyntaxError
     items, notes = {}, []
@@ -129,7 +129,7 @@ def net_items(game, sf, cat):
             lay = fkp.load(lay_path) if os.path.exists(lay_path) else None
             flat = elaborate_file(src, cat, name=p.module, layout=lay)
         except (FkSyntaxError, ElabError, OSError, fkp.FkpError) as exc:
-            notes.append(f"{p.factory}: no netlist ({exc}); WRONG_ITEM is not checked there")
+            notes.append(f"{p.factory}: no netlist ({exc}); other-item is not checked there")
             continue
         for n, net in flat.nets.items():
             items[f"{p.factory}/{n}"] = list(net.items)
@@ -220,7 +220,7 @@ def unpaired(live):
 
 def report(s, live, cat, area, pol, net_items=None, own=None) -> Look:
     """The look at ``area`` of the composed ``s`` against the ``live`` scene. Pure. ``own``: the
-    toolkit's own entities (``fkcore.own``): those the design dropped read NOBODY."""
+    toolkit's own entities (``fkcore.own``): those the design dropped read unowned."""
     area = tuple(int(v) for v in area)
     rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items, own=own)
     design = compose.render_scene(scene.design_scene(s, cat, list(area)), cat, area)
@@ -266,7 +266,7 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
     pol = policy(sf, notify, watch)
     live = scene.from_capture(link.snapshot(r, sf.name, area, tag, keep=False))
     lk = report(s, live, cat, area, pol, items, ownmod.load(game, sf.name))
-    ghosts = sorted({v.name for v in lk.rep.verdicts if v.verdict == "GHOST"})
+    ghosts = sorted({v.name for v in lk.rep.verdicts if v.verdict == "ghost"})
     if ghosts:
         # a ghost that stays is a blocked build: say why (SHORT: the network holds none of the
         # item; LOCKED: its recipe is not researched), from the free supply read

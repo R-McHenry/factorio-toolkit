@@ -6,13 +6,13 @@
 the same tiles, and a recipe switch can leave an item in an inserter's hand that its machine no
 longer takes; both jam the new machines. A scripted fix is fine when it goes through the game: it
 breaks the connectors with stale items and replaces them. ``run`` looks at the area as ``fk look``
-does and orders deconstruction of every carrier with a ``WRONG_ITEM`` (an item its net doesn't
+does and orders deconstruction of every carrier with a ``other-item`` (an item its net doesn't
 carry) and, 1.1.1, of every inserter holding an item the assembling machine it feeds doesn't use
 (``link.lua_stuck_hands``). 1.7 (Rory, 2026-10-21: ``fk fresh`` also deals with a one-off crafter
 whose output slot is full of the old product): an assembling machine whose output holds what its
 recipe no longer makes, and a chest its machines' inserters fill that holds what none of them
 makes now (``link.lua_stale_crafters``). Robots carry them and what they hold to storage, nothing
-is moved or created by script, and the next ``fk build`` lays them again (they are ``MISSING`` by
+is moved or created by script, and the next ``fk build`` lays them again (they are ``not-placed`` by
 then). They are found by name and position, in batches that fit one RCON command. Keeping the
 wrong items out in the first place is the game's job (an inserter's filter or condition), not
 this one's.
@@ -88,7 +88,7 @@ def _contested(r, surface, force, things):
     """A line per kind taken up that ghosts elsewhere wait for, more of them than the network
     holds: robots carry the taken-up ones to storage, and those ghosts may get them first (the
     first lead run, 2026-10-21: the shop's two fast inserters went to the mall's ghosts, and the
-    shop stood GHOST SHORT, unable to make inserters)."""
+    shop stood ghost SHORT, unable to make inserters)."""
     taken = {}
     for name, _x, _y in things:
         taken[name] = taken.get(name, 0) + 1
@@ -104,5 +104,5 @@ def _contested(r, surface, force, things):
         if ghosts > stock:
             out.append(f"  {name}: {k} taken up here, {int(stock)} in the network, {int(ghosts)} "
                        "ghosts of it wait: robots may build those with the ones taken up, and the "
-                       "next build's here stay GHOST SHORT until more are made")
+                       "next build's here stay ghost SHORT until more are made")
     return out

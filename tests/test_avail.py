@@ -2,7 +2,7 @@
 
 Rory, 2026-10-25: "The toolkit should let whatever inserter be easy to use, same with power poles.
 Right now the bad habit is agents using lots of fast inserters when they only have regular
-inserters." The 2026-10-25 run pasted 4 fast inserters LOCKED (research at 81%, none in the network)
+inserters." The 2026-10-25 run pasted 4 fast inserters needs-research (research at 81%, none in the network)
 while 50 plain inserters sat in the kit, and the burner row they fed stood dead; its script had to
 say ``route --hand inserter`` by hand, and a single ``Assembler<inserter=inserter>`` got fast hands
 from the router anyway.
@@ -142,7 +142,7 @@ class ChooseTest(unittest.TestCase):
                           row("small-electric-pole", 0, enabled=False)))
         got, note = avail.choose("pole", "any", need=20)
         self.assertEqual(got, "medium-electric-pole")           # LOCKED: the family's default
-        self.assertIn("LOCKED", note)
+        self.assertIn("needs-research", note)
 
     def test_a_name_is_taken_as_given_and_the_words_are_aliases(self):
         avail.install(sup(KIT["inserter"], KIT["fast"]))

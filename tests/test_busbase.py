@@ -36,8 +36,8 @@ class BusBaseTest(unittest.TestCase):
 
     def test_it_routes_clean(self):
         self.assertEqual(self.routed.failed, {})
-        bad = [ln for ln in self.routed.lines if ln.startswith(("SEAL", "FRAME", "PORT"))
-               or "LEAK" in ln and " 0 LEAK" not in ln]
+        bad = [ln for ln in self.routed.lines if ln.startswith(("crosses-frame", "FRAME", "port"))
+               or "SPILL" in ln and " 0 SPILL" not in ln]
         self.assertEqual(bad, [])
         self.assertEqual([c for c in self.flat.checks], [])
         self.assertEqual(sorted(self.flat.sealed), ["circ", "cu", "fe", "mall", "sci"])

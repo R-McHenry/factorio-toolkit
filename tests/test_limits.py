@@ -1,6 +1,6 @@
 """1.1 (Rory, 2026-10-20): limited production, rips, stale belts, and the 0534 player's patches.
 
-A chest's ``limit=`` is its inventory bar in the paste. CLOG, UNLIMITED and SHARED_SINK say where
+A chest's ``limit=`` is its inventory bar in the paste. CLOG, no-limit and SHARED_SINK say where
 production is not limited, and only there: a mixed belt that requester chests feed, or a mixed
 chest with a limit, is fine (the 0534 player's one-off crafters were). The rip estimate says what a
 build takes up and how long the robots need; ``fk fresh`` takes up belts with stale items. The
@@ -86,16 +86,16 @@ class ChestLimitTest(unittest.TestCase):
 
 class LimitedProductionChecksTest(unittest.TestCase):
     def test_unlimited_chests_are_one_line(self):
-        self.assertEqual(advice(BASE.format(inbox="", box="")), [("UNLIMITED", "box")])
+        self.assertEqual(advice(BASE.format(inbox="", box="")), [("no-limit", "box")])
         self.assertEqual(advice(BASE.format(inbox="", box=", limit=4")), [])
         two = BASE.format(inbox="", box="") + "more = Chest<provider> @(12, 12)\nnet m: gears -> more\n"
-        self.assertIn(("UNLIMITED", "box, more"), advice(two))
+        self.assertIn(("no-limit", "box, more"), advice(two))
 
     def test_a_chest_on_a_net_with_machines(self):
         src = BASE.format(inbox="", box=", limit=4").replace(
             "net plates_in: inbox -> gears", "spare = Chest<provider> @(12, 12)\n"
                                              "net plates_in: inbox -> gears, spare")
-        self.assertEqual(advice(src), [("SHARED_SINK", "net plates_in"), ("UNLIMITED", "spare")])
+        self.assertEqual(advice(src), [("SHARED_SINK", "net plates_in"), ("no-limit", "spare")])
         limited = src.replace("spare = Chest<provider>", "spare = Chest<provider, limit=1>")
         self.assertEqual(advice(limited), [])
 
@@ -107,8 +107,8 @@ class LimitedProductionChecksTest(unittest.TestCase):
             "net plates_in: inbox -> gears", "pipes = AsmRow<n=1, recipe=pipe> @(6, 20)\n"
                                              "net plates_in: inbox -> gears, pipes").replace(
             "net gear:      gears -> box", "net out: gears, pipes -> box")
-        self.assertEqual(advice(src), [("CLOG", "net out"), ("UNLIMITED", "box")])
-        (line,) = [c for c in flat_of(src).checks if c.code == "UNLIMITED"]
+        self.assertEqual(advice(src), [("CLOG", "net out"), ("no-limit", "box")])
+        (line,) = [c for c in flat_of(src).checks if c.code == "no-limit"]
         self.assertIn("a mixed belt of makers fills it without end, unless each maker is limited",
                       line.msg)
         self.assertEqual(advice(src.replace("net out:", "net out limited:")), [])
@@ -212,13 +212,13 @@ class RipEstimateTest(unittest.TestCase):
         self.assertNotIn("fk merge", warn)
 
     def test_what_the_apply_takes_up(self):
-        rep = Diff([v("NOBODY", "transport-belt", 1, 1), v("WRONG", "inserter", 2, 2),
-                    v("OK", "assembling-machine-1"), v("MISSING", "transport-belt")])
+        rep = Diff([v("unowned", "transport-belt", 1, 1), v("other-entity", "inserter", 2, 2),
+                    v("ok", "assembling-machine-1"), v("not-placed", "transport-belt")])
         self.assertEqual(apply.rip_points(rep), [(1, 1), (2, 2)])
 
     def test_a_moved_factory_points_to_merge(self):
-        rep = Diff([v("NOBODY", "transport-belt")] * 40 + [v("MISSING", "transport-belt")] * 35
-                   + [v("GHOST", "transport-belt")] * 10)
+        rep = Diff([v("unowned", "transport-belt")] * 40 + [v("not-placed", "transport-belt")] * 35
+                   + [v("ghost", "transport-belt")] * 10)
         self.assertEqual(apply.moved(rep), 40)
         _line, warn = apply.rip_report({"n": 40, "items": 0, "robots": 50, "dist": 100,
                                         "speed": 4.86, "cargo": 2}, apply.moved(rep))
@@ -244,9 +244,9 @@ class FakeLink:
 class FreshTest(unittest.TestCase):
     def fresh(self, r):
         class Look:
-            rep = Diff([v("OK", "transport-belt", 1.5, 1.5, ["pipe"]),
-                        v("OK", "transport-belt", 2.5, 1.5),
-                        v("OK", "underground-belt", 3.5, 1.5, ["steel-plate", "pipe"])])
+            rep = Diff([v("ok", "transport-belt", 1.5, 1.5, ["pipe"]),
+                        v("ok", "transport-belt", 2.5, 1.5),
+                        v("ok", "underground-belt", 3.5, 1.5, ["steel-plate", "pipe"])])
         saved = fresh.look.run
         fresh.look.run = lambda *a, **k: Look
         game = os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game")

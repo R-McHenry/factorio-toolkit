@@ -11,7 +11,7 @@
 #   docs\LANGUAGE.md "Modules with ports"   the module, its ports, its contract
 #   docs\EXAMPLES.md busbase.fk             a whole base built this way: smelting, a bus,
 #                                          circuits, a mall and science
-# Two items into one row share a belt, a lane each: `lanes A | B` (the build's LANES check names
+# Two items into one row share a belt, a lane each: `lanes A | B` (the build's could-pair check names
 # the pair when you leave them on two belts).
 # A factory used in several places (or a big one) can live in a file of its own:
 #   import Smelting from "smelting.fk"

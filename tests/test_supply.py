@@ -43,7 +43,7 @@ class SupplyTest(unittest.TestCase):
     def test_ghost_states(self):
         self.assertEqual(supply.ghost_state(self.sup, "transport-belt", 204)[0], "SHORT")
         state, why = supply.ghost_state(self.sup, "electric-mining-drill", 18)
-        self.assertEqual(state, "LOCKED")
+        self.assertEqual(state, "needs-research")
         self.assertIn("research electric-mining-drill (25 automation-science-pack; first: "
                       "automation-science-pack)", why)
         # in the network: robots can build it, locked recipe or not
@@ -53,23 +53,23 @@ class SupplyTest(unittest.TestCase):
         self.assertIn("the network holds 4 of 6 iron-chest", why)
 
     def test_mark_ghosts(self):
-        vs = [Verdict("GHOST", "transport-belt", 1.5, 1.5), Verdict("GHOST", "iron-chest", 3.5, 1.5),
-              Verdict("GHOST", "medium-electric-pole", 5.5, 1.5), Verdict("OK", "transport-belt", 0.5, 0.5)]
+        vs = [Verdict("ghost", "transport-belt", 1.5, 1.5), Verdict("ghost", "iron-chest", 3.5, 1.5),
+              Verdict("ghost", "medium-electric-pole", 5.5, 1.5), Verdict("ok", "transport-belt", 0.5, 0.5)]
         supply.mark_ghosts(vs, self.sup)
-        self.assertEqual([v.verdict for v in vs], ["GHOST SHORT", "GHOST", "GHOST", "OK"])
+        self.assertEqual([v.verdict for v in vs], ["ghost SHORT", "ghost", "ghost", "ok"])
 
     def test_bom_lines_and_checks(self):
         need = {"transport-belt": 204, "electric-mining-drill": 18, "medium-electric-pole": 12}
         lines, checks = supply.bom(need, self.sup, ["automation-science-pack"])
         self.assertTrue(lines[0].startswith("STOCK: robots can build 1 of 3 kinds now; SHORT 204 "
-                                            "transport-belt, 18 electric-mining-drill; LOCKED "
+                                            "transport-belt, 18 electric-mining-drill; needs-research "
                                             "electric-mining-drill, recipe automation-science-pack"),
                         lines[0])
         codes = sorted((c.code, c.where) for c in checks)
-        self.assertEqual(codes, [("LOCKED", "electric-mining-drill"),
-                                 ("LOCKED", "recipe automation-science-pack"),
-                                 ("LOW_STOCK", "electric-mining-drill"),
-                                 ("LOW_STOCK", "transport-belt")])
+        self.assertEqual(codes, [("needs-research", "electric-mining-drill"),
+                                 ("needs-research", "recipe automation-science-pack"),
+                                 ("short-stock", "electric-mining-drill"),
+                                 ("short-stock", "transport-belt")])
         lock = next(c for c in checks if c.where == "recipe automation-science-pack")
         self.assertIn("craft lab x1", lock.msg)
 
@@ -97,7 +97,7 @@ class SupplyTest(unittest.TestCase):
                                          pre=[("automation-science-pack", False)])]},
                          {"asked": "nope", "kind": "unknown"}]}
         out = supply.tech_lines(data)
-        self.assertEqual(out[0], "electric-mining-drill: recipe LOCKED: research it first")
+        self.assertEqual(out[0], "electric-mining-drill: recipe needs-research: research it first")
         self.assertIn("tech electric-mining-drill: NOT researched; cost 25 automation-science-pack; "
                       "research first: automation-science-pack", out[1])
         self.assertIn("nope: no technology, recipe or item of that name", out)
@@ -141,15 +141,15 @@ class GroupedAlertsTest(unittest.TestCase):
         new += [entry(300 + i, "electric-mining-drill") for i in range(18)]
         out = alerts.lines(new, [], [], 200, sup)
         self.assertEqual(len(out), 1)
-        self.assertTrue(out[0].startswith("ALERT no_material_for_construction x222: 204 "
+        self.assertTrue(out[0].startswith("alert no_material_for_construction x222: 204 "
                                           "transport-belt (the network holds 0), 18 "
-                                          "electric-mining-drill (LOCKED:"), out[0])
+                                          "electric-mining-drill (needs-research:"), out[0])
 
     def test_a_few_alerts_stay_one_line_each(self):
         e = {"alert": {"type": "entity_destroyed", "surface": "nauvis", "x": 1, "y": 2,
                        "target": "wooden-chest", "tick": 5}, "first": 5, "pushed": 5}
         self.assertEqual(alerts.lines([e], [], [], 10),
-                         ["ALERT entity_destroyed: wooden-chest at nauvis 1,2 (raised at tick 5)"])
+                         ["alert entity_destroyed: wooden-chest at nauvis 1,2 (raised at tick 5)"])
 
 
 if __name__ == "__main__":

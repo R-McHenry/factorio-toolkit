@@ -38,7 +38,7 @@ is missing and never re-lays the grid that stands (both overnight players lost p
 grid). New poles take numbers after the pinned ones; the prune step drops a pinned pole only when
 it powers nothing at all and joins nothing (a new pole never replaces a standing one). What
 cannot be done is a report line, never raised: ``NO_POWER`` for an entity no free spot can power
-(with what takes the spots), ``POWER_SPLIT`` for a pole component left apart.
+(with what takes the spots), ``power-split`` for a pole component left apart.
 
 Taken from C:\\fk-lead\\repo (d6018d3), copied, never imported: from fk\\power.py ``cover`` (the
 greedy cover, its tie-break, existing poles as wire nodes, the bridge loop), ``unpowered`` and
@@ -546,7 +546,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         splits.append(keys)
         shown = ", ".join(keys[:_SHOW]) + (f" ... {len(keys) - _SHOW} more" if len(keys) > _SHOW
                                            else "")
-        checks.append(Check("POWER_SPLIT", f"cover {owner}",
+        checks.append(Check("power-split", f"cover {owner}",
                             f"{shown} ({len(keys)} pole{'s' if len(keys) != 1 else ''}) cannot be "
                             f"wired to the main grid: no chain of free spots at most "
                             f"{fkp.fmt(wire)} tiles apart joins them"))

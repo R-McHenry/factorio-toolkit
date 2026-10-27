@@ -1,6 +1,6 @@
 """fkcore.own (1.2): the toolkit's own entities, what the applies pasted. The 0534 run kept its own
-dropped rows under ``watch plots: keep``, left a moved plot's 166 entities standing as MARKED
-outside every plot, and an emptied factory's 28 ghosts; the record makes them NOBODY."""
+dropped rows under ``watch plots: keep``, left a moved plot's 166 entities standing as marked
+outside every plot, and an emptied factory's 28 ghosts; the record makes them unowned."""
 import copy
 import json
 import os
@@ -75,7 +75,7 @@ class RequesterSettingsTest(unittest.TestCase):
     fresh by the next apply (raising max= in the source left the game's request as it was)."""
 
     SURF = "fkp 1 surface nauvis\nplot asks at 0,0 rot 0 size 3x1\n"
-    V = sense.Verdict("OK", "requester-chest", 0.5, 0.5, key="nauvis:asks/c/req0")
+    V = sense.Verdict("ok", "requester-chest", 0.5, 0.5, key="nauvis:asks/c/req0")
 
     def design(self, most=10, trash=False):
         req = {"sections": [{"index": 1, "filters": [
@@ -115,11 +115,11 @@ class SenseTest(unittest.TestCase):
 
     def test_without_the_record_they_are_kept(self):
         rep = self.run_sense(self.live, None)
-        self.assertEqual(rep.counts().get("MARKED"), 2)
+        self.assertEqual(rep.counts().get("marked"), 2)
 
     def test_own_dropped_rows_are_nobody_whatever_the_policy(self):
         rep = self.run_sense(self.live, record_of(self.s, OLD_BELT, OLD_GHOST))
-        nobody = {v.key: v for v in rep.verdicts if v.verdict == "NOBODY"}
+        nobody = {v.key: v for v in rep.verdicts if v.verdict == "unowned"}
         self.assertEqual(set(nobody), {OLD_BELT.key, OLD_GHOST.key})
         self.assertEqual({v.action for v in nobody.values()}, {"own"})
         self.assertEqual(rep.marks, [])                                  # nothing is kept
@@ -133,15 +133,15 @@ class SenseTest(unittest.TestCase):
         live = with_old(live_as_designed(self.s), belt_user="Rory_618")
         rep = self.run_sense(live, record_of(self.s, OLD_BELT, OLD_GHOST))
         belt = next(v for v in rep.verdicts if v.x == 16.5 and v.y == 1.5)
-        self.assertEqual((belt.verdict, belt.actor), ("MARKED", "Rory_618"))
+        self.assertEqual((belt.verdict, belt.actor), ("marked", "Rory_618"))
 
     def test_a_claim_still_explains_it(self):
         live = copy.deepcopy(live_as_designed(self.s))
         live["things"].append(scene.thing(name="iron-chest", x=31.5, y=1.5))
         rec = record_of(self.s, own.Row("nauvis:kit/c0", "iron-chest", 31.5, 1.5))
         rep = self.run_sense(live, rec)
-        self.assertIn("CLAIMED", rep.counts())
-        self.assertNotIn("NOBODY", rep.counts())
+        self.assertIn("claimed", rep.counts())
+        self.assertNotIn("unowned", rep.counts())
 
 
 class FakeRcon:
@@ -195,7 +195,7 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual(sorted(r.ordered), [("assembling-machine-1", 25.5, 3.5),
                                              ("transport-belt", 16.5, 1.5)])
         self.assertEqual((rep.decon, rep.dropped), (2, 2))
-        self.assertIn("2 NOBODY entities ordered for deconstruction (2 of them the toolkit's own, "
+        self.assertIn("2 unowned entities ordered for deconstruction (2 of them the toolkit's own, "
                       "dropped from the design)", "\n".join(rep.lines()))
         self.assertIn(own.at("transport-belt", 16.5, 1.5), rep.own)    # until robots took it
         # robots took them up: the next apply finds nothing, and the record forgets them
@@ -265,7 +265,7 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual(rep.hand, [
             "Someone placed (the game names no one: the map editor, or a script) "
             "long-handed-inserter at 10.5,0.5 on mini/~iron/b0's tile; this build replaces it"])
-        self.assertIn("HAND: 1 placed by hand, replaced or removed by this build",
+        self.assertIn("by-hand: 1 placed by hand, replaced or removed by this build",
                       "\n".join(rep.lines()))
         named = copy.deepcopy(live)
         find(named, "long-handed-inserter", 10.5, 0.5)["last_user"] = "Rory_618"
@@ -305,9 +305,9 @@ class RelayTest(unittest.TestCase):
     def test_the_diff_says_a_carrier_was_laid_under_another_net(self):
         rep = sense.sense(self.s, self.live, CAT, AREA, WATCH, net_items=NETS, own=self.rec)
         v, = [v for v in rep.verdicts if v.wrong_items]
-        self.assertEqual((v.verdict, v.renet, v.wrong_items), ("OK", "mini/copper",
+        self.assertEqual((v.verdict, v.renet, v.wrong_items), ("ok", "mini/copper",
                                                                ["copper-plate"]))
-        self.assertIn("WRONG_ITEM copper-plate (laid under net mini/copper before: the next apply "
+        self.assertIn("other-item copper-plate (laid under net mini/copper before: the next apply "
                       "takes it up and lays it fresh)", str(v))
         same = record_of(self.s)                                      # pasted under mini/iron
         rep = sense.sense(self.s, self.live, CAT, AREA, WATCH, net_items=NETS, own=same)
@@ -351,9 +351,9 @@ class RelayTest(unittest.TestCase):
         after = own.update(self.rec, self.s, CAT)
         rep = sense.sense(self.s, live, CAT, AREA, WATCH, net_items=NETS, own=after)
         at = {(v.verdict, v.key) for v in rep.verdicts if (v.x, v.y) == (14.5, 0.5)}
-        self.assertEqual(at, {("GHOST", "nauvis:mini/~iron/b2"),
-                              ("NOBODY", "nauvis:mini/~iron/b2")})
-        old = next(v for v in rep.verdicts if v.verdict == "NOBODY")
+        self.assertEqual(at, {("ghost", "nauvis:mini/~iron/b2"),
+                              ("unowned", "nauvis:mini/~iron/b2")})
+        old = next(v for v in rep.verdicts if v.verdict == "unowned")
         self.assertEqual(old.detail, "the toolkit's own, ordered out: robots take it up")
 
     def test_the_snapshot_reads_the_fluid_in_a_pipe(self):

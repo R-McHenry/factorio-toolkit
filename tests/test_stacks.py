@@ -9,11 +9,11 @@ routing as 3 belts in a row, no bends or undergrounds".
   `Stack<cell=CELL, n=N, head=HEAD>` places N cells edge to edge, a net per pair between
   neighbours, which lays nothing (2.0.48: ports are edges, and the two meet on one);
 - a ref to the stack names the head's port, or with no head the first cell's NEAR / the last
-  cell's FAR port; the last cell's FAR ports are dead ends, no PORT line;
+  cell's FAR port; the last cell's FAR ports are dead ends, no port line;
 - inside a cell a net's belt runs straight across, port edge to port edge, one inserter per
   machine; a paired port (`A | B`, a `lanes` pair) comes in paired and runs straight on;
 - `Pole` pins a pole where a packed cell needs it; a straight run tunnels under it;
-- CARRYOVER: a feed riding a product's belt into the product's sink, unless its hands filter it.
+- feed-rides-on: a feed riding a product's belt into the product's sink, unless its hands filter it.
 """
 import os
 import unittest
@@ -80,7 +80,7 @@ class ElaborationTest(unittest.TestCase):
     def test_dead_ends_are_no_port_lines(self):
         flat = flat_of(LINE)
         self.assertIn("line/3/f_out", flat.stack_ends)
-        self.assertFalse([c for c in flat.checks if c.code == "PORT"])
+        self.assertFalse([c for c in flat.checks if c.code == "port"])
 
     def test_a_pair_must_meet_across_the_cell(self):
         bad = LINE.replace("port f_out : out iron-plate @n1", "port f_out : out iron-plate @n2")
@@ -111,7 +111,7 @@ class RoutingTest(unittest.TestCase):
         flat = elaborate(f, m, CAT, "blue6")
         r = routed(flat)
         self.assertEqual(r.failed, {})
-        self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME", "PORT"))], [])
+        self.assertEqual([ln for ln in r.lines if ln.startswith(("crosses-frame", "FRAME", "port"))], [])
         rep = connect.connect(r.layout, CAT, connect.endpoints(flat), flat._port_edges)
         self.assertEqual(rep.leaks, [])
         for key, e in r.layout.entities.items():

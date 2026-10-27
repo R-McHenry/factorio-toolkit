@@ -28,7 +28,7 @@ class Spm10Test(unittest.TestCase):
         kinds = {i.kind for i in flat.insts.values()}
         self.assertFalse(kinds & {"BeltSplit", "LaneMerge", "ChestTap", "ChestEnd"})
         self.assertEqual([c.code for c in flat.checks if c.code not in ADVICE],
-                         ["UNBOUNDED"])  # the packed circuit chest
+                         ["no-rate"])  # the packed circuit chest
 
     def test_nets_never_merge(self):
         # v4's model joined the cable, circuit, gear and pipe nets through the spine adapters into

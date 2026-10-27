@@ -43,9 +43,9 @@ def game(i0_condition=None, request=None, wire=False):
 DESIGNED = {"first_signal": {"name": "iron-plate"}, "constant": 50, "comparator": "<"}
 REQUEST = {"index": 1, "filters": [{"index": 1, "name": "iron-plate", "quality": "normal",
                                     "comparator": "=", "count": 100}]}
-VERDICTS = [Verdict("OK", "inserter", 5.5, 5.5, "nauvis:mall/m/i0"),
-            Verdict("OK", "inserter", 5.5, 7.5, "nauvis:mall/m/i1"),
-            Verdict("OK", "requester-chest", 8.5, 5.5, "nauvis:mall/m/c0")]
+VERDICTS = [Verdict("ok", "inserter", 5.5, 5.5, "nauvis:mall/m/i0"),
+            Verdict("ok", "inserter", 5.5, 7.5, "nauvis:mall/m/i1"),
+            Verdict("ok", "requester-chest", 8.5, 5.5, "nauvis:mall/m/c0")]
 
 
 def drifts(**kw):
@@ -89,7 +89,7 @@ class SettingsTest(unittest.TestCase):
                           "leaves it)"])
 
     def test_only_what_stands_where_the_design_has_it(self):
-        ghost = [Verdict("GHOST", "inserter", 5.5, 5.5, "nauvis:mall/m/i0")] + VERDICTS[1:]
+        ghost = [Verdict("ghost", "inserter", 5.5, 5.5, "nauvis:mall/m/i0")] + VERDICTS[1:]
         got = settings.drifts(settings.design(rows(), None), settings.live(game(request=REQUEST)),
                               ghost, {})
         self.assertEqual(got, [])

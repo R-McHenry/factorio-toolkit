@@ -4,25 +4,25 @@
    "checks": 2,
    "machines": 5,
    "nets": 4,
-   "sha256": "b1cafcc93ba3e5d4ec58658f5e4e959a87bb67ee6ec64a05b7b0e41333084f8f"
+   "sha256": "3dfe1858267fa5d7dd4e78ff8a526fe95e594cda29e472e1b9f2a076e3b2ff23"
   },
   "agent/docs/examples/bus4.fk": {
    "checks": 1,
    "machines": 16,
    "nets": 7,
-   "sha256": "94d648ff209af6874fb595cc96f956918155ab30d2ed10d7da12e229143b8793"
+   "sha256": "89db72d9a296fe392c669d464c3cef690019cddc40b2306c4f083c401ed66575"
   },
   "agent/docs/examples/compact-mall.fk": {
    "checks": 4,
    "machines": 28,
    "nets": 20,
-   "sha256": "7fd624ce8296f5d669af4c2f25d0f1f9feead63de85531d35d4457e5ff7d3732"
+   "sha256": "6c0f1f36d363e36db5895ebb9e9b477d2fda6bb7165a172ae586db44cd726f4f"
   },
   "agent/docs/examples/early-mall.fk": {
    "checks": 1,
    "machines": 44,
    "nets": 30,
-   "sha256": "8a1f4d038ff2b64304e60809cbb9861864756b13808bdc9a14023029634cade8"
+   "sha256": "0dc62a346fb56b5e73979f1b969ee80d7058ac5a0152e9fe522e0cf214fe6159"
   },
   "agent/docs/examples/gears.fk": {
    "checks": 0,
@@ -40,7 +40,7 @@
    "checks": 1,
    "machines": 9,
    "nets": 4,
-   "sha256": "88ee2b3cf90370ddaacdfe64ba4618e4e8825dcf349d2faa3c0f6aced8927d05"
+   "sha256": "4cfcfaed7c816be72067b413478298e228d370c5c010af01e700e26881eb36be"
   },
   "agent/docs/examples/robot-feed.fk": {
    "checks": 0,
@@ -58,7 +58,7 @@
    "checks": 1,
    "machines": 5,
    "nets": 4,
-   "sha256": "36410c62d8561429f4be9917862025409279a53ac534ca7602c48d790628cced"
+   "sha256": "a1451876dc98a424aa1be86195e94a86ce8f42a87cbb97c7a9be2f331b17bebb"
   },
   "agent/docs/examples/smelter-array.fk": {
    "checks": 0,
@@ -70,7 +70,7 @@
    "checks": 1,
    "machines": 15,
    "nets": 3,
-   "sha256": "d667cbd154143bceb3651ce2382752debc5144a0153ec5b9285174a7c78d091a"
+   "sha256": "d1276e45bad1d27e39a9b3dfe0ff7e9a7dbe111ca025a2f952dc8947d4e833d5"
   },
   "agent/docs/examples/steam.fk": {
    "checks": 0,
@@ -82,109 +82,109 @@
    "checks": 2,
    "machines": 7,
    "nets": 2,
-   "sha256": "9f9b5340b1f2f5a3a229aa02520b0dd7f76a95ff1aac1d2e62f394635a0e913f"
+   "sha256": "b7ee7176b505727074ebcd0295e1eefdb27a0dc70638aeb472aa97911ab813e6"
   },
   "games/lab-fluids/sulfur.fk": {
    "checks": 1,
    "machines": 3,
    "nets": 2,
-   "sha256": "2e03eafed229d50d484b18445a3ea20cd9674019addec5ed07971e803b3f7cb1"
+   "sha256": "a73d843955e86b4e7f19bd0c2f72b08e5cc82be6cf50fa2675c1836b7b8652d0"
   },
   "games/lab-kxm/kxm.fk": {
    "checks": 3,
    "machines": 5,
    "nets": 1,
-   "sha256": "bc5433e75664789c22e5a61e967407b953611f1789dd5459e49b03943748716f"
+   "sha256": "602c9c9a74d556a27be720c9d19dc0d554fff99874b3a01700689c2da0a319eb"
   },
   "games/lab-merge/gears.fk": {
    "checks": 1,
    "machines": 4,
    "nets": 2,
-   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+   "sha256": "944031efc06c822828c9321aea78208c9032300ed77d3a6b9d599bcd75874461"
   },
   "games/lab-merge/iron.fk": {
    "checks": 2,
    "machines": 8,
    "nets": 3,
-   "sha256": "a12499db56541a6be7733948a9c82b85ee6856179dbd476601bb26c715fe9e07"
+   "sha256": "ad4b765f5f39c68e50fce63bcee711516205b436fdd2d979ab9f1242eeebada0"
   },
   "games/lab-play/gears.fk": {
    "checks": 1,
    "machines": 4,
    "nets": 2,
-   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+   "sha256": "944031efc06c822828c9321aea78208c9032300ed77d3a6b9d599bcd75874461"
   },
   "games/lab-play/red.fk": {
    "checks": 1,
    "machines": 9,
    "nets": 4,
-   "sha256": "88ee2b3cf90370ddaacdfe64ba4618e4e8825dcf349d2faa3c0f6aced8927d05"
+   "sha256": "4cfcfaed7c816be72067b413478298e228d370c5c010af01e700e26881eb36be"
   },
   "games/lab-redgreen/main.fk": {
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "08c94724261926ab7cb854a3b81a3aa959c191d1ac5ec9f1139496b6db245c57"
+   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
   },
   "games/lab-sense/gears.fk": {
    "checks": 1,
    "machines": 4,
    "nets": 2,
-   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+   "sha256": "944031efc06c822828c9321aea78208c9032300ed77d3a6b9d599bcd75874461"
   },
   "games/lab-sense/iron.fk": {
    "checks": 2,
    "machines": 8,
    "nets": 3,
-   "sha256": "a12499db56541a6be7733948a9c82b85ee6856179dbd476601bb26c715fe9e07"
+   "sha256": "ad4b765f5f39c68e50fce63bcee711516205b436fdd2d979ab9f1242eeebada0"
   },
   "games/lab-terrain/gears.fk": {
    "checks": 1,
    "machines": 3,
    "nets": 2,
-   "sha256": "8923033bedd93eb256d2c2555e6821401a979a9bcc8e2eab30961bdf164b71dd"
+   "sha256": "8ee0b270e383c0c67669d5897148e076b7624bd4a839fb28f7d0b18f526d0326"
   },
   "games/lab-terrain/iron.fk": {
    "checks": 2,
    "machines": 18,
    "nets": 3,
-   "sha256": "1c4450c1af1d74b60fe9ef42b9109714815e2510e9f662987e434493ab5fa660"
+   "sha256": "dcdf71b01344072cef21a17e4a5b70b3549e61e3a0db50effedc35a400850447"
   },
   "games/merge/gears.fk": {
    "checks": 1,
    "machines": 4,
    "nets": 2,
-   "sha256": "83fa77faaa26f27ff5b0cae0f97dc7bc16af4e96ce82794c692825d7cdb15b9a"
+   "sha256": "944031efc06c822828c9321aea78208c9032300ed77d3a6b9d599bcd75874461"
   },
   "games/merge/iron.fk": {
    "checks": 2,
    "machines": 8,
    "nets": 3,
-   "sha256": "a12499db56541a6be7733948a9c82b85ee6856179dbd476601bb26c715fe9e07"
+   "sha256": "ad4b765f5f39c68e50fce63bcee711516205b436fdd2d979ab9f1242eeebada0"
   },
   "games/nauvis-terrain/gears.fk": {
    "checks": 1,
    "machines": 3,
    "nets": 2,
-   "sha256": "8923033bedd93eb256d2c2555e6821401a979a9bcc8e2eab30961bdf164b71dd"
+   "sha256": "8ee0b270e383c0c67669d5897148e076b7624bd4a839fb28f7d0b18f526d0326"
   },
   "games/nauvis-terrain/iron.fk": {
    "checks": 2,
    "machines": 18,
    "nets": 3,
-   "sha256": "1c4450c1af1d74b60fe9ef42b9109714815e2510e9f662987e434493ab5fa660"
+   "sha256": "dcdf71b01344072cef21a17e4a5b70b3549e61e3a0db50effedc35a400850447"
   },
   "games/nauvis/boot.fk": {
    "checks": 2,
    "machines": 8,
    "nets": 3,
-   "sha256": "f06a79eb11848660c1670486a1de3eb17b28d2027ff09c49fd9f37b385dd7f07"
+   "sha256": "fa482f9c13db712e1b65b94f1bc0767ecd62b4df350157256409d4cf965b3f46"
   },
   "games/nauvis/main.fk": {
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "08c94724261926ab7cb854a3b81a3aa959c191d1ac5ec9f1139496b6db245c57"
+   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
   },
   "games/nauvis/plant.fk": {
    "checks": 0,
@@ -202,13 +202,13 @@
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "08c94724261926ab7cb854a3b81a3aa959c191d1ac5ec9f1139496b6db245c57"
+   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
   },
   "games/spm10/main.fk": {
    "checks": 12,
    "machines": 142,
    "nets": 38,
-   "sha256": "e5617513717375f0b45c3fc44531b0986ced9bc82b31937ebeb0593a8c42052b"
+   "sha256": "55b0dce0251dd1fa2b533e8ff916733f69de151e618239c0a20e00a74dc96961"
   },
   "games/spm10/mall.fk": {
    "checks": 0,
@@ -220,19 +220,19 @@
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "08c94724261926ab7cb854a3b81a3aa959c191d1ac5ec9f1139496b6db245c57"
+   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
   },
   "games/v2-bench/join-big.fk": {
    "checks": 4,
    "machines": 97,
    "nets": 10,
-   "sha256": "099f5d72a9e11272cdc215fd31b923d8a99a1440e8cde47ebd61af89aad18a0c"
+   "sha256": "47e4490792856685fd05aedccc1e1de9b429c7b2e0fe485f08a2e5ed96bb083a"
   },
   "games/v2-bench/join-small.fk": {
    "checks": 4,
    "machines": 30,
    "nets": 10,
-   "sha256": "75107089975be63de361a77f07b4040226befb93c87ab66c21c740656449134b"
+   "sha256": "0bce592e14883f48780f7d697eed97d0e76c61cfcd37ca574d19db421acf2332"
   },
   "kickoff/template/game/plant.fk": {
    "checks": 0,
@@ -244,13 +244,13 @@
    "checks": 5,
    "machines": 13,
    "nets": 5,
-   "sha256": "a194eee35592b13c523bf5b6bc7f13065bead2d40ec91d362f5d1650674959b2"
+   "sha256": "da74b21250bd2ee759274e440093f533c08ea04f97aebe82970bb26a906c38fc"
   },
   "tests/data/red_green.fk": {
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "c9ddb3c38e6f0f7c4a164180833ffcab3d27e2bcd38a91a4a3cc7f5e30e3a44e"
+   "sha256": "4b281ddbea1708f70e652ac3b7b497ba91af7f361518be89b4472fdb13b5bec3"
   }
  },
  "note": "what 2.0.27's elaboration produces for every existing .fk: the ports release (2.0.28) must reproduce it exactly",

@@ -49,7 +49,7 @@ the port carrier's direction in that frame, ``lane`` the lane(s) the port occupi
 for both lanes) and ``items`` what it carries (``|`` splits a pair's left and right lane, ``,``
 several items on one lane). The build writes it when it chooses the tile, and a rebuild reads it
 back, so a parent change never moves a port: the tile is kept like a committed route, and the
-module's own routes with it. A pinned port (``@w4``) whose record disagrees is a ``PORT`` line,
+module's own routes with it. A pinned port (``@w4``) whose record disagrees is a ``port`` line,
 and the pin wins.
 
 :func:`invariants` lists what makes a layout malformed: two entities on a tile, an entity outside

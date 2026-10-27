@@ -27,7 +27,7 @@ A factory is a short file, `game\NAME.fk`: rows of machines and the nets that sa
 feed which. `fk build` lays it out, routes the belts, adds the poles, pastes it in one go, and the
 robots build it from the network's stock; `fk look` shows how it turned out. A build replaces
 whatever is in the way and takes up what it built before that the design no longer has; what it
-replaces that someone placed by hand, it lists (`HAND`), and the lead hears it too. Builds go one
+replaces that someone placed by hand, it lists (`by-hand`), and the lead hears it too. Builds go one
 at a time in this folder: a second `fk build` waits for the first.
 
 The game's rules are in `docs\FAIR-PLAY.md`. Grow helpers in `helpers\` as reusable features
@@ -39,8 +39,8 @@ The toolkit can answer most of the questions you will hit. Reach for a command b
 out by hand:
 
 - the design says one thing and the world another → `fk look X0,Y0,X1,Y1`: look small and often
-- a ghost that stays → `fk look` says `GHOST SHORT` (the network has none of that item: make it) or
-  `GHOST LOCKED` (its recipe needs research: `fk tech ITEM` says which)
+- a ghost that stays → `fk look` says `ghost SHORT` (the network has none of that item: make it) or
+  `ghost needs-research` (its recipe needs research: `fk tech ITEM` says which)
 - can the network afford the next piece → `fk build` says it before it pastes
   (`out\report_bom.txt`); `fk build --to diff` is a dry run that writes nothing
 - how many machines, furnaces and drills a size takes → `fk plan ITEM 1/s`, or
@@ -50,7 +50,7 @@ out by hand:
 - old items left on a rebuilt belt, in an inserter's hand, or in a crafter or its chest after a
   recipe switch → `fk fresh X0,Y0,X1,Y1` takes those up, and the next `fk build` lays them fresh
 - a factory makes less than its numbers on paper → after `fk build`, `out\report_rates.txt` has
-  the routed rates: a `CAPACITY` line names the belt lane or inserter that is too thin
+  the routed rates: a `too-thin` line names the belt lane or inserter that is too thin
 - what is the factory really making → `fk stats`
 - anything else → `fk lua` reads the game for you
 

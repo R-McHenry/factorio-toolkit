@@ -176,7 +176,7 @@ class SealedTest(unittest.TestCase):
         self.assertEqual(flat.nets["ore"].consumers, [("rib/iron", "iron-plate")])
         self.assertEqual(flat.nets["again"].consumers, [])   # rib/iron is taken (free only)
         self.assertIn("that is still free", " ".join(c.msg for c in flat.checks))
-        self.assertIn("DOUBLE", codes(flat))                 # the bare ref fed it twice
+        self.assertIn("two-nets", codes(flat))                 # the bare ref fed it twice
 
     def test_a_star_with_no_port_that_fits(self):
         with self.assertRaises(ElabError) as cm:
@@ -291,7 +291,7 @@ net c: burn.out_ -> box
         self.assertEqual(flat.nets["burn/coal_"].items, ["coal"])
         self.assertEqual(flat.lane_of["burn/ore_"], "burn/ore_|burn/coal_")
         # 2.0.50: the two nets into the pair port are named as a pair (they arrive together anyway)
-        self.assertEqual(codes(flat), ["LANES"])
+        self.assertEqual(codes(flat), ["could-pair"])
 
     def test_a_lane_feeds_the_one_item_it_carries(self):
         flat = flat_of(self.BURNER)
@@ -379,7 +379,7 @@ net y: both.out_ -> box
 
 class PortCheckTest(unittest.TestCase):
     def ports(self, text):
-        return [c for c in flat_of(text).checks if c.code == "PORT"]
+        return [c for c in flat_of(text).checks if c.code == "port"]
 
     def test_a_port_no_net_names(self):
         text = (RIB + FEED).replace("net ore: feed -> rib.iron\n", "") \

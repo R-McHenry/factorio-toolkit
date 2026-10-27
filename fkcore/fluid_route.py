@@ -35,7 +35,7 @@ The search is v4's fkc/pipes.py (C:\\fk-lead\\repo, d6018d3), copied and re-poin
 layout: a net is a tree grown from a driver's group, one group at a time, nearest first; each
 join is an A* from the group's free connection tiles to the tree over (tile, heading,
 just-exited) states, with pipe steps and pipe-to-ground jumps (a straight run of 5 or more tiles
-is cheaper as a pair). Each routed net is judged by ``fkcore.connect`` (connected, no LEAK)
+is cheaper as a pair). Each routed net is judged by ``fkcore.connect`` (connected, no SPILL)
 before it is kept; other group orders are tried when it fails, then other net orders. Pure,
 stdlib only, deterministic.
 """
@@ -377,7 +377,7 @@ def _groups(net, ends, g, w):
             parent[find(a)] = find(b)
         elif (a in nids) != (b in nids) and not g.nodes[(b if a in nids else a)[0]].carrier:
             mine, other = (a, b) if a in nids else (b, a)
-            notes.append(f"{mine[0]} joins {other[0]} directly (a LEAK by placement)")
+            notes.append(f"{mine[0]} joins {other[0]} directly (a SPILL by placement)")
     out = {}
     for n in sorted(nids, key=lambda x: (fkpmod.natural_key(x[0]), x[1])):
         key, side, b = nids[n]
@@ -448,7 +448,7 @@ def _entities(net, placed):
 
 
 def _judge(cat, base, extra, flat, net, new):
-    """``fkcore.connect`` on the layout with the new carriers: connected and no LEAK of them."""
+    """``fkcore.connect`` on the layout with the new carriers: connected and no SPILL of them."""
     fn = flat.nets[net]
     rep = connectmod.connect(list(base) + list(extra) + list(new), cat,
                              {net: (list(fn.drivers), list(fn.consumers))})

@@ -1,4 +1,4 @@
-"""The UNBOUNDED line (2.0.21) says how much the machines on a rate-less requester take, and points
+"""The no-rate line (2.0.21) says how much the machines on a rate-less requester take, and points
 at `fk stock`.
 
 The 1035 run's smelter was twenty furnaces with four `Chest<requester>` feeds and no `rate=` on any
@@ -32,7 +32,7 @@ class UnboundedDemandTest(unittest.TestCase):
         self.flat = elaborate(f, dict(f.modules), CAT, "t")
 
     def test_the_line_names_the_demand_and_the_stock_read(self):
-        got = [c for c in self.flat.checks if c.code == "UNBOUNDED" and c.where == "ore"]
+        got = [c for c in self.flat.checks if c.code == "no-rate" and c.where == "ore"]
         self.assertEqual(len(got), 1, [str(c) for c in self.flat.checks])
         msg = got[0].msg
         self.assertIn("no rate=", msg)

@@ -48,7 +48,7 @@ def judged(flat, r):
 
 
 def connected(test, flat, r):
-    """Every net routed and connected, no LEAK, no check line at all, a well-formed layout."""
+    """Every net routed and connected, no SPILL, no check line at all, a well-formed layout."""
     test.assertEqual(r.failed, {}, r.lines)
     test.assertEqual(fkp.invariants(r.layout, CAT, nets=flat.nets), [])
     status, rep = judged(flat, r)

@@ -1,5 +1,5 @@
 """2.0.36 (PLAN-MODULES phase 3): a sealed module's ports are tiles the router can meet, it routes
-inside its frame, and SEAL reports a crossing that is not at a port.
+inside its frame, and crosses-frame reports a crossing that is not at a port.
 """
 import unittest
 
@@ -114,7 +114,7 @@ class SealTest(unittest.TestCase):
     def test_a_sealed_module_routes_inside_its_frame(self):
         flat, r = routed(DESIGN)
         self.assertEqual(r.failed, {})
-        self.assertFalse([ln for ln in r.lines if ln.startswith("SEAL")], r.lines)
+        self.assertFalse([ln for ln in r.lines if ln.startswith("crosses-frame")], r.lines)
         x0, y0, x1, y1 = expand.frame_of(flat, r.layout, "rib", CAT)
         self.assertEqual((x0, y0, x1, y1), (40, 10, 56, 20))
         for net in ("rib/fe", "rib/g"):
@@ -152,7 +152,7 @@ class SealTest(unittest.TestCase):
     def test_a_portless_module_routes_as_one_block(self):
         _flat, r = routed(PLAIN)
         self.assertEqual(r.failed, {})
-        self.assertFalse([ln for ln in r.lines if ln.startswith("SEAL")])
+        self.assertFalse([ln for ln in r.lines if ln.startswith("crosses-frame")])
         self.assertIn("rib/g", r.routed)
 
     def test_seal_reports_a_crossing_outside_a_port(self):
@@ -185,7 +185,7 @@ class SealTest(unittest.TestCase):
         tight = DESIGN.replace("size 16x10", "size 12x8").replace("@(2, 1)", "@(0, 1)") \
                        .replace("iron-plate @w", "iron-plate @w4")
         _flat, r = routed(tight)
-        lines = " ".join(ln for ln in r.lines if ln.startswith("PORT"))
+        lines = " ".join(ln for ln in r.lines if ln.startswith("port"))
         self.assertIn("rib.iron", lines)
         self.assertIn("rib/g/m0", lines)
 
@@ -228,7 +228,7 @@ class FixesTest(unittest.TestCase):
         across = [k for k, e in r.layout.entities.items() if e.attrs.get("net") == "o/through"
                   and x0 <= e.x < x1 and y0 <= e.y < y1]
         self.assertEqual(across, [])
-        self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME"))], [])
+        self.assertEqual([ln for ln in r.lines if ln.startswith(("crosses-frame", "FRAME"))], [])
 
     def test_size_alone_seals_a_module(self):
         text = """
@@ -248,7 +248,7 @@ p = Plot @(10, 10)
         self.assertIn("sealed", str(cm.exception))
         _flat, r = routed(text)
         self.assertEqual(r.failed, {})
-        self.assertEqual([ln for ln in r.lines if ln.startswith(("SEAL", "FRAME"))], [])
+        self.assertEqual([ln for ln in r.lines if ln.startswith(("crosses-frame", "FRAME"))], [])
 
     def test_a_module_without_size_or_ports_stays_transparent(self):
         self.assertEqual(flat_of(PLAIN).sealed, set())

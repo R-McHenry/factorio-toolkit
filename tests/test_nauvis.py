@@ -48,7 +48,7 @@ class NauvisTest(unittest.TestCase):
         # BOOTSTRAP (2.0.4) is about main's own belt maker feeding the routes it is built from,
         # one line per net, not about the composed surface
         self.assertEqual([(s, c) for s, c in self.ctx.checks
-                          if c.code not in ADVICE and c.code != "BOOTSTRAP"], [])
+                          if c.code not in ADVICE and c.code != "bootstrap"], [])
         s = self.ctx.composed
         self.assertEqual(sorted(s.plots), ["boot", "main", "plant"])
         self.assertEqual(s.problems, [])
@@ -107,7 +107,7 @@ class NauvisTest(unittest.TestCase):
 
 
 class BridgeUnderAPlotTest(unittest.TestCase):
-    """1.2 (the 0534 run): a new plot over the old pole bridge stopped the build with INVARIANT
+    """1.2 (the 0534 run): a new plot over the old pole bridge stopped the build with malformed
     shared infrastructure, and the bridge stayed. Now the plot takes the bridge's poles and
     ``floorplan --bridge-power`` lays the bridge again around the plots."""
 
@@ -130,7 +130,7 @@ class BridgeUnderAPlotTest(unittest.TestCase):
             fh.write("place pad = pad plot -14,-14 6x6\n")
         code, ctx = flow.run(self.script, cat=CAT, echo=lambda _l: None)
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual([c for _s, c in ctx.checks if c.code == "INVARIANT"], [])
+        self.assertEqual([c for _s, c in ctx.checks if c.code == "malformed"], [])
         s = ctx.composed
         self.assertEqual(s.problems, [])
         self.assertNotIn("nauvis:bridge/p2", s.entities)

@@ -787,7 +787,7 @@ def health(st):
 
 
 def status_line(st):
-    """-> (the world line, the key of what blocks: SHORT and LOCKED ghost items, ghosts no
+    """-> (the world line, the key of what blocks: SHORT and needs-research ghost items, ghosts no
     powered roboport reaches, no research, research stalled with every lab waiting for packs,
     and (2.0.12) a dead base, the reactor's fuel out or low, robots in chests while the network
     has none). The base's alarms lead the line and its other health facts end it."""
@@ -801,7 +801,7 @@ def status_line(st):
             if g.get("stock"):
                 why = f"{g['stock']} in the network"
             elif g.get("locked"):
-                why = "LOCKED: the network holds none and its recipe needs research"
+                why = "needs-research: the network holds none and its recipe needs research"
                 blocked.append(g["item"] + ":locked")
             else:
                 why = "SHORT: the network holds none"

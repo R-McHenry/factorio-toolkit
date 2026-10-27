@@ -99,7 +99,7 @@ def _unturn(x, y, size, rot):
 
 def _port_tile(port, w, h, choice=None):
     """(x, y, the outward direction) of a port's tile, in the module's own frame: the recorded or
-    chosen tile (``choice``), else ``pos`` along the side (0-based, as the ``PORT`` check and
+    chosen tile (``choice``), else ``pos`` along the side (0-based, as the ``port`` check and
     2.0.29's ``@n0L`` count) when the declaration pinned it, else the middle of that side.
     2.0.41: the build chooses an unpinned port's tile facing its partner
     (``_choose_port_tiles``) and records it; this reads the record back."""
@@ -241,7 +241,7 @@ def _choose_port_tiles(flat, lay, cat=None):
     """Choose the tile of every port the declaration does not pin and no record holds, **facing its
     partner** (2.0.41, PLAN-GLOBAL phase A): the tile of the declared side nearest the other end's
     attach point, and for a one-lane port the lane on the partner's side. A recorded tile is kept as
-    it is; a pinned one is kept too (a record that disagrees is a ``PORT`` line). Fills
+    it is; a pinned one is kept too (a record that disagrees is a ``port`` line). Fills
     ``flat.port_tiles`` (the module's own frame), so what is laid is what the record will keep
     (2.0.48: a port is an edge, with no carrier to move; its attach points follow the choice)."""
     tiles = getattr(flat, "port_tiles", None)
@@ -790,7 +790,7 @@ def _put(lay, path, inst, frag, binding, at, notes, cat=None):
         if fe.role is not None:
             net = role_net(binding, fe.role)
             if net is None:
-                notes.append(f"{path}/{fe.local}: role {fe.role} has no net (UNFED/UNCONSUMED)")
+                notes.append(f"{path}/{fe.local}: role {fe.role} has no net (no-feed/no-taker)")
                 continue
             if "|" in net and cat is not None and cat.has_entity(fe.name) \
                     and cat.kind(fe.name) not in fkpmod.LANE_TYPES:
@@ -893,7 +893,7 @@ def attach_points(flat, lay, path, cat):
 
 def planned_frame(flat, path, cat, frames=None):
     """(x0, y0, x1, y1): where instance ``path``'s turned frame lands in the factory frame by its
-    ``@(x, y)`` hint, before anything is placed (the size step's FIT); None without a hint (an
+    ``@(x, y)`` hint, before anything is placed (the size step's does-not-fit); None without a hint (an
     ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
     fails. ``frames`` caches the module frames, as for ``_origin``."""
     inst = flat.insts[path]

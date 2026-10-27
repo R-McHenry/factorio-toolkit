@@ -1,4 +1,4 @@
-"""fkcore.robots: roboports over a factory's logistic chests, and the surface's NO_ROBOTS check."""
+"""fkcore.robots: roboports over a factory's logistic chests, and the surface's no-robots check."""
 import os
 import shutil
 import tempfile
@@ -55,7 +55,7 @@ class RobotsTest(unittest.TestCase):
     def test_a_factory_out_of_reach_is_reported(self):
         lay, _ = robots.apply_robots(gears_layout(), CAT)
         lines, checks = robots.check_surface(surface(lay, (200, -14)), CAT)
-        self.assertTrue(any(c.code == "NO_ROBOTS" for c in checks), lines)
+        self.assertTrue(any(c.code == "no-robots" for c in checks), lines)
         self.assertIn("2 logistic networks", lines[0])
 
     def test_no_kit_roboport_judges_nothing(self):
@@ -118,7 +118,7 @@ def places(at, rot=0, size=(14, 14)):
 
 
 class SurfaceNetworkTest(unittest.TestCase):
-    """1.2 (the 0534 run): cover robots counts the surface's network, as NO_ROBOTS does. A factory
+    """1.2 (the 0534 run): cover robots counts the surface's network, as no-robots does. A factory
     whose chests the kit roboport already reaches got a roboport of its own (the stock held 4),
     so the player turned cover robots off."""
 
@@ -180,7 +180,7 @@ class SurfaceNetworkTest(unittest.TestCase):
         text, ctx = cover_txt()
         self.assertIn("0 roboports; 2/2 logistic chests inside a logistic area (2 of them in "
                       "the surface network's)", text)
-        self.assertFalse([c for _s, c in ctx.checks if c.code == "NO_ROBOTS"])
+        self.assertFalse([c for _s, c in ctx.checks if c.code == "no-robots"])
         with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(files["nauvis.surface"].replace("14,-14", "200,-14"))
         text, ctx = cover_txt()
