@@ -55,7 +55,9 @@ def merge(flat, js):
             job.owners += part.owners
             job.anchors.update(part.anchors)
         job.parts = (left, right, pair)
-        missing = [p.net for p in (left, right) if not p.drivers()]
+        # 2.0.48: a pair that comes in paired (a stack cell's paired port drives the pair itself)
+        # needs no driver of each lane's own
+        missing = [] if pair.starts else [p.net for p in (left, right) if not p.drivers()]
         if missing:
             job.skip = (f"net {' and '.join(missing)} of the pair {key} has no driver role "
                         "placed")
@@ -128,7 +130,8 @@ def _direct(cat, job, grid):
     return out
 
 
-def route(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None):
+def route(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
+          allow=frozenset()):
     """Lay a pair's job (``merge``): -> (carriers, report text) or (None, the reason)."""
     left, right, pair = job.parts
     net = job.net
@@ -149,7 +152,7 @@ def route(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=No
                       "consumer")
     why = None
     for hub, h in cands[:_TRIES]:
-        got = _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans)
+        got = _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans, allow)
         if isinstance(got, str):
             why = why or f"join {hub[0]},{hub[1]} {'NESW'[h]}: {got}"
             continue
@@ -157,7 +160,8 @@ def route(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=No
     return None, f"none of {min(len(cands), _TRIES)} joins routes; first: {why}"
 
 
-def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans):
+def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
+          allow=frozenset()):
     """The three parts through join ``hub`` heading ``h``: -> (carriers, text) or a reason."""
     left, right, pair = job.parts
     lt, rt = _step(hub, (h + 3) % 4), _step(hub, (h + 1) % 4)
@@ -175,7 +179,7 @@ def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans)
     laid, how, now = [], {}, list(ents)
     for part, prefix in ((a, "l"), (b, "r"), (both, "")):
         got, text = routemod._route_one(cat, part, now, frames, sub, box, limit, terrain, avoid,
-                                        spans)
+                                        spans, allow)
         if got is None:
             return f"{part.net if part is not both else 'both lanes'}: {text}"
         for e in got:

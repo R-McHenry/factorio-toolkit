@@ -395,8 +395,11 @@ def _module_fragment(flat, path, cat):
                                   [(ox + 0.5, oy + 0.5, belt)])
         roles[outside_role] = Role(outside_role, outside_side, [item] if item else [], [key],
                                    [(x + 0.5, y + 0.5, belt)])
-        binding[inside_role] = (inner or [None])[0]
-        binding[outside_role] = (outer or [None])[0]
+        # 2.0.48: a paired port's lanes are a ``lanes A | B`` pair on one side: its role is the
+        # pair's (both lanes come in, or go out, on the one belt across the edge)
+        lane_of = getattr(flat, "lane_of", {})
+        binding[inside_role] = lane_of.get((inner or [None])[0], (inner or [None])[0])
+        binding[outside_role] = lane_of.get((outer or [None])[0], (outer or [None])[0])
     params = {k: v for k, v in inst.params.items() if k != "duty"}
     return _finish(Fragment(inst.kind, params, ents, roles, (w, h))), binding
 

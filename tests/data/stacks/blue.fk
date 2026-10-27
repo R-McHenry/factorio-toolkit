@@ -25,15 +25,15 @@ module BlueCell size 18x3 {
   net ad: adv -> blue
 }
 
-steel = Chest<requester, item=steel-plate, rate=1/s>        @(0, 30)
+steel = Chest<requester, item=steel-plate, rate=1/s>        @(2, 20)
 gear  = Chest<requester, item=iron-gear-wheel, rate=1/s>    @(2, 30)
-pipe  = Chest<requester, item=pipe, rate=1/s>               @(4, 30)
-sulf  = Chest<requester, item=sulfur, rate=1/s>             @(10, 30)
-circ  = Chest<requester, item=electronic-circuit, rate=2/s> @(15, 30)
-plas  = Chest<requester, item=plastic-bar, rate=2/s>        @(17, 30)
-cab   = Chest<requester, item=copper-cable, rate=4/s>       @(19, 30)
-packs = Chest<provider, limit=8>                            @(11, 0)
-blue  = Stack<cell=BlueCell, n=4> @(0, 6)
+pipe  = Chest<requester, item=pipe, rate=1/s>               @(15, 32)
+sulf  = Chest<requester, item=sulfur, rate=1/s>             @(26, 30)
+circ  = Chest<requester, item=electronic-circuit, rate=2/s> @(40, 22)
+plas  = Chest<requester, item=plastic-bar, rate=2/s>        @(40, 28)
+cab   = Chest<requester, item=copper-cable, rate=4/s>       @(34, 34)
+packs = Chest<provider, limit=8>                            @(25, 0)
+blue  = Stack<cell=BlueCell, n=4> @(14, 6)
 
 net fe_a: steel -> blue.a_in
 net ge_a: gear -> blue.a_in

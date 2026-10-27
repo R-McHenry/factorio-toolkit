@@ -762,10 +762,25 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
 
 def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
               allow=frozenset()):
-    if job.parts:
-        from . import pairs
-        return pairs.route(cat, job, ents, frames, js, box, limit, terrain, avoid, spans)
     net = job.net
+    if job.parts:
+        joined = _prejoined(job)
+        if joined is None:
+            from . import pairs
+            return pairs.route(cat, job, ents, frames, js, box, limit, terrain, avoid, spans,
+                               allow)
+        # a pair already paired where it comes in (a stack cell's paired port, 2.0.48): its one
+        # belt runs straight on, both lanes, and every machine hands on or off it
+        blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
+        plan = _straight(joined, _Bounded(blocked, box))
+        if plan is None:
+            return None, ("its two lanes come in paired, and no straight belt runs on from there "
+                          "past every machine to its end")
+        laid = _carriers(job, plan, net)
+        for e in laid:
+            if e.name not in _BELT_NAMES:
+                e.attrs["net"] = fkpmod.hand_net(net)
+        return laid, f"a straight belt of both lanes, {len(laid)} carriers (paired at its port)"
     blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
     spans = _ug_spans(cat, ents) if spans is None else spans
     clear = _belt_tiles(cat, ents)
@@ -774,11 +789,73 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
     else:
         plan, how = _tree_job(cat, job, blocked, spans, clear, box, limit)
     if plan is None:
+        # 2.0.48: a belt that runs straight through, every machine handing on or off it by one
+        # inserter (a stack cell's through belt: no room for a tree's turns or hub)
+        straight = _straight(job, _Bounded(blocked, box))
+        if straight is not None:
+            plan, how = straight, f"a straight belt, {len(straight)} carriers"
+    if plan is None:
         return None, how
     laid = _settle_leaves(cat, _carriers(job, plan, net), ents, allow=allow)
     if laid is None:
         return None, "a tapped belt's last tile points into another net's belt"
     return laid, how
+
+
+_BELT_NAMES = ("transport-belt", "underground-belt", "splitter")
+
+
+def _prejoined(job):
+    """A pair job whose two nets come in on one belt already (both start where a paired port's
+    belt crosses into a stack cell): -> one NetJob of both, from that start, or None."""
+    left, right, pair = job.parts
+    shared = list(pair.starts) or [s for s in left.starts if s in right.starts]
+    if not shared:
+        return None
+    return NetJob(job.net, starts=shared[:1],
+                  goals=list(pair.goals) + list(left.goals) + list(right.goals),
+                  taps=list(pair.taps) + list(left.taps) + list(right.taps),
+                  sources=list(left.sources) + list(right.sources),
+                  owners=list(job.owners))
+
+
+def _straight(job, grid):
+    """A net laid as one straight belt from its one start to its one goal, and one inserter for
+    each machine on it (fast where it reaches, long-handed where only that reaches), taking from
+    the belt into a consumer or dropping from a driver onto it (2.0.48, Rory 2026-10-26: "it should
+    be possible to do it with every belt routing as 3 belts in a row, no bends or undergrounds").
+    -> plan entities, or None when the two ends don't line up, a tile is taken or a machine finds
+    no inserter tile."""
+    if len(job.starts) != 1 or len(job.goals) != 1:
+        return None
+    (s, h), (g, gh) = job.starts[0], job.goals[0]
+    if h != gh:
+        return None
+    tiles = [tuple(s)]
+    while tiles[-1] != tuple(g):
+        if len(tiles) > 64:
+            return None
+        tiles.append((tiles[-1][0] + _DX[h], tiles[-1][1] + _DY[h]))
+    ends = {tuple(s), tuple(g)}
+    if any(grid.blocked(t) and t not in ends for t in tiles):
+        return None
+    plan = [{"name": "transport-belt", "x": x + 0.5, "y": y + 0.5, "direction": h * 4}
+            for x, y in tiles]
+    taken = set(tiles)
+    for want, pairs in ((job.taps, False), (job.sources, True)):
+        for _key, rect in want:
+            got = None
+            for x, y in tiles:
+                belt = (x, y, x + 1, y + 1)
+                got = _direct_pair(rect, belt, grid, taken) if pairs else \
+                    _direct_pair(belt, rect, grid, taken)
+                if got:
+                    break
+            if not got:
+                return None
+            taken.add((math.floor(got["x"]), math.floor(got["y"])))
+            plan.append(got)
+    return plan
 
 
 def _guarded(cat, job, ents, frames, js, box, limit, terrain):
