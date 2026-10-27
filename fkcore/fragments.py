@@ -348,6 +348,86 @@ def smelter_array(n, recipe, inputs, outputs, machine="stone-furnace", fuel=None
     return ents, roles, (11 * k + 1, m_ + 6)
 
 
+def circuit_stack(n, inputs, outputs, machine="assembling-machine-1"):
+    """Green circuits on both sides of one output belt (2.0.47, Rory 2026-10-26: "use smelter and
+    green circuit factories that fill both sides of the output belt"): the smelter stack's shape
+    for 3x3 assemblers, one unit 13 tiles wide, two columns of circuit assemblers around the
+    output belt. Local rows, M = 12 x the taller column:
+
+    - rows 0..M-1, the columns, cell b from the foot at rows r..r+11 (r = M-12(b+1)): a cable
+      assembler (r..r+2), an inserter handing its cable south (r+3), the circuit assembler
+      (r+4..r+6), an inserter handing cable north (r+7), a cable assembler (r+8..r+10). x+0 the
+      west feed belt (north), x+1 its inserters (copper into the cable assemblers, iron into the
+      circuit one), x+2..4 the machines, x+5 the circuit's output inserter, x+6 the output belt
+      (south), x+7..12 the same mirrored. Two cable assemblers per circuit: 4 cable/s for its 3.
+    - rows M..M+5, the foot: the smelter stack's (``smelter_array``), widened: the iron (in1) comes
+      up at x+3 and side-loads both feed belts from the south, the copper (in2) comes in from the
+      east at row M+1 and side-loads them from the north, so each feed belt carries iron on one
+      lane and copper on the other; the output leaves at x+6.
+
+    Only the circuit assemblers are machines of the netlist (each takes iron and the copper its
+    two cable assemblers make into cable); the cable assemblers are entities of the stack. ->
+    (entities, roles, size)"""
+    if len(inputs) != 2:
+        raise FragmentError("CircuitStack takes its iron and its copper on two nets that share no "
+                            "belt: it side-loads them onto the lanes of its own feed belts")
+    cols = ((n + 1) // 2, n // 2)
+    m_ = 12 * cols[0]
+    ents, machines, cable = [], [], 0
+    m = 0
+    for side, c in enumerate(cols):
+        mx, feed_x, fin_x, out_x = (2, 0, 1, 5) if side == 0 else (8, 12, 11, 7)
+        face = W if side == 0 else E
+        lanes = "in1|in2" if side == 0 else "in2|in1"
+        for b in range(c):
+            r = m_ - 12 * (b + 1)
+            for dy in (0, 8):                      # the cable assemblers above and below
+                ents.append(FEnt(f"k{cable}", machine, mx + 1.5, r + dy + 1.5, None, None,
+                                 {"recipe": "copper-cable"}))
+                ents.append(FEnt(f"kf{cable}", _INSERTER, fin_x + 0.5, r + dy + 1.5, face, lanes))
+                cable += 1
+            ents.append(FEnt(f"m{m}", machine, mx + 1.5, r + 5.5, None, None,
+                             {"recipe": "electronic-circuit"}))
+            ents.append(FEnt(f"f{m}", _INSERTER, fin_x + 0.5, r + 5.5, face, lanes))
+            ents.append(FEnt(f"o{m}", _INSERTER, out_x + 0.5, r + 5.5, face, "out"))
+            # the cable hands, on the copper net: the circuit assembler takes its copper as cable
+            ents.append(FEnt(f"kn{m}", _INSERTER, mx + 1.5, r + 3.5, N, "in2"))   # from above
+            ents.append(FEnt(f"ks{m}", _INSERTER, mx + 1.5, r + 7.5, S, "in2"))   # from below
+            machines.append(f"m{m}")
+            m += 1
+        top = m_ - 12 * c
+        ents += [FEnt(f"feed{'we'[side]}{y}", "transport-belt", feed_x + 0.5, y + 0.5, N, lanes)
+                 for y in range(top, m_ + 3)]
+    for y in range(m_ - 12 * cols[0] + 4, m_ - 2):          # the output belt, south
+        ents.append(FEnt(f"outb{y}", "transport-belt", 6.5, y + 0.5, S, "out"))
+    ents += [FEnt("outu0", "underground-belt", 6.5, m_ - 1.5, S, "out", {"ug": "in"}),
+             FEnt("outu1", "underground-belt", 6.5, m_ + 3.5, S, "out", {"ug": "out"}),
+             FEnt("outx0", "transport-belt", 6.5, m_ + 4.5, S, "out"),
+             FEnt("outx1", "transport-belt", 6.5, m_ + 5.5, S, "out")]
+    # the iron up from the south, split onto both feed belts' south sides
+    ents += [FEnt("fes", "splitter", 4, m_ + 3.5, N, "in1"),
+             FEnt("feb0", "transport-belt", 3.5, m_ + 4.5, N, "in1"),
+             FEnt("feb1", "transport-belt", 3.5, m_ + 5.5, N, "in1")]
+    ents += [FEnt(f"feedm{j}", "transport-belt", 1.5 + j, m_ + 2.5, W, "in1|in2")
+             for j in range(3)]
+    ents += [FEnt(f"feedn{j}", "transport-belt", 4.5 + j, m_ + 2.5, E, "in2|in1")
+             for j in range(8)]
+    # the copper in from the east, split onto both feed belts' north sides
+    ents += [FEnt("cuin", "underground-belt", 13.5, m_ + 1.5, W, "in2", {"ug": "in"}),
+             FEnt("cuu0", "underground-belt", 9.5, m_ + 1.5, W, "in2", {"ug": "out"}),
+             FEnt("cub0", "transport-belt", 8.5, m_ + 1.5, W, "in2"),
+             FEnt("cus0", "splitter", 7.5, m_ + 1, W, "in2"),
+             FEnt("cub1", "transport-belt", 6.5, m_ + 0.5, W, "in2"),
+             FEnt("cub2", "transport-belt", 5.5, m_ + 0.5, W, "in2"),
+             FEnt("cub3", "transport-belt", 4.5, m_ + 0.5, S, "in2"),
+             FEnt("cus1", "splitter", 4, m_ + 1.5, S, "in2")]
+    roles = {"in1": Role("in1", "in", inputs[0], machines, [(3.5, m_ + 5.5, N)]),
+             "in2": Role("in2", "in", inputs[1], machines, [(13.5, m_ + 1.5, W)]),
+             "out": Role("out", "out", outputs[0] if outputs else [], machines,
+                         [(6.5, m_ + 5.5, S)])}
+    return ents, roles, (14, m_ + 6)
+
+
 # -- the bus (Rory's 4-belt bus, 2026-10-21: agent/docs/examples/bus4.json) ----------------------
 #: a port's staircase climbs across the bus from the side its stream comes from to the side it goes
 #: to: input priority on the first, output priority toward the second (the game's splitter fields)
@@ -549,6 +629,8 @@ FRAGMENTS = {
         int(p["n"]), p["_recipe"], i, o, p.get("machine", "stone-furnace"), p.get("_fuel"),
         int(p.get("_per", 24)), p.get("units")),
     "Bus": lambda p, i, o: _bus(p),
+    "CircuitStack": lambda p, i, o: circuit_stack(int(p["n"]), i, o,
+                                                  p.get("machine", "assembling-machine-1")),
 }
 
 

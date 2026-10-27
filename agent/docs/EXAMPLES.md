@@ -275,38 +275,42 @@ and 6 underground ends in all). `bus4.json` is his demo exactly as he placed it 
 (`Literal<file="bus4.json">` pastes it as it is). To grow it: make it longer, add loads and taps
 (`load=s11|s40`), and a net for each.
 
-## busbase.fk: a bus base, smelting, circuits, mall and science (209x98)
+## busbase.fk: a bus base, smelting, circuits, mall and science (172x82)
 
-Three buses run east: circuits on top (1 belt), iron (2 belts), copper (1 belt). West of their
-heads, two iron smelting spines and a copper one (drills, coal, a 12-furnace row each) fill the
-iron and copper buses at their mouths. North of the buses, three spine factories, each a sealed
-module, take what they need by taps that stand in front of their ports:
+Three buses run east along the bottom: circuits (1 belt), iron (2 belts), copper (1 belt). Every
+spine factory stands north of them and runs **perpendicular** to the bus: its machines in columns
+running north-south, its belts coming straight down to its loads and taps, each of which stands in
+front of the spine's port. Build spines across the bus like this, not along it: a spine grows away
+from the bus, and the next one fits beside it.
 
-- **circuits**: copper and iron off the buses, 3 cable and 2 circuit assemblers, into the circuit
-  bus's mouth;
+- **smelting**: a drill column beside a smelter stack (`SmelterArray`: furnaces on both sides of
+  each plate belt), loaded onto the iron bus (24 furnaces, 7.5 plates/s) and the copper bus (12);
+- **circuits**: a `CircuitStack<n=4>`: circuit assemblers on both sides of one output belt, handed
+  cable directly by the cable assemblers above and below them, loaded onto the circuit bus;
 - **mall**: iron and circuits into belts, inserters, assemblers, drills and pipes, a chest each
   with a slot limit, so each maker stops when its chest is full;
 - **science**: iron, copper and circuits into 30 red and 30 green packs a minute.
 
 ```
-cbus  = Bus<belts=1, item=electronic-circuit>(in1: circ.circ, mc: mall.circ, sc: sci.circ) @(100, 54)
-febus = Bus<belts=2, item=iron-plate>(in1: fe_a.plate, in2: fe_b.plate, ci: circ.iron,
-                                      mi: mall.iron, si: sci.iron) @(50, 60)
-cubus = Bus<belts=1, item=copper-plate>(in1: cu_a.plate, cc: circ.copper, sc2: sci.copper) @(50, 67)
+cbus  = Bus<belts=1, item=electronic-circuit>(cl: circ.circ, mc: mall.circ, sc: sci.circ) @(70, 66)
+febus = Bus<belts=2, item=iron-plate>(fl: fe.plate, ci: circ.iron, mi: mall.iron, si: sci.iron) @(0, 72)
+cubus = Bus<belts=1, item=copper-plate>(kl: cu.plate, cc: circ.copper, sc2: sci.copper) @(0, 79)
 ```
 
-Built on the lab (2.0.46): 43 nets routed in under a second, 1995 entities, all of them standing.
-After the mall's chests fill, science runs at the model's rates (30 red and 30 green a minute),
-circuits at 30 a minute, and the smelters slow down as the buses fill. `fk contract busbase.fk`:
+Built on the lab (2.0.47): 35 nets routed in half a second, 1760 entities, all of them standing.
+By game minute 30 science runs at the model's rates (30 red and 30 green a minute), the iron stack
+at its full 7.5 plates/s, and the mall's makers have stopped with their chests full.
+`fk contract busbase.fk`:
 
 ```
-circ: out electronic-circuit 2.0/s via cbus mouth in1 (got 0.6) | in copper-plate 0.8/s via cubus tap n28 (got 0.8) | ...
-fe_a: out iron-plate 3.8/s via febus mouth in1 (got 2.1)
-sci: in electronic-circuit 0.5/s via cbus tap n78 (got 0.5) | in copper-plate 0.5/s via cubus tap n122 (got 0.5) | ...
+circ: out electronic-circuit 4.0/s via cbus load n11 (got 0.6) | in copper-plate 0.8/s via cubus tap n89 (got 0.8) | ...
+fe: out iron-plate 7.5/s via febus load n16 (got 4.3)
+sci: in electronic-circuit 0.5/s via cbus tap n74 (got 0.5) | in copper-plate 0.5/s via cubus tap n138 (got 0.5) | ...
 ```
 
-To grow it: add a spine north of the buses and an entry for each port it takes from, in order
-along the bus; a new item gets a bus of its own, fed by the spine that makes it.
+To grow it: add a spine north of the buses, beside the last one, and an entry for each port it
+takes from, in order along the bus; a new item gets a bus of its own, loaded by the spine that
+makes it.
 
 ## robot-feed.fk: the kit's robots back into a roboport (12x8)
 

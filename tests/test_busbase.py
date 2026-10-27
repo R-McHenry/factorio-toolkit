@@ -40,25 +40,52 @@ class BusBaseTest(unittest.TestCase):
                or "LEAK" in ln and " 0 LEAK" not in ln]
         self.assertEqual(bad, [])
         self.assertEqual([c for c in self.flat.checks], [])
-        self.assertEqual(sorted(self.flat.sealed), ["circ", "cu_a", "fe_a", "fe_b", "mall", "sci"])
+        self.assertEqual(sorted(self.flat.sealed), ["circ", "cu", "fe", "mall", "sci"])
 
-    def test_each_tap_stands_in_front_of_its_spines_port(self):
+    def test_each_load_and_tap_stands_in_front_of_its_spines_port(self):
         # ports pinned @sN along the spine's south side: spine x + N - the bus's head x
         febus, cubus, cbus = (self.flat.insts[b].params for b in ("febus", "cubus", "cbus"))
-        self.assertEqual(febus["tap"], ["n22", "n66", "n116"])     # circ 66+6, mall 110+6, sci 160+6
-        self.assertEqual(cubus["tap"], ["n28", "n122"])            # circ 66+12, sci 160+12
-        self.assertEqual(cbus["tap"], ["n24", "n78"])              # mall 110+14, sci 160+18 (head 100)
+        self.assertEqual(febus["load"], ["n16"])                     # fe 0+16
+        self.assertEqual(febus["tap"], ["n78", "n110", "n132"])     # circ 74+4, mall 104+6, sci 128+4
+        self.assertEqual(cubus["load"], ["n52"])                     # cu 36+16
+        self.assertEqual(cubus["tap"], ["n89", "n138"])             # circ 74+15, sci 128+10
+        self.assertEqual(cbus["load"], ["n11"])                      # circ 74+7 (head 70)
+        self.assertEqual(cbus["tap"], ["n46", "n74"])               # mall 104+12, sci 128+16
 
-    def test_every_bus_has_its_own_mouth_net(self):
-        for net in ("febus_in1", "febus_in2", "cubus_in1", "cbus_in1"):
-            self.assertIn(net, self.flat.nets)
-        self.assertNotIn("in1", self.flat.nets)
+    def test_every_spine_stands_perpendicular_to_the_buses(self):
+        # Rory: spine factories perpendicular to the bus, not parallel: each is taller (north-
+        # south) than it is wide along the bus
+        for path in ("fe", "cu", "circ", "mall", "sci"):
+            w, h = self.flat.insts[path].size
+            self.assertGreater(h, w, path)
 
-    def test_the_contract_reads_the_smelters_through_the_mouths(self):
+    def test_the_contract_reads_the_smelters_and_the_stack(self):
         lines = {ln.split(":")[0]: ln for ln in contract.contract(self.flat)}
-        self.assertIn("fe_a: out iron-plate 3.8/s via febus mouth in1 (got 2.1)", lines["fe_a"])
-        self.assertIn("out electronic-circuit 2.0/s via cbus mouth in1", lines["circ"])
-        self.assertIn("in iron-plate 3.2/s via febus tap n116 (got 3.2)", lines["sci"])
+        self.assertIn("fe: out iron-plate 7.5/s via febus load n16", lines["fe"])
+        self.assertIn("out electronic-circuit 4.0/s via cbus load n11", lines["circ"])
+        self.assertIn("in iron-plate 3.3/s via febus tap n132 (got 3.3)", lines["sci"])
+
+
+class MouthNamesTest(unittest.TestCase):
+    def test_every_bus_has_its_own_mouth_net(self):
+        text = """
+a = Chest<requester, item=iron-plate, rate=1> @(0, 0)
+b = Chest<requester, item=iron-plate, rate=1> @(0, 4)
+c = Chest<requester, item=copper-plate, rate=1> @(0, 20)
+x = Chest<provider> @(30, 0)
+y = Chest<provider> @(30, 20)
+febus = Bus<belts=2, item=iron-plate>(in1: a, in2: b, t1: x) @(4, 10)
+cubus = Bus<belts=1, item=copper-plate>(in1: c, t2: y) @(4, 30)
+"""
+        f = lang.parse(text, "t.fk")
+        flat = elaborate(f, dict(f.modules), CAT, "t")
+        for net in ("febus_in1", "febus_in2", "cubus_in1"):
+            self.assertIn(net, flat.nets)
+        self.assertNotIn("in1", flat.nets)
+        one = text.split("cubus =")[0].replace("c = Chest<requester, item=copper-plate, rate=1> @(0, 20)\n", "")
+        f = lang.parse(one, "t.fk")
+        flat = elaborate(f, dict(f.modules), CAT, "t")
+        self.assertIn("in1", flat.nets)                 # a single bus keeps the plain names
 
 
 class InLineTest(unittest.TestCase):

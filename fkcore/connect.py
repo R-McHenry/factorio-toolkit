@@ -675,7 +675,7 @@ def _joint(a, b, na, nb, table):
                for y in nb.nets if y in table for k in (a, b))
 
 
-def _leak(g, a, b, via, table):
+def _leak(g, a, b, via, table, cat=None):
     """The Leak an edge makes, or None. Between two carriers, the items of a net the second one
     does not carry escape (``ore|fuel`` into a belt of ``ore``: the fuel)."""
     na, nb = g.nodes[a], g.nodes[b]
@@ -692,17 +692,41 @@ def _leak(g, a, b, via, table):
     if table is None:
         return None
     mine = [x for x in na.nets if x in table] if na.carrier else []
-    if mine and not any(b in table[x][1] for x in mine):
+    if mine and not any(b in table[x][1] for x in mine) and not _relay(g, b, mine, table, cat):
         return Leak(mine[0], a, b, via, f"{a} drops into {b}, which is not a consumer of "
                                         f"{_either(mine)}")
     mine = [x for x in nb.nets if x in table] if nb.carrier else []
-    if mine and not any(a in table[x][0] for x in mine):
+    if mine and not any(a in table[x][0] for x in mine) and not _relay(g, a, mine, table, cat):
         if via == "mine":
             return Leak(mine[0], a, b, via, f"{a} drops onto {b}, but does not drive "
                                             f"{_either(mine)}")
         return Leak(mine[0], a, b, via, f"{b} picks from {a}, which does not drive "
                                         f"{_either(mine)}")
     return None
+
+
+def _relay(g, key, nets, table, cat):
+    """A template's own intermediate maker (2.0.47: a CircuitStack's cable assemblers, between its
+    copper feed and its circuit assemblers): no endpoint of the netlist, standing in the instance
+    of a consumer of one of ``nets``, and making an ingredient of that consumer's recipe. It hands
+    the net's items on inside the template, so items into or out of it don't leave the net."""
+    if cat is None or not isinstance(key, str) or "/" not in key or key not in g.nodes:
+        return False
+    if any(key in table[x][0] or key in table[x][1] for x in table):
+        return False                         # a netlist machine: judged as one
+    mine = g.nodes[key].recipe
+    if not mine or not cat.has_recipe(mine):
+        return False
+    makes = set(cat.recipe_rates(mine, 1)[1])
+    inst = key.rsplit("/", 1)[0]
+    for x in nets:
+        for c in table[x][1]:
+            if not isinstance(c, str) or c.rsplit("/", 1)[0] != inst or c not in g.nodes:
+                continue
+            theirs = g.nodes[c].recipe
+            if theirs and cat.has_recipe(theirs) and makes & set(cat.recipe_rates(theirs, 1)[0]):
+                return True
+    return False
 
 
 def _either(nets):
@@ -813,7 +837,7 @@ def connect(ents, cat, nets=None) -> Report:
     if nets is None:
         table.update({n: ends for n, ends in _inferred_fluid(g, fluid, owners).items()})
     leaks = [lk for a, b, via in g.edges()
-             if (lk := _leak(g, a, b, via, None if nets is None else table)) is not None]
+             if (lk := _leak(g, a, b, via, None if nets is None else table, cat)) is not None]
     leaks += _fluid_leaks(g, owners, None if nets is None else table)
     ug_sides = [(a, b) for a, b, via in g.edges() if via == "ug_sideload"]
     mine_boxes = _boxes_by_key(g)

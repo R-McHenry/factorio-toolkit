@@ -218,6 +218,15 @@ both.
   factories off its side built and torn down without cutting the main flow. Other shapes come
   later: a city-block grid gives power and roboports but no item backbone without trains; a
   freeform base needs a hand-placed bus plus robot and power scaffolding.
+- **Off a bus, build each factory across it, not along it.** A spine factory that runs away from
+  the bus (its machines in columns, its belts coming straight down to the bus) takes a narrow
+  stretch of it, grows by getting longer, and leaves the next stretch free for the next factory. A
+  factory laid along the bus uses up bus length, and the next one has nowhere to go but further
+  down. `docs\examples\busbase.fk` is a whole base built this way, each factory a sealed module.
+- **Fill both sides of an output belt.** An inserter drops onto the belt's far lane, so a row of
+  machines on one side fills one lane; machines on both sides fill both, and one belt carries
+  twice as much. A smelter stack (`SmelterArray`) and a circuit stack (`CircuitStack`) are built
+  that way.
 - **Prefer patches to rebuilds.** Pin what stands and change only the part that needs changing,
   rather than regenerating the whole base. Routing a new section into the old one, even as a bit of
   spaghetti, beats ripping everything up. As a fallback, leave old poles and roboports standing

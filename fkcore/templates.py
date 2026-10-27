@@ -172,6 +172,28 @@ def smelter_array(params, cat):
     return [_crafter(cat, f"m{k}", machine, recipe, fuel) for k in range(n)]
 
 
+def circuit_stack(params, cat):
+    """``CircuitStack<n, machine=assembling-machine-1>`` (2.0.47): n green circuit assemblers on
+    both sides of one output belt, each fed cable directly by two cable assemblers beside it, and
+    iron and copper on the two lanes of the stack's own feed belts (``fragments.circuit_stack``).
+    Each circuit assembler is one machine taking iron and the copper its cable assemblers turn
+    into cable (1.5 copper a circuit); the cable assemblers are the stack's entities."""
+    _only(params, ("n", "machine"))
+    n = _int(params, "n")
+    if n > 14:
+        raise TemplateError(f"n={n}: a stack's columns hold 7 circuit assemblers each (a lane of "
+                            "iron on each feed belt); use two stacks")
+    machine = _word(params, "machine", "assembling-machine-1")
+    out = []
+    for k in range(n):
+        spec = _crafter(cat, f"m{k}", machine, "electronic-circuit")
+        needs = {"iron-plate": spec.needs.get("iron-plate", 0.0),
+                 "copper-plate": spec.needs.get("copper-cable", 0.0) / 2}
+        out.append(MSpec(spec.local, machine, "electronic-circuit", needs, spec.makes,
+                         frozenset(needs)))
+    return out
+
+
 def furnace(params, cat):
     """``Furnace<recipe | ore, fuel=coal, machine=stone-furnace>``: one furnace."""
     _only(params, ("recipe", "ore", "fuel", "machine"))
@@ -481,6 +503,7 @@ TEMPLATES = {
     "Chest": chest,
     "TurretRow": turret_row,
     "Bus": bus,
+    "CircuitStack": circuit_stack,
 }
 
 
