@@ -1,0 +1,47 @@
+# blue.fk: blue science as a stack of 3-tall cells (2.0.48 test case)
+module BlueCell size 18x3 {
+  port a_in  : in  steel-plate | iron-gear-wheel @s0
+  port a_out : out steel-plate | iron-gear-wheel @n0
+  port b_in  : in  pipe @s1
+  port b_out : out pipe @n1
+  port t_in  : in  sulfur | chemical-science-pack @s11
+  port t_out : out sulfur | chemical-science-pack @n11
+  port c_in  : in  electronic-circuit | plastic-bar @s16
+  port c_out : out electronic-circuit | plastic-bar @n16
+  port d_in  : in  copper-cable @s17
+  port d_out : out copper-cable @n17
+  stack a_in -> a_out, b_in -> b_out, t_in -> t_out, c_in -> c_out, d_in -> d_out
+  engine = Assembler<recipe=engine-unit, machine=assembling-machine-2>                @(3, 0)
+  blue   = Assembler<recipe=chemical-science-pack, machine=assembling-machine-2>     @(7, 0)
+  adv    = Assembler<recipe=advanced-circuit, machine=assembling-machine-2>          @(12, 0)
+  net a:  a_in -> engine, a_out
+  net b:  b_in -> engine, b_out
+  net ts: t_in -> blue, t_out
+  net tp: t_in, blue -> t_out
+  lanes ts | tp
+  net c:  c_in -> adv, c_out
+  net d:  d_in -> adv, d_out
+  net en: engine -> blue
+  net ad: adv -> blue
+}
+
+steel = Chest<requester, item=steel-plate, rate=1/s>        @(0, 30)
+gear  = Chest<requester, item=iron-gear-wheel, rate=1/s>    @(2, 30)
+pipe  = Chest<requester, item=pipe, rate=1/s>               @(4, 30)
+sulf  = Chest<requester, item=sulfur, rate=1/s>             @(10, 30)
+circ  = Chest<requester, item=electronic-circuit, rate=2/s> @(15, 30)
+plas  = Chest<requester, item=plastic-bar, rate=2/s>        @(17, 30)
+cab   = Chest<requester, item=copper-cable, rate=4/s>       @(19, 30)
+packs = Chest<provider, limit=8>                            @(11, 0)
+blue  = Stack<cell=BlueCell, n=4> @(0, 6)
+
+net fe_a: steel -> blue.a_in
+net ge_a: gear -> blue.a_in
+lanes fe_a | ge_a
+net pi:   pipe -> blue.b_in
+net su:   sulf -> blue.t_in
+net ci:   circ -> blue.c_in
+net pl:   plas -> blue.c_in
+lanes ci | pl
+net ca:   cab -> blue.d_in
+net out:  blue.t_out -> packs

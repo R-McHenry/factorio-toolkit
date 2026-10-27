@@ -264,6 +264,7 @@ class Module:
     sets: list = field(default_factory=list)       # [Props]: properties on named objects (2.0.27)
     ports: list = field(default_factory=list)      # [Port]: the module's interface (2.0.28)
     size: tuple | None = None                      # (W, H) of its frame as written, or None
+    stacks: list = field(default_factory=list)     # [(near, far, line)]: stack pairs (2.0.48)
 
 
 @dataclass
@@ -458,6 +459,22 @@ class _P:
                      f"{text[0]}{rest}", tok)
         return Port(name, direction, left, text[0], int(rest) if rest else None, line, lane, right)
 
+    def stack_pairs(self):
+        """``stack NEAR -> FAR[, NEAR -> FAR ...]`` (2.0.48, Rory 2026-10-26): the module is a cell
+        that stacks in a line. NEAR is a port on the edge toward the stack's head, FAR the port on
+        the opposite edge that meets the next cell's NEAR; the items flow whichever way the ports'
+        own directions say (a feed head to tail, a product tail to head)."""
+        line = self.expect("stack").line
+        out = []
+        while True:
+            near = self.name("port name").text
+            self.expect("->")
+            far = self.name("port name").text
+            out.append((near, far, line))
+            if not self.accept(","):
+                break
+        return out
+
     def stmt(self, mod):
         tok = self.peek()
         if tok.kind != "word":
@@ -480,6 +497,8 @@ class _P:
             mod.sets.append(self.props())
         elif tok.text == "port" and self.peek(1).kind == "word":
             mod.ports.append(self.port())
+        elif tok.text == "stack" and self.peek(1).kind == "word" and self.peek(2).text == "->":
+            mod.stacks += self.stack_pairs()
         elif tok.text == "expect" and self.peek(1).text != "=":
             mod.expects.append(self.expect_line())
         elif self.peek(1).text == "=":

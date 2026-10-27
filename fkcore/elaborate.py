@@ -183,6 +183,9 @@ class Flat:
                                                     # (recorded, or chosen at layout; 2.0.41)
     port_records: dict = field(default_factory=dict)  # port key -> fkp.PortRec (the committed .fkp)
     sealed: set = field(default_factory=set)        # instance paths whose module declares ports
+    stacks: dict = field(default_factory=dict)      # stack path -> (cell, n, head) (2.0.48)
+    stack_alias: dict = field(default_factory=dict)  # stack path -> {port name: its child}
+    stack_ends: set = field(default_factory=set)    # port keys a stack leaves open: dead ends
 
     def resolve_ref(self, ref, scope=""):
         """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine or a port.
@@ -225,7 +228,7 @@ def _imports(f, folder, modules, seen):
                                   asserts=body.asserts, covers=body.covers, signals=body.signals,
                                   wires=body.wires, behaves=body.behaves, expects=body.expects,
                                   lanes=body.lanes, sets=body.sets, ports=body.ports,
-                                  size=body.size)
+                                  size=body.size, stacks=body.stacks)
             if name in modules and modules[name] is not mod:
                 raise ElabError(f.path, line, f"import: module {name} is defined twice")
             modules[name] = mod
@@ -346,6 +349,16 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         if inst.name in scope:
             raise ElabError(src, inst.line, f"{inst.name} is defined twice")
         d = min(duty, _duty(inst.params, path, inst.line, src))
+        stacked = None
+        if inst.kind == "Stack":
+            # 2.0.48: a line of cells, built as a module of its own (its head, its cells, the nets
+            # between them) and expanded like any module instance
+            stacked = inst
+            synth = _stack_module(flat, inst, path, modules, src)
+            modules[synth.name] = synth
+            inst = lang.Inst(inst.name, synth.name,
+                             {k: v for k, v in inst.params.items() if k == "duty"},
+                             inst.hints, inst.line)
         if inst.kind in modules:
             if inst.kind in stack:
                 raise ElabError(src, inst.line, f"module {inst.kind} contains itself")
@@ -366,6 +379,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                         port.size = size
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, inst.kind,
                         flat.scopes[path], inst.line, size=size, conns=inst.conns)
+            if stacked is not None:
+                node.kind, node.params = "Stack", dict(stacked.params)
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
             auto = _auto(flat, path, inst, src)
@@ -549,6 +564,10 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
             node = node.scope[part]
             used += 1
             continue
+        alias = flat.stack_alias.get(node.path, {})
+        if node.scope is not None and part in alias:     # a stack's port: its head's (2.0.48)
+            node = node.scope[alias[part]]
+            continue
         key = _join(node.path, part)
         if node.scope is None and key in flat.machines:
             return None, [key]
@@ -584,6 +603,100 @@ def _conn_direction(flat, keys, ref, item, src):
     if takes:
         return "tap"
     raise ElabError(src, ref.line, f"connection {ref}: it neither makes nor takes {item}")
+
+
+def _stack_module(flat, inst, path, modules, src):
+    """``Stack<cell=CELL, n=N, head=HEAD>`` (2.0.48, Rory 2026-10-26: "a more generic linear
+    template, with each unit programmed routed and validated like any other module ... matching
+    input and output ports on opposite sides so that it can stack linearly") -> the lang.Module it
+    is: HEAD (optional) and N cells, each a sealed instance of CELL, placed edge to edge, and for
+    each of CELL's ``stack NEAR -> FAR`` pairs one net between each cell's FAR and the next one's
+    NEAR (the head plays the cell before the first: it has a FAR port of each pair). The items flow
+    as the ports' directions say. The last cell's FAR ports are dead ends (``flat.stack_ends``),
+    and a ref ``STACK.P`` names the head's port P, or with no head the first cell's NEAR port P or
+    the last cell's FAR port P (``flat.stack_alias``)."""
+    p = inst.params
+    extra = sorted(set(p) - {"cell", "n", "head", "duty"})
+    if extra:
+        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head= and duty=, not "
+                                        f"{', '.join(extra)}")
+    cname, hname = p.get("cell"), p.get("head")
+    if not isinstance(cname, str) or cname not in modules:
+        raise ElabError(src, inst.line, f"{path} = Stack: cell= names a module, got {cname!r}")
+    if hname is not None and (not isinstance(hname, str) or hname not in modules):
+        raise ElabError(src, inst.line, f"{path} = Stack: head= names a module, got {hname!r}")
+    n = p.get("n")
+    if isinstance(n, float) and n.is_integer():
+        n = int(n)
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        raise ElabError(src, inst.line, f"{path} = Stack: n= a whole number of cells, got {n!r}")
+    cell = modules[cname]
+    if cell.size is None or not cell.stacks:
+        raise ElabError(src, inst.line, f"{path} = Stack: cell {cname} needs a size and its "
+                                        "`stack NEAR -> FAR` pairs")
+    ports = {q.name: q for q in cell.ports}
+    opposite = {"n": "s", "s": "n", "e": "w", "w": "e"}
+    sides = set()
+    for near, far, line in cell.stacks:
+        a, b = ports.get(near), ports.get(far)
+        if a is None or b is None:
+            raise ElabError(src, line, f"stack {near} -> {far}: module {cname} has no port "
+                                       f"{near if a is None else far}")
+        if opposite[a.side] != b.side or a.pos is None or a.pos != b.pos:
+            raise ElabError(src, line, f"stack {near} -> {far}: the two ports stand on opposite "
+                                       "edges at the same pinned tile (like @s3 and @n3), so one "
+                                       "cell's meets the next one's")
+        if {a.dir, b.dir} != {"in", "out"} or a.all_items != b.all_items:
+            raise ElabError(src, line, f"stack {near} -> {far}: one port in and one out, "
+                                       "carrying the same items")
+        sides.add(b.side)
+    if len(sides) != 1:
+        raise ElabError(src, inst.line, f"{path} = Stack: every FAR port of {cname} stands on one "
+                                        f"edge, so the cells stack one way (got {sorted(sides)})")
+    grow = sides.pop()
+    head = modules[hname] if hname else None
+    if head is not None:
+        hports = {q.name: q for q in head.ports}
+        for near, far, line in cell.stacks:
+            q = hports.get(far)
+            if q is None or q.side != grow or q.pos != ports[far].pos or q.dir != ports[far].dir:
+                raise ElabError(src, line, f"{path}: head {hname} needs port {far} like {cname}'s "
+                                           f"({ports[far].dir} @{grow}{ports[far].pos}): the head "
+                                           "meets the first cell as a cell before it would")
+        if head.size is None:
+            raise ElabError(src, inst.line, f"{path}: head {hname} needs a size")
+    w, h = cell.size
+    hw, hh = head.size if head is not None else (0, 0)
+    at = {"n": lambda k: (0, (n - 1 - k) * h), "s": lambda k: (0, hh + k * h),
+          "e": lambda k: (hw + k * w, 0), "w": lambda k: ((n - 1 - k) * w, 0)}[grow]
+    insts = [lang.Inst(str(k), cname, {}, {"at": (*at(k), 0)}, inst.line) for k in range(n)]
+    if head is not None:
+        hat = {"n": (0, n * h), "s": (0, 0), "e": (0, 0), "w": (n * w, 0)}[grow]
+        insts.insert(0, lang.Inst("head", hname, {}, {"at": (*hat, 0)}, inst.line))
+    nets = []
+    for near, far, _line in cell.stacks:
+        items = list(dict.fromkeys(ports[far].all_items))
+        for k in range(n):
+            prev = ("head" if head is not None else None) if k == 0 else str(k - 1)
+            if prev is None:
+                continue
+            a = lang.Ref([prev, far], False, inst.line)
+            b = lang.Ref([str(k), near], False, inst.line)
+            drv, con = (a, b) if ports[far].dir == "out" else (b, a)
+            nets.append(lang.Net(f"{far}_{k}", items, [drv], [con], inst.line))
+        flat.stack_ends.add(_join(path, str(n - 1), far))
+        if head is None:
+            flat.stack_ends.add(_join(path, "0", near))
+    alias = {}
+    if head is not None:
+        for q in head.ports:
+            alias.setdefault(q.name, "head")
+    else:
+        for near, far, _line in cell.stacks:
+            alias[near], alias[far] = "0", str(n - 1)
+    flat.stack_alias[path] = alias
+    flat.stacks[path] = (cname, n, hname)
+    return lang.Module(f"Stack:{path}", inst.line, insts=insts, nets=nets)
 
 
 def _conn_want(flat, bus, keys):
@@ -1134,7 +1247,7 @@ def _port_checks(flat):
             flat.checks.append(Check("PORT", f"port {key}",
                                      f"no net inside {port.module} uses it, so nothing carries "
                                      f"{_port_items(port)} through it", port.line))
-        if not outside and not named_out:
+        if not outside and not named_out and key not in flat.stack_ends:
             flat.checks.append(Check("PORT", f"port {key}",
                                      f"no net outside {port.scope} uses it: the interface is "
                                      "declared but not wired yet", port.line))
