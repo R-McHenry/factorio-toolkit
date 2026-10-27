@@ -60,7 +60,9 @@ def places(path):
         stem = os.path.splitext(os.path.basename(rel))[0]
         for n in names:
             files[n] = stem
-    out, notes, held = {}, [], {}
+    # 2.0.44: one file may hold several plots (14 relays of relay.fk), as place lines allowed:
+    # each is its own factory, and the flow reads the file's .fk and .fkp for each
+    out, notes = {}, []
     for inst in f.body.insts:
         if inst.kind in f.modules:
             if inst.size or f.modules[inst.kind].size:
@@ -79,15 +81,10 @@ def places(path):
             notes.append(f"{inst.name}: no frame: give its line `size WxH`, or `{stem}.fk` a size "
                          "line (a plot's rectangle is its module's size)")
             continue
-        if stem in held:
-            notes.append(f"{inst.name}: {stem}.fk already holds plot {held[stem]}; one .fk per "
-                         "plot (copy the file for a second plot)")
-            continue
         at = inst.hints.get("at")
         if at is None:
             notes.append(f"{inst.name}: no @(x, y) hint: a plot is placed at map coordinates")
             continue
-        held[stem] = inst.name
         x, y, rot = at
         out[inst.name] = surfacemod.Place(factory=inst.name, module=stem, x=int(x), y=int(y),
                                           w=int(size[0]), h=int(size[1]), rot=int(rot) % 4,
@@ -116,10 +113,12 @@ def migrate(places, surface="nauvis"):
     """The root .fk's text for a surface's ``place`` lines (``fk migrate-surface``, 2.0.43): each
     plot becomes an import of its file and one sealed instance at its map coordinates, with the
     place line's rot, gap, patch and lifecycle."""
-    imports, body, used = [], [], set()
+    imports, body, used, names = [], [], set(), {}
     for p in places.values():
-        modname = module_name(p.factory, p.module, used)
-        imports.append(f'import {modname} from "{p.module}.fk"')
+        if p.module not in names:               # one import per file, however many plots
+            names[p.module] = module_name(p.factory, p.module, used)
+            imports.append(f'import {names[p.module]} from "{p.module}.fk"')
+        modname = names[p.module]
         at = f"@({p.x}, {p.y}" + (f", rot {p.rot}" if p.rot else "") + ")"
         line = f"{p.factory} = {modname} {at} size {p.w}x{p.h}"
         if p.gap:

@@ -342,7 +342,21 @@ def _migrate_surface(a):
         was = fh.read()
     with open(sf.path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(surfacemod.migrate_text(was, rootname))
-    after = surfacemod.load(sf.path)
+    # 2.0.44: the design must give back exactly the plots the place lines gave, or nothing changes
+    try:
+        after = surfacemod.load(sf.path)
+        lost = _migrate_mismatch(sf.places, after.places)
+    except surfacemod.SurfaceError as exc:
+        after, lost = None, [str(exc)]
+    if lost:
+        with open(sf.path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(was)
+        os.remove(rootpath)
+        print(f"error: the design would not give back the place lines' plots, so nothing was "
+              f"changed:", file=sys.stderr)
+        for line in lost + (after.design_notes if after is not None else []):
+            print(f"  {line}", file=sys.stderr)
+        return 2
     print(f"migrate-surface {game}: wrote {rootname} "
           f"({len(sf.places)} plots: {', '.join(sorted(sf.places))})")
     for p in sf.places.values():
@@ -357,6 +371,21 @@ def _migrate_surface(a):
     print(f"  the design derives {len(after.places)} plots; "
           f"`fk build` reads it from now on (`place` lines no longer place anything)")
     return 0
+
+
+def _migrate_mismatch(was, now):
+    """What a migrated design's plot list loses or changes against the place lines' (2.0.44)."""
+    out = []
+    for name in sorted(set(was) | set(now)):
+        p, q = was.get(name), now.get(name)
+        if q is None:
+            out.append(f"{name}: placed by a place line, not by the design")
+        elif p is None:
+            out.append(f"{name}: placed by the design, not by a place line")
+        elif (p.module, p.x, p.y, p.w, p.h, p.rot, p.gap, p.patch, p.lifecycle) != \
+                (q.module, q.x, q.y, q.w, q.h, q.rot, q.gap, q.patch, q.lifecycle):
+            out.append(f"{name}: the design places it otherwise")
+    return out
 
 
 def _force_surface(game):

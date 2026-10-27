@@ -284,12 +284,45 @@ noat = C size 10x10
         self.write("a.fk", "# plot\n")
         self.write("c.fk", "# the second plot file\n")
         places, notes = root.places(os.path.join(self.dir, "root.fk"))
-        self.assertEqual(sorted(places), ["a"])
+        self.assertEqual(sorted(places), ["a", "a2"])       # 2.0.44: one file, two plots
         joined = " ".join(notes)
-        self.assertIn("a2: a.fk already holds plot a", joined)
         self.assertIn("inline: module Inline is declared in the root file", joined)
         self.assertIn("noframe: no frame", joined)
         self.assertIn("noat: no @(x, y) hint", joined)
+
+    def test_one_file_holds_several_plots(self):
+        # 2.0.44: run 20261021-0110 placed relay.fk 14 times; 2.0.43 kept the first and dropped
+        # the rest with a DESIGN note, so a migration lost plots
+        self.write("relay.fk", "size 6x5\n")
+        with open(self.surface_path, "a", newline="\n") as fh:
+            fh.write("place relay1 = relay plot 200,0 6x5\n"
+                     "place relay2 = relay plot 220,0 6x5 rot 1\n"
+                     "place relay3 = relay plot 240,0 6x5\n")
+        was = surface.load_game(self.dir, derive=False).places
+        code, report = self.migrate()
+        self.assertEqual(code, 0, report)
+        with open(os.path.join(self.dir, "nauvis.fk"), encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertEqual(text.count('from "relay.fk"'), 1)    # one import per file
+        now = self.design().places
+        self.assertEqual(sorted(now), sorted(was))
+        self.assertEqual([now[n].module for n in ("relay1", "relay2", "relay3")], ["relay"] * 3)
+        self.assertEqual(now["relay2"].rot, 1)
+
+    def test_a_migration_that_loses_a_plot_changes_nothing(self):
+        # a place line whose plot the design cannot give back: a dash in its name, which an
+        # instance name cannot carry, so the root file does not parse; nothing may change
+        self.write("pad.fk", "# a pad\n")
+        with open(self.surface_path, "a", newline="\n") as fh:
+            fh.write("place pad-1 = pad plot 300,0 6x6\n")
+        with open(self.surface_path, encoding="utf-8") as fh:
+            was = fh.read()
+        code, report = self.migrate()
+        self.assertEqual(code, 2, report)
+        self.assertIn("nothing was changed", report)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "nauvis.fk")))
+        with open(self.surface_path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), was)
 
     def test_the_gap_rides_on_the_plot_line(self):
         code, _out = quiet(cli.main, ["migrate-surface", self.dir])
