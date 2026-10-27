@@ -1,0 +1,101 @@
+# busbase.fk: a bus base (2.0.46). Three buses run east: circuits on top, iron, then copper. West of
+# their heads, smelting spines fill the iron and copper buses at their mouths. North of the buses,
+# spine factories take what they need off the buses by taps, each tap in front of its spine:
+#   circuits: copper and iron off the buses, cable and circuits, into the circuit bus's mouth;
+#   mall:     iron and circuits into belts, inserters, assemblers, drills and pipes, a chest each;
+#   science:  iron, copper and circuits into red and green packs.
+# Every spine is a sealed module: its own nets stay inside its frame, and it meets the buses only at
+# its ports. `fk contract busbase.fk` shows what each one takes and gives.
+
+module IronSmelt size 44x30 {
+  port plate : out iron-plate @e
+  ore   = MinerRow<n=8, resource=iron-ore> @(2, 2)
+  coal  = MinerRow<n=1, resource=coal>     @(2, 20)
+  smelt = SmelterRow<n=12, recipe=iron-plate> @(16, 12)
+  net ore_: ore -> smelt
+  net fuel: coal -> smelt
+  net out:  smelt -> plate
+}
+
+module CopperSmelt size 44x30 {
+  port plate : out copper-plate @e
+  ore   = MinerRow<n=8, resource=copper-ore> @(2, 2)
+  coal  = MinerRow<n=1, resource=coal>       @(2, 20)
+  smelt = SmelterRow<n=12, recipe=copper-plate> @(16, 12)
+  net ore_: ore -> smelt
+  net fuel: coal -> smelt
+  net out:  smelt -> plate
+}
+
+module Circuits size 36x30 {
+  port iron   : in  iron-plate         @s6
+  port copper : in  copper-plate       @s12
+  port circ   : out electronic-circuit @s30
+  cab = AsmRow<n=3, recipe=copper-cable>       @(4, 2)
+  ec  = AsmRow<n=2, recipe=electronic-circuit> @(4, 15)
+  net cu:  copper -> cab
+  net cb:  cab -> ec
+  net fe:  iron -> ec
+  net out: ec -> circ
+}
+
+module Mall size 44x26 {
+  port iron : in iron-plate         @s6
+  port circ : in electronic-circuit @s14
+  gear  = Assembler<recipe=iron-gear-wheel>       @(18, 12)
+  belt  = Assembler<recipe=transport-belt>        @(6, 4)
+  ins   = Assembler<recipe=inserter>              @(14, 4)
+  asm   = Assembler<recipe=assembling-machine-1>  @(22, 4)
+  drill = Assembler<recipe=electric-mining-drill> @(30, 4)
+  pipe  = Assembler<recipe=pipe>                  @(36, 12)
+  belt_c  = Chest<provider, limit=4> @(7, 1)
+  ins_c   = Chest<provider, limit=4> @(15, 1)
+  asm_c   = Chest<provider, limit=2> @(23, 1)
+  drill_c = Chest<provider, limit=2> @(31, 1)
+  pipe_c  = Chest<provider, limit=2> @(40, 13)
+  net fe:   iron -> gear, belt, ins, asm, drill, pipe
+  net ci:   circ -> ins, asm, drill
+  net gr:   gear -> belt, ins, asm, drill
+  net bo:   belt -> belt_c
+  net io:   ins -> ins_c
+  net ao:   asm -> asm_c
+  net do_:  drill -> drill_c
+  net po:   pipe -> pipe_c
+}
+
+module Science size 56x40 {
+  port iron   : in iron-plate         @s6
+  port copper : in copper-plate       @s12
+  port circ   : in electronic-circuit @s18
+  gears = AsmRow<n=2, recipe=iron-gear-wheel>         @(4, 2)
+  red   = AsmRow<n=5, recipe=automation-science-pack> @(14, 2)
+  insm  = Assembler<recipe=inserter>                  @(6, 16)
+  beltm = Assembler<recipe=transport-belt>            @(12, 16)
+  green = AsmRow<n=6, recipe=logistic-science-pack>   @(20, 20)
+  redbox   = Chest<provider, limit=8> @(48, 4)
+  greenbox = Chest<provider, limit=8> @(48, 22)
+  net fe:     iron -> gears, insm, beltm
+  net gr:     gears -> red, insm, beltm
+  net cu:     copper -> red
+  net ci:     circ -> insm
+  net insn:   insm -> green
+  net beltn:  beltm -> green
+  net reds:   red -> redbox
+  net greens: green -> greenbox
+}
+
+# the smelting spines, west of the buses' heads
+fe_a = IronSmelt   @(0, 0)
+fe_b = IronSmelt   @(0, 34)
+cu_a = CopperSmelt @(0, 68)
+
+# the spine factories north of the buses
+circ = Circuits @(66, 20)
+mall = Mall<duty=0.1> @(110, 24)
+sci  = Science  @(160, 10)
+
+# the buses, west to east; each tap stands in front of the spine it feeds
+cbus  = Bus<belts=1, item=electronic-circuit>(in1: circ.circ, mc: mall.circ, sc: sci.circ) @(100, 54)
+febus = Bus<belts=2, item=iron-plate>(in1: fe_a.plate, in2: fe_b.plate, ci: circ.iron,
+                                      mi: mall.iron, si: sci.iron) @(50, 60)
+cubus = Bus<belts=1, item=copper-plate>(in1: cu_a.plate, cc: circ.copper, sc2: sci.copper) @(50, 67)

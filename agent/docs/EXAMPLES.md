@@ -275,6 +275,39 @@ and 6 underground ends in all). `bus4.json` is his demo exactly as he placed it 
 (`Literal<file="bus4.json">` pastes it as it is). To grow it: make it longer, add loads and taps
 (`load=s11|s40`), and a net for each.
 
+## busbase.fk: a bus base, smelting, circuits, mall and science (209x98)
+
+Three buses run east: circuits on top (1 belt), iron (2 belts), copper (1 belt). West of their
+heads, two iron smelting spines and a copper one (drills, coal, a 12-furnace row each) fill the
+iron and copper buses at their mouths. North of the buses, three spine factories, each a sealed
+module, take what they need by taps that stand in front of their ports:
+
+- **circuits**: copper and iron off the buses, 3 cable and 2 circuit assemblers, into the circuit
+  bus's mouth;
+- **mall**: iron and circuits into belts, inserters, assemblers, drills and pipes, a chest each
+  with a slot limit, so each maker stops when its chest is full;
+- **science**: iron, copper and circuits into 30 red and 30 green packs a minute.
+
+```
+cbus  = Bus<belts=1, item=electronic-circuit>(in1: circ.circ, mc: mall.circ, sc: sci.circ) @(100, 54)
+febus = Bus<belts=2, item=iron-plate>(in1: fe_a.plate, in2: fe_b.plate, ci: circ.iron,
+                                      mi: mall.iron, si: sci.iron) @(50, 60)
+cubus = Bus<belts=1, item=copper-plate>(in1: cu_a.plate, cc: circ.copper, sc2: sci.copper) @(50, 67)
+```
+
+Built on the lab (2.0.46): 43 nets routed in under a second, 1995 entities, all of them standing.
+After the mall's chests fill, science runs at the model's rates (30 red and 30 green a minute),
+circuits at 30 a minute, and the smelters slow down as the buses fill. `fk contract busbase.fk`:
+
+```
+circ: out electronic-circuit 2.0/s via cbus mouth in1 (got 0.6) | in copper-plate 0.8/s via cubus tap n28 (got 0.8) | ...
+fe_a: out iron-plate 3.8/s via febus mouth in1 (got 2.1)
+sci: in electronic-circuit 0.5/s via cbus tap n78 (got 0.5) | in copper-plate 0.5/s via cubus tap n122 (got 0.5) | ...
+```
+
+To grow it: add a spine north of the buses and an entry for each port it takes from, in order
+along the bus; a new item gets a bus of its own, fed by the spine that makes it.
+
 ## robot-feed.fk: the kit's robots back into a roboport (12x8)
 
 The robots the kit starts with, and the ones a build takes up with a roboport, sit in a storage

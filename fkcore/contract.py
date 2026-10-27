@@ -21,7 +21,9 @@ def _where(flat, key):
     if m is not None:
         kind, at = m.extra.get("port"), m.extra.get("at")
         if kind in ("load", "tap", "mouth"):
-            return f"bus {'mouth' if m.extra.get('mouth') else kind} {at}"
+            # 2.0.46: the bus by its own name ("bus tap n7" for a bus called bus, "febus mouth
+            # in1" where a base has several)
+            return f"{m.inst} {'mouth' if m.extra.get('mouth') else kind} {at}"
     port = flat.ports.get(key)
     if port is not None:
         return f"port {port.name}"
@@ -65,7 +67,16 @@ def contract(flat, model=None):
             via = ", ".join(_where(flat, k) for k in partners) or "nothing"
             got = _net_rate(model, both, item, "delivered")
             if port.dir == "out":
-                want = _net_rate(model, both, item, "can_make")
+                # 2.0.46: what the module's own makers put through the port, at full speed and as
+                # solved; a net a bus pool absorbed (an out port into a mouth or a load) has no
+                # delivered or can_make of its own, so the nets' rows read 0.0 there
+                makers = [k for n in inside if n in flat.nets for k, _i in flat.nets[n].drivers
+                          if k != key and k in flat.machines and not flat.machines[k].extra.get("port")]
+                if makers:
+                    want = sum(flat.machines[k].makes.get(item, 0.0) for k in makers)
+                    got = sum(model.rate(k, item) for k in makers)
+                else:
+                    want = _net_rate(model, both, item, "can_make")
                 parts.append(f"out {item} {want:.1f}/s via {via} (got {got:.1f})")
             else:
                 want = _net_rate(model, both, item, "would_take")

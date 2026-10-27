@@ -242,7 +242,9 @@ class Bus4Test(unittest.TestCase):
         self.assertEqual(rates.underfed(a), rates.underfed(b))
         self.assertEqual(sorted({c.code for c in hand.checks}),
                          sorted({c.code for c in mapped.checks}))
-        self.assertEqual(mapped.insts["bus"].params["tap"], ["n7", "n13"])
+        # 2.0.46: the gears' tap in front of them (x 30, north of the bus); the box stands south
+        # of the bus, so its tap keeps the packed place after the gears' band
+        self.assertEqual(mapped.insts["bus"].params["tap"], ["n30", "n36"])
         self.assertEqual(mapped.insts["bus"].params["mouth"], ["in1"])
 
 

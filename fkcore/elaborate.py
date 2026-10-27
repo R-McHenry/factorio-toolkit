@@ -586,11 +586,66 @@ def _conn_direction(flat, keys, ref, item, src):
     raise ElabError(src, ref.line, f"connection {ref}: it neither makes nor takes {item}")
 
 
+def _conn_want(flat, bus, keys):
+    """Where along ``bus`` (its own x, from its head) a connection's endpoint stands, from the
+    placement hints, or None (2.0.46). A port of a sealed sibling module: its tile's coordinate along
+    the bus (a port on the side facing up the bus is that side's coordinate, one along it the
+    module's middle); a template sibling: its head. Only a bus running east or south (rot 0 or 1),
+    and siblings in its own scope that stand beside it on its staircases' side (north of a bus
+    running east, east of one running south), are placed this way; anything else keeps the packed
+    order, so a bus never grows into something standing in line with it.
+
+    Rory, 2026-10-26: a bus base, with its spine factories spread along the bus. The list packed
+    every staircase at the head, so each spine's plates ran back along the bus to it."""
+    at = bus.hints.get("at") if bus.hints else None
+    if at is None or int(at[2]) % 4 not in (0, 1):
+        return None
+    axis = int(at[2]) % 4                       # 0: the bus runs east (x), 1: south (y)
+    head = at[0] if axis == 0 else at[1]
+    scope = bus.path.rsplit("/", 1)[0] if "/" in bus.path else ""
+    got = []
+    for key in keys:
+        if key in flat.ports:
+            port = flat.ports[key]
+            inst = flat.insts.get(port.scope)
+            side = port.side
+        else:
+            path = key.rsplit("/", 1)[0]
+            while path and path not in flat.insts:
+                path = path.rsplit("/", 1)[0] if "/" in path else ""
+            inst, side = flat.insts.get(path), None
+        if inst is None or (inst.path.rsplit("/", 1)[0] if "/" in inst.path else "") != scope:
+            continue
+        hint = inst.hints.get("at") if inst.hints else None
+        if hint is None:
+            continue
+        x, y, rot = int(hint[0]), int(hint[1]), int(hint[2]) % 4
+        w, h = inst.size if inst.size is not None and rot % 2 == 0 else \
+            inst.size[::-1] if inst.size is not None else (1, 1)
+        if axis == 0 and y + h > int(at[1]) or axis == 1 and x < int(at[0]) + 1:
+            continue                            # not beside the bus on its staircases' side
+        lo = x if axis == 0 else y
+        if inst.size is not None and side is not None and rot == 0:
+            w, h = inst.size
+            n = w if axis == 0 else h
+            first, last = ("w", "e") if axis == 0 else ("n", "s")
+            pinned = flat.ports[key].pos if key in flat.ports else None
+            lo += 0 if side == first else n - 1 if side == last else \
+                pinned if pinned is not None else n // 2
+        got.append(lo - int(head))
+    return min(got) if got else None
+
+
 def _bus_conns(flat, cat):
     """A Bus's connection list (2.0.32, PLAN-MODULES §4): the named entries are nets, written in port
     order. Direction comes from the netlist — an out port or a maker is a load, an in port or a taker
     is a tap — the staircases take their positions from the order (each band clears the one before by
     two tiles), `length` follows, and a tap written before any load is an ``ORDER`` line."""
+    shared = {}                                 # scope -> how many of its buses have a mouth
+    for path, inst in flat.insts.items():
+        if any(c.startswith("in") and c[2:].isdigit() for c, _r, _k in inst.conns or ()):
+            key = path.rsplit("/", 1)[0] if "/" in path else ""
+            shared[key] = shared.get(key, 0) + 1
     for path, inst in list(flat.insts.items()):
         if not inst.conns:
             continue
@@ -628,25 +683,27 @@ def _bus_conns(flat, cat):
                     raise ElabError(flat.path, ref.line,
                                     f"connection {cname}: a {ckind} kind is for a tap, and this one "
                                     f"is a {kind} (a load is dual; a mouth is a belt end)")
-            kinds.append((cname, ref, kind, ckind))
-        upstream = any(k == "mouth" for _c, _r, k, _t in kinds)  # a mouth is at the head: always first
-        for cname, ref, kind, _t in kinds:
+            kinds.append((cname, ref, kind, ckind, _conn_want(flat, inst, keys)))
+        upstream = any(k == "mouth" for _c, _r, k, _t, _w in kinds)  # a mouth is at the head: first
+        for cname, ref, kind, _t, _w in kinds:
             if kind in ("load", "mouth"):
                 upstream = True
             elif not upstream:
                 flat.checks.append(Check("ORDER", f"bus {path}",
                                          f"{cname} is a tap before any load: nothing upstream feeds "
                                          "the bus there", ref.line))
+        # 2.0.46: a staircase stands where its endpoint stands along the bus (``_conn_want``), never
+        # before the band ahead of it, so the list order is still the order along the bus
         bound, placed = 1, []
-        for cname, ref, kind, tkind in kinds:
+        for cname, ref, kind, tkind, want in kinds:
             if kind == "mouth":
                 placed.append((cname, ref, kind, None, tkind))
                 continue
             if kind == "tap":
-                x = bound + 2 + belts
+                x = max(bound + 2 + belts, want if want is not None else 0)
                 band = (x - belts, x)
             else:
-                x = bound + 2
+                x = max(bound + 2, want if want is not None else 0)
                 band = (x, x + belts)
             placed.append((cname, ref, kind, x, tkind))
             bound = band[1]
@@ -681,6 +738,11 @@ def _bus_conns(flat, cat):
         for cname, ref, kind, _x, _t in placed:
             if kind == "mouth":
                 port = lang.Ref([bus, cname], False, ref.line)
+                if shared.get(scope, 0) > 1:
+                    # 2.0.46: several buses of one scope have mouths (each its own in1): every
+                    # mouth's net is named by its bus then (febus_in1, febus_in2), and a single
+                    # bus keeps the plain names
+                    cname = f"{bus}_{cname}"
                 net = lang.Net(cname, [item], [ref], [port], ref.line)
             elif kind == "load":
                 li += 1

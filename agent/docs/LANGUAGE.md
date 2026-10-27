@@ -224,8 +224,12 @@ bus = Bus<belts=4, item=iron-plate>(
 
 - A name that is `in1..in{belts}` is a **mouth**: the bus's own belt end at the head, fed in line.
 - Every other entry is a staircase: a maker (or an `out` port) loads, a taker (or an `in` port)
-  taps. Its position follows the list order, with the staircases spaced as the bus needs; `length`
-  follows.
+  taps. It stands **in front of what it connects to**: a sealed module's port (at its pin, or the
+  module's middle), or a row's head. It never stands before the staircase written ahead of it, so
+  the list order is still the order along the bus; `length` follows. Every staircase is on the
+  bus's north side (as written at rot 0), so put the spines on that side.
+- Several buses may each have mouths (an `in1` each): every mouth's net is then named by its bus
+  (`febus_in1`, `febus_in2`), and a single bus keeps the plain `in1`.
 - `left NAME: …` and `right NAME: …` before the entry's name choose the tap kind (2.0.34): `dual` is
   the belt strap, two lanes, 15/s; `left` is a lone underground exit at the stub, `right` an
   underground entrance with its exit one row out, each one lane, 7.5/s, both delivering on the left.

@@ -62,9 +62,11 @@ class ContractTest(unittest.TestCase):
     def test_every_rib_has_its_in_and_out(self):
         lines = lines_of(BASE.replace("RATE", "16"))
         self.assertEqual(len(lines), 4)
-        for i, line in enumerate(lines):
+        # 2.0.46: each tap in front of its rib's west port (ribs at x 2, 22, 42, 62; the bus at 10),
+        # the first two held back by the band before them
+        for i, (line, tap) in enumerate(zip(lines, (7, 13, 32, 52))):
             self.assertTrue(line.startswith(f"rib{i}: "), line)
-            self.assertIn(f"in iron-plate 2.0/s via bus tap n{7 + 6 * i} (got 2.0)", line)
+            self.assertIn(f"in iron-plate 2.0/s via bus tap n{tap} (got 2.0)", line)
             self.assertIn(f"out iron-gear-wheel 1.0/s via box{i}/c0 (got 1.0)", line)
 
     def test_a_starved_rib_shows_what_it_got(self):
@@ -87,7 +89,7 @@ class ContractTest(unittest.TestCase):
         lines = lines_of(text)
         self.assertEqual(len(lines), 4)
         self.assertIn("via bus tap n7 (got 2.0)", lines[0])
-        self.assertIn("via bus tap n25 (got 2.0)", lines[3])
+        self.assertIn("via bus tap n52 (got 2.0)", lines[3])     # 2.0.46: in front of rib3
 
 
 if __name__ == "__main__":
