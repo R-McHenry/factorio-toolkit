@@ -1,6 +1,9 @@
-# world.fk: your base, one plot (nauvis.fk places it and gives its size; 0,0 here is its top-left).
-# It is 2000x2000 tiles, and the starter kit and the plant stand just west of its west edge: the
-# ground will not run out, so build where the ore is.
+# world.fk: your base, one plot: 2000x2000 tiles (nauvis.fk places it; 2000,2000 here is the map
+# corner at 999,999, so a map tile x,y is this file's x+1000, y+1000).
+#
+# The reactor and its pole line (plant.fk) and the starter kit the kickoff puts down (kit.fk) stand
+# inside this plot from the start, as the world's own furniture: the design declares them, so they
+# are yours to build around, extend or take up. Everything else you add here is your base.
 #
 # Build each factory as a sealed module: `module NAME size WxH { ... }` with `port` lines on its
 # edges. Its own belts stay inside its frame; the belts between factories are nets written here,
@@ -12,3 +15,8 @@
 # the pair when you leave them on two belts).
 # A factory used in several places (or a big one) can live in a file of its own:
 #   import Smelting from "smelting.fk"
+import Plant from "plant.fk"
+import Kit from "kit.fk"
+
+plant = Plant @(966, 961)      # the reactor and its poles, at map -34,-39
+kit   = Kit @(1000, 1000)      # the kit: chests, roboport, panels, accumulators, poles at map 0,0

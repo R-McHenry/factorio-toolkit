@@ -11,8 +11,9 @@ RUN_DIR gets:
   docs/                TOOLKIT.md, LANGUAGE.md, EXAMPLES.md (agent/docs)
   bin/fk.cmd, fk.py    the agent's one command (agent/)
   .toolkit/fkcore/     the toolkit at SHA (git archive): the design steps run on the laptop
-  game/                the game codebase (kickoff/template/game): the surface, the build script,
-                       the plant
+  game/                the game codebase (kickoff/template/game): the world design (one plot),
+                       the surface, the build script, the base's file with the reactor and the kit
+                       in it
   helpers/             the player's reusable features (kickoff/template/helpers, 1.7: Rory,
                        2026-10-21, helpers grow as a library, not a pile of one-off scripts)
   run.json             where the game is: host, host_game, host_toolkit, the toolkit's sha, the

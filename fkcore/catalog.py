@@ -8,7 +8,9 @@ and the few base-game facts the fixture does not carry (``FUEL_USE_W``, ``FUEL_V
 instance instead of opening the fixture itself. 2.0 added to the six inserters' rows the values
 read from the game (2.0.77, docs/LAB-LANES-20261020.md "Prototype values"): ``rotation_speed``,
 ``extension_speed``, ``bulk``, ``stack_size_bonus`` (the stack inserter's own +4 hand) and
-``filter_count``, which the lane graph rates them by.
+``filter_count``, which the lane graph rates them by. 2.0.51 added the two prototypes the starter
+kit needs now that the kit is part of a run's design (``solar-panel`` 3x3, ``accumulator`` 2x2,
+sizes read from the live game's own entities: their bounding boxes on the run's map).
 
 Fluid boxes (``fluidboxes.json``, read from the game over RCON, 2.0.77, see its ``source``):
 every fluid prototype's boxes and pipe connections per direction, and per crafting machine and

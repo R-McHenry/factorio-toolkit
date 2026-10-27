@@ -13,7 +13,7 @@ tier            minimize --allow yellow   # belt tier per lane: --allow yellow,r
 report_rates                              # again, routed: the lanes and inserters as laid (CAPACITY)
 cover robots                              # roboports over the logistic chests (before power)
 cover power     --pole any                # medium poles where the network can build them, else small: the coverage step picks (no ghost the network cannot build)
-floorplan       --bridge-power any        # plots + shared infra (a pole bridge of the same kind), compose
+floorplan                                 # the plot composed: one surface, one owner of every tile
 report_checks                             # invariants + warnings, connectivity of every net
 diff            --scope stale             # what stands there now, against the design (the game)
 report_bom      --stock live              # still to build vs the network's stock and research (LOW_STOCK, LOCKED)

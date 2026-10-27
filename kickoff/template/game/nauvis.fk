@@ -1,11 +1,6 @@
-# nauvis.fk: the world design. Each plot is a module placed at map coordinates; its size is its
-# ground. The plant runs from the start. Your base is the world plot: 2000x2000 tiles, so you will
-# never reach its edge; build every factory inside it, in world.fk.
-import Plant from "plant.fk"
+# nauvis.fk: the world design. One plot: your base, 2000x2000 tiles, from map -1000,-1000 to
+# 999,999. The reactor, its pole line and the starter kit stand inside it (world.fk declares them),
+# so nothing else owns a tile: build anywhere, and grow the base out from the kit.
 import World from "world.fk"
 
-plant = Plant @(-34, -39) size 17x16        # the nuclear plant, running from the start
-world = World @(26, -1000) size 2000x2000   # your base: from the kit's east side, 2000 tiles out
-# The world plot starts at x 26 because a plot may not overlap another plot or hold the world's own
-# shared infrastructure: the plant stands at -34,-39, its pole bridge runs to 5,7, and the starter
-# kit's claim and roboport are at 2,6..25,27 and 8,8. Everything west of 26 belongs to them.
+world = World @(-1000, -1000) size 2000x2000

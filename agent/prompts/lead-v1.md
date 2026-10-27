@@ -107,14 +107,14 @@ out. Growing the base is adding the next piece and repeating.
 - `docs\LANGUAGE.md` describes the factory language
 - `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
   growing, power, rebuilds): reasons, not rules, so use what fits your map
-- `game\nauvis.fk` is the world design: it places every plot on the map (the plant and the base,
-  `world`), each plot's ground on its line; the base's plot is 2000x2000 tiles, so its edge never
-  constrains a layout, and the plant and the kit stand just west of it
-- `game\nauvis.surface` holds what is true of the world itself: the ground, the starter kit's claim
-  and the alerts
+- `game\nauvis.fk` is the world design: one plot, the base (`world`, `game\world.fk`), 2000x2000
+  tiles from map -1000,-1000, so its edge never constrains a layout (a map tile x,y is the file's
+  x+1000, y+1000)
+- `game\nauvis.surface` holds what is true of the world itself: the ground and the alerts
 
-The nuclear plant is already a plot in the world design (`plant`), and the starter kit is a claim:
-build around them.
+The reactor and its pole line (`game\plant.fk`) and the starter kit (`game\kit.fk`) are declared in
+`world.fk` as the world's own: they stand on the base's ground from the first build, they are the
+players' to build around, and nothing has to be kept out of the plot's tiles.
 
 ## You're free to just build
 

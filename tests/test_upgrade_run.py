@@ -80,7 +80,9 @@ class PolesTest(unittest.TestCase):
         from fkcore import flow
         opts = {ln.cmd: ln.args for ln in flow.parse(text, TEMPLATE)}
         self.assertIn("any", opts["cover_power"])
-        self.assertIn("any", opts["floorplan"])
+        # 2.0.51: the template's world is one plot, and the plant's own pole line is in its design,
+        # so floorplan has no bridge to lay; `_pole` still upgrades a run that has one
+        self.assertEqual(opts["floorplan"], [])
 
     def test_a_named_pole_becomes_any(self):
         old = ("route           --only stale --effort normal\n"

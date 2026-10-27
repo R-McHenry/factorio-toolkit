@@ -9,6 +9,10 @@ rules), changed for V1:
 - **no plant paste here.** The plant is a factory of the run's game codebase (a Literal, the same
   world positions), so the run's first ``fk build`` pastes it with everything else and robots
   build it from the kit, like any factory.
+- **the kit is in the design** (2.0.51). The bootstrap and the six chests below are exactly the
+  entities ``kickoff/template/game/kit.fk`` declares (``kit.json``), and the plant and its pole line
+  are ``plant.fk``'s: the run's one plot owns them, so nothing inside it belongs to the surface. The
+  first build finds them standing and keeps them; what it adds is the rest of the design.
 
 Steps, each one RCON call (``fkcore.link``: 5 s, nothing registered):
 

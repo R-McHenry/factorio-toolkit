@@ -13,13 +13,13 @@ fk build                             # the paste
 fk look 68,-42 88,-22
 ```
 
-A factory goes in `world.fk`, your base's plot (`nauvis.fk` places it: 2000x2000 tiles, so the
-ground is not the limit). It can have a plot of its own instead: `import Gears from "gears.fk"` and
+A factory goes in `world.fk`, your base's file: one plot, 2000x2000 tiles, so the ground is not the
+limit. It can have a plot of its own instead: `import Gears from "gears.fk"` and
 `gears = Gears @(70, -40) size 16x16` in `nauvis.fk`, at map coordinates, and it keeps its own
 `.fkp`. `size WxH` is the factory's frame; the size in each heading below is what its rows take.
 
-The first three together, on plots next to each other, give 9 nets, all routed and connected, 0
-LEAK. Their power joins the plant's grid (`floorplan --bridge-power`).
+The first three together, next to the kit (whose grid the reactor feeds), give 9 nets, all routed
+and connected, 0 LEAK.
 
 **The current way, and the older examples.** The newest examples build a base the way the
 toolkit now works best: every factory a sealed module with ports, joined by belts between its

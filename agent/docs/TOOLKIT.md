@@ -491,7 +491,6 @@ terrain  map                                  # map.terrain.json: the bare groun
 catalog  base
 design   nauvis.fk                            # the plots, from the world design
 
-claim kit box 2,6 23,21 "the starter kit"     # a claim: keep it, never build over it
 watch plots:      keep                        # something placed by hand in a plot: kept, listed
 watch sanctioned: mark 2h                     # ... outside every plot: marked for two hours
 notify   nearby                               # alerts for what is built: nearby, all or off
@@ -500,11 +499,9 @@ target automation-science-pack 10/min         # a rate the whole surface should 
 
 ```
 # nauvis.fk: the world design
-import Plant from "plant.fk"
 import World from "world.fk"
 
-plant = Plant @(-34, -39) size 17x16          # the nuclear plant, running from the start
-world = World @(30, -100) size 300x260        # your base: its factories are in world.fk
+world = World @(-1000, -1000) size 2000x2000  # your base, and the only plot there is
 ```
 
 Every top-level sealed instance of `nauvis.fk` is a **plot**: the instance's name is the factory's
@@ -514,10 +511,15 @@ ground. `gap N`, `retired`, `temporary until ...` and `@patch(resource)` go on t
 they went on a `place` line. `design` wins over `place` lines: while it is there, a plot is an
 instance and a `place` line names nothing.
 
+A plot owns every tile inside it, and a plot may not overlap another or hold the surface's own
+buildings: that is why a template gives a new run **one** plot and declares what stands inside it.
+The starter kit (`kit.fk`, a `Literal` of the kickoff's own entities) and the reactor with its pole
+line (`plant.fk`) are part of the world design, so they are the plot's, and the ground is free for
+the base's own factories.
+
 A factory's own `@(x, y)` positions are inside its plot: (0, 0) is the plot's top-left corner.
 Plots never overlap. A plot can be moved by changing its `@(x, y)` alone: the build takes up what
-stood on the old ground. A plot laid over the power bridge (the poles between factories) takes its
-poles, and `floorplan --bridge-power` lays the bridge again around the plots.
+stood on the old ground.
 
 Without a `design` line the older form still works, one plot per line:
 

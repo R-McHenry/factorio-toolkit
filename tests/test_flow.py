@@ -419,10 +419,9 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})   # outside the scope: kept
 
     def test_the_kickoff_template_runs_through_the_routed_rates(self):
-        # every new run's script (tier, then report_rates again) on its plant, a Literal with
-        # fluids, and a first factory of drills into furnaces; on paper (no terrain read).
-        # The template's plots are its world design (nauvis.fk), so the factory goes in
-        # game\world.fk, the plot the base owns, and no `place` line can add one.
+        # every new run's script (tier, then report_rates again) on the template as it ships: one
+        # plot with the reactor, its pole line and the kit inside it, and a first factory of drills
+        # into furnaces east of the kit; on paper (no terrain read).
         kick = os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game")
         game = os.path.join(self.dir, "kick")
         shutil.copytree(kick, game)
@@ -435,11 +434,11 @@ class FlowTest(unittest.TestCase):
                 fh.write(text.replace(old, new))
         with open(os.path.join(game, "nauvis.surface"), encoding="utf-8") as fh:
             self.assertIn("design   nauvis.fk", fh.read())       # the plots are the world design
-        with open(os.path.join(game, "world.fk"), "w", encoding="utf-8", newline="\n") as fh:
-            fh.write("ore   = MinerRow<n=4, resource=iron-ore> @(6, 2)\n"
-                     "smelt = SmelterRow<n=4, recipe=iron-plate> @(6, 16)\n"
-                     "coal  = Chest<requester, item=coal, rate=1/s> @(30, 16)\n"
-                     "box   = Chest<provider, limit=4> @(30, 30)\n"
+        with open(os.path.join(game, "world.fk"), "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("\nore   = MinerRow<n=4, resource=iron-ore> @(1030, 1000)\n"
+                     "smelt = SmelterRow<n=4, recipe=iron-plate> @(1030, 1016)\n"
+                     "coal  = Chest<requester, item=coal, rate=1/s> @(1054, 1016)\n"
+                     "box   = Chest<provider, limit=4> @(1054, 1030)\n"
                      "net ore: ore -> smelt\nnet fuel: coal -> smelt\nnet plates: smelt -> box\n")
         code, ctx = flow.run(os.path.join(game, "nauvis.build.fkb"), to="report_checks", cat=CAT,
                              echo=lambda _line: None)
@@ -447,12 +446,15 @@ class FlowTest(unittest.TestCase):
         with open(os.path.join(game, "out", "report_rates.txt"), encoding="utf-8") as fh:
             rates_txt = fh.read()
         self.assertEqual(rates_txt.count("# report_rates"), 2)
-        self.assertIn("routed plant (V2: the lanes and inserters as laid)", rates_txt)
+        # one plot, so the reactor and the kit are part of `world`, not factories of their own
+        self.assertNotIn("rates plant (", rates_txt)
         self.assertRegex(rates_txt, r"routed world \(V2[^\n]*the machines settled in \d+ rounds")
         self.assertRegex(rates_txt, r"\n  smelt +1\.000 +1\.000 +1\.000  as nominal\n")
         with open(os.path.join(game, "out", "route.txt"), encoding="utf-8") as fh:
             self.assertIn("world: 3 routed, 0 kept (0 pinned from the committed .fkp), 0 failed",
                           fh.read())
+        with open(os.path.join(game, "out", "floorplan.txt"), encoding="utf-8") as fh:
+            self.assertIn("1 plots", fh.read())                 # the base's plot, and no other
         with open(os.path.join(game, "out", "tier.txt"), encoding="utf-8") as fh:
             self.assertIn("tier minimize (allowed: yellow)", fh.read())
 

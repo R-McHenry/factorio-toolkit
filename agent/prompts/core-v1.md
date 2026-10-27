@@ -8,11 +8,13 @@ enjoys seeing it come together.
 A fresh map with a working start:
 
 - a roboport at spawn with 50 construction and 50 logistic robots (speed and cargo upgrade 1)
-- solar panels and accumulators, and a nuclear plant that is already built and running (it idles at
-  temperature when nothing needs power, which is normal)
+- solar panels and accumulators, and a nuclear reactor that is already built and running (it idles at
+  temperature when nothing needs power, which is normal). The reactor and its pole line are part of
+  your base's design (`game\plant.fk`), so its power is on your grid from the first build
 - six starter chests by the roboport: burner mining drills (they mine on coal, no power needed),
   roboports, assemblers, poles, logistic chests, belts, undergrounds, splitters, inserters, pipes,
-  plates, ore, coal and stone
+  plates, ore, coal and stone. They are part of the design too (`game\kit.fk`): they stand where
+  they stand, and the supplies in them are yours to take
 - electronics and steam power already researched
 
 Everything after that, you make: robots build what you plan, and the factory you design feeds itself.
@@ -38,14 +40,14 @@ repeating.
 - `docs\LANGUAGE.md` describes the factory language
 - `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
   growing, power, rebuilds): reasons, not rules, so use what fits your map
-- `game\nauvis.fk` is the world design: it places every plot on the map, and they are the plant and
-  your base (`world`, `game\world.fk`). Your plot is 2000x2000 tiles, so its edge will never be in
-  your way: the plant and the starter kit stand just west of it, and you build where the ore is
-- `game\nauvis.surface` holds what is true of the world itself: the ground, the starter kit's
-  claim, and the alerts
+- `game\nauvis.fk` is the world design: one plot, your base (`world`, `game\world.fk`), 2000x2000
+  tiles covering map -1000,-1000 to 999,999, so its edge will never be in your way. A map tile x,y
+  is the file's x+1000, y+1000
+- `game\nauvis.surface` holds what is true of the world itself: the ground and the alerts
 
-The nuclear plant is already a plot in your world design (`plant`), and the starter kit is a claim:
-build around them.
+Your base already holds the reactor and its pole line (`game\plant.fk`) and the starter kit
+(`game\kit.fk`), declared in `world.fk` as the world's own: they are on your grid, they are yours to
+build around, extend or take up, and they are why there is nothing to keep out of your ground.
 
 ## You're free to just build
 

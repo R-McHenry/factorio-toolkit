@@ -1,3 +1,56 @@
 fkp 1 factory world
-size 0x0
+size 1022x1021
+inst kit/kit Literal box=0,0,30,30 file=kit.json at 1000,1000 rot 0 sig abd6ba6ce9
+inst plant/bridge Literal box=-22,-22,8,10 file=plant-w3.json at 978,978 rot 0 sig 2ccc653e3f
+inst plant/reactor Literal box=-34,-39,-17,-23 file=plant-w3.json at 966,961 rot 0 sig 4ee679e1e0
 cover power power pole=medium-electric-pole
+e kit/kit/accumulator0 accumulator 1021,1015 N
+e kit/kit/accumulator1 accumulator 1021,1019 N
+e kit/kit/medium-electric-pole0 medium-electric-pole 1008.5,1011.5 N
+e kit/kit/medium-electric-pole1 medium-electric-pole 1010.5,1014.5 N
+e kit/kit/medium-electric-pole2 medium-electric-pole 1014.5,1014.5 N
+e kit/kit/medium-electric-pole3 medium-electric-pole 1010.5,1018.5 N
+e kit/kit/medium-electric-pole4 medium-electric-pole 1014.5,1018.5 N
+e kit/kit/medium-electric-pole5 medium-electric-pole 1021.5,1013.5 N
+e kit/kit/medium-electric-pole6 medium-electric-pole 1021.5,1017.5 N
+e kit/kit/roboport0 roboport 1008,1008 N
+e kit/kit/solar-panel0 solar-panel 1008.5,1015.5 N
+e kit/kit/solar-panel1 solar-panel 1012.5,1015.5 N
+e kit/kit/solar-panel2 solar-panel 1016.5,1015.5 N
+e kit/kit/solar-panel3 solar-panel 1008.5,1019.5 N
+e kit/kit/solar-panel4 solar-panel 1012.5,1019.5 N
+e kit/kit/solar-panel5 solar-panel 1016.5,1019.5 N
+e kit/kit/storage-chest0 storage-chest 1002.5,1008.5 N
+e kit/kit/storage-chest1 storage-chest 1003.5,1008.5 N
+e kit/kit/storage-chest2 storage-chest 1004.5,1008.5 N
+e kit/kit/storage-chest3 storage-chest 1002.5,1009.5 N
+e kit/kit/storage-chest4 storage-chest 1003.5,1009.5 N
+e kit/kit/storage-chest5 storage-chest 1004.5,1009.5 N
+e plant/bridge/medium-electric-pole0 medium-electric-pole 978.5,978.5 N
+e plant/bridge/medium-electric-pole1 medium-electric-pole 983.5,983.5 N
+e plant/bridge/medium-electric-pole2 medium-electric-pole 988.5,988.5 N
+e plant/bridge/medium-electric-pole3 medium-electric-pole 993.5,993.5 N
+e plant/bridge/medium-electric-pole4 medium-electric-pole 998.5,998.5 N
+e plant/bridge/medium-electric-pole5 medium-electric-pole 1003.5,1003.5 N
+e plant/bridge/medium-electric-pole6 medium-electric-pole 1005.5,1007.5 N
+e plant/reactor/heat-exchanger0 heat-exchanger 975,969.5 E
+e plant/reactor/inserter0 inserter 968.5,967.5 E net=plant/reactor/hand0
+e plant/reactor/inserter1 inserter 968.5,968.5 W net=plant/reactor/hand1 config='{"control_behavior":{"circuit_condition":{"comparator":"<","constant":550,"first_signal":{"name":"signal-T","type":"virtual"}},"circuit_enabled":true}}' wire=1,nuclear-reactor0,1
+e plant/reactor/iron-chest0 iron-chest 967.5,967.5 N
+e plant/reactor/medium-electric-pole0 medium-electric-pole 971.5,966.5 N
+e plant/reactor/medium-electric-pole1 medium-electric-pole 976.5,971.5 N
+e plant/reactor/nuclear-reactor0 nuclear-reactor 971.5,969.5 N config='{"control_behavior":{"read_temperature":true,"temperature_signal":{"name":"signal-T","type":"virtual"}}}'
+e plant/reactor/offshore-pump0 offshore-pump 974.5,962.5 N
+e plant/reactor/pipe0 pipe 974.5,963.5 N net=plant/reactor/fluid0
+e plant/reactor/pipe1 pipe 974.5,964.5 N net=plant/reactor/fluid0
+e plant/reactor/pipe2 pipe 974.5,965.5 N net=plant/reactor/fluid0
+e plant/reactor/pipe3 pipe 974.5,966.5 N net=plant/reactor/fluid0
+e plant/reactor/pipe4 pipe 974.5,967.5 N net=plant/reactor/fluid0
+e plant/reactor/pipe5 pipe 976.5,967.5 N net=plant/reactor/fluid1
+e plant/reactor/pipe6 pipe 976.5,968.5 N net=plant/reactor/fluid1
+e plant/reactor/pipe7 pipe 976.5,969.5 N net=plant/reactor/fluid1
+e plant/reactor/pipe8 pipe 976.5,970.5 N net=plant/reactor/fluid1
+e plant/reactor/requester-chest0 requester-chest 967.5,968.5 N config='{"request_filters":{"sections":[{"filters":[{"comparator":"=","count":20,"index":1,"max_count":50,"name":"uranium-fuel-cell","quality":"normal"}],"index":1}],"trash_not_requested":true}}'
+e plant/reactor/roboport0 roboport 978,974 N config='{"request_filters":{"sections":[{"index":1}]}}'
+e plant/reactor/steam-turbine0 steam-turbine 979.5,967.5 E
+e plant/reactor/steam-turbine1 steam-turbine 979.5,970.5 E
