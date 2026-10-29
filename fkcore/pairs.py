@@ -85,7 +85,8 @@ def joins(grid, left, right, pair, ends=(), most=_JOINS):
     da = [routemod._walk(grid, s) for s in _seeds(grid, left, "drivers") if s]
     db = [routemod._walk(grid, s) for s in _seeds(grid, right, "drivers") if s]
     dc = [routemod._walk(grid, s) for s in _seeds(grid, pair, "consumers") if s]
-    if not da or not db or not dc:
+    # a lane pin's empty side (2.0.54) asks only that its tile be free, for the stub
+    if (not da and left.drivers()) or (not db and right.drivers()) or not dc:
         return []
     ends = set(ends)
     rows = []
@@ -151,18 +152,43 @@ def route(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=No
                       "free tiles on all four sides, reached from both nets' drivers and every "
                       "consumer")
     why = None
-    for hub, h in cands[:_TRIES]:
-        got = _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans, allow)
-        if isinstance(got, str):
-            why = why or f"join {hub[0]},{hub[1]} {'NESW'[h]}: {got}"
-            continue
-        return got
-    return None, f"none of {min(len(cands), _TRIES)} joins routes; first: {why}"
+    # 2.0.54: a net's own two groups (or a lane pin's one) try every ranked join, each group laid
+    # first in turn: the one laid first can wall the other off its side
+    one = job.wide or job.pin
+    tries = len(cands) if one else _TRIES
+    for hub, h in cands[:tries]:
+        for flip in ((False, True) if one else (False,)):
+            got = _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
+                        allow, flip)
+            if isinstance(got, str):
+                why = why or f"join {hub[0]},{hub[1]} {'NESW'[h]}: {got}"
+                continue
+            return _one_net(cat, job, *got) if one else got
+    return None, f"none of {min(len(cands), tries)} joins routes; first: {why}"
+
+
+def _one_net(cat, job, laid, text):
+    """A net on both lanes (2.0.54, ``route._widen``): its two groups' carriers are the net's own
+    (``X``, the lanes their drops fall on), the route on from the join both its lanes (``X|X``)."""
+    net = job.net
+    on = fkpmod.pair_net(net, net) if job.wide else \
+        fkpmod.pair_net(net, "") if job.pin == "L" else fkpmod.pair_net("", net)
+    for e in laid:
+        lane = cat.has_entity(e.name) and cat.kind(e.name) in fkpmod.LANE_TYPES
+        local = e.key.rsplit("/", 1)[1]
+        e.attrs["net"] = on if lane and local[:1] not in "lrz" else net
+    left, right = job.parts[0].net, job.parts[1].net
+    text = text.replace(f"({left} on the left lane, {right} on the right)",
+                        "(a group of drivers onto each lane)" if job.wide else
+                        f"(onto its {'left' if job.pin == 'L' else 'right'} lane, lane {job.pin})")
+    return laid, text.replace(f"{left}:", "left group:").replace(f"{right}:", "right group:")
 
 
 def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
-          allow=frozenset()):
-    """The three parts through join ``hub`` heading ``h``: -> (carriers, text) or a reason."""
+          allow=frozenset(), flip=False):
+    """The three parts through join ``hub`` heading ``h``: -> (carriers, text) or a reason.
+    ``flip``: B's part laid before A's. A part with no driver (a lane pin's empty side, 2.0.54)
+    lays one empty belt into the join instead, the stub that makes it a side-load."""
     left, right, pair = job.parts
     lt, rt = _step(hub, (h + 3) % 4), _step(hub, (h + 1) % 4)
     back, ahead = _step(hub, (h + 2) % 4), _step(hub, h)
@@ -177,7 +203,17 @@ def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
     sub = {k: v for k, v in js.items() if k != job.net}
     sub.update({a.net: a, b.net: b, both.net: both})
     laid, how, now = [], {}, list(ents)
-    for part, prefix in ((a, "l"), (b, "r"), (both, "")):
+    order = ((b, "r"), (a, "l"), (both, "")) if flip else ((a, "l"), (b, "r"), (both, ""))
+    for part, prefix in order:
+        if part is not both and not part.drivers():
+            side = lt if part is a else rt
+            into = (h + 1) % 4 if part is a else (h + 3) % 4
+            stub = fkpmod.Entity(f"~{job.net}/z0", "transport-belt", side[0] + 0.5,
+                                 side[1] + 0.5, into * 4, {"net": job.net})
+            laid.append(stub)
+            now.append(stub)
+            how[part.net] = "an empty stub belt"
+            continue
         got, text = routemod._route_one(cat, part, now, frames, sub, box, limit, terrain, avoid,
                                         spans, allow)
         if got is None:

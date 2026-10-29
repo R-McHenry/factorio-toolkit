@@ -132,8 +132,20 @@ class BothLaneTest(unittest.TestCase):
         self.assertEqual([c for c in checks if c.code == "too-thin" and c.where.startswith("port")],
                          [])                      # a both-lane port carries the 15/s it is asked
 
-    def test_a_one_lane_port_is_rated_at_one_lane(self):
+    def test_an_unpinned_port_is_as_wide_as_its_belt(self):
+        # 2.0.54: written one item, but the two-sided row fills both lanes inside it, so it
+        # carries the 15/s
         flat, _lay, r = build(ONE_LANE)
+        self.assertEqual(r.failed, {})
+        rr = routed.solve(flat, r.layout, CAT)
+        _lines, checks = routed.report(rr)
+        self.assertEqual([c for c in checks if c.code == "too-thin" and c.where.startswith("port")],
+                         [])
+
+    def test_a_port_pinned_to_one_lane_is_rated_at_one_lane(self):
+        pinned = ONE_LANE.replace("out iron-ore @e", "out iron-ore @e4L") \
+                         .replace("in iron-ore @w", "in iron-ore @w4L")
+        flat, _lay, r = build(pinned)
         self.assertEqual(r.failed, {})
         rr = routed.solve(flat, r.layout, CAT)
         _lines, checks = routed.report(rr)

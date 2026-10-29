@@ -8,7 +8,8 @@
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
-    net     := 'net' name ('items' item (',' item)*)? 'limited'? ':' refs '->' refs ('when' cond)?
+    net     := 'net' name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
+               'limited'? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
@@ -191,6 +192,8 @@ class Net:
     line: int
     limited: bool = False  # the source says each maker on it is limited (silences CLOG only)
     when: Cond | None = None   # a gated net: its route's inserters move items while it holds
+    width: int = 1         # 2.0.54: the lanes it takes, 1 or 2 (both lanes of one belt)
+    lane: str | None = None    # 2.0.54: the lane (L or R) its items are on where it ends
 
 
 @dataclass
@@ -631,13 +634,26 @@ class _P:
             items = [self.word("item").text]
             while self.accept(","):
                 items.append(self.word("item").text)
+        width = 1
+        if self.accept("width"):
+            tok = self.peek()
+            width = self.number()
+            if width not in (1, 2):
+                self.err(f"width {width}: a net takes 1 lane or 2 (both lanes of a belt); "
+                         "more is 2.1's buses", tok)
+        lane = None
+        if self.accept("lane"):
+            tok = self.word("lane")
+            if tok.text not in ("L", "R"):
+                self.err(f"lane {tok.text}: a lane is L or R (looking downstream)", tok)
+            lane = tok.text
         limited = self.accept("limited") is not None
         self.expect(":")
         drivers = self.refs()
         self.expect("->")
         consumers = self.refs()
         when = self.cond() if self.accept("when") else None
-        return Net(name, items, drivers, consumers, line, limited, when)
+        return Net(name, items, drivers, consumers, line, limited, when, width, lane)
 
     def lanes(self):
         line = self.expect("lanes").line

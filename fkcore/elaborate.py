@@ -85,6 +85,8 @@ class FlatNet:
     limited: bool = False      # `net NAME limited:` the source limits its makers (1.7)
     when: tuple | None = None  # a gated net (2.0): (lang.Cond, its scope)
     scope: str = ""            # the path of the body it is written in (2.0.28)
+    width: int = 1             # 2.0.54, `net NAME width 2:` both lanes of one belt
+    lane: str | None = None    # 2.0.54, `net NAME lane L:` its lane where it ends on a belt
 
     @property
     def sushi(self):
@@ -290,6 +292,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _resolve_nets(flat, cat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
+    _width_checks(flat, cat)
     _recorded_ports(flat, layout)
     _port_checks(flat)
     _endpoint_checks(flat, cat)
@@ -1002,7 +1005,8 @@ def _resolve_nets(flat, cat):
         flat.nets[name] = FlatNet(name, w["items"], w["drivers"], w["consumers"],
                                   p.net.items is not None, p.net.line,
                                   getattr(p.net, "limited", False),
-                                  None if when is None else (when, p.scope), p.scope)
+                                  None if when is None else (when, p.scope), p.scope,
+                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None))
     flat._out_hold, flat._in_hold = out_hold, in_hold
 
 
@@ -1040,6 +1044,9 @@ def _resolve_lanes(flat, cat):
             if any(cat.is_fluid(i) for i in flat.nets[name].items):
                 raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} is a "
                                 "fluid's, and pipes have no lanes")
+            if flat.nets[name].width > 1:
+                raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} is "
+                                "width 2, both lanes of its belt, so it shares a belt with none")
             if name in flat.lane_of:
                 raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} "
                                 f"already shares a belt ({flat.lane_of[name]}), and a belt has "
@@ -1047,6 +1054,37 @@ def _resolve_lanes(flat, cat):
         key = f"{a}|{b}"
         flat.pairs[key] = (a, b)
         flat.lane_of[a] = flat.lane_of[b] = key
+
+
+def _width_checks(flat, cat):
+    """``width 2`` (2.0.54) where it can't give a second lane: a fluid's net (pipes have no
+    lanes), and a net with one driver whose belt carries one lane (anything but a two-sided
+    MinerRow, which fills both): the router side-loads two drivers onto the two lanes."""
+    for name, net in flat.nets.items():
+        if net.lane is not None:
+            why = ("it is a fluid's: pipes have no lanes"
+                   if net.items and all(cat.is_fluid(i) for i in net.items) else
+                   "it is width 2, on both lanes" if net.width > 1 else
+                   f"it shares a belt ({flat.lane_of[name]}), whose lanes say where it goes"
+                   if name in flat.lane_of else None)
+            if why:
+                flat.checks.append(Check("width", f"net {name}", f"lane {net.lane} does "
+                                         f"nothing: {why}", net.line))
+        if net.width < 2:
+            continue
+        if net.items and all(cat.is_fluid(i) for i in net.items):
+            flat.checks.append(Check("width", f"net {name}", "width 2 on a fluid's net: pipes "
+                                     "have no lanes, so it is one pipe", net.line))
+            continue
+        insts = list(dict.fromkeys(flat.machines[k].inst for k, _i in net.drivers))
+        if len(insts) == 1:
+            inst = flat.insts.get(insts[0])
+            two_sided = inst is not None and inst.kind == "MinerRow" and len(inst.machines) > 1
+            if not two_sided:
+                flat.checks.append(Check(
+                    "width", f"net {name}",
+                    f"width 2 with one driver, {insts[0]}: its belt brings one lane, and the "
+                    "second lane comes from a second driver side-loaded onto it", net.line))
 
 
 def _items_text(items):

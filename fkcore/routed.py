@@ -526,7 +526,11 @@ def port_capacity(r, where=""):
     is a second lane (``item | item``) or a second port.
 
     2.0.48: a port is an edge and lays no belt, so its lanes are those of the belt on the tile
-    just inside its edge (the module's own route, where every item through the port passes)."""
+    just inside its edge (the module's own route, where every item through the port passes).
+
+    2.0.54: a port is as wide as that belt carries its item: both lanes there make it a
+    both-lane port, written ``item | item`` or not (the width comes from the layout). A port
+    pinned to a lane (``@e4L``) stays that one lane: the pin is the promise."""
     flat, lg, need = r.flat, r.lg, r.need or {}
     out = []
     edges = getattr(flat, "_port_edges", None) or {}
@@ -545,7 +549,8 @@ def port_capacity(r, where=""):
         unit = lg.nodes[lanes[0]].cap
         what = TIER_WORD.get(lg.nodes[lanes[0]].name, lg.nodes[lanes[0]].name)
         for item in dict.fromkeys(port.all_items):
-            width = port.width_of(item)
+            on = [nid for nid in lanes if (need.get(nid) or {}).get(item, 0.0) > 1e-6]
+            width = port.width_of(item) if port.lane else max(port.width_of(item), len(on))
             cap = unit * width
             req = sum((need.get(nid) or {}).get(item, 0.0) for nid in lanes)
             if req <= cap + 1e-6:

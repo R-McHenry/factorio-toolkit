@@ -131,6 +131,9 @@ class NetJob:
     anchors: dict = field(default_factory=dict)    # "<inst>.<role>" -> what the route is laid to
     parts: tuple = ()                              # two nets on one belt: (A, B, both) jobs
     straight: bool = False                         # a stack cell's net: a straight run first
+    wide: bool = False                             # 2.0.54: one net on both lanes (its parts)
+    pin: str | None = None                         # 2.0.54: the lane it ends on (L or R)
+    drv: list = field(default_factory=list)        # [(start or source, instance path)]
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
@@ -252,6 +255,8 @@ def jobs(flat, lay, cat) -> dict:
                     rect = (min(t[0] for t in ts), min(t[1] for t in ts),
                             max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
                     (job.sources if side == "out" else job.taps).append((key, rect))
+                    if side == "out":
+                        job.drv.append(((key, rect), path))
                     mine.append((side, key, rect))
                 job.owners.append(f"{path}.{role}")
                 continue
@@ -259,6 +264,7 @@ def jobs(flat, lay, cat) -> dict:
             tile = (math.floor(x), math.floor(y))
             if side == "out":
                 job.starts.append(((tile[0] + _DX[h], tile[1] + _DY[h]), h))
+                job.drv.append((job.starts[-1], path))
                 mine.append((side, job.starts[-1]))
             else:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
@@ -267,6 +273,7 @@ def jobs(flat, lay, cat) -> dict:
     if getattr(flat, "pairs", None):
         from . import pairs
         pairs.merge(flat, out)
+    _widen(flat, cat, out)
     for net, job in out.items():
         if job.skip is not None or job.fluid:
             continue
@@ -725,6 +732,111 @@ def _settle_leaves(cat, laid, ents, also=frozenset(), allow=frozenset()):
     return out
 
 
+# -- one net on both lanes (2.0.54) ----------------------------------------------------------------
+def _lane_cap(cat):
+    from .lanes import lane_rate
+    return lane_rate(cat, "transport-belt")
+
+
+def _flow(flat, fn):
+    """What a net carries at full speed: what its drivers make of its items, or what its consumers
+    take where that is less. A sink without a rate (a chest) takes what one fast inserter hands
+    it: a mall's products into one chest are one inserter's worth, whatever the makers make."""
+    from .lanes import inserter_rate
+    made = sum(flat.machines[k].makes.get(i, 0.0) for k, i in fn.drivers)
+    taken, sinks = 0.0, set()
+    for k, i in fn.consumers:
+        m = flat.machines[k]
+        if i in m.needs:
+            taken += m.needs[i]
+        elif m.drain is not None:
+            taken += m.drain
+        elif m.extra.get("port"):
+            taken = float("inf")              # a bus's load or mouth: a whole belt end
+        else:
+            sinks.add(k)
+    taken += len(sinks) * inserter_rate("fast-inserter")
+    return min(made, taken)
+
+
+def _driver_rate(flat, fn, entry, path):
+    """What one driver end of a net puts on it: a machine's own product, or every machine of the
+    instance whose belt starts there."""
+    items = set(fn.items)
+    if isinstance(entry[0], str):                         # a machine driver: (key, rect)
+        m = flat.machines.get(entry[0])
+        return sum(r for i, r in (m.makes.items() if m else ()) if i in items)
+    keys = flat.insts[path].machines if path in flat.insts else ()
+    return sum(r for k in keys if k in flat.machines
+               for i, r in flat.machines[k].makes.items() if i in items)
+
+
+def _halves(flat, fn, job, cap):
+    """The net's drivers in two groups, one a lane: split along the axis they spread on, where the
+    two groups' rates come closest. None when one driver alone fills a lane (a two-sided MinerRow:
+    a side-load would squeeze its two lanes onto one)."""
+    rows = []
+    for entry, path in job.drv:
+        if isinstance(entry[0], str):
+            r = entry[1]
+            at = ((r[0] + r[2]) / 2, (r[1] + r[3]) / 2)
+        else:
+            at = entry[0]
+        rows.append((at, _driver_rate(flat, fn, entry, path), entry))
+    if len(rows) < 2 or any(rate > cap + 1e-9 for _a, rate, _e in rows):
+        return None
+    xs, ys = [a[0] for a, _r, _e in rows], [a[1] for a, _r, _e in rows]
+    axis = 0 if max(xs) - min(xs) >= max(ys) - min(ys) else 1
+    rows.sort(key=lambda row: (row[0][axis], row[0][1 - axis]))
+    total = sum(rate for _a, rate, _e in rows)
+    best, run = None, 0.0
+    for i in range(1, len(rows)):
+        run += rows[i - 1][1]
+        gap = abs(total - 2 * run)
+        if best is None or gap < best[0] - 1e-9:
+            best = (gap, i)
+    i = best[1]
+    return [e for _a, _r, e in rows[:i]], [e for _a, _r, e in rows[i:]]
+
+
+def _widen(flat, cat, js):
+    """A net on both lanes of its belt (``width 2``, or a flow above one lane) with two or more
+    drivers: its job is a pair of itself (``fkcore.pairs``): the drivers in two groups, chosen from
+    where they stand, each side-loaded onto its own lane at a join, then one route of both lanes
+    to every consumer (Rory, 2026-10-28: the router picks the grouping; nothing prescribes it)."""
+    cap = _lane_cap(cat)
+    for net, job in list(js.items()):
+        fn = flat.nets.get(net)
+        if fn is None or job.parts or job.fluid or job.skip or not job.drivers() or \
+                not job.consumers() or net in getattr(flat, "lane_of", {}):
+            continue
+        pin = fn.lane if fn.width < 2 else None
+        if pin is None and (job.drivers() < 2 or
+                            fn.width < 2 and _flow(flat, fn) <= cap + 1e-9):
+            continue
+        if pin is not None:
+            # `lane L` (2.0.54): every driver onto that side of the join, an empty stub on the
+            # other, so the join is a side-load and its items run on that lane to the end
+            every = [entry for entry, _path in job.drv]
+            halves = (every, []) if pin == "L" else ([], every)
+        else:
+            halves = _halves(flat, fn, job, cap)
+        if halves is None:
+            continue
+        parts = []
+        for side, group in zip("lr", halves):
+            part = NetJob(f"{net}.{side}")
+            for entry in group:
+                (part.sources if isinstance(entry[0], str) else part.starts).append(entry)
+            parts.append(part)
+        both = NetJob(net, goals=list(job.goals), taps=list(job.taps), owners=list(job.owners))
+        wide = NetJob(net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
+                      sources=list(job.sources), owners=list(job.owners),
+                      anchors=dict(job.anchors), parts=(parts[0], parts[1], both),
+                      wide=pin is None, pin=pin, drv=list(job.drv))
+        js[net] = wide
+
+
 def _near_box(job, box, margin=None):
     """The box a net is searched in first (2.0.45): its own ends and machines plus ``_NEAR``
     tiles and a quarter of their extent, inside ``box``. None when that is ``box`` already.
@@ -758,7 +870,17 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
         got, how = _route_in(cat, job, ents, frames, js, near, limit, terrain, avoid, spans, allow)
         if got is not None:
             return got, how
-    return _route_in(cat, job, ents, frames, js, box, limit, terrain, avoid, spans, allow)
+    got, how = _route_in(cat, job, ents, frames, js, box, limit, terrain, avoid, spans, allow)
+    if got is not None or not (job.wide or job.pin):
+        return got, how
+    # 2.0.54: no join routes, so the net goes on as one lane, the way it went before
+    plain = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
+                   sources=list(job.sources), owners=list(job.owners), anchors=dict(job.anchors))
+    got, text = _route_one(cat, plain, ents, frames, js, box, limit, terrain, avoid, spans, allow)
+    if got is None:
+        return None, how
+    what = "both lanes" if job.wide else f"lane {job.pin}"
+    return got, f"{text}; one lane: no join for {what} routes ({how})"
 
 
 def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
@@ -986,6 +1108,24 @@ def _serving(g, net, drivers, consumers, keys):
     up = set().union(*fwd.values())
     down = set().union(*bwd.values())
     return {k for k in keys if k in up and k in down}
+
+
+def _is_stub(e):
+    """A lane pin's stub (2.0.54, ``fkcore.pairs``): one empty belt into the side of its join,
+    keyed ``~<net>/z<k>``. It carries nothing and serves no end, and it is what makes the join a
+    side-load: without it the belt into the join would be a turn, which keeps its lanes."""
+    return e.key.rsplit("/", 1)[-1][:1] == "z"
+
+
+def _serving_only(flat, cat, job, ents, laid):
+    """``laid`` less what serves no end (a tail past its last pickup): the rule a rebuild keeps a
+    committed route by (``_patch_net``), so the next build keeps this one as it stands."""
+    g = connectmod.graph(list(ents) + list(laid), cat, _ports(flat))
+    table = connectmod.endpoints(flat)
+    keep = _serving(g, job.net, *_ends_of(flat, table, job, g, routed=False),
+                    {e.key for e in laid})
+    out = [e for e in laid if e.key in keep or _is_stub(e)]
+    return out if out else laid
 
 
 def _common(sets):
@@ -1400,6 +1540,7 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     if leak is not None:
         return None, f"what stands of its route would SPILL: {leak.text}"
     kept = [e for e in old if e.key in serve]
+    kept += [e for e in old if _is_stub(e) and e.key not in serve and kept]   # a lane pin's join
     p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
     p.used |= mine
     new_c, new_d = set(), set()
@@ -1644,6 +1785,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             if got is None:
                 failed[net] = why
                 continue
+            if js[net].wide or js[net].pin:
+                got = _serving_only(flat, cat, js[net], ents, got)
             added[net] = got
             how[net] = why
             ents += got

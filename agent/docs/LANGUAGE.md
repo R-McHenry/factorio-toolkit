@@ -130,6 +130,15 @@ share, below): the drivers put items on it, the consumers take them.
 - A machine is on at most one net per item and direction.
 - Several drivers merge onto the net; several consumers split off it. The router lays the
   splitters.
+- **Both lanes** (2.0.54): a net that carries more than one lane (7.5/s on yellow) is laid on both
+  lanes of its belt, 15/s. The router splits its drivers into two groups by where they stand and
+  side-loads each group onto its own lane at a join, then runs both lanes to every consumer: 24
+  furnaces in a row put 15 plates/s on one yellow belt. `net NAME width 2:` asks for it outright.
+  One driver brings one lane (its belt's), except a two-sided MinerRow; when no join fits, the net
+  goes on one lane and the route report says so.
+- **The lane it ends on**: `net NAME lane L:` (or `R`) puts the net's items on that lane, looking
+  downstream, where it ends on a belt (a row's input belt, a port, a bus). Into a machine by an
+  inserter the lane does nothing: an inserter takes from both.
 
 ## Two nets on one belt: `lanes`
 
@@ -226,7 +235,8 @@ module GearRib size 16x10 {
   them. A crossing anywhere but a port is a `crosses-frame` line. The module's
   internals are the module's own: a parent change never re-routes them (the same carriers, key for
   key, just moved), and `fk explain rib` shows both the template line and its plain entities.
-- Width: in 2.0 a port is one lane (7.5/s); the two-lane pair is 2.1's multi-lane nets.
+- Width: a port is as wide as the belt just inside it carries its item: both lanes there make it
+  a both-lane port (15/s on yellow), written `item | item` or not.
 
 ### The bus's connection list
 
