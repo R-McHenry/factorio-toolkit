@@ -41,6 +41,9 @@ A machine with no slots (assembling-machine-1, burner furnaces) or too many modu
 elaboration. The slots are a table in `fkcore/templates.py` (`MODULE_SLOTS`), since the catalog has
 none. Beacons are not modelled: a beacon is still a Literal.
 
+`fk lab` puts the requested modules straight into their slots (no robot flies on the lab), as it
+stocks requester chests: `modules put in: 16` in its report.
+
 ## Your own templates
 
 LANGUAGE.md now calls the template table "the built-in kinds", a starting kit, and says first that

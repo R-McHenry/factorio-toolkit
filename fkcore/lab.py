@@ -234,13 +234,14 @@ def lua_supply(box):
     """Power, the requesters' items and burners' first coal for what stands in ``box`` (lab rules:
     free materials). A requester chest is filled with what it asks for, its slots shared among
     the items: a request is about a minute's worth, which the lab's first run used up before a
-    measure (the gears example, 2026-10-22). Run again, it tops them up. -> JSON {power,
-    stocked, fuel}."""
+    measure (the gears example, 2026-10-22). Run again, it tops them up. The paste's item
+    requests (2.0.53: a machine's ``modules=``) go straight into their slots, since no robot
+    flies there. -> JSON {power, stocked, fuel, modules}."""
     x0, y0, x1, y1 = box
     return f"""
 local s, f = game.get_surface('{SURFACE}'), '{FORCE}'
 local area = {{{{{x0}, {y0}}}, {{{x1}, {y1}}}}}
-local out = {{power = nil, stocked = {{}}, fuel = 0}}
+local out = {{power = nil, stocked = {{}}, fuel = 0, modules = 0}}
 if s.count_entities_filtered{{area = area, name = 'electric-energy-interface'}} == 0 then
   for _, p in pairs(s.find_entities_filtered{{area = area, type = 'electric-pole'}}) do
     for dx = -3, 3 do for dy = -3, 3 do
@@ -285,6 +286,22 @@ for _, e in pairs(s.find_entities_filtered{{area = area}}) do
   if ok and inv and inv.is_empty() then
     inv.insert{{name = 'coal', count = 5}}
     out.fuel = out.fuel + 1
+  end
+end
+for _, p in pairs(s.find_entities_filtered{{area = area, name = 'item-request-proxy'}}) do
+  local t = p.proxy_target
+  if t and t.valid then
+    for _, plan in pairs(p.insert_plan or {{}}) do
+      for _, at in pairs((plan.items and plan.items.in_inventory) or {{}}) do
+        local inv = t.get_inventory(at.inventory)
+        local slot = inv and inv[at.stack + 1]
+        if slot and slot.set_stack{{name = plan.id.name, count = at.count or 1,
+                                   quality = plan.id.quality or 'normal'}} then
+          out.modules = out.modules + (at.count or 1)
+        end
+      end
+    end
+    p.destroy()
   end
 end
 rcon.print(helpers.table_to_json(out))
@@ -335,7 +352,8 @@ def build(r, game, name, src=None, size=None, cat=None):
         stocked = {}
     lines.append(f"  power: {'an energy interface at ' + got['power'] if got.get('power') not in (None, 'already') else got.get('power') or 'no pole to put an energy interface beside'}"
                  f"; requesters stocked: {', '.join(f'{n} {k}' for n, k in sorted(stocked.items())) or 'none'}"
-                 f"; burners given a first load: {got.get('fuel', 0)}")
+                 f"; burners given a first load: {got.get('fuel', 0)}"
+                 + (f"; modules put in: {got['modules']}" if got.get("modules") else ""))
     lines.append(f"  next: let it run a minute or two, then `fk lab {name} --measure 60`; Rory sees "
                  f"it with /lab at {x + w // 2},{y + h // 2}")
     return lines
