@@ -142,8 +142,14 @@ def asm_row(n, recipe, inputs, outputs, machine="assembling-machine-1", counter=
     return ents, roles, (3 * n, (in3_y if three else out_y) + 1)
 
 
+#: furnaces 3x3 wide: a SmelterRow of them is laid as an AsmRow is, at pitch 3, ore in, plates out
+_BIG_FURNACES = ("electric-furnace",)
+
+
 def smelter_row(n, recipe, inputs, outputs, machine="stone-furnace", fuel=None):
     inputs = _inputs(inputs, "SmelterRow")
+    if machine in _BIG_FURNACES:          # 2.0.53: no fuel, so one belt in (two for a sushi row)
+        return asm_row(n, recipe, inputs, outputs, machine)
     two = len(inputs) == 2
     shift = 0 if two else -1
     in2_y, in1_y, feed_y = 0, 1 + shift, 2 + shift

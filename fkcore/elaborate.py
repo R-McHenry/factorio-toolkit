@@ -287,7 +287,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._port_named = {}
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     _bus_conns(flat, cat)
-    _resolve_nets(flat)
+    _resolve_nets(flat, cat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
     _recorded_ports(flat, layout)
@@ -874,7 +874,31 @@ def _bus_conns(flat, cat):
             flat.nets[full] = _Pending(net, scope, flat.path)
 
 
-def _resolve_nets(flat):
+def _fluids_taken(flat, p, cat):
+    """A net with no ``items`` whose drivers make more than one fluid (an advanced-oil refinery,
+    a cracking plant): a pipe holds one fluid, so the net takes the fluids its consumers take, and
+    what else the drivers make stays free for the other nets (2.0.53; FRICTION 2026-11-02). None
+    when that changes nothing."""
+    try:
+        drivers = [k for ref in p.net.drivers
+                   for k in _resolve(flat, ref, p.scope, side="driver", src=p.src)[1]]
+        consumers = [k for ref in p.net.consumers
+                     for k in _resolve(flat, ref, p.scope, side="consumer", src=p.src)[1]]
+    except ElabError:
+        return None                     # the main pass reports it
+    if any(k not in flat.machines for k in drivers + consumers):
+        return None                     # a port: its items are the interface's
+    made = list(dict.fromkeys(i for k in drivers for i in flat.machines[k].makes))
+    fluids = [i for i in made if cat.is_fluid(i)]
+    if len(fluids) < 2:
+        return None
+    taken = [i for i in fluids if any(i in flat.machines[k].needs for k in consumers)]
+    if not taken or len(taken) == len(fluids):
+        return None
+    return [i for i in made if not cat.is_fluid(i) or i in taken]
+
+
+def _resolve_nets(flat, cat):
     pending = list(flat.nets.items())
     work = {}
     out_hold, in_hold = {}, {}
@@ -895,7 +919,7 @@ def _resolve_nets(flat):
             f"{port.dir} {_port_items(port)}", ref.line))
 
     for name, p in pending:
-        work[name] = {"items": list(p.net.items) if p.net.items else None,
+        work[name] = {"items": list(p.net.items) if p.net.items else _fluids_taken(flat, p, cat),
                       "drivers": [], "consumers": []}
 
     def add_drivers(name, p, ref, free_only):
@@ -1332,7 +1356,8 @@ def _endpoint_checks(flat, cat):
         for (key, item), nets in hold.items():
             if len(nets) > 1:
                 flat.checks.append(Check("two-nets", key, f"{item} ({side}) is on {len(nets)} "
-                                         "nets: " + ", ".join(nets)))
+                                         "nets: " + ", ".join(nets) + f". Name each net's items "
+                                         f"(`net {nets[0]} items {item}: ...`) so one carries it"))
     fed = {key for key, _item in in_hold}
     unfed, unconsumed = [], []
     for key, m in flat.machines.items():

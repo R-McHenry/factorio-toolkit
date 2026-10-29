@@ -1,0 +1,21 @@
+# furnace-column.fk: electric furnaces as a stack of your own cells (2.0.53). A cell is one
+# electric furnace between two belts: the ore runs up the west belt through every cell, the plates
+# come back down the east one. No coal, and each furnace takes two modules. Change the cell and
+# every furnace in the column changes with it; n= is how many.
+module FurnaceCell size 7x3 {
+  port ore_in  : in  iron-ore   @s0
+  port ore_out : out iron-ore   @n0
+  port pl_in   : in  iron-plate @n6
+  port pl_out  : out iron-plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=iron-plate, machine=electric-furnace, modules=productivity-module> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+ore = MinerRow<n=6, resource=iron-ore> @(10, 0, rot 2)
+col = Stack<cell=FurnaceCell, n=8>     @(10, 12)
+box = Chest<provider>                  @(30, 40)
+
+net ore_:   ore -> col.ore_in
+net plates: col.pl_out -> box

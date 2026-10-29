@@ -29,7 +29,18 @@ INF = float("inf")
 #: straight holds at most N; ``guard``: its input inserters carry only what its recipe takes.
 CIRCUIT_PARAMS = ("keep", "fill", "guard")
 #: Parameters every instance may carry; the elaborator reads them, the templates ignore them.
-COMMON_PARAMS = ("duty", "inserter") + CIRCUIT_PARAMS
+COMMON_PARAMS = ("duty", "inserter", "modules") + CIRCUIT_PARAMS
+#: 2.0.53, ``modules=``: the module slots of the machines that take them (Factorio 2.0), and each
+#: module's effect on speed and productivity (normal quality; efficiency changes no rate).
+MODULE_SLOTS = {"assembling-machine-2": 2, "assembling-machine-3": 4, "electric-furnace": 2,
+                "chemical-plant": 3, "oil-refinery": 3, "centrifuge": 2,
+                "electric-mining-drill": 3, "pumpjack": 2}
+MODULE_EFFECTS = {"speed-module": (0.2, 0.0), "speed-module-2": (0.3, 0.0),
+                  "speed-module-3": (0.5, 0.0),
+                  "productivity-module": (-0.05, 0.04), "productivity-module-2": (-0.10, 0.06),
+                  "productivity-module-3": (-0.15, 0.10),
+                  "efficiency-module": (0.0, 0.0), "efficiency-module-2": (0.0, 0.0),
+                  "efficiency-module-3": (0.0, 0.0)}
 #: Items that pass by contact, with no carrier (2.0): a reactor heats the exchanger it touches.
 #: A net of only these has no route; it is connected when its machines touch.
 CONTACT = frozenset({"heat"})
@@ -585,4 +596,34 @@ def machines(kind, params, cat):
         fn = TEMPLATES[kind]
     except KeyError:
         raise TemplateError(f"unknown template {kind}") from None
-    return fn(params, cat)
+    out = fn(params, cat)
+    if params.get("modules") is not None:
+        out = with_modules(out, params["modules"])
+    return out
+
+
+def with_modules(specs, modules):
+    """``modules=speed-module`` fills every slot of each machine; ``modules=a|b`` names them slot by
+    slot. A machine's needs and makes scale with the modules' speed, its makes with their
+    productivity; ``extra["modules"]`` is the list the paste requests (``expand``). The machines
+    with no slots (an assembling-machine-1, a burner furnace, a chest) are left as they are."""
+    words = [str(w) for w in (modules if isinstance(modules, list) else [modules])]
+    for w in words:
+        if w not in MODULE_EFFECTS:
+            raise TemplateError(f"modules={w}: not a module (speed-module, productivity-module, "
+                                "efficiency-module, or their -2 / -3)")
+    slotted = [s for s in specs if MODULE_SLOTS.get(s.prototype)]
+    if not slotted:
+        raise TemplateError(f"modules={'|'.join(words)}: {specs[0].prototype if specs else 'it'} has "
+                            "no module slots (" + ", ".join(sorted(MODULE_SLOTS)) + " have)")
+    for s in slotted:
+        slots = MODULE_SLOTS[s.prototype]
+        mods = words * slots if len(words) == 1 else words
+        if len(mods) > slots:
+            raise TemplateError(f"modules={'|'.join(words)}: {s.prototype} has {slots} slots")
+        speed = max(0.2, 1 + sum(MODULE_EFFECTS[m][0] for m in mods))
+        prod = 1 + sum(MODULE_EFFECTS[m][1] for m in mods)
+        s.needs = {i: r * speed for i, r in s.needs.items()}
+        s.makes = {i: r * speed * prod for i, r in s.makes.items()}
+        s.extra = dict(s.extra, modules=list(mods))
+    return specs

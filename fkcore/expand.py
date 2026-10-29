@@ -436,6 +436,7 @@ def fragment_of(flat, path, cat):
         if inst.kind == "SmelterArray":
             params["_per"] = _array_column(cat, m0)
         frag = fragment(inst.kind, params, [b[1] for b in ins], [b[1] for b in outs])
+        _row_modules(frag, flat, path, cat)
     binding = {}
     names_in = [r for r in frag.roles if frag.roles[r].side == "in"]
     names_out = [r for r in frag.roles if frag.roles[r].side == "out"]
@@ -444,6 +445,35 @@ def fragment_of(flat, path, cat):
     for name, (net, _items) in zip(names_out, outs):
         binding[name] = net
     return frag, binding
+
+
+#: the module inventory of each machine kind, as the paste's ``items`` names it (2.0)
+_MODULE_INVENTORY = {"assembling-machine": 4, "furnace": 4, "mining-drill": 2, "lab": 3,
+                     "beacon": 1}
+
+
+def _module_fields(m, cat):
+    """``modules=`` (``templates.with_modules``) as the paste's item requests: robots bring the
+    modules and put them in the machine's slots (Codex's lab run, 2026-10-28)."""
+    mods = m.extra.get("modules")
+    if not mods:
+        return {}
+    inv = _MODULE_INVENTORY.get(cat.kind(m.prototype), 4)
+    per = {}
+    for slot, name in enumerate(mods):
+        per.setdefault(name, []).append({"inventory": inv, "stack": slot, "count": 1})
+    return {"items": [{"id": {"name": name, "quality": "normal"},
+                       "items": {"in_inventory": spots}} for name, spots in per.items()]}
+
+
+def _row_modules(frag, flat, path, cat):
+    """A row's machines get their modules' requests, as a single machine's do (``_machine_attrs``)."""
+    for e in frag.entities:
+        m = flat.machines.get(f"{path}/{e.local}")
+        if e.role is None and m is not None:
+            fields = _module_fields(m, cat)
+            if fields:
+                e.attrs["config"] = config_text(fields)
 
 
 def _row_hands(inst):
@@ -514,6 +544,9 @@ def _single(flat, keys, cat, ins, outs):
     w, h = cat.size(m.prototype)
     local = keys[0].rsplit("/", 1)[1]
     attrs = _machine_attrs(m)
+    fields = _module_fields(m, cat)
+    if fields:
+        attrs["config"] = config_text(fields)
     ents = [FEnt(local, m.prototype, w / 2, h / 2, _facing(m, cat), None, attrs)]
     roles = {}
     for i, (_net, items) in enumerate(ins):

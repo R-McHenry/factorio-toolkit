@@ -355,6 +355,30 @@ On the lab (2.0.49): 223 entities, every inserter powered, sulfur on the left la
 right, the chest holding packs only. Without the filter, `feed-rides-on` says the sulfur would fill the
 packs' chest and stop the belt.
 
+## furnace-column.fk: electric furnaces, a column of your own cells (31x41) (current)
+
+Your own template: a 7x3 cell of one electric furnace between an ore belt and a plate belt, and
+`Stack<cell=FurnaceCell, n=8>` lines up eight of them. The ore runs up through every cell and the
+plates come back down; the furnaces need no coal and each holds two productivity modules
+(`modules=`), which the robots bring with the paste. Six drills feed it (3 ore/s, 3.24 plates/s).
+
+```
+module FurnaceCell size 7x3 {
+  port ore_in  : in  iron-ore   @s0
+  port ore_out : out iron-ore   @n0
+  port pl_in   : in  iron-plate @n6
+  port pl_out  : out iron-plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=iron-plate, machine=electric-furnace, modules=productivity-module> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+col = Stack<cell=FurnaceCell, n=8> @(10, 12)
+```
+
+The same furnaces as one row: `SmelterRow<n=8, recipe=iron-plate, machine=electric-furnace>` (3
+tiles each, ore in, plates out).
+
 ## robot-feed.fk: the kit's robots back into a roboport (12x8) (older)
 
 The robots the kit starts with, and the ones a build takes up with a roboport, sit in a storage

@@ -23,12 +23,16 @@ assert smelt.rate >= 2/s
 top-left tile inside the factory's plot; `rot` turns it r quarter turns clockwise (0 to 3).
 `@patch(iron-ore)` instead of a position puts a miner row on that ore.
 
-The templates:
+The built-in kinds are below. They are a starting kit, not the only shapes: a `module` you write is
+a template of your own, used like any kind (`col = FurnaceCell @(10, 12)`), and `Stack<cell=...>`
+lines up as many of it as you want (Stacks, below). When no kind below fits, write the module
+before you reach for a `Literal`: `docs\examples\furnace-column.fk` is a column of electric
+furnaces in twelve lines.
 
 | kind | what | belts |
 |---|---|---|
 | `MinerRow<n, resource>` | n electric drills facing a belt between them; 3 tiles per pair, 7 tall. `drill=burner-mining-drill, fuel=coal`: n burner drills in one row (2 tiles each, 5 tall), a fuel belt north with one inserter per drill: they mine without power | the ore leaves at the row's head; a burner row's fuel comes in at its head too |
-| `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in | 2 in (1 when the ore and fuel nets share a belt), 1 out |
+| `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in. `machine=electric-furnace`: 3 tiles each, no fuel, laid as an AsmRow is | 2 in (1 when the ore and fuel nets share a belt; 1 for electric furnaces), 1 out |
 | `SmelterArray<n, recipe>` | Rory's smelter stack: n furnaces in columns, each column fed by one belt with ore on one lane and coal on the other, side-loaded at its foot; plain inserters. A unit is 11 tiles wide (two columns around their plate belt) and up to 48 furnaces (24 a column: a yellow lane of ore); more furnaces add units east, sharing the coal. `machine=steel-furnace` (12 a column), `units=K` to choose the units | per unit an ore belt in and a plate belt out at its foot; the coal in at its east end |
 | `CircuitStack<n>` | green circuits on both sides of one output belt: two columns of circuit assemblers around it, each handed cable directly by the two cable assemblers above and below it; iron and copper on the two lanes of its own feed belts, side-loaded at its foot as the smelter stack does. 14 wide, 12 tall per circuit assembler in a column, then 6 for the foot; up to 14 (7 a column) | the iron in at its foot (x 3), the copper in from the east near its foot, the circuits out at its foot (x 6) |
 | `Pole`, `Pole<pole=small-electric-pole>` | one pole, pinned: for a cell packed so tight that its pole's tile is part of its design (the power step keeps it and adds only what is missing) | none |
@@ -42,7 +46,7 @@ The templates:
 | `OffshorePump<rate=1200/s>` | water from the lake: it stands on the shore, open to the water (rot 3 faces west, water west of it) | pipes |
 | `Boiler<fuel=coal>` | one boiler, 3x2: water in and out at its short ends, steam out of its long north side (rot 0), coal by an inserter beside it; 60 steam/s on 0.45 coal/s | pipes |
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
-| `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines | pipes |
+| `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines. A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
 | `Reactor<read=temperature, signal=S>`, `HeatExchanger`, `SteamTurbine` | nuclear power: a reactor heats the exchangers it touches (`net heat items heat: reactor -> hx`, no route), 10 MW each, 103 steam/s for 1.7 turbines | pipes, an inserter for the cells |
 | `Constant<signals="S=N, T=M">` | a constant combinator (Circuits, below) | wires |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. A listed entity sets itself too: `"request": {"logistic-robot": 50}` (a requester's request), `"recipe"`, or `"config"` (the game's fields as JSON). Its frame is its entities' box, so a lone roboport needs a pole of its own beside it | |
@@ -60,6 +64,14 @@ connectors whose flow needs a faster one (`out/avail.json`, written by `report_b
 `inserter=fast-inserter` only when you want fast hands and nothing else. The router's direct
 insertion takes the same family, as `route --hand any` in the build script; a single machine's
 `inserter=` does nothing (its inserters are the router's: that is what `--hand` is for).
+
+`modules=speed-module` on a machine or row fills every module slot of its machines;
+`modules=productivity-module|speed-module` names them slot by slot. The paste asks for them and
+the robots put them in, and `fk rates` counts their speed and productivity. Slots:
+assembling-machine-2 2, assembling-machine-3 4, electric-furnace 2, chemical-plant 3,
+oil-refinery 3, electric-mining-drill 3, pumpjack 2; an assembling-machine-1 or a burner has none.
+Productivity modules go only into intermediate recipes (plates, circuits, science packs), as in
+the game.
 
 ## Counts the build chooses: `n=auto`
 
