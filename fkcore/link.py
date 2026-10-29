@@ -675,14 +675,19 @@ rcon.print(n)
 
 def lua_seed(surface, tiles, amount=100000):
     """Lab only: put resource ``name`` under the given tiles {name: [(x, y)]} (lab terrain: a
-    drill can only be placed on ore)."""
+    drill can only be placed on ore). A tile that has ore already keeps it (2.0.56: ore copied
+    from the world with ``fk lab --copy-ore``; the game would stack a second resource on it)."""
     data = json.dumps({k: [[int(x), int(y)] for x, y in v] for k, v in tiles.items()})
     return f"""
 local s = game.get_surface({_q(surface)})
 local n = 0
 for name, ts in pairs(helpers.json_to_table({_q(data)})) do
   for _, t in pairs(ts) do
-    if s.create_entity{{name = name, position = {{t[1] + 0.5, t[2] + 0.5}}, amount = {amount}}} then n = n + 1 end
+    local area = {{{{t[1] + 0.1, t[2] + 0.1}}, {{t[1] + 0.9, t[2] + 0.9}}}}
+    if s.count_entities_filtered{{area = area, type = 'resource'}} == 0 and
+        s.create_entity{{name = name, position = {{t[1] + 0.5, t[2] + 0.5}}, amount = {amount}}} then
+      n = n + 1
+    end
   end
 end
 rcon.print(n)

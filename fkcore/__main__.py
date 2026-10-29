@@ -67,6 +67,8 @@ use the game link, and only with FK_LINK=on)
     lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
                                           a factory (or a stage's) built on its own lab slot,
                                           powered and stocked; then what it really makes
+    lab GAME_DIR NAME --copy-ore X0,Y0,X1,Y1 [--to X,Y] | --ore R --area X0,Y0,X1,Y1
+         [--amount N] | --clear-ore       ore on NAME's slot: the world's, copied, or made
     fresh GAME_DIR --area X0,Y0,X1,Y1     belts there that carry items their net doesn't are
                                           taken up by robots; the next build lays them fresh
     adopt GAME_DIR X,Y[;X,Y...] --into FACTORY/NET
@@ -555,6 +557,10 @@ def _lab(a, cat):
         with r:
             if a.clear:
                 lines = lab.clear(r, a.game, a.name)
+            elif a.ore or a.copy_ore or a.clear_ore:
+                to = tuple(int(float(v)) for v in a.to.split(","))
+                lines = lab.ore(r, a.game, a.name, a.ore, a.area, a.amount, a.copy_ore, to,
+                                a.clear_ore)
             elif a.measure is not None:
                 lines = lab.measure_lab(r, a.game, a.name, a.measure, cat)
             else:
@@ -800,6 +806,12 @@ def main(argv=None):
     lb.add_argument("--measure", type=float)
     lb.add_argument("--clear", action="store_true")
     lb.add_argument("--list", action="store_true")
+    lb.add_argument("--ore")                      # 2.0.56: RESOURCE over --area
+    lb.add_argument("--area")
+    lb.add_argument("--amount", type=int, default=100000)
+    lb.add_argument("--copy-ore", dest="copy_ore")    # X0,Y0,X1,Y1 of the world
+    lb.add_argument("--to", default="0,0")
+    lb.add_argument("--clear-ore", dest="clear_ore", action="store_true")
     ad = sub.add_parser("adopt")
     ad.add_argument("game")
     ad.add_argument("tiles")

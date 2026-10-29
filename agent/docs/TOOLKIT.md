@@ -228,13 +228,22 @@ fk lab NAME --size 60x40         its plot size, when no plot places it (default 
 fk lab NAME --measure 60         what its machines really make over 60 s, against the rate model
 fk lab NAME --clear              its slot emptied and freed
 fk lab --list                    the slots in use
+fk lab NAME --copy-ore 272,-72,312,-40 --to 4,2
+                                 the world's ore in that map area (shape and amounts) copied
+                                 onto NAME's slot, its top-left at 4,2 of NAME's plot
+fk lab NAME --ore iron-ore --area 0,0,30,20 [--amount 50000]
+                                 that ore over that area of NAME's plot
+fk lab NAME --clear-ore          every ore tile of NAME's slot taken up
 ```
 
 - The lab has no edge, and a factory of any size fits. Each factory gets its own slot, sized to
   it in 200-tile cells, and keeps it while it fits; building it again empties the slot first,
   and `fk lab` generates the ground under it. Its workspace is `lab\NAME` in the run
   folder, never `game\`.
-- Drill rows get their ore seeded under them, so a smelting block runs as designed. A requester
+- Drill rows get their ore seeded under them, so a smelting block runs as designed. To try drills
+  on a real patch's shape, build NAME once, copy the patch onto its slot (`--copy-ore`, the map
+  area round the patch, `--to` where your design puts its corner), and build again: a rebuild
+  keeps the slot's ore, and the drills are seeded only where there is none. A requester
   chest is filled with what it asks for, so the machines run as fast as they can: the measure
   shows what the machines do when their inputs keep up, where the rate model counts the
   `rate=` you wrote (the gears example: 120 gears a minute in the lab, 37.5 on paper at

@@ -359,6 +359,130 @@ def build(r, game, name, src=None, size=None, cat=None):
     return lines
 
 
+# -- ore on the lab (2.0.56, PLAN-CELLS step 3) ----------------------------------------------------
+#: one game call reads or writes the ore of at most this many tiles each way (5 s a call)
+ORE_BATCH = 32
+WORLD = "nauvis"
+
+
+def _rect(text, what):
+    """``X0,Y0,X1,Y1`` -> four ints, X0 < X1 and Y0 < Y1."""
+    try:
+        x0, y0, x1, y1 = (int(float(v)) for v in str(text).split(","))
+    except ValueError:
+        raise LabError(f"{what}: X0,Y0,X1,Y1 (four numbers), got {text!r}") from None
+    if x1 <= x0 or y1 <= y0:
+        raise LabError(f"{what}: {text} is empty (X0 < X1 and Y0 < Y1)")
+    return x0, y0, x1, y1
+
+
+def _batches(x0, y0, x1, y1):
+    for by in range(y0, y1, ORE_BATCH):
+        for bx in range(x0, x1, ORE_BATCH):
+            yield bx, by, min(bx + ORE_BATCH, x1), min(by + ORE_BATCH, y1)
+
+
+def lua_ore_read(surface, area):
+    """The resources whose tile is in ``area`` (x0, y0, x1, y1) of ``surface``:
+    JSON [[name, x, y, amount], ...], x and y the tile."""
+    x0, y0, x1, y1 = area
+    return f"""
+local s = game.get_surface('{surface}')
+local out = {{}}
+for _, e in pairs(s.find_entities_filtered{{area = {{{{{x0}, {y0}}}, {{{x1}, {y1}}}}}, type = 'resource'}}) do
+  local x, y = math.floor(e.position.x), math.floor(e.position.y)
+  if x >= {x0} and x < {x1} and y >= {y0} and y < {y1} then
+    out[#out + 1] = {{e.name, x, y, e.amount}}
+  end
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
+def lua_ore_clear(area):
+    """Take up the lab's resources whose tile is in ``area``. -> how many."""
+    x0, y0, x1, y1 = area
+    return f"""
+local s = game.get_surface('{SURFACE}')
+local n = 0
+for _, e in pairs(s.find_entities_filtered{{area = {{{{{x0}, {y0}}}, {{{x1}, {y1}}}}}, type = 'resource'}}) do
+  local x, y = math.floor(e.position.x), math.floor(e.position.y)
+  if x >= {x0} and x < {x1} and y >= {y0} and y < {y1} then e.destroy() n = n + 1 end
+end
+rcon.print(n)
+"""
+
+
+def lua_ore_put(rows):
+    """Put [[name, x, y, amount], ...] on the lab, each on tile x, y. -> how many stood."""
+    data = json.dumps(rows, separators=(",", ":"))
+    return f"""
+local s = game.get_surface('{SURFACE}')
+local n = 0
+for _, t in pairs(helpers.json_to_table('{data}')) do
+  if s.create_entity{{name = t[1], position = {{t[2] + 0.5, t[3] + 0.5}}, amount = t[4]}} then
+    n = n + 1
+  end
+end
+rcon.print(n)
+"""
+
+
+def _slot_for_ore(game, name):
+    held = slots(game)
+    if name not in held:
+        raise LabError(f"{name}: no lab slot yet: build it once (fk lab {name}), then lay its ore")
+    return held[name]
+
+
+def ore(r, game, name, resource=None, area=None, amount=100000, copy=None, to=(0, 0),
+        clear_ore=False):
+    """Ore on NAME's lab slot, in the design's own coordinates (its plot's top-left is 0,0):
+    ``resource`` over ``area``; or ``copy``, the resources of a map area of the world, shape and
+    amounts, with its top-left at ``to``; or ``clear_ore``, every resource of the slot taken up.
+    A rebuild keeps the ore (it empties a slot of everything but resources), and its drills are
+    seeded only where no ore is. -> the report lines."""
+    sx, sy, sw, sh = _slot_for_ore(game, name)
+    box = _box(sx, sy, sw, sh)
+    if clear_ore:
+        gone = sum(int(r.lua(lua_ore_clear(b)).strip() or 0) for b in _batches(*box))
+        return [f"lab {name}: {gone} ore tiles taken up from its slot {sx},{sy}"]
+    r.lua(link.lua_generate_area(SURFACE, FORCE, box))
+    if copy is not None:
+        x0, y0, x1, y1 = _rect(copy, "--copy-ore")
+        tx, ty = sx + int(to[0]), sy + int(to[1])
+        dest = (tx, ty, tx + x1 - x0, ty + y1 - y0)
+        if dest[0] < box[0] or dest[1] < box[1] or dest[2] > box[2] or dest[3] > box[3]:
+            raise LabError(f"--copy-ore {copy} at {to[0]},{to[1]} runs past the slot "
+                           f"({sw}x{sh} tiles): copy a smaller area, or build NAME bigger")
+        gone = sum(int(r.lua(lua_ore_clear(b)).strip() or 0) for b in _batches(*dest))
+        put, kinds, total = 0, {}, 0
+        for b in _batches(x0, y0, x1, y1):
+            rows = json.loads(r.lua(lua_ore_read(WORLD, b)).strip() or "[]")
+            if not isinstance(rows, list):
+                rows = []
+            moved = [[n, x - x0 + tx, y - y0 + ty, a] for n, x, y, a in rows]
+            for n, _x, _y, a in moved:
+                kinds[n] = kinds.get(n, 0) + 1
+                total += a
+            if moved:
+                put += int(r.lua(lua_ore_put(moved)).strip() or 0)
+        what = ", ".join(f"{n} {k} tiles" for n, k in sorted(kinds.items())) or "no ore"
+        return [f"lab {name}: copied {copy} of {WORLD} to {to[0]},{to[1]} of its slot: {what}, "
+                f"{total} in all; {put} stood ({gone} lab ore tiles taken up first)"]
+    if resource is None or area is None:
+        raise LabError("--ore RESOURCE --area X0,Y0,X1,Y1, --copy-ore X0,Y0,X1,Y1 or --clear-ore")
+    x0, y0, x1, y1 = _rect(area, "--area")
+    dest = (sx + x0, sy + y0, sx + x1, sy + y1)
+    gone = sum(int(r.lua(lua_ore_clear(b)).strip() or 0) for b in _batches(*dest))
+    put = 0
+    for b in _batches(*dest):
+        rows = [[resource, x, y, int(amount)] for y in range(b[1], b[3]) for x in range(b[0], b[2])]
+        put += int(r.lua(lua_ore_put(rows)).strip() or 0)
+    return [f"lab {name}: {resource} on {put} tiles of {area} ({int(amount)} each; {gone} ore "
+            "tiles there taken up first)"]
+
+
 def measure_lab(r, game, name, seconds, cat=None):
     """What NAME's machines make on its lab slot over ``seconds``, against the rate model."""
     ws = workspace(game, name)
