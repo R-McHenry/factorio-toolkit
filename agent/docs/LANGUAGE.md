@@ -1,20 +1,19 @@
 # The factory language (`.fk`)
 
 A factory file says what the factory is: its machines and its nets. Where everything goes on the
-ground, the belts and the poles are the toolkit's job (`fk build`); you give each row a position.
+ground, the belts and the poles are the toolkit's job (`fk build`); you give each machine or line a
+position.
 
 ```
-# smelting.fk: iron ore and coal into plates
-ore   = MinerRow<n=4, resource=iron-ore>   @(10, 2, rot 2)     # a row of 4 drills, turned 180
-coal  = MinerRow<n=2, resource=coal>       @(18, 2, rot 2)
-smelt = SmelterRow<n=8, recipe=iron-plate> @(10, 12)
-box   = Chest<provider>                    @(4, 22)
+# smelting.fk: iron ore into plates, on a line of furnace cells of your own
+import FurnaceCell from "cells.fk"
 
-net ore_:   ore -> smelt                  # the drills' ore goes to the furnaces
-net fuel:   coal -> smelt
-net plates: smelt -> box                  # the plates into a provider chest (robots take them)
+ore   = MinerRow<n=4, resource=iron-ore>  @(10, 2, rot 2)     # 4 drills, turned 180
+col   = Stack<cell=FurnaceCell, n=8>      @(10, 12)           # 8 electric furnaces in a line
+box   = Chest<provider>                   @(30, 40)
 
-assert smelt.rate >= 2/s
+net ore_:   ore -> col.ore_in             # the drills' ore goes up the line
+net plates: col.pl_out -> box             # the plates into a provider chest (robots take them)
 ```
 
 ## Instances
@@ -23,23 +22,35 @@ assert smelt.rate >= 2/s
 top-left tile inside the factory's plot; `rot` turns it r quarter turns clockwise (0 to 3).
 `@patch(iron-ore)` instead of a position puts a miner row on that ore.
 
-The built-in kinds are below. They are a starting kit, not the only shapes: a `module` you write is
-a template of your own, used like any kind (`col = FurnaceCell @(10, 12)`), and `Stack<cell=...>`
-lines up as many of it as you want (Stacks, below). When no kind below fits, write the module
-before you reach for a `Literal`: `docs\examples\furnace-column.fk` is a column of electric
-furnaces in twelve lines.
+## Lines of machines: your own cells
+
+A line of machines is a **Stack of cells you write**. A cell is a `module` with ports: one slice
+of the line, its belts running straight across it from edge to edge, so cells stacked edge to edge
+make one long line (Stacks, below, has the rules). Your `game\cells.fk` starts with five:
+
+| cell | what |
+|---|---|
+| `FurnaceCell` | an electric furnace, ore up one belt, plates down the other: one lane of plates, about 12 to a yellow lane |
+| `FurnacePair` | two electric furnaces facing each other across the plate belt: both lanes, 24 furnaces to a yellow belt |
+| `StoneFurnaceCell` | a stone furnace, ore and coal on the two lanes of one belt |
+| `GearCell` | an assembler, one ingredient in, its product out |
+| `LabCell` | a lab, red and green packs on the two lanes of one belt |
+
+They are yours: copy one, change its recipe and its ports' items, add modules or a machine, and
+rename it. `import FurnaceCell from "cells.fk"` brings one into a factory, and `col =
+Stack<cell=FurnaceCell, n=12>` lines up twelve. A single machine needs no cell (`Assembler`,
+`Furnace`, `Lab`): place it where you want it, and the router lays its belts and inserters. Several
+single machines on one net work too, and the router gives the net both lanes when it carries more
+than one (Nets, below).
+
+The built-in kinds:
 
 | kind | what | belts |
 |---|---|---|
 | `MinerRow<n, resource>` | n electric drills facing a belt between them; 3 tiles per pair, 7 tall. `drill=burner-mining-drill, fuel=coal`: n burner drills in one row (2 tiles each, 5 tall), a fuel belt north with one inserter per drill: they mine without power | the ore leaves at the row's head; a burner row's fuel comes in at its head too |
-| `SmelterRow<n, recipe>` | n stone furnaces, 2 tiles each; ore and fuel (coal) in. `machine=electric-furnace`: 3 tiles each, no fuel, laid as an AsmRow is | 2 in (1 when the ore and fuel nets share a belt; 1 for electric furnaces), 1 out |
-| `SmelterArray<n, recipe>` | Rory's smelter stack: n furnaces in columns, each column fed by one belt with ore on one lane and coal on the other, side-loaded at its foot; plain inserters. A unit is 11 tiles wide (two columns around their plate belt) and up to 48 furnaces (24 a column: a yellow lane of ore); more furnaces add units east, sharing the coal. `machine=steel-furnace` (12 a column), `units=K` to choose the units | per unit an ore belt in and a plate belt out at its foot; the coal in at its east end |
-| `CircuitStack<n>` | green circuits on both sides of one output belt: two columns of circuit assemblers around it, each handed cable directly by the two cable assemblers above and below it; iron and copper on the two lanes of its own feed belts, side-loaded at its foot as the smelter stack does. 14 wide, 12 tall per circuit assembler in a column, then 6 for the foot; up to 14 (7 a column) | the iron in at its foot (x 3), the copper in from the east near its foot, the circuits out at its foot (x 6) |
 | `Pole`, `Pole<pole=small-electric-pole>` | one pole, pinned: for a cell packed so tight that its pole's tile is part of its design (the power step keeps it and adds only what is missing) | none |
-| `AsmRow<n, recipe>` | n assemblers, 3 tiles each, 7 to 9 tall | up to 3 in (the third under the product belt, by long-handed inserters), 1 out |
 | `Lab`, `Lab<rate=2/min>` | one lab, its inserters laid like an Assembler's: several Labs around one multi-item requester chest each take their packs by one inserter, no belt | by inserters next to it |
 | `Roboport` | one roboport, 4x4: it takes construction and logistic robots into its robot inventory from a net, so the loader is a `Chest<requester, item="logistic-robot", request=50>` beside it and `net load: chest -> roboport`: the router lays the inserter (2.0.16). The kit's robots come out of a storage chest only into a roboport, so a build that takes up a roboport strands its robots until one of these stands again. `cover robots` counts it as coverage | by an inserter next to it |
-| `LabRow<n>`, `LabRow<n, rate=2/min>` | n labs, 3 tiles each. Without `rate=` a lab takes every pack that reaches it; with it, at most that much of each pack (one research unit of 30 s takes a pack of each kind in 30 s: `rate=2/min`), and science rows that make more back up. Two packs to a belt on the two lanes (`lanes packs | greenpacks`) halves the belts, and for many packs a line of lab cells of your own (`Stack<cell=...>`) is the shape: the two are designs, not templates | 1 to 3 science belts in (the third by long-handed inserters), each a pair |
 | `Assembler<recipe>` | one assembler | by inserters next to it |
 | `Furnace<recipe>` | one furnace | |
 | `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request: the request's count is never above it, and a changed request on a standing chest is laid again by the next `fk build`). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said cannot-carry). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
@@ -52,11 +63,14 @@ furnaces in twelve lines.
 | `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. A listed entity sets itself too: `"request": {"logistic-robot": 50}` (a requester's request), `"recipe"`, or `"config"` (the game's fields as JSON). Its frame is its entities' box, so a lone roboport needs a pole of its own beside it | |
 | `Bus<belts=4, length, item, load=s11, tap=n26\|s33>` | Rory's bus: `belts` belts of one item, `length` tiles, running east at rot 0. Its loads and taps are ports (below) | one belt per port, beside the bus |
 
-Rows are **counterflow**: every belt of a row attaches at its head, the west end at rot 0. Leave
-a few free tiles at a row's head and between rows: the router lays the belts there. `fk explain
-FILE INST` shows any row as its exact entities, with its size and where its belts attach.
+**Older kinds.** `AsmRow<n, recipe>`, `SmelterRow<n, recipe>`, `LabRow<n>`, `SmelterArray<n,
+recipe>` and `CircuitStack<n>` are rows the toolkit lays for you. They still build, and a design
+that has them keeps working; new lines are Stacks of your own cells. A row is **counterflow**:
+every belt of a row attaches at its head, the west end at rot 0, so leave a few free tiles there.
+`fk explain FILE INST` shows any instance as its exact entities, with its size and where its belts
+attach.
 
-`duty=0.5` on any instance caps it (a row that runs only part of the time). `inserter=inserter`
+`duty=0.5` on any instance caps it (a machine that runs only part of the time). `inserter=inserter`
 on a row puts plain inserters in place of the fast ones; `inserter=any` (or `auto`, `whatever`)
 lets the build pick: the lowest hand the network can build now, and the `hands` step raises the
 connectors whose flow needs a faster one (`out/avail.json`, written by `report_bom --stock live`;
@@ -75,9 +89,10 @@ the game.
 
 ## Counts the build chooses: `n=auto`
 
-`n=auto` on a `MinerRow`, `SmelterRow`, `SmelterArray`, `AsmRow` or `LabRow` leaves its count to
-the build. The `size` step (right after `elaborate` in the build script) gives each such row the
-fewest machines that meet:
+`n=auto` on a `MinerRow` (and on the older rows, `SmelterRow`, `SmelterArray`, `AsmRow` and
+`LabRow`) leaves its count to the build. A Stack's `n` is a number you write: the build does not
+count cells yet. The `size` step (right after `elaborate` in the build script) gives each auto row
+the fewest machines that meet:
 
 - the surface file's `target` lines (what the whole surface makes),
 - the factory's `assert INST.rate >= R` lines,
@@ -210,7 +225,7 @@ contents must fit its `size`; a machine or belt past the frame is a `FRAME` line
 module GearRib size 16x10 {
   port iron : in iron-plate @w        # plates in at the west edge
   port gear : out iron-gear-wheel @e  # gears out at the east edge
-  g = AsmRow<n=1, recipe=iron-gear-wheel> @(2, 1)
+  g = Assembler<recipe=iron-gear-wheel> @(4, 3)
   net fe: iron -> g
   net g: g -> gear
 }
@@ -435,10 +450,11 @@ is an `rate-not-met` line, not an error. With `n=auto` rows the build sizes them
 ## Modules and imports
 
 ```
+import FurnaceCell from "cells.fk"
 module Smelting {                 # a reusable part, written like a factory
   ore   = MinerRow<n=4, resource=iron-ore> @(0, 0, rot 2)
-  smelt = SmelterRow<n=8, recipe=iron-plate> @(0, 10)
-  net ore_: ore -> smelt
+  smelt = Stack<cell=FurnaceCell, n=8> @(0, 10)
+  net ore_: ore -> smelt.ore_in
 }
 left = Smelting @(0, 0)
 import Mall from "mall.fk"

@@ -41,13 +41,14 @@ routed section's first line says whether its machines settled; where they did no
 are approximate. `fk rates main.fk` shows the same routed section after its nominal one, on
 `main.fkp` as the last build laid it out (`--hand N` for other inserter hands).
 
-A net is one lane. A row's inserters drop its products on one lane of its belt, so a net from one
-row carries at most 7.5/s on yellow, and the routed rates count it so: each net's critical
-connector is its own lane. Two nets can share a belt, one on each lane (`lanes ore_ | fuel`,
-LANGUAGE.md): one belt to lay instead of two, and the two never stop each other, since a full
-lane holds only its own items. A net on both lanes (a two-sided MinerRow's ore) gets one lane
-when it is side-loaded onto a shared belt: 7.5/s there, and `too-thin` says so where it brings
-more.
+A net is one lane until it needs two. A line's inserters drop its products on one lane of its
+belt, so one line of machines on one side carries at most 7.5/s on yellow, and the routed rates
+count it so: each net's critical connector is its own lane. A net that carries more than a lane
+and has two or more makers goes on both lanes: the router puts half its makers on each (2.0.54,
+LANGUAGE.md "Nets"). Two nets can share a belt, one on each lane (`lanes ore_ | fuel`): one belt
+to lay instead of two, and the two never stop each other, since a full lane holds only its own
+items. A net on both lanes (a two-sided MinerRow's ore) gets one lane when it is side-loaded onto
+a shared belt: 7.5/s there, and `too-thin` says so where it brings more.
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report

@@ -1,0 +1,83 @@
+# cells.fk: starter cells, yours to change. A cell is one slice of a line of machines: its belts
+# run straight across it, edge to edge, so cells stacked in a line make one long line.
+#
+#   import FurnaceCell from "cells.fk"
+#   col = Stack<cell=FurnaceCell, n=12> @(10, 12)
+#   net ore_:   drills -> col.ore_in
+#   net plates: col.pl_out -> bus
+#
+# Copy a cell and change it: another recipe (change the items in its ports too), modules
+# (`modules=productivity-module`), a machine more, a belt more. Rename the copy. Each port is where
+# a belt crosses the cell's edge; `stack NEAR -> FAR` pairs the two ends of one belt, so the next
+# cell's NEAR meets this one's FAR. docs\LANGUAGE.md, "Stacks", has the rules.
+
+# One electric furnace beside two belts: the ore runs up through every cell on the west belt, the
+# plates come back down the east one. No coal. One side, so the plates ride one lane: about 12 of
+# these fill it (7.5/s on yellow).
+module FurnaceCell size 7x3 {
+  port ore_in  : in  iron-ore   @s0
+  port ore_out : out iron-ore   @n0
+  port pl_in   : in  iron-plate @n6
+  port pl_out  : out iron-plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=iron-plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# Two electric furnaces facing each other across the plate belt, an ore belt outside each: the
+# plates ride both lanes, so 24 of these furnaces (12 cells) fill one yellow belt at 15/s.
+module FurnacePair size 13x3 {
+  port oa_in  : in  iron-ore   @s0
+  port oa_out : out iron-ore   @n0
+  port pl_in  : in  iron-plate @n6
+  port pl_out : out iron-plate @s6
+  port ob_in  : in  iron-ore   @s12
+  port ob_out : out iron-ore   @n12
+  stack oa_in -> oa_out, pl_out -> pl_in, ob_in -> ob_out
+  w = Furnace<recipe=iron-plate, machine=electric-furnace> @(2, 0)
+  e = Furnace<recipe=iron-plate, machine=electric-furnace> @(8, 0)
+  net a: oa_in -> w, oa_out
+  net b: ob_in -> e, ob_out
+  net p: pl_in, w, e -> pl_out
+}
+
+# One stone furnace: ore and coal on the two lanes of one belt (ore left, coal right), one inserter
+# takes both. The plates go back on the other belt. Feed it `net ore_ ... -> col.f_in` and
+# `net fuel ... -> col.f_in` with `lanes ore_ | fuel`.
+module StoneFurnaceCell size 6x2 {
+  port f_in   : in  iron-ore | coal @s0
+  port f_out  : out iron-ore | coal @n0
+  port pl_in  : in  iron-plate @n5
+  port pl_out : out iron-plate @s5
+  stack f_in -> f_out, pl_out -> pl_in
+  f = Furnace<recipe=iron-plate> @(2, 0)
+  net o items iron-ore: f_in -> f, f_out
+  net c items coal:     f_in -> f, f_out
+  lanes o | c
+  net p: pl_in, f -> pl_out
+}
+
+# One assembler: plates up the west belt, gears back down the east one. Change the recipe and the
+# items of its ports for anything with one ingredient.
+module GearCell size 7x3 {
+  port in_in   : in  iron-plate      @s0
+  port in_out  : out iron-plate      @n0
+  port out_in  : in  iron-gear-wheel @n6
+  port out_out : out iron-gear-wheel @s6
+  stack in_in -> in_out, out_out -> out_in
+  a = Assembler<recipe=iron-gear-wheel> @(2, 0)
+  net i: in_in -> a, in_out
+  net g: out_in, a -> out_out
+}
+
+# One lab: red and green packs on the two lanes of one belt, which runs on to the next lab.
+module LabCell size 5x3 {
+  port p_in  : in  automation-science-pack | logistic-science-pack @s0
+  port p_out : out automation-science-pack | logistic-science-pack @n0
+  stack p_in -> p_out
+  lab = Lab @(2, 0)
+  net r items automation-science-pack: p_in -> lab, p_out
+  net g items logistic-science-pack:   p_in -> lab, p_out
+  lanes r | g
+}

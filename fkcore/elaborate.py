@@ -682,6 +682,11 @@ def _stack_module(flat, inst, path, modules, src):
     nets = []
     for near, far, _line in cell.stacks:
         items = list(dict.fromkeys(ports[far].all_items))
+        # 2.0.55: a paired port's two items cross the edge on their own lanes, so the crossing
+        # can't clog (`limited` quiets CLOG and nothing else)
+        p = ports[far]
+        paired = p.right is not None and not (set(p.items) & set(p.right)) and \
+            len(p.items) == len(p.right) == 1
         for k in range(n):
             prev = ("head" if head is not None else None) if k == 0 else str(k - 1)
             if prev is None:
@@ -689,7 +694,7 @@ def _stack_module(flat, inst, path, modules, src):
             a = lang.Ref([prev, far], False, inst.line)
             b = lang.Ref([str(k), near], False, inst.line)
             drv, con = (a, b) if ports[far].dir == "out" else (b, a)
-            nets.append(lang.Net(f"{far}_{k}", items, [drv], [con], inst.line))
+            nets.append(lang.Net(f"{far}_{k}", items, [drv], [con], inst.line, paired))
         flat.stack_ends.add(_join(path, str(n - 1), far))
         if head is None:
             flat.stack_ends.add(_join(path, "0", near))

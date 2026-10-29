@@ -223,10 +223,11 @@ both.
   stretch of it, grows by getting longer, and leaves the next stretch free for the next factory. A
   factory laid along the bus uses up bus length, and the next one has nowhere to go but further
   down. `docs\examples\busbase.fk` is a whole base built this way, each factory a sealed module.
-- **Fill both sides of an output belt.** An inserter drops onto the belt's far lane, so a row of
-  machines on one side fills one lane; machines on both sides fill both, and one belt carries
-  twice as much. A smelter stack (`SmelterArray`) and a circuit stack (`CircuitStack`) are built
-  that way.
+- **Fill both lanes of an output belt.** An inserter drops onto the belt's far lane, so a line of
+  machines on one side of its belt fills one lane. Machines on both sides fill both, and one belt
+  carries twice as much: `FurnacePair` in `game\cells.fk` is that cell. Machines you place one by
+  one get both lanes from the router when their net carries more than a lane: it puts half of them
+  on each.
 - **Prefer patches to rebuilds.** Pin what stands and change only the part that needs changing,
   rather than regenerating the whole base. Routing a new section into the old one, even as a bit of
   spaghetti, beats ripping everything up. As a fallback, leave old poles and roboports standing

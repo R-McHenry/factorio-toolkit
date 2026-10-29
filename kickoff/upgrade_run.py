@@ -245,6 +245,10 @@ def upgrade(run, sha, dry=False):
     helpers = not os.path.exists(os.path.join(run, "helpers"))
     if helpers:
         plan.append("  helpers/: the template's (the run has none)")
+    # 2.0.55: the starter cells, only where the run has none (a player's own cells.fk stays)
+    cells = not os.path.exists(os.path.join(run, "game", "cells.fk"))
+    if cells:
+        plan.append("  game/cells.fk: the template's starter cells (the run has none)")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:
         return plan
@@ -252,7 +256,8 @@ def upgrade(run, sha, dry=False):
     claude = cfg.get("player") == "claude"
     _archive(sha, src, ("agent", "fkcore")
              + (tuple(f"kickoff/{name}" for name in LOOP) if claude else ())
-             + (("kickoff/template/helpers",) if helpers else ()))
+             + (("kickoff/template/helpers",) if helpers else ())
+             + (("kickoff/template/game/cells.fk",) if cells else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
     for p in REPLACED:
@@ -280,6 +285,9 @@ def upgrade(run, sha, dry=False):
         shutil.copytree(os.path.join(src, "kickoff", "template", "helpers"),
                         os.path.join(run, "helpers"),
                         ignore=shutil.ignore_patterns("__pycache__"))
+    if cells:
+        shutil.copy(os.path.join(src, "kickoff", "template", "game", "cells.fk"),
+                    os.path.join(run, "game", "cells.fk"))
     shutil.copy(os.path.join(agent, "prompts", f"{cfg.get('prompt', 'core-v1')}.md"),
                 os.path.join(run, "AGENTS.md"))
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:

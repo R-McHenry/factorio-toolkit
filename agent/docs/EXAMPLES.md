@@ -1,7 +1,9 @@
 # Examples
 
-Small factories that build cleanly, each in `docs\examples\`. Copy one into `game\`, give it
-ground, check it on paper, build it:
+Small factories that build cleanly, each in `docs\examples\`. New designs build their lines from
+cells, as `furnace-column.fk` and `blue6.fk` do; your own starter cells are in `game\cells.fk`
+(LANGUAGE.md, "Lines of machines"). The rest use the toolkit's row kinds, which still build. Copy
+one into `game\`, give it ground, check it on paper, build it:
 
 ```
 copy docs\examples\gears.fk game\gears.fk
