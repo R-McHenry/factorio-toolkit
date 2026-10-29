@@ -51,6 +51,22 @@ LINES = {
         net fuel: coal -> col.f_in
         lanes ore_ | fuel
         net p: col.pw_out, col.pe_out -> box""",
+    "CircuitCell": """
+        fe0 = Chest<requester, item=iron-plate, rate=2/s> @(0, 2)
+        fe1 = Chest<requester, item=iron-plate, rate=2/s> @(40, 2)
+        cu0 = Chest<requester, item=copper-plate, rate=2.5/s> @(14, 2)
+        cu1 = Chest<requester, item=copper-plate, rate=2.5/s> @(18, 2)
+        cu2 = Chest<requester, item=copper-plate, rate=2.5/s> @(26, 2)
+        cu3 = Chest<requester, item=copper-plate, rate=2.5/s> @(30, 2)
+        col = Stack<cell=CircuitCell, n=2> @(10, 10)
+        box1 = Chest<provider> @(6, 40)
+        box2 = Chest<provider> @(16, 40)
+        box3 = Chest<provider> @(26, 40)
+        box4 = Chest<provider> @(36, 40)
+        net few: fe0 -> col.wi_in
+        net fee: fe1 -> col.ei_in
+        net cu: cu0, cu1, cu2, cu3 -> col.cu_in
+        net circuits: col.wo_out, col.eo_out -> box1, box2, box3, box4""",
     "GearCell": """
         pl  = Chest<requester, item=iron-plate, rate=2/s> @(10, 2)
         col = Stack<cell=GearCell, n=4> @(10, 8)

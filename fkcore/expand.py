@@ -67,8 +67,10 @@ def belts(flat, key, side):
     m = flat.machines[key]
     order = list(m.needs if side == "in" else m.makes)
     lane_of = getattr(flat, "lane_of", {}) if side == "in" else {}
-    pairs = [(item, lane_of.get(nets[0], nets[0])) for (k, item), nets in hold.items()
-             if k == key and item not in CONTACT]
+    # 2.0.58: one item may come from several nets (a circuit assembler handed cable by two cable
+    # assemblers, each its own net): a role per net, not only the first
+    pairs = [(item, lane_of.get(net, net)) for (k, item), nets in hold.items()
+             if k == key and item not in CONTACT for net in nets]
     pairs.sort(key=lambda p: order.index(p[0]) if p[0] in order else len(order))
     out = []
     for item, net in pairs:

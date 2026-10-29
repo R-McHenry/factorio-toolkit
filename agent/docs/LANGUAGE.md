@@ -26,7 +26,7 @@ top-left tile inside the factory's plot; `rot` turns it r quarter turns clockwis
 
 A line of machines is a **Stack of cells you write**. A cell is a `module` with ports: one slice
 of the line, its belts running straight across it from edge to edge, so cells stacked edge to edge
-make one long line (Stacks, below, has the rules). Your `game\cells.fk` starts with six:
+make one long line (Stacks, below, has the rules). Your `game\cells.fk` starts with seven:
 
 | cell | what |
 |---|---|
@@ -34,6 +34,7 @@ make one long line (Stacks, below, has the rules). Your `game\cells.fk` starts w
 | `FurnacePair` | two electric furnaces facing each other across the plate belt: both lanes, 24 furnaces to a yellow belt |
 | `StoneFurnaceCell` | a stone furnace, ore and coal on the two lanes of one belt |
 | `SmelterPair` | two stone furnaces back to back on one ore and coal belt, plates out both sides: 24 furnaces to a yellow lane of ore. Several lines on one ore and coal pair make a big smelter (it replaces `SmelterArray`) |
+| `CircuitCell` | green circuits: a column of cable assemblers beside a column of circuit assemblers, offset a row so each circuit assembler takes cable from two (3 to 2). Copper up the middle on both lanes, iron up the outer belts, circuits back down beside them. Two cells: 480 circuits/min (it replaces `CircuitStack`) |
 | `GearCell` | an assembler, one ingredient in, its product out |
 | `LabCell` | a lab, red and green packs on the two lanes of one belt |
 
@@ -143,7 +144,10 @@ share, below): the drivers put items on it, the consumers take them.
   on the net. It only quiets `CLOG` and `no-limit` for it: it limits nothing itself. The limits
   are `set` properties on the makers' hands (Properties on objects, below).
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
-- A machine is on at most one net per item and direction.
+- A machine is on at most one net per item and direction, with one exception: a single machine
+  (`Assembler`, `Furnace`, a chest...) may take one item from several nets, each carrying only that
+  item, as `CircuitCell`'s circuit assemblers take cable from two cable assemblers
+  (`net k0: w0 -> wa` and `net k1: w1 -> wa, wb`). Each net gets an inserter of its own.
 - Several drivers merge onto the net; several consumers split off it. The router lays the
   splitters.
 - **Both lanes** (2.0.54): a net that carries more than one lane (7.5/s on yellow) is laid on both

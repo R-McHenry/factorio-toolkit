@@ -1393,10 +1393,24 @@ def _port_checks(flat):
                 "drop the port line"))
 
 
+#: the kinds that are one machine each, placed where written (``expand._SINGLE``): every net of
+#: such a machine gets a role of its own
+_SINGLE_KINDS = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack",
+                 "OffshorePump", "Boiler", "SteamEngine", "InfinityPipe", "Lab", "Reactor",
+                 "HeatExchanger", "SteamTurbine", "Roboport")
+
+
 def _endpoint_checks(flat, cat):
     out_hold, in_hold = flat._out_hold, flat._in_hold
     for side, hold in (("out", out_hold), ("in", in_hold)):
         for (key, item), nets in hold.items():
+            # 2.0.58: a single machine takes an item from several nets, a role each (a circuit
+            # assembler handed cable by two cable assemblers): fine while each of those nets
+            # carries that item alone. One product on two nets is still a line: where it goes is
+            # the question
+            if side == "in" and len(nets) > 1 and flat.machines[key].kind in _SINGLE_KINDS and \
+                    all(flat.nets[n].items == [item] for n in nets if n in flat.nets):
+                continue
             if len(nets) > 1:
                 flat.checks.append(Check("two-nets", key, f"{item} ({side}) is on {len(nets)} "
                                          "nets: " + ", ".join(nets) + f". Name each net's items "

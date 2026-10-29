@@ -81,6 +81,48 @@ module SmelterPair size 11x2 {
   net pe: pe_in, e -> pe_out
 }
 
+# Green circuits: a column of cable assemblers beside a column of circuit assemblers, offset by a
+# row, so the inserters between them zigzag. Three cable assemblers to two circuit assemblers
+# (the middle cable assembler hands to both), 3 cable/s for each circuit assembler: all it uses.
+# Copper comes up the middle belt, both lanes, to the cable columns on either side; iron comes up
+# each outer belt, reached by a long-handed inserter over the circuits belt beside it, which takes
+# the circuits back down. Two cells are eight circuit assemblers: 480 circuits/min on the lab, to
+# the CircuitStack row's 450.
+module CircuitCell size 23x9 {
+  port wi_in  : in  iron-plate         @s0
+  port wi_out : out iron-plate         @n0
+  port wo_in  : in  electronic-circuit @n1
+  port wo_out : out electronic-circuit @s1
+  port cu_in  : in  copper-plate | copper-plate @s11
+  port cu_out : out copper-plate | copper-plate @n11
+  port eo_in  : in  electronic-circuit @n21
+  port eo_out : out electronic-circuit @s21
+  port ei_in  : in  iron-plate         @s22
+  port ei_out : out iron-plate         @n22
+  stack wi_in -> wi_out, wo_out -> wo_in, cu_in -> cu_out, eo_out -> eo_in, ei_in -> ei_out
+  wa = Assembler<recipe=electronic-circuit> @(3, 1)
+  wb = Assembler<recipe=electronic-circuit> @(3, 5)
+  w0 = Assembler<recipe=copper-cable>       @(7, 0)
+  w1 = Assembler<recipe=copper-cable>       @(7, 3)
+  w2 = Assembler<recipe=copper-cable>       @(7, 6)
+  e0 = Assembler<recipe=copper-cable>       @(13, 0)
+  e1 = Assembler<recipe=copper-cable>       @(13, 3)
+  e2 = Assembler<recipe=copper-cable>       @(13, 6)
+  ea = Assembler<recipe=electronic-circuit> @(17, 1)
+  eb = Assembler<recipe=electronic-circuit> @(17, 5)
+  net wi: wi_in -> wa, wb, wi_out
+  net ei: ei_in -> ea, eb, ei_out
+  net cu: cu_in -> w0, w1, w2, e0, e1, e2, cu_out
+  net kw0: w0 -> wa
+  net kw1: w1 -> wa, wb
+  net kw2: w2 -> wb
+  net ke0: e0 -> ea
+  net ke1: e1 -> ea, eb
+  net ke2: e2 -> eb
+  net wo: wo_in, wa, wb -> wo_out
+  net eo: eo_in, ea, eb -> eo_out
+}
+
 # One assembler: plates up the west belt, gears back down the east one. Change the recipe and the
 # items of its ports for anything with one ingredient.
 module GearCell size 7x3 {
