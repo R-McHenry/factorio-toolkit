@@ -261,6 +261,38 @@ rcon.print(n)
 """
 
 
+def lua_decon_area(surface, force, area, names=(), cancel=False):
+    """``fk decon`` (2.0.62): the deconstruction planner over ``area``, as a player drags it:
+    every entity of ``force`` there (only those named in ``names``, when given) ordered out, or
+    with ``cancel`` the orders taken back. Replies JSON: {name: count} of what it ordered (or
+    cancelled), and ``robots``: the robots inside the roboports it ordered out, which go to
+    storage as items when the roboport is taken up."""
+    only = json.dumps(sorted(names))
+    verb = "cancel_deconstruction" if cancel else "order_deconstruction"
+    test = "e.to_be_deconstructed()" if cancel else "not e.to_be_deconstructed()"
+    return f"""
+local s, f = game.get_surface({_q(surface)}), game.forces[{_q(force)}]
+if not s or not f then rcon.print('no surface or force') return end
+local only = {{}}
+for _, n in pairs(helpers.json_to_table({_q(only)})) do only[n] = true end
+local filt = {{area = {_area(area)}, force = f}}
+if next(only) then local ns = {{}} for n in pairs(only) do ns[#ns + 1] = n end filt.name = ns end
+local by, robots = {{}}, 0
+for _, e in pairs(s.find_entities_filtered(filt)) do
+  if e.valid and e.type ~= 'character' and {test} then
+    local name, port = e.name, e.type == 'roboport' and e.get_inventory(defines.inventory.roboport_robot)
+    local held = port and port.get_item_count() or 0
+    local ok = e.{verb}(f)                       -- cancel_deconstruction returns nothing
+    if {str(cancel).lower()} or ok then
+      by[name] = (by[name] or 0) + 1
+      if not {str(cancel).lower()} then robots = robots + held end
+    end
+  end
+end
+rcon.print(helpers.table_to_json({{by = by, robots = robots}}))
+"""
+
+
 def lua_decon_list(surface, force, things):
     """Order deconstruction of the given entities [(name, x, y)] (found by name and position).
     With no entity of that name there, a ghost of it at that position is ordered out instead:

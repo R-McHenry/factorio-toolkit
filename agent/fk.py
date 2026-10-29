@@ -62,9 +62,9 @@ LOCAL = {"rates", "plan", "check", "explain", "unfold", "render", "layout", "spl
          "merge", "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "read-terrain", "measure",
-        "adopt", "sense", "research", "tech", "recipes", "lua", "fresh", "avail"}
+        "adopt", "sense", "research", "tech", "recipes", "lua", "fresh", "avail", "decon"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
-AREA_FIRST = ("fresh", "measure")
+AREA_FIRST = ("fresh", "measure", "decon")
 #: files only the host writes: pulled, never pushed
 HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/chat-ack.json", "out/alerts.json",
              "out/inbox.txt")
@@ -353,7 +353,7 @@ def sim(cfg, rest):
                   file=sys.stderr)
             return 2
         if args[0] not in ("say",):
-            args = [args[0], "."] + args[1:]
+            args = [args[0], "."] + (_area(args[1:]) if args[0] in AREA_FIRST else args[1:])
         return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME,
                               env=env).returncode
     return local(cfg, ["sim", "."] + rest)
@@ -414,17 +414,22 @@ def build(cfg, args):
     names = _steps(script)
     i = _at(names, args[args.index("--from") + 1]) if "--from" in args else 0
     j = _at(names, args[args.index("--to") + 1]) if "--to" in args else len(names) - 1
+    # this build's own options (2.0.62): --with 'STEP OPTS' (repeatable) and --reroute NET[,NET]
+    extra = []
+    for k, a in enumerate(args[:-1]):
+        if a in ("--with", "--reroute"):
+            extra += [a, args[k + 1]]
     link_at = [k for k, n in enumerate(names) if n in LINK_STEPS]
     split = link_at[0] if link_at else len(names)
     code = 0
     if i < split:
         _avail_first(cfg)
         code = local(cfg, ["build", script, "--from", _spec(names, i),
-                           "--to", _spec(names, min(j, split - 1))])
+                           "--to", _spec(names, min(j, split - 1))] + extra)
     if code == 0 and j >= split:
         push(cfg)
         code = remote(cfg, ["build", script, "--from", _spec(names, max(i, split)),
-                            "--to", _spec(names, j)], footer=False)
+                            "--to", _spec(names, j)] + extra, footer=False)
         pull(cfg)
     else:
         push(cfg)
@@ -443,9 +448,12 @@ def main(argv):
         if "-h" in rest or "--help" in rest:
             # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
             # ran all 19 steps, the paste included)
-            print("fk build [--from STEP] [--to STEP]: the steps of game\\<surface>.build.fkb in "
-                  "order, design here and the game steps on the host; STEP is a step's name, or "
-                  "NAME:K for its K-th time (docs\\TOOLKIT.md, \"The build script\")")
+            print("fk build [--from STEP] [--to STEP] [--with 'STEP OPTS'] [--reroute NET[,NET]]: "
+                  "the steps of game\\<surface>.build.fkb in order, design here and the game "
+                  "steps on the host; STEP is a step's name, or NAME:K for its K-th time. --with "
+                  "adds options to a step for this build only (--with 'cover robots --fresh'); "
+                  "--reroute lays these nets (or every net inside an instance) again "
+                  "(docs\\TOOLKIT.md, \"The build script\")")
             return 0
         with _build_lock():
             code = build(cfg, rest)
@@ -491,6 +499,16 @@ def main(argv):
         return code
     if cmd == "sim":
         return sim(cfg, rest)
+    if cmd == "capture":
+        # 2.0.62: a design's instance is read here; a lab slot or an area, in the game
+        if rest and rest[0] == "design":
+            code = local(cfg, ["capture", "."] + rest)
+            push(cfg)
+            return code
+        push(cfg)
+        code = remote(cfg, ["capture", "."] + rest)
+        pull(cfg)
+        return code
     if cmd in LOCAL:
         code = local(cfg, [cmd] + rest)
         push(cfg)

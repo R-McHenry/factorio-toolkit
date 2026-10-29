@@ -1077,8 +1077,11 @@ _BELTY = frozenset({"transport-belt", "splitter"})    # what a drop or a pickup 
 
 
 def _placed(flat, job):
-    """The machines of the instances the net's job has an end in (``_judge``'s pairs)."""
-    out = set()
+    """The machines of the instances the net's job has an end in (``_judge``'s pairs), and every
+    port: a port end is always the router's to reach. 2.0.62 (the opus run's mall1/fe): without
+    the ports, a net driven by a port had no drivers here, so a consumer added to it read as
+    joined and the route was kept as laid, the new machine never fed."""
+    out = set(getattr(flat, "ports", None) or ())
     for owner in job.owners:
         out |= set(flat.insts[owner.rsplit(".", 1)[0]].machines)
     return out

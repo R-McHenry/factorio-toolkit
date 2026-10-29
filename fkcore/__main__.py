@@ -82,6 +82,12 @@ use the game link, and only with FK_LINK=on)
     poll GAME_DIR                         what every agent command ends with: the game's alerts
                                           (new, reminders, cleared; grouped), new chat lines and
                                           the research state (loud when nothing researches)
+    decon GAME_DIR --area X0,Y0,X1,Y1 [--name ENTITY[,...]] [--cancel]
+                                          the deconstruction planner: robots take it up
+    capture GAME_DIR lab NAME | world X0,Y0,X1,Y1 | design [FACTORY/]INST [--to FILE]
+                                          something built (a lab slot, an area of the game or
+                                          the planner, a laid-out instance) as a Literal file:
+                                          Literal<file=...> anywhere, a module included
     lua GAME_DIR CODE | --file F          run a Lua chunk in the game (RCON); its rcon.print is the
                                           reply. For reading and investigating; the link refuses
                                           Lua that registers handlers or commands (unjoinable saves)
@@ -398,6 +404,103 @@ def _force_surface(game):
     from .apply import force_for
     sf = surfacemod.load_game(game)
     return getattr(sf, "force", None) or force_for(sf.mode), sf.name
+
+
+def _decon(a, cat):
+    """fk decon (2.0.62): the deconstruction planner over an area, the robots take it up."""
+    from . import link
+    area = _area(a.area)
+    names = [n for n in (a.name or "").split(",") if n]
+    unknown = [n for n in names if not cat.has_entity(n)]
+    if unknown:
+        print(f"error: decon: no entity {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    force, surface = _force_surface(a.game)
+
+    def body(r):
+        got = r.lua(link.lua_decon_area(surface, force, area, names, a.cancel)).strip()
+        try:
+            data = json.loads(got)
+        except ValueError:
+            raise link.LinkError(got[:300]) from None
+        by = data.get("by") or {}
+        if isinstance(by, list):                  # an empty Lua table comes back as []
+            by = {}
+        n = sum(by.values())
+        what = ", ".join(f"{c} {k}" for k, c in sorted(by.items(), key=lambda kv: (-kv[1], kv[0])))
+        if a.cancel:
+            return [f"decon: {n} orders taken back in {a.area}" + (f": {what}" if what else "")]
+        out = [f"decon: {n} entities in {a.area} ordered out, for the robots"
+               + (f": {what}" if what else "")]
+        if n:
+            out.append("  what the design still has there, the next build of its factory lays "
+                       "again: take it out of the .fk too, or `fk decon AREA --cancel`")
+        if data.get("robots"):
+            out.append(f"  the roboports ordered out hold {data['robots']} robots: they go to "
+                       "storage as items and do nothing there until an inserter puts them into a "
+                       "roboport (fk stock shows them)")
+        return out
+    return _world(a, cat, "decon", body)
+
+
+def _capture(a, cat):
+    """fk capture (2.0.62): something built, as a Literal file that can go anywhere
+    (fkcore.capture)."""
+    from . import capture, lab, link
+    to = a.to or os.path.join("captured", f"{re.sub(r'[^A-Za-z0-9_-]+', '-', a.what)}.json")
+    dest = to if os.path.isabs(to) else os.path.join(a.game, to)
+    try:
+        if a.source == "design":
+            fkp_path = a.fkp
+            if not fkp_path:
+                factory, _, rest = a.what.partition("/")
+                fkp_path = os.path.join(a.game, f"{factory}.fkp")
+                path = rest
+                if not rest or not os.path.exists(fkp_path):
+                    # one plot: every instance is in the world's layout
+                    sf = surfacemod.load_game(a.game)
+                    only = sorted(sf.places)
+                    fkp_path = os.path.join(a.game, f"{only[0]}.fkp") if len(only) == 1 \
+                        else fkp_path
+                    path = a.what
+            else:
+                path = a.what
+            if not os.path.exists(fkp_path):
+                raise capture.CaptureError(f"no layout {fkp_path} (run a build to write_layout "
+                                           "first, or name one with --fkp)")
+            rows = capture.from_design(fkp.load(fkp_path), cat, path)
+            capture.write(dest, {"entities": rows, "from": f"design {path} of {fkp_path}"})
+            names = {}
+            for row in rows:
+                names[row["name"]] = names.get(row["name"], 0) + 1
+            n = len(rows)
+        else:
+            r = _game_link("capture")
+            if r is None:
+                return 2
+            with r:
+                if a.source == "lab":
+                    held = lab.slots(a.game)
+                    if a.what not in held:
+                        raise capture.CaptureError(
+                            f"no lab slot {a.what} (slots: {', '.join(sorted(held)) or 'none'})")
+                    x, y, w, h = held[a.what]
+                    area = (x, y, x + w, y + h)
+                    surface, force = lab.SURFACE, lab.FORCE
+                else:
+                    area = _area(a.what)
+                    force, surface = _force_surface(a.game)
+                got = capture.from_game(r, surface, force, area)
+            n, names = got["n"], got.get("names") or {}
+            capture.write(dest, {"bp": got["bp"], "from": f"{a.source} {a.what} on {surface}"})
+    except (capture.CaptureError, link.LinkError, surfacemod.SurfaceError, OSError) as exc:
+        print(f"error: capture: {exc}", file=sys.stderr)
+        return 2
+    rel = os.path.relpath(dest, a.game).replace(os.sep, "/")
+    print(f"capture: {n} entities into {rel}: {capture.summary(names)}")
+    print(f'  use it anywhere, a module included:  X = Literal<file="{rel}"> @(x, y)'
+          f"   (or fk sim place game\\{rel.replace('/', chr(92))} @X,Y)")
+    return 0
 
 
 def _avail(a):
@@ -791,6 +894,11 @@ def main(argv=None):
     b.add_argument("script")
     b.add_argument("--from", dest="frm")
     b.add_argument("--to")
+    b.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'",
+                   help="options added to STEP for this build only (repeatable)")
+    b.add_argument("--reroute", default="", metavar="NET[,NET]",
+                   help="route these nets (or every net inside an instance) again: "
+                        "--with 'route --again NET'")
     lk = sub.add_parser("look")
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
@@ -897,6 +1005,20 @@ def main(argv=None):
     ak.add_argument("game")
     po = sub.add_parser("poll")
     po.add_argument("game")
+    dc = sub.add_parser("decon", description="the deconstruction planner over an area: the "
+                        "robots take it up (or --cancel the orders)")
+    dc.add_argument("game")
+    dc.add_argument("--area", required=True)
+    dc.add_argument("--name", default="", metavar="ENTITY[,...]", help="only these")
+    dc.add_argument("--cancel", action="store_true")
+    cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
+                        "anywhere (fkcore.capture)")
+    cp.add_argument("game")
+    cp.add_argument("source", choices=("lab", "world", "design"))
+    cp.add_argument("what", help="lab: a slot's NAME; world: X0,Y0,X1,Y1; design: "
+                    "[FACTORY/]INST")
+    cp.add_argument("--to", help="the file (default captured/<what>.json, in GAME_DIR)")
+    cp.add_argument("--fkp", help="design: the layout to read (default the committed one)")
     lu = sub.add_parser("lua")
     lu.add_argument("game")
     lu.add_argument("code", nargs="?")
@@ -950,6 +1072,10 @@ def main(argv=None):
         return _sim(a, cat)
     if a.cmd == "lab":
         return _lab(a, cat)
+    if a.cmd == "capture":
+        return _capture(a, cat)
+    if a.cmd == "decon":
+        return _decon(a, cat)
     if a.cmd == "adopt":
         return _adopt(a, cat)
 
@@ -960,7 +1086,8 @@ def main(argv=None):
         return 0
     if a.cmd == "build":
         try:
-            code, _ctx = flow.run(a.script, a.frm, a.to, cat)
+            extra = list(a.extra) + ([f"route --again {a.reroute}"] if a.reroute else [])
+            code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

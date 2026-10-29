@@ -506,10 +506,27 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
     for name, job in routemod.jobs(flat, lay, cat).items():
         if not job.fluid:
             keep |= set(job.ends())
+    # 2.0.62 (the opus run's Oil module: "every connection tile of its box is taken"): every
+    # frame was blocked for every net, a sealed module's own included, so no pipe could stand
+    # inside a module. Now, as for belts (route.net_frames), a net inside a sealed module routes in
+    # that module's frame and keeps off every other frame
+    frames = {}
     for path, rec in lay.insts.items():
         if rec.kind != "Literal" and path in flat.insts:
-            x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
-            keep |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+            frames[path] = frame_of(flat, lay, path, cat)
+    sealed = set(getattr(flat, "sealed", ()) or ())
+    tiles_of = {p: {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+                for p, (x0, y0, x1, y1) in frames.items()}
+
+    def net_frames(net):
+        parts = net.split("/")[:-1]
+        inside = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+        inside = [p for p in inside if p in sealed and p in frames]
+        blocked = set()
+        for p, tiles in tiles_of.items():
+            if p not in inside:
+                blocked |= tiles
+        return blocked, (frames[inside[-1]] if inside else box)
     fluid_all = sorted(routemod.fluid_nets(flat, cat))
     reach = int(cat.entity(PTG).get("max_distance") or 10)
     base = list(lay.entities.values())
@@ -522,14 +539,21 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
         except _Skip as exc:
             failed0[net] = str(exc)
     order = [n for n in todo if n in ends]
+    per_net = {}
     best = None
     for attempt in range(len(order) + 1):
         w, owners, g = _world(flat, lay, cat, fluid_all, blocked, box, keep)
         added, how, failed = {}, {}, dict(failed0)
         extra = []
+        occ0 = set(w.occ)
         for net in order:
+            if net not in per_net:
+                per_net[net] = net_frames(net)
+            w.occ = occ0 | per_net[net][0]
+            w.box = per_net[net][1]
             got, why = _route_net(w, owners, g, flat, cat, net, ends[net], base, extra, reach,
                                   limit)
+            w.occ, w.box = occ0, box
             if got is None:
                 failed[net] = why
                 continue

@@ -101,9 +101,18 @@ or planning and nothing new is running in the game, stop and build the simplest 
 Mistakes are cheap here: a build replaces whatever was in the way, and takes up what it built before
 and your design no longer has.
 
-Only `fk wait` waits, from a fixed budget. You can also write your own scripts, and read the game
-directly with Lua (`fk lua`). Grow your helpers in `helpers\` as a small library of reusable features
-rather than a pile of one-off scripts.
+Only `fk wait` waits, from a fixed budget.
+
+You can code, and it's often the quickest way. Any fk command is Python sending Lua to the game, and
+all of it is readable in `.toolkit\fkcore\` (`link.py` holds most of the Lua). When the toolkit has
+no command for something a player could do (a filtered deconstruction, a grid of ghosts, a button),
+write the Lua and run it with `fk lua`. Chain fk commands, Lua and your own scripts as the work
+needs. A for loop that lays a grid is as fair as a paste. `FAIR-PLAY.md` is the whole rulebook.
+Try risky Lua on the planner first (`fk sim game lua ...`). Grow your helpers in `helpers\` as a
+small library of reusable features rather than a pile of one-off scripts.
+
+A design doesn't have to start as `.fk`. Build it in the lab, the planner or by hand, then
+`fk capture` it into a file that a `Literal` reads, and drop it anywhere, a module included.
 
 ## Ways to get unstuck
 
@@ -122,7 +131,11 @@ out by hand:
   `too-thin` line names the belt lane or inserter that is too thin
 - what the factory is really making → `fk stats`; what you have → `fk stock`
 - whether a plan works before it costs anything → `fk sim`
-- anything else → `fk lua` reads the game for you
+- a route you don't like, or one that missed a machine → `fk build --reroute NET` (or `--reroute
+  MODULE`: every net inside it)
+- one build with other step options → `fk build --with 'cover robots --fresh'`
+- taking things up → `fk decon X0,Y0,X1,Y1 [--name ENTITY]`, as the deconstruction planner does
+- anything else → `fk lua` reads or does it for you
 
 ## How big
 

@@ -61,7 +61,7 @@ over, too).
 Rebuilds keep what stands. The poles and roboports a build laid stay where they are wherever the
 new design leaves their spot free, and new ones go only where something new needs them, so power
 and the robot network keep running through a rebuild (`out\cover_power.txt` says how many were
-kept; `cover power --fresh` or `cover robots --fresh` in the build script lays them all anew).
+kept; `fk build --with 'cover robots --fresh'` lays them all anew for one build).
 Switching the pole kind (`cover power --pole small-electric-pole` while medium poles are short)
 keeps the poles of the old kind the last build found standing and lays the new kind only where
 the old one never stood. `--pole any` switches by itself, the way `--hand any` does: medium poles
@@ -83,6 +83,15 @@ is never kept as it was. So a patch is cheap: a row beside the others, a chest o
 more machine on a net, one more net into what stands. The design the next build keeps to is the
 one the last full build wrote (`write_layout`, just before the paste); `fk build --to diff` and
 `--to report_checks` write nothing, so try changes with them freely.
+
+When a route you have stops pleasing you (spaghetti from patches, a branch you'd lay otherwise),
+`fk build --reroute mall1/fe` lays that net anew, and `--reroute mall1` every net inside mall1
+(`out\route.txt`: `routed again: asked`). A route that doesn't reach a machine of its net is laid
+again by itself; `report_checks` says `partly-connected` if one ever still doesn't.
+
+Any step takes options for one build without editing the script: `fk build --with 'cover robots
+--fresh'`, `fk build --with 'route --effort high' --with 'tier --allow yellow,red'` (repeat
+`--with` as often as you like; the step's own options stay, the ones you add win).
 
 Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on objects (`set
 NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
@@ -497,6 +506,18 @@ fk unfold main.fk gears          turn a row into a Literal (its entities pinned 
 fk split-to-chest . main NET box --at X,Y [--requester --item I]
                                  a chest joins a net as one more endpoint (a buffer, a tap)
 fk adopt X,Y --into main/NET     a belt you placed by hand becomes part of that net's route
+fk build --reroute NET[,NET]     those nets laid anew (an instance's name: every net inside it)
+fk build --with 'STEP OPTS'      a step's options for this build only (--with 'cover robots --fresh')
+fk decon X0,Y0,X1,Y1 [--name E[,E]] [--cancel]
+                                 the deconstruction planner, as you'd drag it: robots take up
+                                 what stands there (only those entities, with --name), or the
+                                 orders go back. What the design still has there, the next build
+                                 lays again: take it out of the .fk as well
+fk capture lab NAME              something built, as a file a Literal reads: a lab slot, an area
+fk capture world X0,Y0,X1,Y1     of the game (fk sim game capture world ...: of the planner), or
+fk capture design [FACTORY/]INST an instance of your laid-out design. Then
+                                 X = Literal<file="captured/NAME.json"> @(x, y) puts it anywhere,
+                                 inside a module too, and fk sim place takes the same file
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]
@@ -529,7 +550,35 @@ ack: `fk say "on it: belting the ore now"`, do the work, `fk ack`.
 
 Every command takes `--help`.
 
-## Reading the game yourself
+## Programming the game yourself
+
+You can code, and the game is open to it at three levels. Use whichever fits what you're doing:
+
+- **fk commands.** Each is Python sending Lua over RCON. All of it is readable in
+  `.toolkit\fkcore\`: `link.py` holds most of the Lua chunks the commands send (`lua_decon_area`,
+  `lua_paste`, `lua_snapshot`, ...), and `lab.py`, `sim.py` and `capture.py` hold their own.
+  When a command does almost what you want, read its Lua and change it.
+- **Lua** (`fk lua`), for anything the game API can do that no command does yet: a
+  deconstruction order with a filter of your own, a ghost grid, a question about the base.
+  Writing a few lines of Lua is often quicker than looking for a command that does the same.
+- **Your own scripts.** Python or PowerShell that chains `fk` commands and Lua chunks: a loop
+  that tries five layouts with `fk build --to report_checks` and keeps the best one, or a
+  probe that reads many machines at once. The ones you'd write twice go in `helpers\`.
+
+A planner who designs one factory at a time may never need more than the fk design commands. A
+player expanding, scouting or fighting, or trying an odd build, usually gets more out of Lua and
+scripts. The rules are the same either way (`FAIR-PLAY.md`): you build by ghosts, and you may press
+any button a player could press. A Lua loop that places ghosts in a grid is a paste of your own,
+and so is a Lua deconstruction order:
+
+```
+fk lua "local s = game.surfaces.nauvis for i = 0, 9 do for j = 0, 3 do s.create_entity{name = 'entity-ghost', inner_name = 'solar-panel', position = {100 + 3 * i + 1.5, 40 + 3 * j + 1.5}, force = 'player'} end end rcon.print('ok')"
+fk lua "for _, e in pairs(game.surfaces.nauvis.find_entities_filtered{area = {{-30, 74}, {8, 96}}, name = 'transport-belt'}) do e.order_deconstruction('player') end"
+```
+
+What you place outside the design reads `marked` in `fk look` and is kept for now. To keep it for
+good, `fk capture world X0,Y0,X1,Y1` it and put the file in your design as a `Literal`. A build made
+that way (in the lab, in the planner, or by hand) goes anywhere afterwards, a module included.
 
 `fk lua` sends a Lua chunk to the game over RCON and prints what it `rcon.print`s:
 
@@ -544,12 +593,12 @@ fine (a file of 40 kB works). A big answer is better written to a file
 (`ssh computah-ct`); `run.json` names the toolkit there (`host_toolkit`: `fkcore.link.Rcon` is
 the RCON client) and your game codebase there (`host_game`).
 
-Use it to look and to understand. Changes go through the game: `fk build` (ghosts and robots).
 What a script of yours may and may not do is in `FAIR-PLAY.md`. (`fk fresh` is the toolkit's own
 example of a multi-stage build action: it takes up the belts, inserters and crafter output that
 hold stale items, so the next build lays them again.) The link refuses Lua that registers an event
 handler, a command or an interface: that made every save unjoinable once. Reusable helpers go in
-`helpers\` (its README says how).
+`helpers\` (its README says how). Try risky Lua on the planner first (`fk sim game lua ...`): it
+is your map, and nothing there touches the real game.
 
 ## The surface file and the world design
 

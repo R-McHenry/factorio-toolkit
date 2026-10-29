@@ -733,7 +733,7 @@ def _need(ctx, kind):
 
 
 def s_route(ctx, args):
-    o = _opts(args, only="all", effort="normal", hand="any", module="")
+    o = _opts(args, only="all", effort="normal", hand="any", module="", again="")
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -749,6 +749,13 @@ def s_route(ctx, args):
                                                o["module"])
         elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
+        if o["again"]:
+            asked, unknown = _asked(flat, str(o["again"]))
+            for net in sorted(asked):
+                if pinned.pop(net, None) is not None:
+                    again[net] = "asked (--again / fk build --reroute)"
+            if unknown:
+                lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
                                hand=hand, patch=pinned)
@@ -772,6 +779,21 @@ def s_route(ctx, args):
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]
         checks += _invariant_checks(factory, fkp.invariants(r.layout, ctx.cat, nets=flat.nets))
     return lines, checks
+
+
+def _asked(flat, spec):
+    """The nets ``route --again`` names: NET[,NET...], each a net's name, or an instance's path
+    for every net inside it (``mall1`` is mall1/fe, mall1/g, ...), or ``all``. -> (nets, the
+    names that matched none)."""
+    nets, unknown = set(), []
+    for name in (s.strip() for s in spec.split(",")):
+        if not name:
+            continue
+        hit = {n for n in flat.nets if name == "all" or n == name or n.startswith(name + "/")}
+        nets |= hit
+        if not hit:
+            unknown.append(name)
+    return nets, unknown
 
 
 def _rehand(lay, cat, hand):
@@ -1694,13 +1716,37 @@ def _load_checkpoint(ctx, step):
         ctx.layouts[p.factory] = fkp.load(path)
 
 
-def run(script, frm=None, to=None, cat=None, echo=print, link=None) -> tuple:
+def with_options(lines, extra):
+    """``lines`` with ``extra`` (["STEP OPTS", ...]: ``fk build --with``) added to every line of
+    each STEP, for this build only; options given later win (``_opts``). 2.0.62 (the opus run:
+    "one build with --fresh, then restore the line"): one build's options without editing the
+    script. -> the new lines."""
+    add = {}
+    for spec in extra or ():
+        t = shlex.split(spec)
+        if not t:
+            continue
+        cmd, args = t[0], t[1:]
+        if cmd == "cover" and args:
+            cmd, args = f"cover_{args[0]}", args[1:]
+        if cmd not in STEPS:
+            raise FlowError(f"--with {spec!r}: unknown step {t[0]!r}")
+        add.setdefault(cmd, []).extend(args)
+    missing = sorted(set(add) - {ln.cmd for ln in lines})
+    if missing:
+        raise FlowError(f"--with: the script has no {', '.join(missing)} step")
+    return [Line(ln.n, ln.cmd, ln.args + add[ln.cmd], ln.text + "  " + " ".join(add[ln.cmd]))
+            if ln.cmd in add else ln for ln in lines]
+
+
+def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) -> tuple:
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
     stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
-    steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes."""
+    steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes.
+    ``extra``: options for this build only (``with_options``)."""
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
-        lines = parse(fh.read(), script)
+        lines = with_options(parse(fh.read(), script), extra)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
     availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:
