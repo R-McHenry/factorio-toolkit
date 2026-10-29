@@ -407,6 +407,10 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         for t in sorted(tiles):
             taken.setdefault(t, e.key)
         kind = _kind(cat, e)
+        if kind == "electric-pole" and e.attrs.get("dnp"):
+            # 2.0.63: a DNP pole is never built, so it powers nothing; its tiles stay taken. What
+            # a DNP piece would power still gets its poles, ready for when it is built
+            continue
         if kind == "electric-pole":
             existing.append(_Node(float(e.x), float(e.y), cat.pole_supply(e.name),
                                   cat.pole_reach(e.name), key=e.key))

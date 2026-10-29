@@ -82,6 +82,7 @@ use the game link, and only with FK_LINK=on)
     poll GAME_DIR                         what every agent command ends with: the game's alerts
                                           (new, reminders, cleared; grouped), new chat lines and
                                           the research state (loud when nothing researches)
+    dnp FILE.fk NAME[,NAME] [--off]       do not populate: laid out and routed, not built
     decon GAME_DIR --area X0,Y0,X1,Y1 [--name ENTITY[,...]] [--cancel]
                                           the deconstruction planner: robots take it up
     capture GAME_DIR lab NAME | world X0,Y0,X1,Y1 | design [FACTORY/]INST [--to FILE]
@@ -404,6 +405,69 @@ def _force_surface(game):
     from .apply import force_for
     sf = surfacemod.load_game(game)
     return getattr(sf, "force", None) or force_for(sf.mode), sf.name
+
+
+def dnp_edit(text, names, off=False):
+    """``text`` (a .fk file's top level) with ``names`` (dotted refs) put on, or with ``off`` taken
+    off, its ``dnp`` lines (2.0.63). The names go on the file's last top-level ``dnp`` line, or a new
+    one at the end; ``off`` drops each name wherever it stands, and a line left empty. -> (new
+    text, what changed)."""
+    lines = text.split("\n")
+    pat = re.compile(r"^dnp\s+(.*?)(\s*#.*)?$")
+    have = {}
+    for i, line in enumerate(lines):
+        m = pat.match(line)
+        if m:
+            have[i] = [n.strip() for n in m.group(1).split(",") if n.strip()]
+    on = {n for ns in have.values() for n in ns}
+    if off:
+        gone = [n for n in names if n in on]
+        for i, ns in sorted(have.items(), reverse=True):
+            keep = [n for n in ns if n not in names]
+            if keep == ns:
+                continue
+            m = pat.match(lines[i])
+            if keep:
+                lines[i] = "dnp " + ", ".join(keep) + (m.group(2) or "")
+            else:
+                del lines[i]
+        return "\n".join(lines), gone
+    new = [n for n in names if n not in on]
+    if not new:
+        return text, []
+    if have:
+        i = max(have)
+        m = pat.match(lines[i])
+        lines[i] = "dnp " + ", ".join(have[i] + new) + (m.group(2) or "")
+    else:
+        while lines and lines[-1] == "":
+            lines.pop()
+        lines += ["dnp " + ", ".join(new) + "   # do not populate: laid out, not built", ""]
+    return "\n".join(lines), new
+
+
+def _dnp(a, cat):
+    """fk dnp FILE.fk NAME[,NAME] [--off] (2.0.63): the file's dnp line, edited; then elaborated, so
+    a name that matches nothing is said before the next build."""
+    names = [n.strip().replace("/", ".") for n in a.names.split(",") if n.strip()]
+    with open(a.file, encoding="utf-8") as fh:
+        text = fh.read()
+    new, changed = dnp_edit(text, names, a.off)
+    with open(a.file, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(new)
+    try:
+        elaborate_file(a.file, cat)
+    except (ElabError, FkSyntaxError) as exc:
+        with open(a.file, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        print(f"error: dnp: {exc} (the file is as it was)", file=sys.stderr)
+        return 2
+    verb = "built again (dnp taken off)" if a.off else "DNP: laid out, not built"
+    print(f"dnp {os.path.basename(a.file)}: {', '.join(changed) or 'nothing changed'}"
+          + (f" {verb}" if changed else "") + "; the next fk build does it"
+          + (" (fk build --confirm also takes up what stands built there)" if not a.off
+             and changed else ""))
+    return 0
 
 
 def _decon(a, cat):
@@ -899,6 +963,8 @@ def main(argv=None):
     b.add_argument("--reroute", default="", metavar="NET[,NET]",
                    help="route these nets (or every net inside an instance) again: "
                         "--with 'route --again NET'")
+    b.add_argument("--confirm", action="store_true",
+                   help="take up what stands built on DNP pieces (diff and apply --confirm)")
     lk = sub.add_parser("look")
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
@@ -1005,6 +1071,11 @@ def main(argv=None):
     ak.add_argument("game")
     po = sub.add_parser("poll")
     po.add_argument("game")
+    dn = sub.add_parser("dnp", description="do not populate: a piece of the design laid out and "
+                        "routed but not built (or --off: built again)")
+    dn.add_argument("file")
+    dn.add_argument("names", metavar="NAME[,NAME]")
+    dn.add_argument("--off", action="store_true")
     dc = sub.add_parser("decon", description="the deconstruction planner over an area: the "
                         "robots take it up (or --cancel the orders)")
     dc.add_argument("game")
@@ -1076,6 +1147,8 @@ def main(argv=None):
         return _capture(a, cat)
     if a.cmd == "decon":
         return _decon(a, cat)
+    if a.cmd == "dnp":
+        return _dnp(a, cat)
     if a.cmd == "adopt":
         return _adopt(a, cat)
 
@@ -1087,6 +1160,10 @@ def main(argv=None):
     if a.cmd == "build":
         try:
             extra = list(a.extra) + ([f"route --again {a.reroute}"] if a.reroute else [])
+            if a.confirm:
+                with open(a.script, encoding="utf-8") as fh:
+                    have = {ln.cmd for ln in flow.parse(fh.read(), a.script)}
+                extra += [f"{s} --confirm" for s in ("diff", "apply") if s in have]
             code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)

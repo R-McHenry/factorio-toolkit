@@ -1131,6 +1131,50 @@ def _serving_only(flat, cat, job, ents, laid):
     return out if out else laid
 
 
+def tag_dnp(flat, lay, cat):
+    """2.0.63, do not populate (Rory, 2026-10-29): mark ``dnp`` on what a build lays but never
+    pastes. That is every entity of a DNP instance, and every route carrier that serves no live
+    pair (a driver and a consumer, neither DNP), such as a branch to a DNP machine, its inserter,
+    or a net whose ends are all DNP. The trunk a live pair shares with it stays. Each build tags
+    afresh, so un-DNP'ing a piece builds it where it was laid. -> how many entities are DNP."""
+    for e in lay.entities.values():
+        e.attrs.pop("dnp", None)
+    if not getattr(flat, "dnp", None):
+        return 0
+    by_net, n = {}, 0
+    for e in lay.entities.values():
+        if e.owner.startswith("~"):
+            by_net.setdefault(e.owner[1:], []).append(e)
+        elif e.owner and flat.is_dnp(e.owner):
+            e.attrs["dnp"] = 1
+            n += 1
+    table = connectmod.endpoints(flat)
+    g = None
+    for net, ents in sorted(by_net.items()):
+        names = fkpmod.net_names(net) or [net]
+        if all(flat.is_dnp(m) for m in names):
+            dead = ents
+        else:
+            ends = {m: table.get(m, ((), ())) for m in names}
+            if not any(flat.is_dnp(k) for d, c in ends.values() for k, _i in list(d) + list(c)):
+                continue                             # no DNP end: all of it is live
+            if g is None:
+                g = connectmod.graph(list(lay.entities.values()), cat, _ports(flat))
+            keys, serve = {e.key for e in ents}, set()
+            fluid = any(cat.kind(e.name) in ("pipe", "pipe-to-ground", "pump") for e in ents)
+            for m, (drivers, consumers) in ends.items():
+                live_d = [k for k, _i in drivers if k in g.nodes and not flat.is_dnp(k)]
+                live_c = [k for k, _i in consumers if k in g.nodes and not flat.is_dnp(k)]
+                if not live_d or not live_c:
+                    continue
+                serve |= keys if fluid else _serving(g, m, live_d, live_c, keys)
+            dead = [e for e in ents if e.key not in serve and not _is_stub(e)]
+        for e in dead:
+            e.attrs["dnp"] = 1
+        n += len(dead)
+    return n
+
+
 def _common(sets):
     sets = list(sets)
     return set.intersection(*sets) if sets else set()

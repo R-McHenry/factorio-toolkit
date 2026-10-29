@@ -194,6 +194,12 @@ class Flat:
     #: 2.0.60, `modules=auto` / `machine=auto`: choice key -> Choice (the size step's to make)
     choices: dict = field(default_factory=dict)
     stack_ends: set = field(default_factory=set)    # port keys a stack leaves open: dead ends
+    #: 2.0.63, do not populate: the instance paths that are DNP (each with all it holds)
+    dnp: set = field(default_factory=set)
+
+    def is_dnp(self, key):
+        """A machine key or instance path inside a DNP instance (2.0.63)."""
+        return any(key == p or key.startswith(p + "/") for p in self.dnp)
 
     def resolve_ref(self, ref, scope=""):
         """``Ref`` -> (Inst or None, machine keys); the Inst is None for a single machine or a port.
@@ -272,6 +278,21 @@ def _join(*parts):
     return "/".join(p for p in parts if p)
 
 
+#: what every instance takes besides its kind's own parameters: its share of full speed, and
+#: 2.0.63's do-not-populate flag
+META = ("duty", "dnp")
+
+
+def _dnp(params, path, line, src):
+    """``<dnp>`` / ``dnp=1`` (2.0.63) -> True; ``dnp=0`` -> False."""
+    v = params.get("dnp", False)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and v in (0, 1):
+        return bool(v)
+    raise ElabError(src, line, f"{path}: dnp is a flag (<dnp>, or dnp=1 / dnp=0), got {v!r}")
+
+
 def _duty(params, path, line, src):
     v = params.get("duty")
     if v is None:
@@ -290,7 +311,11 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._sizes = dict(sizes or {})
     flat._lanes = []
     flat._port_named = {}
+    flat._dnp_named = {}
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
+    for path, (line, src) in sorted(flat._dnp_named.items()):
+        if path not in flat.insts:
+            raise ElabError(src, line, f"dnp {path.replace('/', '.')}: no such instance")
     _bus_conns(flat, cat)
     _resolve_nets(flat, cat)
     _bus_nets(flat)
@@ -301,6 +326,10 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _endpoint_checks(flat, cat)
     from . import circuits
     flat.circuit = circuits.resolve(flat, cat)
+    if flat.dnp:
+        # 2.0.63: a DNP piece is not built, so what would be wrong with it built says nothing now
+        flat.checks = [c for c in flat.checks
+                       if not any(flat.is_dnp(w) for w in str(c.where).split())]
     return flat
 
 
@@ -313,9 +342,12 @@ def _recorded_ports(flat, layout):
         flat.port_records[fkpmod.port_key(rec.key)] = rec
 
 
-def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
+def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
     scope = {}
     flat.scopes[prefix] = scope
+    # 2.0.63: `dnp A, B.c` names instances in this body or below; they are DNP when expanded
+    for ref in getattr(mod, "dnps", ()):
+        flat._dnp_named.setdefault(_join(prefix, "/".join(ref.parts)), (ref.line, src))
     ports = {}
     for p in mod.ports:
         if prefix == "":
@@ -358,6 +390,12 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         if inst.name in scope:
             raise ElabError(src, inst.line, f"{inst.name} is defined twice")
         d = min(duty, _duty(inst.params, path, inst.line, src))
+        # 2.0.63 (Rory, 2026-10-29), do not populate: laid out and routed as ever, nothing of it
+        # in the model (duty 0: it makes, takes and asks for nothing), and never pasted
+        dn = dnp or _dnp(inst.params, path, inst.line, src) or path in flat._dnp_named
+        if dn:
+            d = 0.0
+            flat.dnp.add(path)
         stacked, stack_auto = None, None
         if inst.kind == "Stack":
             # 2.0.48: a line of cells, built as a module of its own (its head, its cells, the nets
@@ -366,21 +404,23 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             # 2.0.59: `n=auto`, the size step's count of cells
             stack_auto = _auto(flat, path, inst, src)
             if stack_auto is not None:
-                inst = dataclasses.replace(inst, params=dict(inst.params, n=stack_auto[2]))
+                inst = dataclasses.replace(inst, params=dict(inst.params,
+                                                             **{stack_auto[3]: stack_auto[2]}))
             synth = _stack_module(flat, inst, path, modules, src)
             modules[synth.name] = synth
             inst = lang.Inst(inst.name, synth.name,
-                             {k: v for k, v in inst.params.items() if k == "duty"},
+                             {k: v for k, v in inst.params.items() if k in META},
                              inst.hints, inst.line)
         if inst.kind in modules:
             if inst.kind in stack:
                 raise ElabError(src, inst.line, f"module {inst.kind} contains itself")
-            extra = sorted(set(inst.params) - {"duty"})
+            extra = sorted(set(inst.params) - set(META))
             if extra:
-                raise ElabError(src, inst.line, f"{path}: a module instance takes only duty=, "
-                                                f"not {', '.join(extra)}")
+                raise ElabError(src, inst.line, f"{path}: a module instance takes only duty= and "
+                                                f"dnp, not {', '.join(extra)}")
             before = set(flat.machines)
-            _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,))
+            _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,),
+                    dn)
             keys = [k for k in flat.machines if k not in before and k not in flat.ports]
             # 2.0.43 (PLAN-GLOBAL phase B): an instance line's own `size WxH` is the frame a plot
             # gets from its placement, and it seals the instance as the module's own `size` does
@@ -395,10 +435,10 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             if stacked is not None:
                 node.kind, node.params = "Stack", dict(stacked.params)
                 if stack_auto is not None:
-                    node.params["n"] = stack_auto[2]
+                    node.params[stack_auto[3]] = stack_auto[2]
                     node.auto = stack_auto[:2]
         else:
-            params = {k: v for k, v in inst.params.items() if k != "duty"}
+            params = {k: v for k, v in inst.params.items() if k not in META}
             auto = _auto(flat, path, inst, src)
             if auto is not None:
                 params["n"] = auto[2]
@@ -420,6 +460,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             keys = []
             for spec in specs:
                 m = _machine(spec, path, inst.kind, d)
+                if dn:
+                    m.extra["dnp"] = True
                 flat.machines[m.key] = m
                 keys.append(m.key)
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
@@ -455,24 +497,37 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
 
 
 def _auto(flat, path, inst, src):
-    """(lo, hi, n) of an ``n=auto`` row, None for any other instance: n is the size step's
-    (``sizes``), else what the factory's .fkp laid out last, else the low bound."""
+    """(lo, hi, n, param) of an ``n=auto`` row, None for any other instance: n is the size step's
+    (``sizes``), else what the factory's .fkp laid out last, else the low bound. 2.0.63: a Stack's
+    ``built=auto`` (``param`` "built") is the count of built cells among its fixed ``n``, bounded
+    by n; the size step sizes it as it sizes ``n=auto``, and the cells past it are DNP."""
     autos = [k for k, v in inst.params.items() if isinstance(v, lang.Auto) and k not in CHOICES]
     if not autos:
         return None
-    if autos != ["n"] or inst.kind not in AUTO_KINDS + ("Stack",):
+    if inst.kind == "Stack" and autos == ["built"]:
+        n = inst.params.get("n")
+        if not isinstance(n, (int, float)) or isinstance(n, bool):
+            raise ElabError(src, inst.line, f"{path}: built=auto counts the built cells of a "
+                                            "fixed n=, so n is a number")
+        a = inst.params["built"]
+        lo, top = min(a.lo, int(n)), min(a.top, int(n))
+        key = "built"
+    elif autos != ["n"] or inst.kind not in AUTO_KINDS + ("Stack",):
         raise ElabError(src, inst.line, f"{path}: {autos[0]}=auto: auto is the count of a row "
-                                        f"or a Stack, n=auto on {', '.join(AUTO_KINDS)} or Stack")
-    a = inst.params["n"]
+                                        f"or a Stack, n=auto on {', '.join(AUTO_KINDS)} or Stack "
+                                        "(or built=auto on a Stack)")
+    else:
+        a = inst.params["n"]
+        lo, top, key = a.lo, a.top, "n"
     n = flat._sizes.get(path)
     rec = flat._layout.insts.get(path) if flat._layout is not None else None
     if n is None and rec is not None and rec.kind == inst.kind:
         try:
-            n = int(rec.params.get("n", ""))
+            n = int(rec.params.get(key, ""))
         except ValueError:
             n = None
-    n = a.lo if n is None else min(max(int(n), a.lo), a.top)
-    return a.lo, a.top, n
+    n = lo if n is None else min(max(int(n), lo), top)
+    return lo, top, n, key
 
 
 # -- 2.0.60: modules=auto and machine=auto, the size step's choices -------------------------------
@@ -570,7 +625,7 @@ def _literal_entities(flat, path, params, cat, src):
     from . import literal
     extra = sorted(set(params) - {"file", "box"})
     if extra:
-        raise TemplateError(f"a Literal takes file=, box= and duty=, not {', '.join(extra)}")
+        raise TemplateError(f"a Literal takes file=, box=, duty= and dnp, not {', '.join(extra)}")
     if "file" in params:
         try:
             ents, size, origin = literal.import_entities(literal.resolve(src, params["file"]),
@@ -726,10 +781,10 @@ def _stack_module(flat, inst, path, modules, src):
     and a ref ``STACK.P`` names the head's port P, or with no head the first cell's NEAR port P or
     the last cell's FAR port P (``flat.stack_alias``)."""
     p = inst.params
-    extra = sorted(set(p) - {"cell", "n", "head", "duty"})
+    extra = sorted(set(p) - {"cell", "n", "head", "built"} - set(META))
     if extra:
-        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head= and duty=, not "
-                                        f"{', '.join(extra)}")
+        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head=, built=, duty= "
+                                        f"and dnp, not {', '.join(extra)}")
     cname, hname = p.get("cell"), p.get("head")
     if not isinstance(cname, str) or cname not in modules:
         raise ElabError(src, inst.line, f"{path} = Stack: cell= names a module, got {cname!r}")
@@ -740,6 +795,14 @@ def _stack_module(flat, inst, path, modules, src):
         n = int(n)
     if not isinstance(n, int) or isinstance(n, bool) or n < 1:
         raise ElabError(src, inst.line, f"{path} = Stack: n= a whole number of cells, got {n!r}")
+    # 2.0.63 (Rory: "a great way to implement a scaling row"): built=K, the first K cells built and
+    # the rest DNP, laid out and routed all the same, so raising K builds them where they stand
+    built = p.get("built", n)
+    if isinstance(built, float) and built.is_integer():
+        built = int(built)
+    if not isinstance(built, int) or isinstance(built, bool) or not 0 <= built <= n:
+        raise ElabError(src, inst.line, f"{path} = Stack: built= a whole number of cells from 0 "
+                                        f"to n={n}, got {built!r}")
     cell = modules[cname]
     if cell.size is None or not cell.stacks:
         raise ElabError(src, inst.line, f"{path} = Stack: cell {cname} needs a size and its "
@@ -779,7 +842,8 @@ def _stack_module(flat, inst, path, modules, src):
     hw, hh = head.size if head is not None else (0, 0)
     at = {"n": lambda k: (0, (n - 1 - k) * h), "s": lambda k: (0, hh + k * h),
           "e": lambda k: (hw + k * w, 0), "w": lambda k: ((n - 1 - k) * w, 0)}[grow]
-    insts = [lang.Inst(str(k), cname, {}, {"at": (*at(k), 0)}, inst.line) for k in range(n)]
+    insts = [lang.Inst(str(k), cname, {"dnp": True} if k >= built else {}, {"at": (*at(k), 0)},
+                       inst.line) for k in range(n)]
     if head is not None:
         hat = {"n": (0, n * h), "s": (0, 0), "e": (0, 0), "w": (n * w, 0)}[grow]
         insts.insert(0, lang.Inst("head", hname, {}, {"at": (*hat, 0)}, inst.line))
@@ -954,7 +1018,7 @@ def _bus_conns(flat, cat):
         if mouths:
             inst.params["mouth"] = mouths
         try:
-            specs = template_machines("Bus", {k: v for k, v in inst.params.items() if k != "duty"},
+            specs = template_machines("Bus", {k: v for k, v in inst.params.items() if k not in META},
                                       cat)
         except TemplateError as exc:
             raise ElabError(flat.path, inst.line, f"{path} = Bus: {exc}") from None

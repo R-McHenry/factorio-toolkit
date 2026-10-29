@@ -585,7 +585,8 @@ def _why(model, key):
         return "full speed"
     kind, item, net = b
     if kind == "duty":
-        return f"duty {m.duty:g}"
+        # 2.0.63: a DNP machine is laid out but not built: it runs at nothing
+        return "dnp: not built" if m.extra.get("dnp") else f"duty {m.duty:g}"
     if net is None:
         return f"{'input' if kind == 'in' else 'output'} {item} has no net"
     if kind == "in":

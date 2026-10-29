@@ -495,6 +495,7 @@ def s_report_rates(ctx, args):
     for factory, flat in ctx.flats.items():
         model = rates.solve(flat)
         lines += rates.report(model, factory).splitlines() + [""]
+        lines += _dnp_lines(flat, factory)
         for text, ok, value, target, op in model.asserts:
             if not ok and not again:
                 checks.append(Check("rate-not-met", factory, f"{text}: {value * 60:.3f}/min"))
@@ -547,6 +548,27 @@ def s_report_rates(ctx, args):
     if hands is not None:
         lines.append(hands[2])
     return lines, checks
+
+
+def _dnp_lines(flat, factory):
+    """2.0.63: the DNP instances (do not populate: laid out and routed, never built, nothing in
+    the model), the topmost of each, and what their machines would make at full speed."""
+    tops = sorted(p for p in getattr(flat, "dnp", ()) if not any(
+        p.startswith(q + "/") for q in flat.dnp))
+    if not tops:
+        return []
+    would, n = {}, 0
+    for key, m in flat.machines.items():
+        if not m.extra.get("dnp") or m.source or m.sink:
+            continue
+        n += 1
+        for item, rate in m.makes.items():
+            would[item] = would.get(item, 0.0) + rate
+    made = ", ".join(f"{item} {rate * 60:.1f}/min" for item, rate in
+                     sorted(would.items(), key=lambda kv: -kv[1])[:6])
+    return [f"dnp {factory}: {', '.join(tops)}: laid out and routed, not built ({n} machine"
+            f"{'s' if n != 1 else ''}" + (f"; at full speed they'd make {made}" if made else "")
+            + ")", ""]
 
 
 def _classify(new, prev):
@@ -760,6 +782,7 @@ def s_route(ctx, args):
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
                                hand=hand, patch=pinned)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
+        dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
         lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept"
@@ -769,6 +792,10 @@ def s_route(ctx, args):
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
                         else ""))
         lines += [f"  stale     {n}: routed again: {why}" for n, why in sorted(again.items())]
+        if dnp:
+            lines.append(f"  dnp       {dnp} entities laid but not built (DNP: "
+                         f"{', '.join(sorted(p for p in flat.dnp if not any(p.startswith(q + '/') for q in flat.dnp)))}"
+                         ")")
         if rehanded:
             lines.append(f"  rehanded  {rehanded} standing inserter"
                          f"{'s' if rehanded != 1 else ''} robots cannot build, to {hand}")
@@ -1293,7 +1320,8 @@ def _to_build(ctx):
                 need[v.name] = need.get(v.name, 0) + 1
         return need, "what the last diff found missing, ghosted or wrong"
     for e in (ctx.composed.entities.values() if ctx.composed is not None else ()):
-        need[e.name] = need.get(e.name, 0) + 1
+        if not e.attrs.get("dnp"):                   # 2.0.63: never built
+            need[e.name] = need.get(e.name, 0) + 1
     return need, "the whole design (no diff before this step)"
 
 
@@ -1365,7 +1393,8 @@ def s_report_bom(ctx, args):
     ents = (ctx.composed.entities.values() if ctx.composed is not None
             else [e for lay in ctx.layouts.values() for e in lay.entities.values()])
     for e in ents:
-        need[e.name] = need.get(e.name, 0) + 1
+        if not e.attrs.get("dnp"):                   # 2.0.63: never built
+            need[e.name] = need.get(e.name, 0) + 1
     stock = None
     if o["stock"] == "live":
         lines = ["stock live: needs the game link, which this offline build has not; needs only"]
@@ -1448,7 +1477,7 @@ def _net_items(ctx):
 
 
 def s_diff(ctx, args):
-    o = _opts(args, scope="all")
+    o = _opts(args, scope="all", confirm=False)
     if ctx.composed is None:
         return ["diff: no composed surface yet (floorplan first)"], []
     r = _link(ctx)
@@ -1462,7 +1491,7 @@ def s_diff(ctx, args):
     if area is None:
         return ["diff: nothing is designed on this surface"], []
     rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx), own=own,
-                        force=_force(ctx))
+                        force=_force(ctx), confirm=bool(o["confirm"]))
     try:
         _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
@@ -1592,7 +1621,7 @@ def _force(ctx):
 
 
 def s_apply(ctx, args):
-    o = _opts(args, scope="all")
+    o = _opts(args, scope="all", confirm=False)
     if ctx.composed is None:
         return ["apply: no composed surface yet (floorplan first)"], []
     if ctx.composed.problems:
@@ -1607,7 +1636,8 @@ def s_apply(ctx, args):
                          force=getattr(ctx.surface, "force", None), policy=ctx.surface,
                          keys=keys, net_items=_net_items(ctx),
                          label=f"fk build {os.path.basename(ctx.script)}",
-                         seed=ctx.ground is None, own=ownmod.load(ctx.root, ctx.surface.name))
+                         seed=ctx.ground is None, own=ownmod.load(ctx.root, ctx.surface.name),
+                         confirm=bool(o["confirm"]))
     if rep.own is not None:
         ownmod.save(ctx.root, ctx.surface.name, rep.own)
     checks = []

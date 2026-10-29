@@ -362,9 +362,10 @@ class _Lead:
 
 
 def _free(model, key):
-    """A machine that only its duty holds: more of them make more."""
+    """A machine that only its duty holds: more of them make more (2.0.63: a DNP one, at duty 0,
+    makes nothing however many)."""
     b = model.binding.get(key)
-    return b is None or b[0] == "duty"
+    return b is None or (b[0] == "duty" and model.flat.machines[key].duty > 0)
 
 
 def _fixed(flat, path, key):

@@ -402,7 +402,7 @@ def _module_fragment(flat, path, cat):
         lane_of = getattr(flat, "lane_of", {})
         binding[inside_role] = lane_of.get((inner or [None])[0], (inner or [None])[0])
         binding[outside_role] = lane_of.get((outer or [None])[0], (outer or [None])[0])
-    params = {k: v for k, v in inst.params.items() if k != "duty"}
+    params = {k: v for k, v in inst.params.items() if k not in ("duty", "dnp")}
     return _finish(Fragment(inst.kind, params, ents, roles, (w, h))), binding
 
 
@@ -423,7 +423,7 @@ def fragment_of(flat, path, cat):
     if inst.kind in _SINGLE:
         frag = _single(flat, keys, cat, ins, outs)
     else:
-        params = {k: v for k, v in inst.params.items() if k not in ("duty",)}
+        params = {k: v for k, v in inst.params.items() if k not in ("duty", "dnp")}
         if params.get("inserter") is not None:
             params["inserter"] = _hand_param(path, params["inserter"], cat)
         elif inst.kind != "SmelterArray":
@@ -524,7 +524,7 @@ def _bus_fragment(flat, path):
             local = key.rsplit("/", 1)[1]
             binding[local] = nets[0]
             used.add(local)
-    params = {k: v for k, v in inst.params.items() if k != "duty"}
+    params = {k: v for k, v in inst.params.items() if k not in ("duty", "dnp")}
     params.update(_rot=int((inst.hints.get("at") or (0, 0, 0))[2]), _used=used,
                   _mouths=sorted(local for local in used if local.startswith("in")))
     return fragment("Bus", params, [], []), binding

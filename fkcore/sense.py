@@ -131,7 +131,9 @@ class SenseReport:
         head = (f"sense {_area_text(self.area)} tick {self.tick}: "
                 + (", ".join(f"{k} {c[k]}" for k in sorted(c)) or "nothing here"))
         # a carrier with stale items is listed too, so a look says where they are (1.1)
-        out = [head] + [f"  {v}" for v in self.verdicts if v.verdict != "ok" or v.wrong_items]
+        # 2.0.63: a DNP entity that isn't built is as designed: counted, not listed
+        out = [head] + [f"  {v}" for v in self.verdicts
+                        if v.verdict not in ("ok", "dnp") or v.wrong_items]
         if self.changes:
             out += ["changes here:"] + [f"  {l}" for l in self.changes]
         if self.marks:
@@ -184,11 +186,17 @@ def _policy(text):
     return (parts[0] if parts else "strict"), (parts[1] if len(parts) > 1 else None)
 
 
-def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None) -> SenseReport:
+def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None,
+          confirm=False) -> SenseReport:
     """``policy``: a ``surface.SurfaceFile`` (its watch and notify settings) or a dict
     {"plots": "keep", "sanctioned": "mark 2h", "notify": "nearby"}. ``net_items``: {net: items}
     for other-item, with surface net names (``<factory>/<net>``). ``own``: the toolkit's own
-    entities ({``own.at``: ``own.Row``}, ``fkcore.own.load``), or None."""
+    entities ({``own.at``: ``own.Row``}, ``fkcore.own.load``), or None.
+
+    2.0.63, do not populate: a design entity with ``dnp`` is not built. Not there, it is ``dnp``
+    (as designed; counted, not listed). A ghost of it is ``unowned`` (the apply cancels it). Built,
+    it is ``dnp-standing``, kept as it stands; with ``confirm`` (``fk build --confirm``) it is
+    ``unowned`` instead, and the apply takes it up."""
     if hasattr(policy, "watch"):
         watch, notify = dict(policy.watch), policy.notify_mode
     else:
@@ -216,6 +224,27 @@ def sense(surface, live, cat, area, policy, tick=None, net_items=None, own=None)
     for e in layout:
         cands = [i for i in at_pos.get((e.name, round(float(e.x), 3), round(float(e.y), 3)), ())
                  if i not in used]
+        if e.attrs.get("dnp"):
+            built = [i for i in cands if not things[i]["ghost"]]
+            for i in cands:
+                used.add(i)
+                owners[i] = e.key.rsplit("/", 1)[0]
+                t = things[i]
+                if t["ghost"]:
+                    verdicts.append(Verdict("unowned", e.name, e.x, e.y, e.key,
+                                            "a ghost of a DNP entity: the apply cancels it",
+                                            None, "own", ghost=True))
+                elif confirm:
+                    verdicts.append(Verdict("unowned", e.name, e.x, e.y, e.key,
+                                            "DNP, and --confirm: the apply takes it up",
+                                            t.get("last_user"), "own"))
+                else:
+                    verdicts.append(Verdict("dnp-standing", e.name, e.x, e.y, e.key,
+                                            "DNP in the design, kept as it stands: fk build "
+                                            "--confirm takes it up"))
+            if not built:
+                verdicts.append(Verdict("dnp", e.name, e.x, e.y, e.key, "not built, as designed"))
+            continue
         if cands:
             # an entity first, then a ghost; one ordered for deconstruction last: a ghost on it
             # is its replacement (a carrier laid fresh under another net, 1.2)

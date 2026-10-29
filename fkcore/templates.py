@@ -29,7 +29,7 @@ INF = float("inf")
 #: straight holds at most N; ``guard``: its input inserters carry only what its recipe takes.
 CIRCUIT_PARAMS = ("keep", "fill", "guard")
 #: Parameters every instance may carry; the elaborator reads them, the templates ignore them.
-COMMON_PARAMS = ("duty", "inserter", "modules") + CIRCUIT_PARAMS
+COMMON_PARAMS = ("duty", "dnp", "inserter", "modules") + CIRCUIT_PARAMS
 #: 2.0.53, ``modules=``: the module slots of the machines that take them (Factorio 2.0), and each
 #: module's effect on speed and productivity (normal quality; efficiency changes no rate).
 MODULE_SLOTS = {"assembling-machine-2": 2, "assembling-machine-3": 4, "electric-furnace": 2,

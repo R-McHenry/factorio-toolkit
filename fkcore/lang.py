@@ -268,6 +268,7 @@ class Module:
     ports: list = field(default_factory=list)      # [Port]: the module's interface (2.0.28)
     size: tuple | None = None                      # (W, H) of its frame as written, or None
     stacks: list = field(default_factory=list)     # [(near, far, line)]: stack pairs (2.0.48)
+    dnps: list = field(default_factory=list)       # [Ref]: `dnp A, B.c` (2.0.63), do not populate
 
 
 @dataclass
@@ -502,6 +503,11 @@ class _P:
             mod.ports.append(self.port())
         elif tok.text == "stack" and self.peek(1).kind == "word" and self.peek(2).text == "->":
             mod.stacks += self.stack_pairs()
+        elif tok.text == "dnp" and self.peek(1).kind == "word":
+            # 2.0.63 (Rory, 2026-10-29): `dnp NAME[, A.B ...]`, do not populate: laid out and routed
+            # as ever, but not built, and nothing of it in the model
+            self.next()
+            mod.dnps += self.refs()
         elif tok.text == "expect" and self.peek(1).text != "=":
             mod.expects.append(self.expect_line())
         elif self.peek(1).text == "=":

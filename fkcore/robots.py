@@ -94,8 +94,11 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", ser
     its storage chest where that still fits; new roboports go only where no kept one reaches."""
     r = _radius(cat, roboport, "logistic_radius")
     ents = sorted(lay.entities.values(), key=lambda e: natural_key(e.key))
-    chests = [e for e in ents if e.name in LOGISTIC_CHESTS and not _is_own(e, owner)]
-    existing = [e for e in ents if cat.kind(e.name) == "roboport" and not _is_own(e, owner)]
+    # 2.0.63: a DNP chest asks for no robots, and a DNP roboport serves none (never built)
+    chests = [e for e in ents if e.name in LOGISTIC_CHESTS and not _is_own(e, owner)
+              and not e.attrs.get("dnp")]
+    existing = [e for e in ents if cat.kind(e.name) == "roboport" and not _is_own(e, owner)
+                and not e.attrs.get("dnp")]
     outside = [c for c in chests
                if any(_inside(float(c.x), float(c.y), sx, sy, sr) for sx, sy, sr in served)]
     taken = {}
@@ -250,7 +253,8 @@ def served(places, infra, layouts, factory, cat):
         if p is None or not lay.size:
             continue
         for e in lay.entities.values():
-            if cat.has_entity(e.name) and cat.kind(e.name) == "roboport":
+            if cat.has_entity(e.name) and cat.kind(e.name) == "roboport" \
+                    and not e.attrs.get("dnp"):
                 x, y, _d = turn(float(e.x), float(e.y), None, p.rot, lay.size)
                 ports.append(_Port(f"{name}/{e.key}", e.name, x + p.x, y + p.y, name))
     main = next((n for n in networks(ports, cat) if any(q.plot is None for q in n)), None)

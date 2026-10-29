@@ -58,7 +58,7 @@ GAME = os.path.join(RUN, "game")
 STAMP = os.path.join(GAME, "out", ".synced")
 
 #: commands that are pure: they run here, on the run's own toolkit
-LOCAL = {"rates", "plan", "check", "explain", "unfold", "render", "layout", "split-to-chest",
+LOCAL = {"rates", "plan", "check", "explain", "unfold", "dnp", "render", "layout", "split-to-chest",
          "merge", "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "read-terrain", "measure",
@@ -415,7 +415,7 @@ def build(cfg, args):
     i = _at(names, args[args.index("--from") + 1]) if "--from" in args else 0
     j = _at(names, args[args.index("--to") + 1]) if "--to" in args else len(names) - 1
     # this build's own options (2.0.62): --with 'STEP OPTS' (repeatable) and --reroute NET[,NET]
-    extra = []
+    extra = ["--confirm"] if "--confirm" in args else []      # 2.0.63: take up DNP pieces
     for k, a in enumerate(args[:-1]):
         if a in ("--with", "--reroute"):
             extra += [a, args[k + 1]]
@@ -448,7 +448,9 @@ def main(argv):
         if "-h" in rest or "--help" in rest:
             # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
             # ran all 19 steps, the paste included)
-            print("fk build [--from STEP] [--to STEP] [--with 'STEP OPTS'] [--reroute NET[,NET]]: "
+            print("fk build [--from STEP] [--to STEP] [--with 'STEP OPTS'] [--reroute NET[,NET]] "
+                  "[--confirm]: "
+                  "--confirm takes up what stands built on DNP pieces; "
                   "the steps of game\\<surface>.build.fkb in order, design here and the game "
                   "steps on the host; STEP is a step's name, or NAME:K for its K-th time. --with "
                   "adds options to a step for this build only (--with 'cover robots --fresh'); "

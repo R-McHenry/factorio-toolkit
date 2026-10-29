@@ -110,6 +110,8 @@ class ApplyReport:
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
     resettled: list = field(default_factory=list)  # laid fresh for new circuit settings (2.0)
     own: dict | None = None            # the record of what the applies pasted, after this one
+    dnp_kept: int = 0                  # built on DNP entities, kept standing (2.0.63)
+    dnp_taken: int = 0                 # on DNP entities, ordered out: ghosts, and --confirm
     chunks: int = 0
     seeded: int = 0
     revived: int = 0
@@ -130,6 +132,12 @@ class ApplyReport:
             out.append(f"  play: {self.decon} unowned entities ordered for deconstruction"
                        + (f" ({self.dropped} of them the toolkit's own, dropped from the design)"
                           if self.dropped else "") + "; robots build the ghosts")
+            if self.dnp_taken:
+                out.append(f"  dnp: {self.dnp_taken} on DNP entities ordered out (their ghosts, "
+                           "and with --confirm what stands)")
+            if self.dnp_kept:
+                out.append(f"  dnp: {self.dnp_kept} built on DNP entities kept standing; "
+                           "fk build --confirm takes them up")
             if self.held:
                 out.append(f"  scaffold: {self.held} old poles and roboports stay up until the "
                            "design's own stand here, so power and robots keep running; the "
@@ -169,10 +177,13 @@ def force_for(mode):
     return "lab" if mode == "lab" else "player"
 
 
-def scope_rows(s, area=None, keys=None):
-    """The codec rows of ``s`` inside ``area`` (any tile in it) and under a key prefix in ``keys``."""
+def scope_rows(s, area=None, keys=None, dnp=False):
+    """The codec rows of ``s`` inside ``area`` (any tile in it) and under a key prefix in ``keys``.
+    2.0.63: the DNP entities (do not populate) only with ``dnp``: they are never pasted."""
     out = []
     for e in sorted(s.entities.values(), key=lambda e: natural_key(e.key)):
+        if e.attrs.get("dnp") and not dnp:
+            continue
         if area is not None and not _touches(e.tiles, area):
             continue
         if keys and not any(e.key.startswith(k) for k in keys):
@@ -189,7 +200,7 @@ def _touches(tiles, area):
 def default_area(s, cat, keys=None, own=None):
     """An apply's area when none is given: the design in scope plus the toolkit's own entities
     it dropped (``own``), wherever they stand (a moved plot's old ground). None: nothing."""
-    rows = scope_rows(s, None, keys)
+    rows = scope_rows(s, None, keys, dnp=True)       # a DNP entity that stands is judged there
     for row in ownmod.dropped(own, s):
         if ownmod.in_scope(row, cat, None, keys):
             rows.append({"src": row.key, "name": row.name, "x": row.x, "y": row.y,
@@ -280,12 +291,15 @@ def single_ghosts(rows, s, cat, refused):
                       if a - 1 in alone or b - 1 in alone]
 
 
-def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=None):
+def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=None,
+         confirm=False):
     """Snapshot ``area`` and judge it against the design: a ``sense.SenseReport``. With
     ``force`` (2.0.12), the standing entities' settings too (``fkcore.settings``): those that
-    differ from the design's are in the report's ``settings``, and so in its hand edits."""
+    differ from the design's are in the report's ``settings``, and so in its hand edits.
+    ``confirm`` (2.0.63): what stands on a DNP entity is taken up (``sense``)."""
     live = scene.from_capture(link.snapshot(r, s.name, area, tag))
-    rep = sense.sense(s, live, cat, list(area), policy, net_items=net_items, own=own)
+    rep = sense.sense(s, live, cat, list(area), policy, net_items=net_items, own=own,
+                      confirm=confirm)
     if force is not None:
         try:
             have = settingsmod.read(r, s.name, force, area, f"{tag}-settings")
@@ -299,7 +313,7 @@ def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=No
 
 
 def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None, keys=None,
-          net_items=None, tag="apply", seed=True, own=None) -> ApplyReport:
+          net_items=None, tag="apply", seed=True, own=None, confirm=False) -> ApplyReport:
     """Paste the design inside ``area`` (default: all of ``s``, and the toolkit's own entities it
     dropped) as one named blueprint. ``own``: the record of what the applies pasted."""
     t0 = time.time()
@@ -315,7 +329,10 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     standing = []
     if mode != "lab" and policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own,
-                      force=force)
+                      force=force, confirm=confirm)
+        rep.dnp_kept = sum(1 for v in before.verdicts if v.verdict == "dnp-standing")
+        rep.dnp_taken = sum(1 for v in before.verdicts if v.verdict == "unowned"
+                            and v.key and v.detail.startswith(("DNP", "a ghost of a DNP")))
         held = scaffold(before, s, cat, area)
         rep.hand = sense.hand_edits(before, held)
         gone = [v for v in before.verdicts
