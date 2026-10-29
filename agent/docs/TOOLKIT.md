@@ -253,6 +253,55 @@ fk lab NAME --clear-ore          every ore tile of NAME's slot taken up
 - A good worker task: "Try stage 4's mall in the lab (`fk lab mall --from stages\4`), let it run
   two minutes, measure it, and report what each maker makes and what it waits for."
 
+## The speedrun planner: `fk sim`
+
+A second game of your own map, on this machine: same seed, same first tick, yours to try a plan in
+before the live game does it. It never touches the live game. It stands still between your
+commands, so every action lands on a tick you chose, and the same save with the same actions
+gives the same game every time. It runs as fast as the machine allows: about 20 times real time
+on this laptop.
+
+```
+fk sim fetch                     your map as it stood right after the kickoff, as save state start
+fk sim fetch --live now          the live game as it stands now, as save state now
+fk sim start [NAME]              the planner from a save state (default start), paused
+fk sim speed 100                 ticks run up to 100 times as fast (1 is real time)
+fk sim run 3600 | until T        move the game on 3600 ticks (a minute), or to tick T
+fk sim save NAME | load NAME     a save state of the game as it stands; back to one
+fk sim saves | status | stop
+fk sim place FILE @X,Y           a design built at once and free: a laid-out .fkp (game\world.fkp,
+                                 a factory's), a blueprint string (.txt) or {"bp": ...} (.json),
+                                 X,Y added to its own coordinates; modules put in, trees and rocks
+                                 in the way removed, landfill laid under it on water
+fk sim paste FILE @X,Y           the same as ghosts, for the robots to build
+fk sim remove X0,Y0,X1,Y1        everything there gone at once (cliffs and enemies too)
+fk sim decon X0,Y0,X1,Y1         everything there ordered out, for the robots
+fk sim play plan.sim             a playback (below)
+fk sim game stats | look | lua | research ...   any game command, on the planner
+```
+
+A playback is a file of actions, one a line, each on the tick the game stands at:
+
+```
+# plan.sim
+from start                  # the save state it plays from (first, once)
+speed 100
+place game\mine.fkp @0,0     # free
+at +1800                    # 1800 ticks on (or `at 36000`: to tick 36000)
+paste game\smelt.fkp @40,0   # ghosts: the robots build it while the game runs
+run 3600
+save after-smelt
+```
+
+`fk sim play` prints each action with its tick. The game still refuses what it refuses in the
+run: a building on a cliff or an enemy base, or a drill off its ore. `place` says how many didn't
+stand and why. The planner's own files are in `sim\` of your run folder.
+
+Rory can watch. Every save state is an ordinary save (`sim\write\saves\NAME.zip`) he can open in his
+own game. `fk sim start --spectate` puts the planner on a fixed port on the LAN, and `start` and
+`status` print the address his client joins. A client simulates every tick too, so keep the speed
+at 1 to 3 while he watches (`--spectate` starts at 1); at 100 his game falls behind and drops out.
+
 ## What `fk look` says
 
 Every designed entity in the area gets a verdict:

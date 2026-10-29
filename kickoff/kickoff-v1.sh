@@ -20,7 +20,8 @@
 #   6. the map saved as server/factorio/saves/v1-RUN.zip, and v1.conf rewritten to start that
 #      save (no restart): a later restart resumes this map. This is done twice: right after the
 #      new map answers (so no later failure leaves the service making a new map on every
-#      start), and again at the end with the setup in it.
+#      start), and again at the end with the setup in it, which is also kept as
+#      v1-RUN-start.zip: the run's start, for the speedrun planner (fk sim fetch).
 #   7. joins open again.
 # Unchanged: the unit file, rcon.pw, the shelved world (instance/saves/world.zip and its copies),
 # the test map's save (server/factorio/saves/lab-test.zip), the v4 kickoff (kickoff.sh).
@@ -127,6 +128,9 @@ run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 60 python3 -
 run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 120 python3 -m fkcore build nauvis.build.fkb'"
 run su computah -c "'cd $G && PYTHONPATH=$TK $AS timeout 300 python3 $TK/kickoff/wait_built.py nauvis -36,-41,24,24 240'" \
   || say "   the plant is not finished yet: the robots keep building it"
-say "6. save the map again as $SAVE, with the setup in it"
+say "6. save the map again as $SAVE, with the setup in it; a copy kept as the run's start"
 pin
+# 2.0.61: the speedrun planner (fk sim fetch) starts from this copy: the map as it stood at the
+# kickoff, which the live save leaves behind as soon as the game moves on
+run cp -p "$SAVE" "${SAVE%.zip}-start.zip"
 say "7. joins open (on exit); done: the map runs, the run's game codebase is $G"

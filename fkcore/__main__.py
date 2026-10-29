@@ -67,6 +67,10 @@ use the game link, and only with FK_LINK=on)
     lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
                                           a factory (or a stage's) built on its own lab slot,
                                           powered and stocked; then what it really makes
+    sim GAME_DIR start [NAME] | stop | status | save NAME | load NAME | saves | speed X |
+         run N | until T | place FILE @X,Y | paste FILE @X,Y | remove AREA | decon AREA |
+         play SCRIPT | env      the speedrun planner: the run's own map on this machine, paused
+                                          between actions (fkcore.sim)
     lab GAME_DIR NAME --copy-ore X0,Y0,X1,Y1 [--to X,Y] | --ore R --area X0,Y0,X1,Y1
          [--amount N] | --clear-ore       ore on NAME's slot: the world's, copied, or made
     fresh GAME_DIR --area X0,Y0,X1,Y1     belts there that carry items their net doesn't are
@@ -572,6 +576,70 @@ def _lab(a, cat):
     return 0
 
 
+def _sim(a, cat):
+    """fk sim (2.0.61): the speedrun planner (fkcore.sim), on this machine."""
+    from . import link
+    from . import sim as simmod
+    s = simmod.Sim(os.path.dirname(os.path.abspath(a.game)))
+    v, rest = a.verb, list(a.rest)
+
+    def one(what):
+        if len(rest) != 1:
+            raise simmod.SimError(f"fk sim {v} {what}")
+        return rest[0]
+    try:
+        if v == "start":
+            spectate = "--spectate" in rest
+            names = [w for w in rest if w != "--spectate"]
+            print(s.start(names[0] if names else "start", spectate=spectate))
+        elif v == "stop":
+            print(s.stop())
+        elif v == "status":
+            st = s.state()
+            print("sim: not running" if st is None else
+                  f"sim: running from {st['save']} since {st['started']}, at tick {s.tick()}, "
+                  f"speed {s.lua('rcon.print(game.speed)').strip()}"
+                  + (f"; join to watch at {s.address()}" if st.get("spectate") else ""))
+            print("save states: " + (", ".join(s.names()) or "none"))
+        elif v == "saves":
+            print("save states: " + (", ".join(s.names()) or "none"))
+        elif v == "save":
+            print(s.save(one("NAME")))
+        elif v == "load":
+            print(s.load(one("NAME")))
+        elif v == "speed":
+            print(s.speed(one("X")))
+        elif v == "run":
+            print(s.run(ticks=int(one("N")))[1])
+        elif v == "until":
+            print(s.run(until=int(one("T")))[1])
+        elif v in ("place", "paste"):
+            if len(rest) != 2:
+                raise simmod.SimError(f"fk sim {v} FILE @X,Y")
+            print((s.place if v == "place" else s.paste)(rest[0], simmod._xy(rest[1]), cat))
+        elif v in ("remove", "decon"):
+            area = simmod._area(one("X0,Y0,X1,Y1"))
+            print(s.remove(area) if v == "remove" else s.decon(area))
+        elif v == "play":
+            path = one("SCRIPT")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            print("\n".join(simmod.play(s, text, cat, os.path.dirname(os.path.abspath(path)))))
+        elif v == "env":
+            print(json.dumps(s.env()))
+        elif v == "add-save":
+            if len(rest) != 2:
+                raise simmod.SimError("fk sim add-save FILE NAME")
+            print(s.add_save(rest[0], rest[1]))
+        else:
+            raise simmod.SimError(f"fk sim {v}: start, stop, status, save, load, saves, speed, "
+                                  "run, until, place, paste, remove, decon, play")
+    except (simmod.SimError, OSError, link.LinkError, ValueError) as exc:
+        print(f"sim: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _adopt(a, cat):
     import math
     from . import adopt, link, scene
@@ -798,6 +866,10 @@ def main(argv=None):
     me.add_argument("game")
     me.add_argument("--area", required=True)
     me.add_argument("--seconds", type=float, default=30.0)
+    sm = sub.add_parser("sim")
+    sm.add_argument("game")
+    sm.add_argument("verb")
+    sm.add_argument("rest", nargs=argparse.REMAINDER)
     lb = sub.add_parser("lab")
     lb.add_argument("game")
     lb.add_argument("name", nargs="?")
@@ -874,6 +946,8 @@ def main(argv=None):
         return _rewire(a)
     if a.cmd == "measure":
         return _measure(a, cat)
+    if a.cmd == "sim":
+        return _sim(a, cat)
     if a.cmd == "lab":
         return _lab(a, cat)
     if a.cmd == "adopt":

@@ -291,6 +291,74 @@ def footer(cfg):
     return remote(cfg, ["poll", "."], footer=False)
 
 
+#: the host's saves: the run's start (``v1-RUN-start.zip``, written at its kickoff) is there
+HOST_SAVES = "/home/computah/factorio/server/factorio/saves"
+
+
+def sim(cfg, rest):
+    """``fk sim`` (2.0.61): the speedrun planner, a game of the run's own map on this machine
+    (``fkcore.sim``). Two verbs are this file's: ``fetch`` copies the run's start from the host (or
+    ``fetch --live NAME``: the live game as it stands, saved first), and ``game CMD ...`` runs an
+    fkcore game command (stats, look, lua, research...) against the planner instead of the live
+    game. Nothing here touches the live game but ``fetch --live``'s save."""
+    if not rest or rest[0] in ("-h", "--help"):
+        print("fk sim fetch [--live NAME] | start [NAME] | stop | status | save NAME | load NAME | "
+              "saves | speed X | run N | until T | place FILE @X,Y | paste FILE @X,Y | remove "
+              "X0,Y0,X1,Y1 | decon X0,Y0,X1,Y1 | play SCRIPT | game CMD ...  (docs\\TOOLKIT.md, "
+              "\"The speedrun planner\")")
+        return 0
+    if rest[0] == "fetch":
+        live = "--live" in rest
+        name = rest[rest.index("--live") + 1] if live and rest.index("--live") + 1 < len(rest) \
+            else ("live" if live else "start")
+        if cfg["host"] == "local":
+            print("fk sim fetch: this run's game is on this machine; fk sim add-save FILE NAME",
+                  file=sys.stderr)
+            return 2
+        if live:
+            tag = f"fk-sim-{name}"
+            r = _ssh(cfg, f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on PYTHONPATH="
+                          f"{shlex.quote(cfg['host_toolkit'])} python3 -m fkcore lua . --file -",
+                     data=f"game.server_save('{tag}') rcon.print('saved')".encode())
+            if r.returncode != 0:
+                return r.returncode
+            time.sleep(5)
+            path = f"{HOST_SAVES}/{tag}.zip"
+        else:
+            path = cfg.get("host_start_save") or \
+                f"{HOST_SAVES}/v1-{os.path.basename(RUN)}-start.zip"
+        got = _ssh(cfg, f"cat {shlex.quote(path)}", capture=True)
+        if got.returncode != 0 or not got.stdout:
+            print(f"fk sim fetch: no {path} on {cfg['host']}", file=sys.stderr)
+            return 2
+        dest = os.path.join(RUN, "sim", "write", "saves")
+        os.makedirs(dest, exist_ok=True)
+        with open(os.path.join(dest, f"{name}.zip"), "wb") as fh:
+            fh.write(got.stdout)
+        print(f"sim: save state {name} from {cfg['host']}:{path} ({len(got.stdout) // 1024} kB)")
+        return 0
+    if rest[0] == "game":
+        env_json = subprocess.run([sys.executable, "-m", "fkcore", "sim", ".", "env"], cwd=GAME,
+                                  capture_output=True, text=True,
+                                  env=dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit")))
+        if env_json.returncode != 0:
+            print(env_json.stderr.strip() or "fk sim game: the planner is not running",
+                  file=sys.stderr)
+            return 2
+        env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"), FK_LINK="on",
+                   PYTHONDONTWRITEBYTECODE="1", **json.loads(env_json.stdout))
+        args = rest[1:]
+        if not args:
+            print("fk sim game CMD ...: stats, look, lua, research, ... on the planner",
+                  file=sys.stderr)
+            return 2
+        if args[0] not in ("say",):
+            args = [args[0], "."] + args[1:]
+        return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME,
+                              env=env).returncode
+    return local(cfg, ["sim", "."] + rest)
+
+
 def _script():
     """The run's build script: ``<surface>.build.fkb`` of the play-mode surface file in game\\,
     else the first. 2.0.3: the first alone let a ``lab.build.fkb`` copied into game\\ take every
@@ -421,6 +489,8 @@ def main(argv):
         code = remote(cfg, ["lab", "."] + rest)
         pull(cfg)
         return code
+    if cmd == "sim":
+        return sim(cfg, rest)
     if cmd in LOCAL:
         code = local(cfg, [cmd] + rest)
         push(cfg)
