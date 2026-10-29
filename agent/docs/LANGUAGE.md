@@ -144,6 +144,35 @@ room. When a sized row runs past its plot or into another instance, the size ste
 the routing, `report_rates` says (`size`) when a net of a sized row asks more than its belts
 carry: a yellow lane carries 7.5 items/s.
 
+## Laid out, not built: `dnp`
+
+DNP is "do not populate", as on a circuit board. A DNP piece keeps its place and its routes, so
+nothing else moves around it. It isn't built, though, and the model has nothing of it: it makes,
+takes and asks for nothing, and a DNP pole or roboport covers nothing. Turn it back on and it's
+built where it was laid.
+
+```
+gears = Assembler<recipe=iron-gear-wheel, dnp> @(24, 12)   # on any instance, a module too
+dnp mall1, sci3.packs                                       # or a line: any instance, any depth
+col   = Stack<cell=FurnaceCell, n=12, built=8> @(4, 2)      # 12 cells laid out, the first 8 built
+col   = Stack<cell=FurnaceCell, n=12, built=auto> @(4, 2)   # as many as the targets take, of 12
+```
+
+- **What goes with it.** Everything inside a DNP instance goes with it, along with each belt,
+  pipe and inserter that served only DNP machines. A trunk that also feeds a live machine stays.
+- **Uses.** It's the quick way to take something out for now, and it makes a scaling row.
+  `built=` grows the line within the frame you laid out for all of it, and `built=auto` lets the
+  size step choose how many to build.
+- **In the build.**
+  - `out\route.txt`: `dnp N entities laid but not built`.
+  - `out\report_rates.txt`: what the DNP machines would make at full speed.
+  - `out\report_bom.txt`: never counts them.
+- **In the game.** A ghost of a DNP piece is cancelled. What already stands built on one stays
+  until `fk build --confirm`, which takes it up. `fk look` says `dnp-standing` for those, and
+  counts the rest as `dnp`.
+- **From the command line.** `fk dnp world.fk sci3` writes the `dnp` line for you, and
+  `fk dnp world.fk sci3 --off` takes it back off.
+
 ## Nets
 
 `net NAME: drivers -> consumers`. A net is one belt (or one pipe; one lane of a belt two nets

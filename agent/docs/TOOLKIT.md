@@ -322,6 +322,8 @@ Every designed entity in the area gets a verdict:
 - `ghost needs-research`: its ghost is there and the item's recipe isn't researched: `fk tech ITEM` says
   which technology opens it and what it costs
 - `not-placed`: nothing there (destroyed, or never built; the next build restores it)
+- `dnp`: DNP in the design and not built, as designed (counted, not listed); `dnp-standing`:
+  DNP but built, kept as it stands until `fk build --confirm` takes it up
 - `other-entity`: something else stands on its tiles
 - `settings-changed`: there but turned, or with another recipe. A belt, underground, splitter, inserter,
   pipe-to-ground, pump or drill that stands turned (or as the other underground end) says
@@ -506,6 +508,13 @@ fk unfold main.fk gears          turn a row into a Literal (its entities pinned 
 fk split-to-chest . main NET box --at X,Y [--requester --item I]
                                  a chest joins a net as one more endpoint (a buffer, a tap)
 fk adopt X,Y --into main/NET     a belt you placed by hand becomes part of that net's route
+fk dnp world.fk NAME[,NAME] [--off]
+                                 do not populate: that piece stays laid out and routed but isn't
+                                 built, and the model has nothing of it (--off: built again).
+                                 A Stack's built=K does the same for its cells past K
+                                 (LANGUAGE.md, "Laid out, not built")
+fk build --confirm               also take up what stands built on DNP pieces (without it, it
+                                 stays: fk look says dnp-standing)
 fk build --reroute NET[,NET]     those nets laid anew (an instance's name: every net inside it)
 fk build --with 'STEP OPTS'      a step's options for this build only (--with 'cover robots --fresh')
 fk decon X0,Y0,X1,Y1 [--name E[,E]] [--cancel]

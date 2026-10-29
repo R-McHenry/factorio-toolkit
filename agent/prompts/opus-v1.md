@@ -135,6 +135,8 @@ out by hand:
   MODULE`: every net inside it)
 - one build with other step options → `fk build --with 'cover robots --fresh'`
 - taking things up → `fk decon X0,Y0,X1,Y1 [--name ENTITY]`, as the deconstruction planner does
+- a piece out for now, or room for a line to grow → `fk dnp world.fk NAME`, or a Stack's
+  `built=K` (laid out, not built; `fk build --confirm` takes up what stands there)
 - anything else → `fk lua` reads or does it for you
 
 ## How big
