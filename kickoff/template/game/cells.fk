@@ -58,6 +58,29 @@ module StoneFurnaceCell size 6x2 {
   net p: pl_in, f -> pl_out
 }
 
+# Two stone furnaces back to back, both taking ore and coal from the middle belt (ore left, coal
+# right); the plates go out on the two outer belts, one each side. 12 of these (24 furnaces) eat
+# one yellow lane of ore. Join the two plate belts in your factory (`net plates: col.pw_out,
+# col.pe_out -> ...`); several lines on one `lanes ore_ | fuel` pair make a bigger smelter, and
+# the router puts their plates on both lanes when they need it. It replaces the SmelterArray row:
+# on the lab, 12 cells made 450 plates/min to the stack's 445.
+module SmelterPair size 11x2 {
+  port pw_in  : in  iron-plate      @n0
+  port pw_out : out iron-plate      @s0
+  port f_in   : in  iron-ore | coal @s5
+  port f_out  : out iron-ore | coal @n5
+  port pe_in  : in  iron-plate      @n10
+  port pe_out : out iron-plate      @s10
+  stack f_in -> f_out, pw_out -> pw_in, pe_out -> pe_in
+  w = Furnace<recipe=iron-plate> @(2, 0)
+  e = Furnace<recipe=iron-plate> @(7, 0)
+  net o items iron-ore: f_in -> w, e, f_out
+  net c items coal:     f_in -> w, e, f_out
+  lanes o | c
+  net pw: pw_in, w -> pw_out
+  net pe: pe_in, e -> pe_out
+}
+
 # One assembler: plates up the west belt, gears back down the east one. Change the recipe and the
 # items of its ports for anything with one ingredient.
 module GearCell size 7x3 {

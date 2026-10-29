@@ -26,13 +26,14 @@ top-left tile inside the factory's plot; `rot` turns it r quarter turns clockwis
 
 A line of machines is a **Stack of cells you write**. A cell is a `module` with ports: one slice
 of the line, its belts running straight across it from edge to edge, so cells stacked edge to edge
-make one long line (Stacks, below, has the rules). Your `game\cells.fk` starts with five:
+make one long line (Stacks, below, has the rules). Your `game\cells.fk` starts with six:
 
 | cell | what |
 |---|---|
 | `FurnaceCell` | an electric furnace, ore up one belt, plates down the other: one lane of plates, about 12 to a yellow lane |
 | `FurnacePair` | two electric furnaces facing each other across the plate belt: both lanes, 24 furnaces to a yellow belt |
 | `StoneFurnaceCell` | a stone furnace, ore and coal on the two lanes of one belt |
+| `SmelterPair` | two stone furnaces back to back on one ore and coal belt, plates out both sides: 24 furnaces to a yellow lane of ore. Several lines on one ore and coal pair make a big smelter (it replaces `SmelterArray`) |
 | `GearCell` | an assembler, one ingredient in, its product out |
 | `LabCell` | a lab, red and green packs on the two lanes of one belt |
 

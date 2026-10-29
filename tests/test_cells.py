@@ -42,6 +42,15 @@ LINES = {
         net fuel: coal -> col.f_in
         lanes ore_ | fuel
         net p: col.pl_out -> box""",
+    "SmelterPair": """
+        ore  = Chest<requester, item=iron-ore, rate=2/s> @(4, 2)
+        coal = Chest<requester, item=coal, rate=0.5/s> @(14, 2)
+        col  = Stack<cell=SmelterPair, n=6> @(10, 8)
+        box  = Chest<provider> @(16, 30)
+        net ore_: ore -> col.f_in
+        net fuel: coal -> col.f_in
+        lanes ore_ | fuel
+        net p: col.pw_out, col.pe_out -> box""",
     "GearCell": """
         pl  = Chest<requester, item=iron-plate, rate=2/s> @(10, 2)
         col = Stack<cell=GearCell, n=4> @(10, 8)
@@ -91,7 +100,7 @@ class StarterCellsTest(unittest.TestCase):
                 self.assertEqual(rep.leaks, [])
 
     def test_a_paired_crossing_draws_no_clog(self):
-        for cell in ("StoneFurnaceCell", "LabCell"):
+        for cell in ("StoneFurnaceCell", "SmelterPair", "LabCell"):
             with self.subTest(cell=cell):
                 self.assertEqual([c for c in self.line(cell).checks if c.code == "CLOG"], [])
 
