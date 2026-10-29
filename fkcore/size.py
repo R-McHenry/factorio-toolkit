@@ -175,6 +175,17 @@ def _leaves(flat):
     return [p for p, inst in flat.insts.items() if inst.module is None and inst.machines]
 
 
+def _own(flat, path):
+    """The instance whose count a machine of instance ``path`` hangs on: the nearest enclosing
+    Stack with ``n=auto`` (2.0.59: its cells' machines), else ``path`` itself."""
+    parts = path.split("/")
+    for i in range(1, len(parts)):
+        node = flat.insts.get("/".join(parts[:i]))
+        if node is not None and node.kind == "Stack" and node.auto:
+            return node.path
+    return path
+
+
 def _first(flat, path):
     return flat.machines[flat.insts[path].machines[0]]
 
@@ -236,8 +247,11 @@ def _wants(flats, autos, targets):
     for f, flat in flats.items():
         for name, net in flat.nets.items():
             for item in net.items:
-                if not any((f, d) in autos for d in _makers(flat, name, item)):
+                if not any((f, _own(flat, d)) in autos for d in _makers(flat, name, item)):
                     continue
+                if any(_own(flat, d) != d for d in _makers(flat, name, item)) and \
+                        all(_own(flat, d) != d for d in _takers(flat, name, item)):
+                    continue            # a net inside an auto Stack, from one cell to the next
                 asks = _insts(flat, [k for k, i in net.consumers if i == item
                                      and _asks(flat, f, k, item, autos)])
                 if asks:
@@ -252,7 +266,7 @@ def _asks(flat, f, key, item, autos):
     m = flat.machines[key]
     if m.needs.get(item, 0.0) > 0:
         return True
-    return m.sink and m.drain is not None and (f, m.inst) not in autos
+    return m.sink and m.drain is not None and (f, _own(flat, m.inst)) not in autos
 
 
 def _rated(flat, model, f, autos, net, item):
@@ -283,8 +297,12 @@ def _one(w, got, autos):
     st = model.nets[(w.net, w.item)]
     if w.kind == "feed":
         ask = st.would_take + _rated(flat, model, w.factory, autos, w.net, w.item)
-        slack = st.can_make - ask
-        return slack >= -_TOL * max(1.0, ask), slack, st.can_make
+        # 2.0.59: a port (a Stack's last cell's) makes nothing of its own, it passes on what its
+        # cells make: the net's measure is what it delivers
+        made = st.delivered if any(k in flat.ports for k, _i in flat.nets[w.net].drivers) \
+            else st.can_make
+        slack = made - ask
+        return slack >= -_TOL * max(1.0, ask), slack, made
     if st.can_make == INF:                                # a drain fed by an unbounded source
         return True, INF, st.can_take
     slack = st.can_take - st.can_make / (1 + EDGE)
@@ -717,13 +735,120 @@ def seed(flats, autos, targets=None):
 
 # -- size -----------------------------------------------------------------------------------------
 def size(makers, targets=None, previous=None, start=None) -> Sizing:
-    """The counts of every ``n=auto`` row of the factories ``makers`` ({factory: make(sizes) ->
-    Flat}, see ``maker``), sized together: ``targets`` ({item: /s}) are the surface's.
-    ``previous`` ({factory: committed Layout}) says what each row had; ``start`` ({(factory,
-    path): n}) replaces the seed (a test, or a what-if)."""
+    """The counts of every ``n=auto`` row and Stack of the factories ``makers`` ({factory:
+    make(sizes) -> Flat}, see ``maker``), sized together: ``targets`` ({item: /s}) are the
+    surface's. ``previous`` ({factory: committed Layout}) says what each had; ``start``
+    ({(factory, path): n}) replaces the seed (a test, or a what-if).
+
+    2.0.59 (Rory, 2026-10-29: "it should have the rate model, and just optimise the params to get
+    the desired rate"): a Stack's ``n=auto`` is a parameter of an outer search. At each count of
+    the Stacks the rows are sized as before (``_size_rows``) and the rate model measures every
+    want; while one fails, the Stack whose one more cell cuts the shortfall most grows; then each
+    Stack gives back cells while every want that holds still holds. A Stack's cells can be any
+    machines, so its count is never guessed from a recipe: only the model's answer counts."""
+    base = {f: make({}) for f, make in makers.items()}
+    stacks = {(f, p): inst.auto for f, flat in base.items() for p, inst in flat.insts.items()
+              if inst.auto and inst.kind == "Stack"}
+    if not stacks:
+        return _size_rows(makers, targets, previous, start)
+    every = {(f, p): inst.auto for f, flat in base.items() for p, inst in flat.insts.items()
+             if inst.auto}
+    wants = _wants(base, every, targets)
+    rows_start = None if start is None else {c: n for c, n in start.items() if c not in stacks}
+    cache, solves = {}, [0]
+
+    def at(sc):
+        key = tuple(sorted(sc.items()))
+        if key not in cache:
+            fixed = {f: {p: n for (g, p), n in sc.items() if g == f} for f in makers}
+            wrapped = {f: (lambda sizes, make=make, fx=fixed[f]: make({**fx, **sizes}))
+                       for f, make in makers.items()}
+            sz = _size_rows(wrapped, targets, previous, rows_start)
+            models = dict(sz.models)
+            for f, flat in sz.flats.items():
+                if f not in models:
+                    models[f] = rates.solve(flat)
+            solves[0] += sz.solves + (len(sz.flats) - len(sz.models))
+            got = {f: (sz.flats[f], models[f]) for f in sz.flats}
+            cache[key] = (sz, got, _measure(wants, got, every))
+        return cache[key]
+
+    def score(states):
+        bad = [s for ok, s, _v in states if not ok]
+        return (len(bad), sum(-s if s != -INF else 1e9 for s in bad))
+
+    def first(c):
+        if start is not None and c in start:
+            return start[c]
+        was = _was(previous, c, "Stack")
+        return was if was is not None else stacks[c][0]
+
+    sc = {c: min(max(int(first(c)), lo), hi) for c, (lo, hi) in stacks.items()}
+    seeded = dict(sc)
+    grown = 0
+    while grown < _STEPS:
+        _sz, _got, states = at(sc)
+        now = score(states)
+        if now[0] == 0:
+            break
+        best = None
+        for c, (_lo, hi) in stacks.items():
+            if sc[c] >= hi:
+                continue
+            trial = {**sc, c: sc[c] + 1}
+            s = score(at(trial)[2])
+            if s < now and (best is None or s < best[0]):
+                best = (s, trial)
+        if best is None:
+            break
+        sc, grown = best[1], grown + 1
+    serves = {c: [] for c in stacks}
+    for _round in range(3):
+        changed = False
+        for c, (lo, _hi) in stacks.items():
+            while sc[c] > lo:
+                state = at(sc)[2]
+                trial = {**sc, c: sc[c] - 1}
+                new = at(trial)[2]
+                broke = [w for w, (ok0, s0, _v0), (ok1, s1, _v1) in zip(wants, state, new)
+                         if (ok0 and not ok1) or (not ok0 and _worse(s1, s0))]
+                if broke:
+                    serves[c] = sorted(broke, key=lambda w: _DIRECT[w.kind])
+                    break
+                sc, changed = trial, True
+                serves[c] = []
+        if not changed:
+            break
+    sz, got, states = at(sc)
+    for w, (ok, slack, value) in zip(wants, states):
+        w.ok, w.slack, w.value = ok, slack, value
+        if not ok:
+            tops = [c[1] for c in stacks if sc[c] >= stacks[c][1]]
+            w.sized = True
+            w.root = (f"{_names(tops)} at the top of its auto bounds" if tops else
+                      "one more cell of any auto Stack doesn't get closer")
+            w.why = w.root
+    out = []
+    for c, (lo, hi) in stacks.items():
+        flat, model = got[c[0]]
+        node = flat.insts[c[1]]
+        key = node.machines[0] if node.machines else None
+        r = Row(c[0], c[1], "Stack", sc[c], lo, hi, seeded[c], _was(previous, c, "Stack"),
+                serves=serves[c], top=sc[c] >= hi and not all(w.ok for w in wants))
+        if key is not None:
+            r.util = model.util.get(key, 0.0)
+            r.binding = model.binding.get(key)
+        out.append(r)
+    return Sizing(sz.flats, {f: m for f, (_fl, m) in got.items()}, sz.rows + out, wants,
+                  solves[0], grown + sz.grown)
+
+
+def _size_rows(makers, targets=None, previous=None, start=None) -> Sizing:
+    """The rows' counts (1.6): seed, grow along the binding chains, trim (the module doc). A
+    Stack's count is fixed here, by the sizes ``makers`` are given (``size``'s outer search)."""
     base = {f: make({}) for f, make in makers.items()}
     autos = {(f, p): inst.auto for f, flat in base.items() for p, inst in flat.insts.items()
-             if inst.auto}
+             if inst.auto and inst.kind != "Stack"}
     if not autos:
         return Sizing(base, {}, [], [])
     run = _Run(makers, base)

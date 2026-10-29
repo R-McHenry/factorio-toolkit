@@ -91,10 +91,10 @@ the game.
 
 ## Counts the build chooses: `n=auto`
 
-`n=auto` on a `MinerRow` (and on the older rows, `SmelterRow`, `SmelterArray`, `AsmRow` and
-`LabRow`) leaves its count to the build. A Stack's `n` is a number you write: the build does not
-count cells yet. The `size` step (right after `elaborate` in the build script) gives each auto row
-the fewest machines that meet:
+`n=auto` on a `Stack` (its cells) or a `MinerRow` (and on the older rows, `SmelterRow`,
+`SmelterArray`, `AsmRow` and `LabRow`) leaves its count to the build. The `size` step (right after
+`elaborate` in the build script) gives each auto row the fewest machines, and each auto Stack the
+fewest cells, that meet:
 
 - the surface file's `target` lines (what the whole surface makes),
 - the factory's `assert INST.rate >= R` lines,
@@ -102,6 +102,12 @@ the fewest machines that meet:
   and what a chest or labs with a `rate=` take. A chest or labs without a rate take what is
   left and ask nothing, so a row that only feeds those grows for a target or an assert,
 - for `LabRow<n=auto, rate=...>`: the labs take what the science rows make.
+
+A Stack's count is searched on the rate model itself: at each count the model measures every
+target, assert and ask, one more cell goes to the Stack that gets them closest, and once they hold
+each Stack gives back the cells it can spare. A cell can be any machines, so nothing is guessed
+from a recipe: `col = Stack<cell=FurnaceCell, n=auto>` feeding a gear assembler that takes 3
+plates/s gets five cells. `out\size.txt` says what each count serves.
 
 `n=auto 4..30` keeps the count within 4 and 30; plain `auto` is 1 to 100. Write the counts you
 want as numbers and leave the rest `auto`:

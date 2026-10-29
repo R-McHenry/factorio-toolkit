@@ -35,6 +35,7 @@ Pure, stdlib only.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 from dataclasses import dataclass, field
 
@@ -355,11 +356,15 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
         if inst.name in scope:
             raise ElabError(src, inst.line, f"{inst.name} is defined twice")
         d = min(duty, _duty(inst.params, path, inst.line, src))
-        stacked = None
+        stacked, stack_auto = None, None
         if inst.kind == "Stack":
             # 2.0.48: a line of cells, built as a module of its own (its head, its cells, the nets
             # between them) and expanded like any module instance
             stacked = inst
+            # 2.0.59: `n=auto`, the size step's count of cells
+            stack_auto = _auto(flat, path, inst, src)
+            if stack_auto is not None:
+                inst = dataclasses.replace(inst, params=dict(inst.params, n=stack_auto[2]))
             synth = _stack_module(flat, inst, path, modules, src)
             modules[synth.name] = synth
             inst = lang.Inst(inst.name, synth.name,
@@ -387,6 +392,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
                         flat.scopes[path], inst.line, size=size, conns=inst.conns)
             if stacked is not None:
                 node.kind, node.params = "Stack", dict(stacked.params)
+                if stack_auto is not None:
+                    node.params["n"] = stack_auto[2]
+                    node.auto = stack_auto[:2]
         else:
             params = {k: v for k, v in inst.params.items() if k != "duty"}
             auto = _auto(flat, path, inst, src)
@@ -446,9 +454,9 @@ def _auto(flat, path, inst, src):
     autos = [k for k, v in inst.params.items() if isinstance(v, lang.Auto)]
     if not autos:
         return None
-    if autos != ["n"] or inst.kind not in AUTO_KINDS:
-        raise ElabError(src, inst.line, f"{path}: {autos[0]}=auto: auto is the count of a row, "
-                                        f"n=auto on {', '.join(AUTO_KINDS)}")
+    if autos != ["n"] or inst.kind not in AUTO_KINDS + ("Stack",):
+        raise ElabError(src, inst.line, f"{path}: {autos[0]}=auto: auto is the count of a row "
+                                        f"or a Stack, n=auto on {', '.join(AUTO_KINDS)} or Stack")
     a = inst.params["n"]
     n = flat._sizes.get(path)
     rec = flat._layout.insts.get(path) if flat._layout is not None else None
