@@ -109,6 +109,18 @@ each Stack gives back the cells it can spare. A cell can be any machines, so not
 from a recipe: `col = Stack<cell=FurnaceCell, n=auto>` feeding a gear assembler that takes 3
 plates/s gets five cells. `out\size.txt` says what each count serves.
 
+`machine=auto` and `modules=auto` leave a choice to the same step. `machine=auto` picks the tier,
+of the machines the same size so a cell's layout holds: assembling-machine-1, -2 or -3 for an
+assembler, stone or steel for a burner furnace. `modules=auto` picks no modules, speed modules, or
+productivity modules where the recipe takes them. One line's choice holds for every copy of it, so
+a choice inside a cell is one for the whole Stack. Of the picks that meet every target, assert and
+ask (each with its counts sized), the cheapest wins. Cheapest means what the machines and modules
+cost to build in raw resources (an assembling-machine-2 is 54; `fkcore.cost`). With `size
+--payback 2h` in the build script it also counts what the design draws over two hours, for the rate
+asked of it, which is where productivity modules pay off. Three gears a second cost least as three
+assembling-machine-1s; over two hours, as two assembling-machine-3s with productivity modules.
+`out\size.txt` says what was chosen and what came next.
+
 `n=auto 4..30` keeps the count within 4 and 30; plain `auto` is 1 to 100. Write the counts you
 want as numbers and leave the rest `auto`:
 

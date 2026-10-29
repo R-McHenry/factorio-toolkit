@@ -191,6 +191,8 @@ class Flat:
     sealed: set = field(default_factory=set)        # instance paths whose module declares ports
     stacks: dict = field(default_factory=dict)      # stack path -> (cell, n, head) (2.0.48)
     stack_alias: dict = field(default_factory=dict)  # stack path -> {port name: its child}
+    #: 2.0.60, `modules=auto` / `machine=auto`: choice key -> Choice (the size step's to make)
+    choices: dict = field(default_factory=dict)
     stack_ends: set = field(default_factory=set)    # port keys a stack leaves open: dead ends
 
     def resolve_ref(self, ref, scope=""):
@@ -400,6 +402,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             auto = _auto(flat, path, inst, src)
             if auto is not None:
                 params["n"] = auto[2]
+            picked = _choose(flat, mod, inst, path, params, cat, src)
             imported = None
             try:
                 if inst.kind == "Literal":
@@ -424,6 +427,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
             if auto is not None:
                 node.params = dict(inst.params, n=auto[2])
                 node.auto = auto[:2]
+            if picked:
+                node.params = dict(node.params, **picked)
+                node.params = {k: v for k, v in node.params.items() if v is not None}
         if getattr(inst, "when", None) is not None:
             node.when = (inst.when, prefix)
         scope[inst.name] = node
@@ -451,7 +457,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack):
 def _auto(flat, path, inst, src):
     """(lo, hi, n) of an ``n=auto`` row, None for any other instance: n is the size step's
     (``sizes``), else what the factory's .fkp laid out last, else the low bound."""
-    autos = [k for k, v in inst.params.items() if isinstance(v, lang.Auto)]
+    autos = [k for k, v in inst.params.items() if isinstance(v, lang.Auto) and k not in CHOICES]
     if not autos:
         return None
     if autos != ["n"] or inst.kind not in AUTO_KINDS + ("Stack",):
@@ -467,6 +473,96 @@ def _auto(flat, path, inst, src):
             n = None
     n = a.lo if n is None else min(max(int(n), a.lo), a.top)
     return a.lo, a.top, n
+
+
+# -- 2.0.60: modules=auto and machine=auto, the size step's choices -------------------------------
+#: the parameters a choice can be made for
+CHOICES = ("modules", "machine")
+#: the machines one source line may be built of, by kind: the same size and the same energy, so a
+#: cell's geometry never changes (an electric furnace is 3x3, a stone one 2x2)
+TIERS = {"Assembler": ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3"),
+         "AsmRow": ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3"),
+         "CircuitStack": ("assembling-machine-1", "assembling-machine-2",
+                          "assembling-machine-3"),
+         "Furnace": ("stone-furnace", "steel-furnace"),
+         "SmelterRow": ("stone-furnace", "steel-furnace"),
+         "SmelterArray": ("stone-furnace", "steel-furnace")}
+#: recipes productivity modules go into (Factorio 2.0's intermediate products)
+PRODUCTIVE = frozenset({
+    "iron-plate", "copper-plate", "steel-plate", "stone-brick", "iron-gear-wheel", "copper-cable",
+    "iron-stick", "electronic-circuit", "advanced-circuit", "processing-unit", "engine-unit",
+    "electric-engine-unit", "plastic-bar", "sulfur", "sulfuric-acid", "battery", "lubricant",
+    "explosives", "solid-fuel-from-light-oil", "solid-fuel-from-heavy-oil",
+    "solid-fuel-from-petroleum-gas", "rocket-fuel", "low-density-structure",
+    "flying-robot-frame", "basic-oil-processing", "advanced-oil-processing",
+    "heavy-oil-cracking", "light-oil-cracking", "coal-liquefaction", "uranium-processing",
+    "automation-science-pack", "logistic-science-pack", "military-science-pack",
+    "chemical-science-pack", "production-science-pack", "utility-science-pack", "rocket-part"})
+
+
+@dataclass
+class Choice:
+    """One source line's ``modules=auto`` or ``machine=auto``: its menu and what it got. Every
+    instance the line makes (each cell of a Stack) takes the same."""
+    key: str                    # "<module>.<instance>.<param>", the size step's key
+    param: str
+    menu: tuple
+    pick: object
+    paths: list = field(default_factory=list)
+
+
+def _menu(kind, param, params, cat):
+    if param == "machine":
+        return TIERS.get(kind, ())
+    from .templates import MODULE_SLOTS
+    machine = params.get("machine")
+    if isinstance(machine, str) and not MODULE_SLOTS.get(machine):
+        return (None,)                                   # a machine with no module slots
+    recipe = params.get("recipe")
+    if recipe is None and params.get("ore"):
+        try:
+            recipe = cat.smelting_recipe(params["ore"])
+        except KeyError:
+            recipe = None
+    out = [None, "speed-module"]
+    if recipe in PRODUCTIVE:
+        out.append("productivity-module")
+    return tuple(out)
+
+
+def _choose(flat, mod, inst, path, params, cat, src):
+    """``params`` with each ``modules=auto`` / ``machine=auto`` made: the size step's pick for the
+    line (``sizes``, keyed by the Choice's key), else the first of its menu (no modules, the lowest
+    tier). Modules a machine has no slots for are left out. -> {param: pick} or {}."""
+    from .templates import MODULE_SLOTS
+    picked = {}
+    for param in CHOICES:
+        if not isinstance(params.get(param), lang.Auto):
+            continue
+        menu = _menu(inst.kind, param, params, cat)
+        if not menu:
+            raise ElabError(src, inst.line, f"{path}: {param}=auto: no choice for a {inst.kind}"
+                            + (" (machine=auto: " + ", ".join(sorted(TIERS)) + ")"
+                               if param == "machine" else ""))
+        key = f"{mod.name}.{inst.name}.{param}"
+        pick = flat._sizes.get(key, menu[0])
+        pick = pick if pick in menu else menu[0]
+        ch = flat.choices.setdefault(key, Choice(key, param, menu, pick))
+        ch.paths.append(path)
+        picked[param] = pick
+    if "modules" in picked:
+        machine = picked.get("machine", params.get("machine"))
+        if picked["modules"] is not None and not MODULE_SLOTS.get(
+                machine or {"Furnace": "stone-furnace", "SmelterRow": "stone-furnace"}.get(
+                    inst.kind, "assembling-machine-1")):
+            picked["modules"] = None                  # this machine has no slots for them
+            flat.choices[f"{mod.name}.{inst.name}.modules"].pick = None
+    for param, pick in picked.items():
+        if pick is None:
+            params.pop(param, None)
+        else:
+            params[param] = pick
+    return picked
 
 
 def _literal_entities(flat, path, params, cat, src):

@@ -120,6 +120,11 @@ class Sizing:
     wants: list                    # [Want], as they stand at the counts
     solves: int = 0                # rate model solves it took
     grown: int = 0                 # growth steps after the seed
+    #: 2.0.60: [(factory, Choice key, pick, menu)] the choices made, and the options tried:
+    #: [(score, {key: pick}, cost, build, draw)] best first
+    picks: list = field(default_factory=list)
+    tried: list = field(default_factory=list)
+    payback: float = 0.0           # seconds of the design's draw counted into its cost
 
     def counts(self, factory):
         return {r.path: r.n for r in self.rows if r.factory == factory}
@@ -734,7 +739,104 @@ def seed(flats, autos, targets=None):
 
 
 # -- size -----------------------------------------------------------------------------------------
-def size(makers, targets=None, previous=None, start=None) -> Sizing:
+#: the most combinations of choices tried one by one; past it, one choice at a time
+COMBOS = 64
+
+
+def draw(flat, model, cat, memo=None):
+    """Raw resources a factory takes in per second at its rates: what its sources (requester
+    chests, drills, pumps) put on its nets, at each item's raw cost (``fkcore.cost``)."""
+    from .cost import item_cost
+    memo = {} if memo is None else memo
+    total = 0.0
+    for key, m in flat.machines.items():
+        if m.extra.get("role") == "requester" or m.extra.get("resource") or m.source:
+            for item in m.makes:
+                r = model.rate(key, item) if hasattr(model, "rate") else 0.0
+                if r and r != INF:
+                    total += r * item_cost(cat, item, memo)
+    return total
+
+
+def size(makers, targets=None, previous=None, start=None, cat=None, payback=0.0) -> Sizing:
+    """The counts of every ``n=auto`` row and Stack, and the picks of every ``modules=auto`` and
+    ``machine=auto``, of the factories ``makers``, sized together.
+
+    2.0.60: the picks are searched around the counts. For each combination of picks the counts
+    are sized on the rate model (``_size_counts``); of the combinations that meet every want the
+    cheapest wins: what its machines and modules cost to build (``fkcore.cost``), plus
+    ``payback`` seconds of the raw resources it draws (productivity modules draw less for the
+    same output). Up to ``COMBOS`` combinations are each tried; past that, one choice at a time,
+    the others held, until none changes."""
+    base = {f: make({}) for f, make in makers.items()}
+    choices = [(f, key, ch.menu) for f, flat in base.items()
+               for key, ch in sorted(getattr(flat, "choices", {}).items())]
+    if not choices:
+        return _size_counts(makers, targets, previous, start)
+    from .catalog import Catalog
+    from .cost import design_cost
+    cat = cat or Catalog.load()
+    memo, seen = {}, {}
+
+    def at(picks):
+        key = tuple(sorted(picks.items()))
+        if key not in seen:
+            mine = {f: {k: v for (g, k), v in picks.items() if g == f} for f in makers}
+            wrapped = {f: (lambda sizes, make=make, p=mine[f]: make({**p, **sizes}))
+                       for f, make in makers.items()}
+            sz = _size_counts(wrapped, targets, previous, start)
+            models = dict(sz.models)
+            for f, flat in sz.flats.items():
+                models.setdefault(f, rates.solve(flat))
+            build = sum(design_cost(flat, cat, memo) for flat in sz.flats.values())
+            use = sum(draw(flat, models[f], cat, memo) for f, flat in sz.flats.items())
+            # what it draws for the rate asked of it: a design that runs past its asserts or
+            # targets (into a chest that takes all) is counted at the rate asked
+            asked = [w.rate / w.value for w in sz.wants if w.kind in ("target", "assert")
+                     and w.op in (">=", ">") and w.value not in (0, INF) and w.ok]
+            use *= min([1.0] + asked)
+            bad = [w for w in sz.wants if not w.ok]
+            short = sum(-w.slack if w.slack != -INF else 1e9 for w in bad)
+            cost = build + use * payback
+            built = {(f, k): ch.pick for f, flat in sz.flats.items()
+                     for k, ch in getattr(flat, "choices", {}).items()}
+            seen[key] = ((len(bad), short, cost), sz, cost, build, use, built)
+        return seen[key]
+
+    menus = {(f, k): menu for f, k, menu in choices}
+    combos = 1
+    for menu in menus.values():
+        combos *= len(menu)
+    if combos <= COMBOS:
+        import itertools
+        keys = list(menus)
+        for pick in itertools.product(*(menus[k] for k in keys)):
+            at(dict(zip(keys, pick)))
+    else:
+        picks = {k: menu[0] for k, menu in menus.items()}
+        for _round in range(4):
+            changed = False
+            for k, menu in menus.items():
+                best = min(menu, key=lambda v: at({**picks, k: v})[0])
+                if best != picks[k]:
+                    picks[k], changed = best, True
+            if not changed:
+                break
+    tried, built = [], set()
+    for v in sorted(seen.values(), key=lambda v: v[0]):
+        mark = tuple(sorted(v[5].items()))
+        if mark not in built:                  # two picks that build the same design: once
+            built.add(mark)
+            tried.append((v[0], v[5], v[2], v[3], v[4]))
+    best = tried[0]
+    sz = at(best[1])[1]
+    sz.picks = [(f, k, best[1][(f, k)], menus[(f, k)]) for f, k in menus]
+    sz.tried = tried
+    sz.payback = payback
+    return sz
+
+
+def _size_counts(makers, targets=None, previous=None, start=None) -> Sizing:
     """The counts of every ``n=auto`` row and Stack of the factories ``makers`` ({factory:
     make(sizes) -> Flat}, see ``maker``), sized together: ``targets`` ({item: /s}) are the
     surface's. ``previous`` ({factory: committed Layout}) says what each had; ``start``
@@ -988,8 +1090,15 @@ def report(sz, cat=None):
     sized rows that carry more than a yellow lane. A constraint the counts can't meet with an
     n=auto row on the way is a ``size`` check (else the target-not-met or rate-not-met line says it all), one
     per blocker."""
-    if not sz.rows:
+    if not sz.rows and not sz.picks:
         return ["no n=auto rows: every count is as written"], []
+    if not sz.rows:
+        lines = _chose(sz)
+        lines += ["", "  constraints at these picks"]
+        for w in sz.wants:
+            lines.append(f"  {'met    ' if w.ok else 'NOT met'} {w.text}: {_value(w)}"
+                         + ("" if w.ok else f"; {w.why}"))
+        return lines, []
     multi = len({r.factory for r in sz.rows}) > 1
 
     def name(r):
@@ -1028,7 +1137,27 @@ def report(sz, cat=None):
         checks.append(Check("size", where, f"{_value(w)}: {w.why}"
                             + (f"; the same stops {_names(also)}" if also else "")))
     lines += _lanes(sz, cat, name)
+    if sz.picks:
+        lines += [""] + _chose(sz)
     return lines, checks
+
+
+def _picks_text(picks):
+    return ", ".join(f"{k.split('.', 1)[1].rsplit('.', 1)[0]} {k.rsplit('.', 1)[1]}="
+                     f"{v if v is not None else 'none'}" for (_f, k), v in sorted(picks.items()))
+
+
+def _chose(sz):
+    """The picks of ``modules=auto`` / ``machine=auto`` (2.0.60), and the next options tried."""
+    best = sz.tried[0]
+    cost = (f"cost {best[2]:.0f}: build {best[3]:.0f}"
+            + (f" + {best[4]:.2f}/s drawn over {sz.payback / 3600:g} h" if sz.payback else ""))
+    lines = [f"chose: {_picks_text(best[1])} ({cost}; {len(sz.tried)} options tried)"]
+    for score, picks, c, build, _use in sz.tried[1:4]:
+        why = (f"{score[0]} constraint{'s' if score[0] != 1 else ''} not met" if score[0]
+               else f"cost {c:.0f}, build {build:.0f}")
+        lines.append(f"  then: {_picks_text(picks)} ({why})")
+    return lines
 
 
 def _lanes(sz, cat, name):

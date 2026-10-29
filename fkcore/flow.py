@@ -453,9 +453,18 @@ def s_size(ctx, args):
         makers[p.factory] = sizemod.maker(path, ctx.cat, p.module, ctx.previous.get(p.factory))
         if p.factory in ctx.previous:
             previous[p.factory] = ctx.previous[p.factory]
-    sz = sizemod.size(makers, ctx.surface.targets if ctx.surface is not None else None, previous)
+    o = _opts(args)
+    payback = 0.0
+    if o.get("payback") not in (None, True):
+        from .wait import parse_duration
+        try:
+            payback = parse_duration(o["payback"])
+        except ValueError as exc:
+            raise FlowError(f"size --payback {o['payback']}: {exc}") from None
+    sz = sizemod.size(makers, ctx.surface.targets if ctx.surface is not None else None, previous,
+                      cat=ctx.cat, payback=payback)
     lines, checks = sizemod.report(sz, ctx.cat)
-    if not sz.rows:
+    if not sz.rows and not sz.picks:
         return lines, checks
     ctx.flats.update(sz.flats)
     ctx.sized = sz
