@@ -54,7 +54,9 @@ for name, r in pairs(f.recipes) do
 end
 local list = {}
 for name in pairs(can) do list[#list + 1] = name end
-rcon.print(helpers.table_to_json({tick = game.tick, made = made, can = list}))
+local done = {}
+for name, t in pairs(f.technologies) do if t.researched then done[#done + 1] = name end end
+rcon.print(helpers.table_to_json({tick = game.tick, made = made, can = list, researched = done}))
 """
 
 
@@ -85,6 +87,31 @@ def levels_of(k):
 def distance(a, b):
     """Manhattan distance between two cells (an item missing from one is level -1 there)."""
     return sum(abs(a.get(i, -1) - b.get(i, -1)) for i in set(a) | set(b))
+
+
+def deficit(levels, made, need, base):
+    """The science-pack levels ``levels`` (a cell) lacks to have unlocked something that needs
+    ``need`` ({pack: count}, ``fkcore.techcost``) more packs than ``made`` has made: for each pack,
+    floor(log(made + need)) less the cell's level of it, when that is short (2.0.66)."""
+    out = 0
+    for p, n in (need or {}).items():
+        if n <= 0:
+            continue
+        want = int(math.floor(math.log(float(made.get(p, 0)) + n, base) + 1e-9))
+        out += max(0, want - levels.get(p, -1))
+    return out
+
+
+def step_cost(levels, item, need, made, base):
+    """What one +1 step on ``item`` costs in the metric (2.0.66, Rory: "alter the manhattan metric
+    space to penalize any connections between cells with fewer corresponding science than is
+    required"): 1, plus the science levels the cell lacks for it when the step is the item's
+    first (an item already made is unlocked). None when nothing can make it."""
+    if levels.get(item, -1) >= 0:
+        return 1
+    if need is None:
+        return None
+    return 1 + deficit(levels, made, need, base)
 
 
 def reached(now, goal):
@@ -238,20 +265,41 @@ class Archive:
                 keys = pool
         return rng.choice(keys)
 
-    def pick_goal(self, go_levels, can, dist, rng):
-        """``go_levels`` plus ``dist`` steps of +1, each on an item picked uniformly from the items
-        the archive has seen made and the items the force can make (``can``). -> {item: level},
-        the goal's items only."""
-        seen = set()
-        for row in self.cells.values():
-            seen |= set(row["levels"])
-        pool = sorted(seen | set(can))
+    def pick_goal(self, go_levels, can, dist, rng, needs=None, made=None):
+        """The goal: a walk from ``go_levels`` of +1 steps within ``dist``. Each step is picked
+        uniformly from the steps the budget left still affords.
+
+        - **With ``needs``** ({item: {pack: count}} for every item something can make, 2.0.66):
+          the pool is every such item, and a step costs ``step_cost``. An item far up the tech
+          tree costs the science levels it lacks, so it comes into reach only once those are
+          near, or the walk has taken them.
+        - **Without it**: the items the archive has seen made and those the force can make now
+          (``can``), a step each. -> {item: level}, the goal's items only."""
+        base = float(self.settings["base"])
+        made = made or {}
+        if needs is not None:
+            pool = sorted(set(needs) | {i for i, lv in go_levels.items() if lv >= 0})
+        else:
+            seen = set()
+            for row in self.cells.values():
+                seen |= set(row["levels"])
+            pool = sorted(seen | set(can))
         if not pool:
             raise ExploreError("no item to aim for: nothing made yet and no recipe enabled")
-        goal = {}
-        for _ in range(int(dist)):
-            item = rng.choice(pool)
-            goal[item] = goal.get(item, go_levels.get(item, -1)) + 1
+        levels, goal, left = dict(go_levels), {}, int(dist)
+        while left > 0:
+            options = []
+            for item in pool:
+                c = (step_cost(levels, item, needs.get(item), made, base)
+                     if needs is not None else 1)
+                if c is not None and c <= left:
+                    options.append((item, c))
+            if not options:
+                break
+            item, c = rng.choice(options)
+            levels[item] = levels.get(item, -1) + 1
+            goal[item] = levels[item]
+            left -= c
         return goal
 
     def start_episode(self, go, goal, tick):

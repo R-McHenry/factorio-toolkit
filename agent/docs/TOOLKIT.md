@@ -332,8 +332,10 @@ A round ends on its own: when the manifest is met, or when its budget of ticks (
 your own time (`--minutes`) is spent. Its `run` stops there and says `ROUND N OVER`, and the next
 round loads by itself with its manifest.
 
-Some manifests name an item that is far off: one fluoroketone barrel takes most of the tech tree
-and another planet. Don't skip it, and don't wait on it. Think of the way that gets to it in the
+A manifest weighs the tech tree. An item behind research costs it the science the base hasn't made
+yet, so short rounds name things the base's science nearly reaches. Some still name an item that
+is far off: one fluoroketone barrel takes most of the tech tree and another planet. Don't skip it,
+and don't wait on it. Think of the way that gets to it in the
 end, and take the first step on that way this round: the research it needs, or the factory before
 it. The round counts every step forward, whether the manifest is met or not.
 

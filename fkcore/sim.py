@@ -397,7 +397,23 @@ rcon.print('sim: removed ' .. n .. ' entities')
         got = json.loads(self.lua(explore.LUA_MADE).strip() or "{}")
         made = got.get("made") or {}
         return {"tick": int(got.get("tick", 0)), "made": made if isinstance(made, dict) else {},
-                "can": list(got.get("can") or [])}
+                "can": list(got.get("can") or []),
+                "researched": list(got.get("researched") or [])}
+
+    def tech_tree(self, arch):
+        """The game's tech tree (``fkcore.techcost``), read once into the archive's folder
+        (prototypes don't change while the game runs). -> a techcost.Tree."""
+        from . import techcost
+        path = os.path.join(arch.root, "techtree.json")
+        if not os.path.exists(path):
+            tag = f"techtree-{os.getpid()}"
+            got = self.lua(techcost.LUA_DUMP.replace("{tag}", tag), timeout=60).strip()
+            src = os.path.join(self.write, "script-output", "fk5", f"{tag}.json")
+            if got != "1" or not os.path.exists(src):
+                raise SimError(f"the tech tree read failed: {got[:200]}")
+            os.makedirs(arch.root, exist_ok=True)
+            shutil.move(src, path)
+        return techcost.Tree.load(path)
 
     def _explore_check(self, arch):
         """The cell now, offered to the archive, and the round's manifest brought up to date.
@@ -505,7 +521,13 @@ rcon.print('sim: removed ' .. n .. ' entities')
         self.start(row["save"])
         self.lua("game.speed = 100 rcon.print('ok')")
         got = self.made()
-        goal = arch.pick_goal(row["levels"], got["can"], arch.settings["dist"], rng)
+        # 2.0.66: what each item costs in science from here, so a step far up the tech tree costs
+        # the science levels the goal lacks for it
+        tree = self.tech_tree(arch)
+        costs = tree.costs(got["researched"])
+        needs = {item: tree.packs(techs) for item, techs in costs.items()}
+        goal = arch.pick_goal(row["levels"], got["can"], arch.settings["dist"], rng,
+                              needs=needs, made=got["made"])
         ep = arch.start_episode(go, goal, got["tick"])
         ep["now"] = row["levels"]
         ep["made"] = {i: got["made"].get(i, 0) for i in goal}
