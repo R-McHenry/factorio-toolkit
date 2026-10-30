@@ -833,7 +833,8 @@ def _explore(s, rest):
                             budget=num("budget", int), chunk=num("chunk", int),
                             prior=num("prior", int), seed=num("seed", int),
                             minutes=num("minutes", float),
-                            auto=None if auto is None else int(auto not in ("off", "0", "no")))
+                            auto=None if auto is None else int(auto not in ("off", "0", "no")),
+                            pick=opts.get("pick"))
     if verb == "next":
         return s.explore_next(num("seed", int))
     if verb == "off":
@@ -858,11 +859,24 @@ def _explore(s, rest):
         return out
     if verb == "archive":
         n = int(args[0]) if args else 15
-        out = [f"explore archive: {len(arch.cells)} cells at base {base:g}, the furthest first "
-               "(levels in all, then the earliest tick)"]
-        for k, row in arch.best(n):
-            top = sorted(row["levels"].items(), key=lambda kv: -kv[1])[:6]
-            out.append(f"  {row['save']:<6} tick {row['tick']:>8}  levels {sum(row['levels'].values()):>4}  "
+        pos, path = arch.positions()
+        if pos:
+            # 2.0.67: the map, highest V first; * marks the best path
+            ranked = sorted(arch.cells.items(), key=lambda kv: (-pos[kv[0]][0],
+                                                                int(kv[1]["tick"])))[:n]
+            out = [f"explore archive: {len(arch.cells)} cells at base {base:g}, highest V first "
+                   f"(V: log2 of worth in raw units, research folded in; H: off the best path, "
+                   f"{len(path)} cells long, marked *)"]
+        else:
+            ranked = arch.best(n)
+            out = [f"explore archive: {len(arch.cells)} cells at base {base:g}, the furthest first "
+                   "(levels in all, then the earliest tick)"]
+        on = set(path)
+        for k, row in ranked:
+            top = sorted(row["levels"].items(), key=lambda kv: -kv[1])[:5]
+            vh = (f"V {pos[k][0]:6.2f}  H {pos[k][1]:>3}  {'*' if k in on else ' '} "
+                  if pos else "")
+            out.append(f"  {row['save']:<6} tick {row['tick']:>8}  {vh}"
                        f"{len(row['traj']):>3} actions  visits {row.get('visits', 0)}  "
                        + ", ".join(f"{i} {explore.count_text(l, base)}" for i, l in top))
         return out
@@ -888,7 +902,8 @@ def _explore(s, rest):
         shutil.rmtree(arch.root, ignore_errors=True)
         return ["explore: archive cleared (its save states x<k> stay in sim\\write\\saves)"]
     raise simmod.SimError("fk sim explore on [--base 2] [--dist 4] [--budget 36000] "
-                          "[--minutes M] [--auto on|off] [--chunk 600] [--prior K] | next | "
+                          "[--minutes M] [--auto on|off] [--pick uniform|track] [--chunk 600] "
+                          "[--prior K] | next | "
                           "status | off | archive [N] | "
                           "best [CELL] [--to plan.sim] | reset")
 

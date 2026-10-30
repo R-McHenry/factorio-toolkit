@@ -98,5 +98,71 @@ class MetricTest(unittest.TestCase):
         self.assertIn("fuel-barrel", far)               # within a long enough walk
 
 
+def worth_data():
+    """DATA with amounts: 1 ore -> 1 plate, 2 plates -> 1 gear, 1 gear -> 1 red; green 2 gears;
+    fuel 1 plate + 4 ice -> 2; and a cheap far route to plates (1 ice -> 10 plates) that home's
+    price must not take."""
+    import copy
+    d = copy.deepcopy(DATA)
+    amounts = {"plate": ({"ore": 1}, {"plate": 1}), "gear": ({"plate": 2}, {"gear": 1}),
+               "green": ({"gear": 2}, {GREEN: 1}), "red": ({"gear": 1}, {RED: 1}),
+               "fuel": ({"plate": 1, "ice": 4}, {"fuel": 2}),
+               "barrel": ({"fuel": 1}, {"fuel-barrel": 1}), "egg": ({"egg": 1}, {"egg": 2}),
+               "boiler": ({"plate": 5}, {"boiler": 1})}
+    for name, (ina, outa) in amounts.items():
+        d["recipes"][name]["ina"], d["recipes"][name]["outa"] = ina, outa
+    d["recipes"]["ice-plates"] = {"ins": ["ice"], "outs": ["plate"], "ina": {"ice": 1},
+                                  "outa": {"plate": 10}, "default": True}
+    return d
+
+
+class WorthTest(unittest.TestCase):
+    """2.0.67 (Rory: "make sure that the positive material axis and the research axis fold into
+    the same dimension, so getting more of an item is always still counting as pushing the game
+    forward far past the last research")."""
+
+    def test_worth_in_raw_units_from_home_first(self):
+        v = techcost.Tree(worth_data()).values()
+        self.assertEqual((v["ore"], v["plate"], v["gear"], v[RED], v[GREEN]), (1, 1, 2, 2, 4))
+        self.assertEqual(v["fuel"], 2.5)                       # (1 plate + 4 ice) / 2
+        self.assertEqual(v["ice"], 1)                          # off-world, priced after home
+        self.assertEqual(v["egg"], 0)                          # it breeds: nothing in, net
+
+    def test_vertical_folds_research_into_material(self):
+        tree = techcost.Tree(worth_data())
+        base = explore.vertical({"plate": 10, "gear": 8}, tree, 2)
+        more = explore.vertical({"plate": 12, "gear": 8}, tree, 2)
+        self.assertGreater(more, base)                         # more of an item: always higher
+        far = explore.vertical({"plate": 10, "gear": 8, "fuel-barrel": 0}, tree, 2)
+        # one barrel implies the planet's research: 1575 red, 1500 green beyond what was made
+        self.assertGreater(far, base + 1)
+        self.assertEqual(explore.vertical({}, tree, 2), 0.0)
+
+    def test_positions_and_the_track_pick(self):
+        d = tempfile.mkdtemp(prefix="fktech-")
+        self.addCleanup(shutil.rmtree, d, True)
+        a = explore.Archive(d)
+        import json
+        import os
+        os.makedirs(a.root)
+        with open(os.path.join(a.root, "techtree.json"), "w") as fh:
+            json.dump(worth_data(), fh)
+        rows = {"r": {"plate": 5}, "a": {"plate": 8}, "b": {"plate": 11, "gear": 6},
+                "side": {"plate": 5, "boiler": 3}}
+        paths = {"r": ["r"], "a": ["r", "a"], "b": ["r", "a", "b"], "side": ["r", "side"]}
+        keys = {n: explore.key(lv) for n, lv in rows.items()}
+        for n, lv in rows.items():
+            a.cells[keys[n]] = {"levels": lv, "tick": 100, "save": n, "traj": [],
+                                "path": [keys[p] for p in paths[n]]}
+        pos, path = a.positions()
+        self.assertEqual(path, [keys["r"], keys["a"], keys["b"]])
+        self.assertEqual(pos[keys["b"]][1], 0)
+        self.assertEqual(pos[keys["side"]][1], 4)              # 3 levels of boiler, from -1
+        self.assertGreater(pos[keys["b"]][0], pos[keys["a"]][0])
+        a.data["settings"] = {"pick": "track"}
+        got = {a.pick_go(random.Random(k)) for k in range(200)}
+        self.assertEqual(got, set(keys.values()))              # every band is picked from
+
+
 if __name__ == "__main__":
     unittest.main()

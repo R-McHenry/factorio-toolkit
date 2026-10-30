@@ -54,10 +54,17 @@ for name, t in pairs(prototypes.technology) do
 end
 for name, r in pairs(prototypes.recipe) do
   if not r.hidden and r.category ~= 'recycling' and r.category ~= 'parameters' then
-    local row = {ins = {}, outs = {}, enabled = game.forces['player'].recipes[name].enabled,
-                 default = r.enabled}
-    for _, i in pairs(r.ingredients) do row.ins[#row.ins + 1] = i.name end
-    for _, p in pairs(r.products) do row.outs[#row.outs + 1] = p.name end
+    local row = {ins = {}, outs = {}, ina = {}, outa = {},
+                 enabled = game.forces['player'].recipes[name].enabled, default = r.enabled}
+    for _, i in pairs(r.ingredients) do
+      row.ins[#row.ins + 1] = i.name
+      row.ina[i.name] = (row.ina[i.name] or 0) + i.amount
+    end
+    for _, p in pairs(r.products) do
+      row.outs[#row.outs + 1] = p.name
+      local n = p.amount or ((p.amount_min or 0) + (p.amount_max or 0)) / 2
+      row.outa[p.name] = (row.outa[p.name] or 0) + n * (p.probability or 1)
+    end
     recipes[name] = row
   end
 end
@@ -122,9 +129,11 @@ for name, p in pairs(prototypes.space_location) do
   end
   planets[name] = row
 end
+local fluids = {}
+for name in pairs(prototypes.fluid) do fluids[#fluids + 1] = name end
 helpers.write_file('fk5/{tag}.json', helpers.table_to_json({techs = techs, recipes = recipes,
   resources = res, tile_fluids = tiles, planets = planets, chunks = chunks,
-  collectors = collectors, turns = turns}), false)
+  collectors = collectors, turns = turns, fluids = fluids}), false)
 rcon.print(1)
 """
 
@@ -145,6 +154,7 @@ class Tree:
         self.chunks = lst(data.get("chunks"))           # what asteroid collectors gather
         self.collectors = lst(data.get("collectors"))   # the items that place one
         self.turns = [tuple(lst(t)) for t in lst(data.get("turns"))]   # (item, what it becomes)
+        self.fluids = set(lst(data.get("fluids")))
         for d in (self.techs, self.recipes, self.resources, self.tile_fluids, self.planets):
             for k, v in list(d.items()):
                 if isinstance(v, dict):
@@ -297,3 +307,64 @@ class Tree:
     def researched(self):
         """The technologies the dump found researched."""
         return {n for n, t in self.techs.items() if t.get("researched")}
+
+    # -- worth (2.0.67) ---------------------------------------------------------------------------
+    #: what a unit of a raw thing is worth: an ore, a chunk, a fruit, and a unit of fluid
+    RAW, RAW_FLUID = 1.0, 0.1
+
+    def values(self):
+        """{item: its worth in raw units}: a raw thing (mined, pumped, grown, gathered) is RAW (a
+        fluid RAW_FLUID); anything made is the cheapest recipe's ingredients over its products,
+        net of what the recipe gives back (a catalyst), its by-products at the same unit worth.
+        Found by relaxing to a fixed point; something nothing reaches has none."""
+        if getattr(self, "_values", None) is not None:
+            return self._values
+        val, frozen = {}, set()
+        raw = lambda item: self.RAW_FLUID if item in self.fluids else self.RAW   # noqa: E731
+        # first from home: what Nauvis yields, and everything made of it. Then the rest from
+        # off-world raws and asteroid chunks, never cheapening what home already priced: an ore
+        # crushed from asteroids or a plate cast from lava is cheaper in raw units, and pricing
+        # by it made every early count worth almost nothing
+        for item, planets in self._sources.items():
+            if HOME in planets:
+                val[item] = raw(item)
+        self._relax(val, frozen)
+        frozen = set(val)
+        for item in self._sources:
+            val.setdefault(item, raw(item))
+        for c in self.chunks:
+            val.setdefault(c, self.RAW)
+        self._relax(val, frozen)
+        self._values = val
+        return val
+
+    def _relax(self, val, frozen):
+        for _ in range(60):
+            changed = False
+            for r in self.recipes.values():
+                ina = r.get("ina") if isinstance(r.get("ina"), dict) else {}
+                outa = r.get("outa") if isinstance(r.get("outa"), dict) else {}
+                if not outa:
+                    continue
+                net_in = {i: a - outa.get(i, 0) for i, a in ina.items() if a - outa.get(i, 0) > 0}
+                net_out = {o: a - ina.get(o, 0) for o, a in outa.items() if a - ina.get(o, 0) > 0}
+                if not net_out or any(i not in val for i in net_in):
+                    continue
+                each = sum(a * val[i] for i, a in net_in.items()) / sum(net_out.values())
+                for o in net_out:
+                    if o not in frozen and (o not in val or each < val[o] - 1e-12):
+                        val[o] = each
+                        changed = True
+            for a, b in self.turns:
+                if a in val and b not in frozen and (b not in val or val[a] < val[b] - 1e-12):
+                    val[b] = val[a]
+                    changed = True
+            if not changed:
+                break
+
+    def unlock_packs(self):
+        """{item: frozenset of technologies} from nothing researched: the research making it
+        implies (``Tree.packs`` of it is its science)."""
+        if getattr(self, "_fresh", None) is None:
+            self._fresh = self.costs(set())
+        return self._fresh

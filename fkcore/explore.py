@@ -114,6 +114,28 @@ def step_cost(levels, item, need, made, base):
     return 1 + deficit(levels, made, need, base)
 
 
+def vertical(levels, tree, base):
+    """How far up the game a cell is (2.0.67, Rory: "make sure that the positive material axis
+    and the research axis fold into the same dimension, so getting more of an item is always
+    still counting as pushing the game forward far past the last research").
+
+    It's one currency, raw units (``Tree.values``): the worth of what the cell has made
+    (each item's count, its level's lower bound, times its worth), plus the worth of the science
+    packs that what it has made implies (the research behind each item, from nothing researched)
+    beyond the packs already counted as made. -> log2 of that worth (0 for nothing)."""
+    values = tree.values()
+    fresh = tree.unlock_packs()
+    techs = set()
+    for item, lvl in levels.items():
+        if lvl >= 0 and item in fresh:
+            techs |= fresh[item]
+    implied = tree.packs(techs)
+    counts = {i: need_count(lvl, base) for i, lvl in levels.items() if lvl >= 0}
+    worth = sum(values.get(i, tree.RAW) * n for i, n in counts.items())
+    worth += sum(values.get(p, tree.RAW) * max(0, n - counts.get(p, 0)) for p, n in implied.items())
+    return math.log2(worth) if worth > 1 else 0.0
+
+
 def reached(now, goal):
     """True when ``now`` stands at or above ``goal`` on every item of the goal."""
     return all(now.get(i, -1) >= lvl for i, lvl in goal.items())
@@ -200,7 +222,7 @@ class Archive:
     @property
     def settings(self):
         s = {"base": 2.0, "dist": 4, "budget": 36000, "chunk": 600, "prior": 0, "minutes": 0,
-             "auto": 1}
+             "auto": 1, "pick": "uniform"}
         s.update(self.data.get("settings") or {})
         return s
 
@@ -217,10 +239,10 @@ class Archive:
         return f"x{self.data['next_id']}"
 
     # -- cells --------------------------------------------------------------------------------------
-    def offer(self, levels, tick, traj, save_name_for):
+    def offer(self, levels, tick, traj, save_name_for, path=None):
         """A cell reached at ``tick`` by ``traj``: -> "new", "faster" or None (known, not faster).
         ``save_name_for(name)`` saves the game as that save state; it is called only when the
-        cell is new or faster."""
+        cell is new or faster. ``path``: the cells passed on the way, from the root (2.0.67)."""
         k = key(levels)
         have = self.cells.get(k)
         ep = self.episode or {}
@@ -230,6 +252,7 @@ class Archive:
         name = have["save"] if have is not None and have["save"] != root else self.new_id()
         save_name_for(name)
         self.cells[k] = {"levels": levels, "tick": tick, "save": name, "traj": list(traj),
+                         "path": list(path or ()) + [k],
                          "found": time.strftime("%Y-%m-%dT%H:%M:%S"),
                          "episode": ep.get("n"), "parent": ep.get("go"),
                          "visits": (have or {}).get("visits", 0),
@@ -252,12 +275,54 @@ class Archive:
             k = self.cells[k].get("parent")
         return out
 
+    # -- positions (2.0.67) ---------------------------------------------------------------------
+    def tree(self):
+        """The tech tree the planner read into the archive, or None before the first round."""
+        from . import techcost
+        path = os.path.join(self.root, "techtree.json")
+        if getattr(self, "_tree", None) is None and os.path.exists(path):
+            self._tree = techcost.Tree.load(path)
+        return getattr(self, "_tree", None)
+
+    def positions(self):
+        """{key: (V, H)} and the best path. V: ``vertical``. The best path: the cells passed on
+        the way to the cell of the highest V, the earliest at a tie. H: the Manhattan distance
+        to the nearest cell of the best path no higher than the cell itself (0 on it).
+        -> (positions, best path keys)."""
+        tree, base = self.tree(), float(self.settings["base"])
+        if tree is None or not self.cells:
+            return {}, []
+        v = {k: vertical(row["levels"], tree, base) for k, row in self.cells.items()}
+        top = max(self.cells, key=lambda k: (v[k], -int(self.cells[k]["tick"])))
+        path = [k for k in self.cells[top].get("path") or self.ancestry(top)[::-1]
+                if k in self.cells]
+        out = {}
+        for k, row in self.cells.items():
+            near = [p for p in path if v[p] <= v[k] + 1e-9] or path
+            h = min(distance(row["levels"], self.cells[p]["levels"]) for p in near) if near else 0
+            out[k] = (v[k], h)
+        return out, path
+
     def pick_go(self, rng):
         """The go cell: uniform over the archive, or with ``prior`` K over the cells on the way to
-        the K furthest (Rory: a prior "based on the cells visited by our most successful runs")."""
+        the K furthest (Rory: a prior "based on the cells visited by our most successful runs").
+        With ``pick`` track (2.0.67): a band of V picked uniformly (eight between the lowest and
+        the highest), then a cell in it, the nearer the best path (low H) the likelier."""
         keys = sorted(self.cells)
         if not keys:
             raise ExploreError("the archive is empty (fk sim explore on starts it)")
+        if self.settings.get("pick") == "track":
+            pos, _path = self.positions()
+            if pos:
+                lo = min(p[0] for p in pos.values())
+                hi = max(p[0] for p in pos.values())
+                width = (hi - lo) / 8 or 1.0
+                bands = {}
+                for k in keys:
+                    bands.setdefault(min(7, int((pos[k][0] - lo) / width)), []).append(k)
+                band = bands[rng.choice(sorted(bands))]
+                weights = [1.0 / (1.0 + pos[k][1]) for k in band]
+                return rng.choices(band, weights=weights)[0]
         prior = int(self.settings["prior"] or 0)
         if prior > 0:
             pool = sorted({c for k, _row in self.best(prior) for c in self.ancestry(k)})
@@ -307,6 +372,7 @@ class Archive:
         self.cells[go]["visits"] = int(self.cells[go].get("visits", 0)) + 1
         self.data["episode"] = {"n": self.data["episodes"], "go": go, "goal": goal,
                                 "start": tick, "traj": list(self.cells[go]["traj"]),
+                                "path": list(self.cells[go].get("path") or [go]),
                                 "found": [], "faster": [], "reached": None,
                                 "wall": time.time(), "ended": None}
         return self.data["episode"]

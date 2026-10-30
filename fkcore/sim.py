@@ -405,6 +405,12 @@ rcon.print('sim: removed ' .. n .. ' entities')
         (prototypes don't change while the game runs). -> a techcost.Tree."""
         from . import techcost
         path = os.path.join(arch.root, "techtree.json")
+        if os.path.exists(path):
+            tree = techcost.Tree.load(path)
+            # a 2.0.66 read has no recipe amounts, and worth (2.0.67) needs them: read it again
+            if any(isinstance(r.get("ina"), dict) and r["ina"] for r in tree.recipes.values()):
+                return tree
+            os.remove(path)
         if not os.path.exists(path):
             tag = f"techtree-{os.getpid()}"
             got = self.lua(techcost.LUA_DUMP.replace("{tag}", tag), timeout=60).strip()
@@ -423,7 +429,12 @@ rcon.print('sim: removed ' .. n .. ' entities')
         got = self.made()
         levels = explore.cell(got["made"], float(st["base"]))
         ep = arch.episode
-        verdict = arch.offer(levels, got["tick"], ep["traj"], lambda name: self.save(name))
+        k = explore.key(levels)
+        path = ep.setdefault("path", [ep["go"]])
+        if path[-1] != k:
+            path.append(k)                  # every cell the round passes, in order (2.0.67)
+        verdict = arch.offer(levels, got["tick"], ep["traj"], lambda name: self.save(name),
+                             path=path[:-1])
         if verdict:
             (ep["found"] if verdict == "new" else ep["faster"]).append(explore.key(levels))
         if ep.get("reached") is None and explore.reached(levels, ep["goal"]):
@@ -468,14 +479,14 @@ rcon.print('sim: removed ' .. n .. ' entities')
         return at, "\n".join(out)
 
     def explore_on(self, base=None, dist=None, budget=None, chunk=None, prior=None, seed=None,
-                   minutes=None, auto=None):
+                   minutes=None, auto=None, pick=None):
         """Explore mode on (settings given are kept), the archive started from save state
         ``start`` when it is empty, and an episode begun. -> report lines."""
         from . import explore
         arch = self.archive()
         st = dict(arch.data.get("settings") or {})
         for k, v in (("base", base), ("dist", dist), ("budget", budget), ("chunk", chunk),
-                     ("prior", prior), ("minutes", minutes), ("auto", auto)):
+                     ("prior", prior), ("minutes", minutes), ("auto", auto), ("pick", pick)):
             if v is not None:
                 st[k] = v
         if float(st.get("base", 2)) <= 1:
@@ -484,6 +495,8 @@ rcon.print('sim: removed ' .. n .. ' entities')
                 float(st["base"]) != float(arch.settings["base"]):
             raise SimError(f"the archive's cells are at base {arch.settings['base']}: "
                            "fk sim explore reset starts another")
+        if st.get("pick", "uniform") not in ("uniform", "track"):
+            raise SimError("--pick uniform (every cell alike) or track (V bands, near the best path)")
         arch.data["settings"] = st
         arch.data["on"] = True
         out = []
@@ -501,6 +514,7 @@ rcon.print('sim: removed ' .. n .. ' entities')
             levels = explore.cell(got["made"], float(arch.settings["base"]))
             arch.cells[explore.key(levels)] = {"levels": levels, "tick": got["tick"],
                                                "save": "x0", "traj": [], "visits": 0,
+                                               "path": [explore.key(levels)],
                                                "found": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                                "episode": 0, "parent": None, "beaten": 0}
             out.append(f"explore: archive started from save state start, kept paused as x0 "

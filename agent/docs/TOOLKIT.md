@@ -343,8 +343,14 @@ it. The round counts every step forward, whether the manifest is met or not.
 ghosts and robots), and so is `load`, since the planner picks the game.
 
 Behind it, the planner keeps the best way to every state the rounds reach, so the good plans
-collect without you tracking them. `fk sim explore archive` and `fk sim explore best --to
-plan.sim` are there to look at them afterwards, and `fk sim explore reset` starts the archive over.
+collect without you tracking them.
+- **Looking afterwards.** `fk sim explore archive` maps them: V is how far up the game a state
+  is, in what its base has made, with the research that implies, so it never stops rising. H is
+  how far off the best path it is.
+- **Replaying.** `fk sim explore best --to plan.sim` writes the way to a state as a playback.
+- **Leaning toward the best path.** `fk sim explore on --pick track` starts rounds across every
+  height of V, near the best path.
+- **Starting over.** `fk sim explore reset`.
 
 ## What `fk look` says
 
