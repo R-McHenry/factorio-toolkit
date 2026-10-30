@@ -317,8 +317,10 @@ round, it loads a game it picks and gives you a **manifest**: a few items, each 
 the base to have made, counting what it made before. Make them as fast as you can.
 
 ```
-fk sim explore on [--budget 36000] [--minutes M] [--dist 4]
+fk sim explore on [--budget 36000] [--minutes M] [--rise 0.1]
                                  the mode on, and the first round loaded with its manifest
+                                 (--rise: how big a round's manifest is, 0.1 about 7% more of
+                                 everything the base has made, research included)
 fk sim explore status            the round: ticks used, minutes, and the manifest so far
 fk sim explore next              the next round now
 fk sim explore off               the mode off
@@ -348,8 +350,9 @@ collect without you tracking them.
   is, in what its base has made, with the research that implies, so it never stops rising. H is
   how far off the best path it is.
 - **Replaying.** `fk sim explore best --to plan.sim` writes the way to a state as a playback.
-- **Leaning toward the best path.** `fk sim explore on --pick track` starts rounds across every
-  height of V, near the best path.
+- **Where rounds start and what they ask.** Both are picked on this map, evenly across it: a
+  round starts in a part of the map picked at random, and its manifest is a step `--rise` up V
+  in a direction picked the same way. `--pick track` leans the starts toward the best path.
 - **Starting over.** `fk sim explore reset`.
 
 ## What `fk look` says

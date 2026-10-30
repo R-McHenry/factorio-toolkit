@@ -164,5 +164,68 @@ class WorthTest(unittest.TestCase):
         self.assertEqual(got, set(keys.values()))              # every band is picked from
 
 
+class CoordinatesTest(unittest.TestCase):
+    """2.0.68 (Rory: "make both the go and explore actions be based on selecting cells using these
+    coordinates as a basis")."""
+
+    def archive(self):
+        import json
+        import os
+        d = tempfile.mkdtemp(prefix="fktech-")
+        self.addCleanup(shutil.rmtree, d, True)
+        a = explore.Archive(d)
+        os.makedirs(a.root)
+        data = worth_data()
+        data["fluids"] = ["steam"]
+        data["recipes"]["boil"] = {"ins": ["plate"], "outs": ["steam"], "ina": {"plate": 1},
+                                   "outa": {"steam": 10}, "default": True}
+        with open(os.path.join(a.root, "techtree.json"), "w") as fh:
+            json.dump(data, fh)
+        return a
+
+    def test_the_incremental_worth_is_vertical(self):
+        tree = techcost.Tree(worth_data())
+        go = {"plate": 10, "gear": 8, RED: 3}
+        w = explore.Worth(tree, 2, go)
+        self.assertAlmostEqual(w.now, explore.vertical(go, tree, 2))
+        for item in ("plate", RED, GREEN, "fuel-barrel", "boiler"):
+            lv = dict(go)
+            lv[item] = lv.get(item, -1) + 1
+            self.assertAlmostEqual(w.after(item), explore.vertical(lv, tree, 2), msg=item)
+        w.apply("fuel-barrel")
+        w.apply(GREEN)
+        lv = dict(go, **{"fuel-barrel": 0, GREEN: 0})
+        self.assertAlmostEqual(w.now, explore.vertical(lv, tree, 2))
+        self.assertIsNone(w.after("nothing"))
+
+    def test_a_goal_rises_by_its_rise_and_never_far(self):
+        a = self.archive()
+        tree = a.tree()
+        needs = {i: tree.packs(t) for i, t in tree.costs(set()).items()}
+        go = {"plate": 10, "gear": 8, RED: 3}
+        v0 = explore.vertical(go, tree, 2)
+        a.data["settings"] = {"rise": 0.3, "steps": 12}
+        for k in range(30):
+            goal = a.pick_goal_vh(go, needs, {}, random.Random(k))
+            self.assertTrue(goal)
+            self.assertNotIn("fuel-barrel", goal)          # its research overshoots 2 x rise
+            self.assertNotIn("steam", goal)                # a fluid: cells count items only
+            v = explore.vertical(dict(go, **goal), tree, 2)
+            self.assertTrue(v0 < v <= v0 + 0.6 + 1e-9, (goal, v0, v))
+
+    def test_go_is_uniform_over_the_maps_bins(self):
+        a = self.archive()
+        rows = {"r": {"plate": 5}, "a": {"plate": 8}, "a2": {"plate": 8, "gear": 0},
+                "a3": {"plate": 8, "gear": 1}, "side": {"plate": 5, "boiler": 3}}
+        paths = {"r": ["r"], "a": ["r", "a"], "a2": ["r", "a", "a2"],
+                 "a3": ["r", "a", "a2", "a3"], "side": ["r", "side"]}
+        keys = {n: explore.key(lv) for n, lv in rows.items()}
+        for n, lv in rows.items():
+            a.cells[keys[n]] = {"levels": lv, "tick": 100, "save": n, "traj": [],
+                                "path": [keys[p] for p in paths[n]]}
+        got = {a.pick_go(random.Random(k)) for k in range(300)}
+        self.assertEqual(got, set(keys.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

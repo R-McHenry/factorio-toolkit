@@ -479,14 +479,15 @@ rcon.print('sim: removed ' .. n .. ' entities')
         return at, "\n".join(out)
 
     def explore_on(self, base=None, dist=None, budget=None, chunk=None, prior=None, seed=None,
-                   minutes=None, auto=None, pick=None):
+                   minutes=None, auto=None, pick=None, rise=None, steps=None):
         """Explore mode on (settings given are kept), the archive started from save state
         ``start`` when it is empty, and an episode begun. -> report lines."""
         from . import explore
         arch = self.archive()
         st = dict(arch.data.get("settings") or {})
         for k, v in (("base", base), ("dist", dist), ("budget", budget), ("chunk", chunk),
-                     ("prior", prior), ("minutes", minutes), ("auto", auto), ("pick", pick)):
+                     ("prior", prior), ("minutes", minutes), ("auto", auto), ("pick", pick),
+                     ("rise", rise), ("steps", steps)):
             if v is not None:
                 st[k] = v
         if float(st.get("base", 2)) <= 1:
@@ -495,8 +496,11 @@ rcon.print('sim: removed ' .. n .. ' entities')
                 float(st["base"]) != float(arch.settings["base"]):
             raise SimError(f"the archive's cells are at base {arch.settings['base']}: "
                            "fk sim explore reset starts another")
-        if st.get("pick", "uniform") not in ("uniform", "track"):
-            raise SimError("--pick uniform (every cell alike) or track (V bands, near the best path)")
+        if st.get("pick", "grid") not in ("grid", "uniform", "track"):
+            raise SimError("--pick grid (the map's V x H bins alike, the default), uniform (every "
+                           "cell alike) or track (V bands, near the best path)")
+        if float(st.get("rise", 0.1)) <= 0:
+            raise SimError("--rise is how far up V a goal is, above 0 (0.1 is about 7% more worth)")
         arch.data["settings"] = st
         arch.data["on"] = True
         out = []
@@ -540,8 +544,11 @@ rcon.print('sim: removed ' .. n .. ' entities')
         tree = self.tech_tree(arch)
         costs = tree.costs(got["researched"])
         needs = {item: tree.packs(techs) for item, techs in costs.items()}
-        goal = arch.pick_goal(row["levels"], got["can"], arch.settings["dist"], rng,
-                              needs=needs, made=got["made"])
+        # 2.0.68: the goal picked in coordinates (V risen by --rise, an H band); the 2.0.66 walk
+        # when no walk rises at all
+        goal = arch.pick_goal_vh(row["levels"], needs, got["made"], rng) or \
+            arch.pick_goal(row["levels"], got["can"], arch.settings["dist"], rng,
+                           needs=needs, made=got["made"])
         ep = arch.start_episode(go, goal, got["tick"])
         ep["now"] = row["levels"]
         ep["made"] = {i: got["made"].get(i, 0) for i in goal}

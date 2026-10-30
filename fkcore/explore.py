@@ -136,6 +136,86 @@ def vertical(levels, tree, base):
     return math.log2(worth) if worth > 1 else 0.0
 
 
+class Worth:
+    """``vertical``, kept up step by step (2.0.68): a goal walk tries hundreds of +1 steps, and
+    each costs only what it changes (one item's count, the research a new item adds)."""
+
+    def __init__(self, tree, base, levels):
+        self.tree, self.base = tree, float(base)
+        self.values, self.fresh = tree.values(), tree.unlock_packs()
+        self.levels = {i: lv for i, lv in levels.items() if lv >= 0}
+        self.counts = {i: need_count(lv, self.base) for i, lv in self.levels.items()}
+        self.techs = set()
+        for i in self.levels:
+            self.techs |= self.fresh.get(i, frozenset())
+        self.implied = tree.packs(self.techs)
+        self.made = sum(self._val(i) * n for i, n in self.counts.items())
+        self.research = sum(self._term(p) for p in self.implied)
+
+    def _val(self, item):
+        return self.values.get(item, self.tree.RAW)
+
+    def _term(self, p, implied=None, counts=None):
+        implied = self.implied if implied is None else implied
+        counts = self.counts if counts is None else counts
+        return self._val(p) * max(0, implied.get(p, 0) - counts.get(p, 0))
+
+    @staticmethod
+    def v(worth):
+        return math.log2(worth) if worth > 1 else 0.0
+
+    @property
+    def now(self):
+        return self.v(self.made + self.research)
+
+    def _step(self, item):
+        """(made, research, new techs, new count) after +1 on ``item``, or None: nothing makes it."""
+        lv = self.levels.get(item, -1) + 1
+        n = need_count(lv, self.base)
+        made = self.made + self._val(item) * (n - self.counts.get(item, 0))
+        new = frozenset()
+        if item not in self.levels:
+            if item not in self.fresh:
+                return None
+            new = self.fresh[item] - self.techs
+        add = self.tree.packs(new) if new else {}
+        touched = set(add) | ({item} if item in self.implied or item in add else set())
+        if not touched:
+            return made, self.research, new, n
+        implied = dict(self.implied)
+        for p, k in add.items():
+            implied[p] = implied.get(p, 0) + k
+        counts = dict(self.counts)
+        counts[item] = n
+        research = self.research + sum(self._term(p, implied, counts) - self._term(p)
+                                       for p in touched)
+        return made, research, new, n
+
+    def after(self, item):
+        """V after +1 on ``item``, or None."""
+        got = self._step(item)
+        return None if got is None else self.v(got[0] + got[1])
+
+    def apply(self, item):
+        made, research, new, n = self._step(item)
+        if new:
+            add = self.tree.packs(new)
+            self.techs |= new
+            for p, k in add.items():
+                self.implied[p] = self.implied.get(p, 0) + k
+        self.levels[item] = self.levels.get(item, -1) + 1
+        self.counts[item] = n
+        self.made, self.research = made, research
+
+
+#: H bands, by their low ends: on the path, 1 off, 2-3, 4-7, 8-15, 16 and more
+H_BANDS = (0, 1, 2, 4, 8, 16)
+
+
+def h_band(h):
+    return max(i for i, lo in enumerate(H_BANDS) if h >= lo)
+
+
 def reached(now, goal):
     """True when ``now`` stands at or above ``goal`` on every item of the goal."""
     return all(now.get(i, -1) >= lvl for i, lvl in goal.items())
@@ -222,7 +302,7 @@ class Archive:
     @property
     def settings(self):
         s = {"base": 2.0, "dist": 4, "budget": 36000, "chunk": 600, "prior": 0, "minutes": 0,
-             "auto": 1, "pick": "uniform"}
+             "auto": 1, "pick": "grid", "rise": 0.1, "steps": 12}
         s.update(self.data.get("settings") or {})
         return s
 
@@ -311,6 +391,21 @@ class Archive:
         keys = sorted(self.cells)
         if not keys:
             raise ExploreError("the archive is empty (fk sim explore on starts it)")
+        if self.settings.get("pick", "grid") == "grid":
+            # 2.0.68 (Rory: "make both the go and explore actions be based on selecting cells
+            # using these coordinates"): uniform over the occupied bins of V (eight bands) x H
+            # (``H_BANDS``), then over the cells in one, so a crowded corner of the map doesn't
+            # outweigh its edges
+            pos, _path = self.positions()
+            if pos:
+                lo = min(p[0] for p in pos.values())
+                hi = max(p[0] for p in pos.values())
+                width = (hi - lo) / 8 or 1.0
+                bins = {}
+                for k in keys:
+                    bins.setdefault((min(7, int((pos[k][0] - lo) / width)), h_band(pos[k][1])),
+                                    []).append(k)
+                return rng.choice(bins[rng.choice(sorted(bins))])
         if self.settings.get("pick") == "track":
             pos, _path = self.positions()
             if pos:
@@ -366,6 +461,52 @@ class Archive:
             goal[item] = levels[item]
             left -= c
         return goal
+
+    def pick_goal_vh(self, go_levels, needs, made, rng, tries=40):
+        """The goal, in coordinates (2.0.68): ``tries`` candidate cells, each a walk of +1 steps
+        from the go cell until its V has risen by ``rise``. A step is picked uniformly from those
+        that keep V at most 2 x ``rise`` above the go cell (an item far up the tech tree overshoots
+        by itself, so it never comes up for a small rise), at most ``steps`` of them. Then an H
+        band picked uniformly among the candidates', and a candidate in it. -> {item: level}, the
+        goal's items only; {} when no walk rises at all."""
+        tree, base, st = self.tree(), float(self.settings["base"]), self.settings
+        rise, steps = float(st["rise"]), int(st["steps"])
+        pos, path = self.positions()
+        start = Worth(tree, base, go_levels)
+        v0 = start.now
+        # items only: the cells count items made, so a fluid in a manifest could never be met
+        pool = sorted((set(needs) | set(start.levels)) - set(tree.fluids))
+        cands = []
+        for _ in range(int(tries)):
+            w = Worth(tree, base, go_levels)
+            goal = {}
+            for _s in range(steps):
+                if w.now >= v0 + rise:
+                    break
+                now, ok = w.now, []
+                for i in pool:
+                    v = w.after(i)
+                    if v is not None and now < v <= v0 + 2 * rise:
+                        ok.append(i)
+                if not ok:
+                    break
+                item = rng.choice(ok)
+                w.apply(item)
+                goal[item] = w.levels[item]
+            if goal:
+                cands.append((w.now >= v0 + rise, w.now, goal, w.levels))
+        if not cands:
+            return {}
+        full = [c for c in cands if c[0]] or sorted(cands, key=lambda c: -c[1])[:1]
+        near = [p for p in path if p in self.cells]
+
+        def h(levels, v):
+            on = [p for p in near if pos.get(p, (0, 0))[0] <= v + 1e-9] or near
+            return min(distance(levels, self.cells[p]["levels"]) for p in on) if on else 0
+        bands = {}
+        for _ok, v, goal, levels in full:
+            bands.setdefault(h_band(h(levels, v)), []).append(goal)
+        return rng.choice(bands[rng.choice(sorted(bands))])
 
     def start_episode(self, go, goal, tick):
         self.data["episodes"] = int(self.data.get("episodes", 0)) + 1

@@ -834,7 +834,8 @@ def _explore(s, rest):
                             prior=num("prior", int), seed=num("seed", int),
                             minutes=num("minutes", float),
                             auto=None if auto is None else int(auto not in ("off", "0", "no")),
-                            pick=opts.get("pick"))
+                            pick=opts.get("pick"), rise=num("rise", float),
+                            steps=num("steps", int))
     if verb == "next":
         return s.explore_next(num("seed", int))
     if verb == "off":
@@ -902,7 +903,8 @@ def _explore(s, rest):
         shutil.rmtree(arch.root, ignore_errors=True)
         return ["explore: archive cleared (its save states x<k> stay in sim\\write\\saves)"]
     raise simmod.SimError("fk sim explore on [--base 2] [--dist 4] [--budget 36000] "
-                          "[--minutes M] [--auto on|off] [--pick uniform|track] [--chunk 600] "
+                          "[--minutes M] [--auto on|off] [--pick grid|uniform|track] [--rise 0.1] "
+                          "[--steps 12] [--chunk 600] "
                           "[--prior K] | next | "
                           "status | off | archive [N] | "
                           "best [CELL] [--to plan.sim] | reset")
