@@ -400,58 +400,66 @@ rcon.print('sim: removed ' .. n .. ' entities')
                 "can": list(got.get("can") or [])}
 
     def _explore_check(self, arch):
-        """The cell now, offered to the archive. -> report lines (new / faster / goal)."""
+        """The cell now, offered to the archive, and the round's manifest brought up to date.
+        Silent: the player sees the manifest, never the cells (2.0.65)."""
         from . import explore
         st = arch.settings
         got = self.made()
         levels = explore.cell(got["made"], float(st["base"]))
         ep = arch.episode
-        out = []
         verdict = arch.offer(levels, got["tick"], ep["traj"], lambda name: self.save(name))
-        k = explore.key(levels)
         if verdict:
-            row = arch.cells[k]
-            (ep["found"] if verdict == "new" else ep["faster"]).append(k)
-            go = arch.cells[ep["go"]]["levels"]
-            out.append(f"explore: {verdict} cell {row['save']} at tick {got['tick']} "
-                       f"({explore.distance(go, levels)} from the go cell)")
+            (ep["found"] if verdict == "new" else ep["faster"]).append(explore.key(levels))
         if ep.get("reached") is None and explore.reached(levels, ep["goal"]):
             ep["reached"] = got["tick"]
-            out.append(f"explore: GOAL reached at tick {got['tick']}, "
-                       f"{got['tick'] - ep['start']} ticks after the go cell: "
-                       "fk sim explore next for the next one")
         ep["now"] = levels
+        ep["made"] = {i: got["made"].get(i, 0) for i in ep["goal"]}
         arch.write()
-        return out
 
     def _explore_run(self, arch, now, n, wait_s):
-        chunk = max(60, int(arch.settings["chunk"]))
-        notes, done, t0 = [], 0, time.time()
-        while done < n:
-            step = min(chunk, n - done)
+        """``run`` in a round: chunks, the cell checked after each, and the round ended when its
+        manifest is met, its budget of ticks spent or its minutes up (2.0.65, Rory: "it shouldn't
+        make the agent wait until it gets to the goal cell"). Then, with ``auto``, the next round."""
+        from . import explore
+        st = arch.settings
+        chunk = max(60, int(st["chunk"]))
+        done, t0 = 0, time.time()
+        why = explore.round_end(arch.episode, st, now, time.time())
+        while why is None and done < n:
+            left = explore.ticks_left(arch.episode, st, self.tick())
+            step = min(chunk, n - done, left if left is not None else chunk)
+            if step <= 0:
+                break
             self._run(self.tick(), step, wait_s)
             done += step
-            notes += self._explore_check(arch)
+            self._explore_check(arch)
             arch = self.archive()
+            why = explore.round_end(arch.episode, st, self.tick(), time.time())
         at = self.tick()
+        line = f"sim: ran {done} ticks to tick {at} in {time.time() - t0:.1f} s" + (
+            f" (of the {n} asked)" if done < n else "")
+        if why is None:
+            return at, f"{line}; manifest: {arch.goal_text()}"
         ep = arch.episode
-        over = at - int(ep["start"]) - int(arch.settings["budget"])
-        line = f"sim: ran {n} ticks to tick {at} in {time.time() - t0:.1f} s, checking cells"
-        if ep.get("reached") is None:
-            line += f"; goal still: {arch.goal_text(ep.get('now'))}"
-            if over > 0:
-                line += (f"; {over} ticks over the episode's budget: fk sim explore next "
-                         "starts another")
-        return at, "\n".join([line] + notes)
+        ep["ended"] = why
+        arch.write()
+        out = [line, f"ROUND {ep['n']} OVER: {why}. Manifest: {arch.goal_text()}"]
+        if int(st.get("auto", 1)):
+            out += self.explore_next()
+            at = self.tick()
+        else:
+            out.append("fk sim explore next starts the next round")
+        return at, "\n".join(out)
 
-    def explore_on(self, base=None, dist=None, budget=None, chunk=None, prior=None, seed=None):
+    def explore_on(self, base=None, dist=None, budget=None, chunk=None, prior=None, seed=None,
+                   minutes=None, auto=None):
         """Explore mode on (settings given are kept), the archive started from save state
         ``start`` when it is empty, and an episode begun. -> report lines."""
         from . import explore
         arch = self.archive()
         st = dict(arch.data.get("settings") or {})
         for k, v in (("base", base), ("dist", dist), ("budget", budget), ("chunk", chunk),
-                     ("prior", prior)):
+                     ("prior", prior), ("minutes", minutes), ("auto", auto)):
             if v is not None:
                 st[k] = v
         if float(st.get("base", 2)) <= 1:
@@ -500,14 +508,21 @@ rcon.print('sim: removed ' .. n .. ' entities')
         goal = arch.pick_goal(row["levels"], got["can"], arch.settings["dist"], rng)
         ep = arch.start_episode(go, goal, got["tick"])
         ep["now"] = row["levels"]
+        ep["made"] = {i: got["made"].get(i, 0) for i in goal}
         arch.write()
         st = arch.settings
-        return [f"explore: episode {ep['n']}, from cell {row['save']} (tick {got['tick']}, "
-                f"{sum(row['levels'].values())} levels; {len(arch.cells)} cells in the archive)",
-                f"  goal ({st['dist']} steps at base {st['base']:g}): {arch.goal_text()}",
-                f"  budget {st['budget']} ticks; the game is loaded there and paused, speed 100. "
-                "Paste, decon, research (fk sim game research) and run: every new cell on the way "
-                "is kept"]
+        ends = [f"its budget of {int(st['budget']):,} ticks"] if int(st["budget"] or 0) else []
+        if float(st.get("minutes") or 0):
+            ends.append(f"{float(st['minutes']):g} minutes of yours")
+        return [f"ROUND {ep['n']}: a game loaded at tick {got['tick']:,}, paused, speed 100. Make "
+                "as fast as you can, in all (counting what was made before):",
+                f"  manifest: {arch.goal_text()}",
+                "  the round ends when it's met" + (f", or after {' or '.join(ends)}"
+                                                     if ends else "")
+                + ", and the next one loads by itself. Paste, decon, fk sim game research / lua, "
+                "and run",
+                "  an item far off or out of reach for now: think of the way that gets to it in the "
+                "end, and take the first step on it (the research it needs, the factory before it)"]
 
     def explore_off(self):
         arch = self.archive()

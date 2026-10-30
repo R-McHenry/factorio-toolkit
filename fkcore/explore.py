@@ -97,6 +97,46 @@ def shortfall(now, goal):
     return {i: (now.get(i, -1), lvl) for i, lvl in sorted(goal.items()) if now.get(i, -1) < lvl}
 
 
+def need_count(level, base):
+    """The count a level starts at: level 10 at base 2 is 1024; level 0 is 1."""
+    return int(math.ceil(base ** level - 1e-9))
+
+
+def manifest(goal, made, base):
+    """The goal as the player sees it (2.0.65, Rory: "the player shouldn't be exposed to cells
+    beyond the goal its given which is just a material manifest"): [(item, total to have made,
+    made so far)], the items still short first."""
+    rows = [(i, need_count(lvl, base), int(made.get(i, 0))) for i, lvl in sorted(goal.items())]
+    return sorted(rows, key=lambda r: (r[2] >= r[1], r[0]))
+
+
+def manifest_text(goal, made, base):
+    rows = manifest(goal, made, base)
+    return "; ".join(f"{i} {have:,} of {need:,}" + (" (done)" if have >= need else "")
+                     for i, need, have in rows)
+
+
+def round_end(ep, st, tick, wall):
+    """Why the round is over, or None (2.0.65, Rory: "an early stop mode that tells the agent its
+    worked on the cell goal long enough and its time for a new round"): its manifest met, its
+    budget of ticks since its start spent, or its minutes of the agent's own time."""
+    if ep.get("reached") is not None:
+        return f"the manifest is met (tick {ep['reached']}, {ep['reached'] - ep['start']:,} ticks in)"
+    budget = int(st.get("budget") or 0)
+    if budget and tick - int(ep["start"]) >= budget:
+        return f"its budget of {budget:,} ticks is spent"
+    minutes = float(st.get("minutes") or 0)
+    if minutes and wall - float(ep.get("wall", wall)) >= minutes * 60:
+        return f"its {minutes:g} minutes are up"
+    return None
+
+
+def ticks_left(ep, st, tick):
+    """The ticks the round may still run (its budget), or None for no limit."""
+    budget = int(st.get("budget") or 0)
+    return max(0, int(ep["start"]) + budget - tick) if budget else None
+
+
 def count_text(level, base):
     """A level as the count it stands for: level 10 at base 2 is 1024+, level -1 is none."""
     if level < 0:
@@ -132,7 +172,8 @@ class Archive:
 
     @property
     def settings(self):
-        s = {"base": 2.0, "dist": 4, "budget": 36000, "chunk": 600, "prior": 0}
+        s = {"base": 2.0, "dist": 4, "budget": 36000, "chunk": 600, "prior": 0, "minutes": 0,
+             "auto": 1}
         s.update(self.data.get("settings") or {})
         return s
 
@@ -218,7 +259,8 @@ class Archive:
         self.cells[go]["visits"] = int(self.cells[go].get("visits", 0)) + 1
         self.data["episode"] = {"n": self.data["episodes"], "go": go, "goal": goal,
                                 "start": tick, "traj": list(self.cells[go]["traj"]),
-                                "found": [], "faster": [], "reached": None}
+                                "found": [], "faster": [], "reached": None,
+                                "wall": time.time(), "ended": None}
         return self.data["episode"]
 
     def record(self, tick, verb, args):
@@ -274,12 +316,9 @@ class Archive:
                 fh.write(text)
         return path
 
-    def goal_text(self, now=None):
-        ep, base = self.episode, float(self.settings["base"])
+    def goal_text(self):
+        """The round's manifest: each item, made so far of the total to have made."""
+        ep = self.episode
         if ep is None:
-            return "no episode"
-        now = now if now is not None else self.cells[ep["go"]]["levels"]
-        parts = []
-        for item, (have, want) in shortfall(now, ep["goal"]).items():
-            parts.append(f"{item} {count_text(want, base)} made (now {count_text(have, base)})")
-        return "; ".join(parts) or "reached"
+            return "no round"
+        return manifest_text(ep["goal"], ep.get("made") or {}, float(self.settings["base"]))

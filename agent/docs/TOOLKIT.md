@@ -312,47 +312,37 @@ it booted. The first boot of one now saves it again, paused, and says so.
 
 ### Explore mode: `fk sim explore`
 
-Go-Explore on the planner. A **cell** is a coarse snapshot of where the game stands:
-`floor(log2(n))` for each item, where n is how many of that item the base has made in all. The
-planner keeps an **archive** of every cell reached, with the earliest tick it was reached at, a save
-state of it, and the actions that got there.
-
-Turn it on, and the planner picks the state you play from and a goal to reach. Your job is only
-to get there quickly:
+Explore mode hands the planning to the planner and gives you a speedrun of short rounds. Each
+round, it loads a game it picks and gives you a **manifest**: a few items, each with a total for
+the base to have made, counting what it made before. Make them as fast as you can.
 
 ```
-fk sim explore on [--dist 4] [--base 2] [--budget 36000] [--prior K]
-                                 the mode on; an episode begins: a cell from the archive loaded,
-                                 and a goal DIST steps of +1 level away, on items picked at random
-fk sim explore status            the episode, its goal and what is still short
-fk sim explore next              the next episode (after the goal, or when you give up on it)
-fk sim explore archive [N]       the furthest cells: their ticks, levels and actions
-fk sim explore best [CELL] [--to plan.sim]
-                                 the way to a cell as a playback (fk sim play plays it)
-fk sim explore off               the mode off; the archive stays
+fk sim explore on [--budget 36000] [--minutes M] [--dist 4]
+                                 the mode on, and the first round loaded with its manifest
+fk sim explore status            the round: ticks used, minutes, and the manifest so far
+fk sim explore next              the next round now
+fk sim explore off               the mode off
 ```
 
-Then play as you would on the planner. `paste` your designs, `decon`, queue research with
-`fk sim game research`, use `fk sim game lua` for anything else, and `run` the game.
-- **What it records.** Every action, at its tick.
-- **What it checks.** The cell, every 600 ticks of a `run`.
-- **What it keeps.** A cell no one has reached is saved with its trajectory, wherever it lies.
-  A cell reached faster than before gets the faster trajectory.
-- **When you're done.** It says when the goal is reached and when the episode's budget of ticks
-  has run out.
-- **Fair play.** `place` and `remove` are off while it's on, since a free build would make every
-  cell a cheat. `load` is off too: the planner picks the state.
+Play as you would on the planner. `paste` your designs, `decon`, queue research with
+`fk sim game research`, use `fk sim game lua` for anything else, and `run` the game. Every `run`
+reports the manifest.
 
-The cells reward anything new, a single first item included, so goals sometimes ask for odd
-things. That's by design: a step is cheap, and the archive keeps every way forward. `--base`
-sets the resolution, and a smaller base makes finer cells. `--prior K` starts episodes only from
-the cells on the way to the K furthest. `fk sim explore best` plays back as a plan for the live
-game.
+A round ends on its own: when the manifest is met, or when its budget of ticks (`--budget`) or of
+your own time (`--minutes`) is spent. Its `run` stops there and says `ROUND N OVER`, and the next
+round loads by itself with its manifest.
 
-Rory can watch. Every save state is an ordinary save (`sim\write\saves\NAME.zip`) he can open in his
-own game. `fk sim start --spectate` puts the planner on a fixed port on the LAN, and `start` and
-`status` print the address his client joins. A client simulates every tick too, so keep the speed
-at 1 to 3 while he watches (`--spectate` starts at 1); at 100 his game falls behind and drops out.
+Some manifests name an item that is far off: one fluoroketone barrel takes most of the tech tree
+and another planet. Don't skip it, and don't wait on it. Think of the way that gets to it in the
+end, and take the first step on that way this round: the research it needs, or the factory before
+it. The round counts every step forward, whether the manifest is met or not.
+
+`place` and `remove` are off while the mode is on (a round is played as the live game would be:
+ghosts and robots), and so is `load`, since the planner picks the game.
+
+Behind it, the planner keeps the best way to every state the rounds reach, so the good plans
+collect without you tracking them. `fk sim explore archive` and `fk sim explore best --to
+plan.sim` are there to look at them afterwards, and `fk sim explore reset` starts the archive over.
 
 ## What `fk look` says
 

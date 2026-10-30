@@ -30,6 +30,32 @@ class CellTest(unittest.TestCase):
         self.assertEqual(explore.count_text(-1, 2), "none")
 
 
+class RoundTest(unittest.TestCase):
+    """2.0.65 (Rory: "an early stop mode that tells the agent its worked on the cell goal long
+    enough and its time for a new round"; "the player shouldn't be exposed to cells beyond the
+    goal its given which is just a material manifest")."""
+
+    def test_the_manifest_is_counts_not_levels(self):
+        goal = {"iron-plate": 10, "rail": 0}
+        self.assertEqual(explore.manifest(goal, {"iron-plate": 700}, 2),
+                         [("iron-plate", 1024, 700), ("rail", 1, 0)])
+        self.assertEqual(explore.manifest_text(goal, {"iron-plate": 1100, "rail": 0}, 2),
+                         "rail 0 of 1; iron-plate 1,100 of 1,024 (done)")
+        self.assertEqual(explore.need_count(4, 1.5), 6)          # 5.06 -> the first whole count
+
+    def test_a_round_ends_on_its_manifest_its_budget_or_its_minutes(self):
+        st = {"budget": 1000, "minutes": 0}
+        ep = {"start": 500, "wall": 100.0, "reached": None}
+        self.assertIsNone(explore.round_end(ep, st, 1499, 1e9))
+        self.assertIn("budget of 1,000 ticks", explore.round_end(ep, st, 1500, 0))
+        self.assertEqual(explore.ticks_left(ep, st, 1200), 300)
+        self.assertIsNone(explore.ticks_left(ep, {"budget": 0}, 1200))
+        self.assertIn("5 minutes are up", explore.round_end(ep, {"minutes": 5}, 600, 400.0))
+        self.assertIsNone(explore.round_end(ep, {"minutes": 5}, 600, 399.0))
+        ep["reached"] = 800
+        self.assertIn("manifest is met (tick 800, 300 ticks in)", explore.round_end(ep, st, 800, 0))
+
+
 class ArchiveTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="fkexplore-")

@@ -93,10 +93,10 @@ never the live game. Try a plan there before the live game does it.
 
 `docs\TOOLKIT.md`, "The speedrun planner", has all of it.
 
-`fk sim explore on` hands the planning to the planner. It picks a state from its archive of cells
-(how many of each item the base has made, in powers of two) and a goal a few cells further on, and
-you get there as fast as you can. Every new cell you reach on the way is kept, with the actions
-that got there, and a faster way to a known cell replaces the old one.
+`fk sim explore on` hands the planning to the planner: short rounds, each a game it loads and a
+manifest of items to make as fast as you can. A round ends by itself, when the manifest is met or
+its time is up, and the next one loads. An item far out of reach is a direction: take the first step
+on the way to it.
 
 ## You're free to just build
 

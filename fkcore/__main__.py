@@ -111,6 +111,7 @@ import json
 import os
 import re
 import sys
+import time
 
 from . import compose, expand, fkp, flow, plan, rates
 from . import size as sizemod
@@ -827,9 +828,12 @@ def _explore(s, rest):
             i += 1
     num = lambda k, f: f(opts[k]) if k in opts else None     # noqa: E731
     if verb == "on":
+        auto = opts.get("auto")
         return s.explore_on(base=num("base", float), dist=num("dist", int),
                             budget=num("budget", int), chunk=num("chunk", int),
-                            prior=num("prior", int), seed=num("seed", int))
+                            prior=num("prior", int), seed=num("seed", int),
+                            minutes=num("minutes", float),
+                            auto=None if auto is None else int(auto not in ("off", "0", "no")))
     if verb == "next":
         return s.explore_next(num("seed", int))
     if verb == "off":
@@ -837,18 +841,20 @@ def _explore(s, rest):
     arch = s.archive()
     base = float(arch.settings["base"])
     if verb == "status":
-        ep = arch.episode
-        out = [f"explore: {'on' if arch.on else 'off'}, {len(arch.cells)} cells, "
-               f"{arch.data.get('episodes', 0)} episodes; settings "
-               + ", ".join(f"{k} {v}" for k, v in sorted(arch.settings.items()))]
+        # the player's view: the round and its manifest, never the cells (2.0.65)
+        ep, st = arch.episode, arch.settings
+        out = [f"explore: {'on' if arch.on else 'off'}; settings "
+               + ", ".join(f"{k} {v}" for k, v in sorted(st.items()))]
         if ep is not None:
-            go = arch.cells[ep["go"]]
-            now = ep.get("now") or go["levels"]
-            out.append(f"  episode {ep['n']} from cell {go['save']} (tick {ep['start']}): "
-                       f"{len(ep['found'])} new cells, {len(ep['faster'])} faster, "
-                       + (f"goal reached at tick {ep['reached']}" if ep.get("reached")
-                          else f"goal: {arch.goal_text(now)}"))
-            out.append(f"  {len(ep['traj'])} actions in its trajectory so far")
+            tick = s.tick() if s.state() else ep["start"]
+            used = tick - int(ep["start"])
+            mins = (time.time() - float(ep.get("wall", time.time()))) / 60
+            out.append(f"  round {ep['n']}: {used:,} ticks in"
+                       + (f" of {int(st['budget']):,}" if int(st["budget"] or 0) else "")
+                       + f", {mins:.0f} min"
+                       + (f" of {float(st['minutes']):g}" if float(st.get('minutes') or 0) else "")
+                       + (f"; over: {ep['ended']}" if ep.get("ended") else ""))
+            out.append(f"  manifest: {arch.goal_text()}")
         return out
     if verb == "archive":
         n = int(args[0]) if args else 15
@@ -882,7 +888,8 @@ def _explore(s, rest):
         shutil.rmtree(arch.root, ignore_errors=True)
         return ["explore: archive cleared (its save states x<k> stay in sim\\write\\saves)"]
     raise simmod.SimError("fk sim explore on [--base 2] [--dist 4] [--budget 36000] "
-                          "[--chunk 600] [--prior K] | next | status | off | archive [N] | "
+                          "[--minutes M] [--auto on|off] [--chunk 600] [--prior K] | next | "
+                          "status | off | archive [N] | "
                           "best [CELL] [--to plan.sim] | reset")
 
 
