@@ -304,8 +304,8 @@ def sim(cfg, rest):
     if not rest or rest[0] in ("-h", "--help"):
         print("fk sim fetch [--live NAME] | start [NAME] | stop | status | save NAME | load NAME | "
               "saves | speed X | run N | until T | place FILE @X,Y | paste FILE @X,Y | remove "
-              "X0,Y0,X1,Y1 | decon X0,Y0,X1,Y1 | play SCRIPT | game CMD ...  (docs\\TOOLKIT.md, "
-              "\"The speedrun planner\")")
+              "X0,Y0,X1,Y1 | decon X0,Y0,X1,Y1 | play SCRIPT | game CMD ... | explore on|next|"
+              "status|archive|best|off  (docs\\TOOLKIT.md, \"The speedrun planner\")")
         return 0
     if rest[0] == "fetch":
         live = "--live" in rest
@@ -352,10 +352,20 @@ def sim(cfg, rest):
             print("fk sim game CMD ...: stats, look, lua, research, ... on the planner",
                   file=sys.stderr)
             return 2
+        given = list(args)
+        if "--file" in given[:-1]:                     # a file of the player's, wherever they are
+            k = given.index("--file") + 1
+            given[k] = os.path.abspath(given[k])
         if args[0] not in ("say",):
-            args = [args[0], "."] + (_area(args[1:]) if args[0] in AREA_FIRST else args[1:])
-        return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME,
+            args = [args[0], "."] + (_area(given[1:]) if args[0] in AREA_FIRST else given[1:])
+        code = subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME,
                               env=env).returncode
+        if code == 0 and given[0] in ("research", "lua", "decon"):
+            # 2.0.64: in explore mode, what changes the game goes into the episode's trajectory
+            subprocess.run([sys.executable, "-m", "fkcore", "sim", ".", "explore-game",
+                            json.dumps(args[:1] + args[2:])], cwd=GAME,
+                           env=dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit")))
+        return code
     return local(cfg, ["sim", "."] + rest)
 
 

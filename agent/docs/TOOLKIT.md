@@ -306,6 +306,49 @@ save after-smelt
 run: a building on a cliff or an enemy base, or a drill off its ore. `place` says how many didn't
 stand and why. The planner's own files are in `sim\` of your run folder.
 
+A save state loads at the tick it was saved at, every time. A save written while the game was
+running (the fetched start, `fetch --live`) used to run on for tens to hundreds of ticks each time
+it booted. The first boot of one now saves it again, paused, and says so.
+
+### Explore mode: `fk sim explore`
+
+Go-Explore on the planner. A **cell** is a coarse snapshot of where the game stands:
+`floor(log2(n))` for each item, where n is how many of that item the base has made in all. The
+planner keeps an **archive** of every cell reached, with the earliest tick it was reached at, a save
+state of it, and the actions that got there.
+
+Turn it on, and the planner picks the state you play from and a goal to reach. Your job is only
+to get there quickly:
+
+```
+fk sim explore on [--dist 4] [--base 2] [--budget 36000] [--prior K]
+                                 the mode on; an episode begins: a cell from the archive loaded,
+                                 and a goal DIST steps of +1 level away, on items picked at random
+fk sim explore status            the episode, its goal and what is still short
+fk sim explore next              the next episode (after the goal, or when you give up on it)
+fk sim explore archive [N]       the furthest cells: their ticks, levels and actions
+fk sim explore best [CELL] [--to plan.sim]
+                                 the way to a cell as a playback (fk sim play plays it)
+fk sim explore off               the mode off; the archive stays
+```
+
+Then play as you would on the planner. `paste` your designs, `decon`, queue research with
+`fk sim game research`, use `fk sim game lua` for anything else, and `run` the game.
+- **What it records.** Every action, at its tick.
+- **What it checks.** The cell, every 600 ticks of a `run`.
+- **What it keeps.** A cell no one has reached is saved with its trajectory, wherever it lies.
+  A cell reached faster than before gets the faster trajectory.
+- **When you're done.** It says when the goal is reached and when the episode's budget of ticks
+  has run out.
+- **Fair play.** `place` and `remove` are off while it's on, since a free build would make every
+  cell a cheat. `load` is off too: the planner picks the state.
+
+The cells reward anything new, a single first item included, so goals sometimes ask for odd
+things. That's by design: a step is cheap, and the archive keeps every way forward. `--base`
+sets the resolution, and a smaller base makes finer cells. `--prior K` starts episodes only from
+the cells on the way to the K furthest. `fk sim explore best` plays back as a plan for the live
+game.
+
 Rory can watch. Every save state is an ordinary save (`sim\write\saves\NAME.zip`) he can open in his
 own game. `fk sim start --spectate` puts the planner on a fixed port on the LAN, and `start` and
 `status` print the address his client joins. A client simulates every tick too, so keep the speed

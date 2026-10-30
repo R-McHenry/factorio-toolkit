@@ -792,6 +792,11 @@ def _sim(a, cat):
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
             print("\n".join(simmod.play(s, text, cat, os.path.dirname(os.path.abspath(path)))))
+        elif v == "explore":
+            print("\n".join(_explore(s, rest)))
+        elif v == "explore-game":
+            # fk sim game CMD ... in explore mode: the command into the episode's trajectory
+            s.explore_game(json.loads(one("JSON")))
         elif v == "env":
             print(json.dumps(s.env()))
         elif v == "add-save":
@@ -800,11 +805,85 @@ def _sim(a, cat):
             print(s.add_save(rest[0], rest[1]))
         else:
             raise simmod.SimError(f"fk sim {v}: start, stop, status, save, load, saves, speed, "
-                                  "run, until, place, paste, remove, decon, play")
+                                  "run, until, place, paste, remove, decon, play, explore")
     except (simmod.SimError, OSError, link.LinkError, ValueError) as exc:
         print(f"sim: {exc}", file=sys.stderr)
         return 2
     return 0
+
+
+def _explore(s, rest):
+    """fk sim explore on|next|status|off|archive|best|reset (2.0.64, fkcore.explore)."""
+    from . import explore
+    from . import sim as simmod
+    verb = rest[0] if rest else "status"
+    opts, args, i = {}, [], 1
+    while i < len(rest):
+        if rest[i].startswith("--") and i + 1 < len(rest):
+            opts[rest[i][2:]] = rest[i + 1]
+            i += 2
+        else:
+            args.append(rest[i])
+            i += 1
+    num = lambda k, f: f(opts[k]) if k in opts else None     # noqa: E731
+    if verb == "on":
+        return s.explore_on(base=num("base", float), dist=num("dist", int),
+                            budget=num("budget", int), chunk=num("chunk", int),
+                            prior=num("prior", int), seed=num("seed", int))
+    if verb == "next":
+        return s.explore_next(num("seed", int))
+    if verb == "off":
+        return [s.explore_off()]
+    arch = s.archive()
+    base = float(arch.settings["base"])
+    if verb == "status":
+        ep = arch.episode
+        out = [f"explore: {'on' if arch.on else 'off'}, {len(arch.cells)} cells, "
+               f"{arch.data.get('episodes', 0)} episodes; settings "
+               + ", ".join(f"{k} {v}" for k, v in sorted(arch.settings.items()))]
+        if ep is not None:
+            go = arch.cells[ep["go"]]
+            now = ep.get("now") or go["levels"]
+            out.append(f"  episode {ep['n']} from cell {go['save']} (tick {ep['start']}): "
+                       f"{len(ep['found'])} new cells, {len(ep['faster'])} faster, "
+                       + (f"goal reached at tick {ep['reached']}" if ep.get("reached")
+                          else f"goal: {arch.goal_text(now)}"))
+            out.append(f"  {len(ep['traj'])} actions in its trajectory so far")
+        return out
+    if verb == "archive":
+        n = int(args[0]) if args else 15
+        out = [f"explore archive: {len(arch.cells)} cells at base {base:g}, the furthest first "
+               "(levels in all, then the earliest tick)"]
+        for k, row in arch.best(n):
+            top = sorted(row["levels"].items(), key=lambda kv: -kv[1])[:6]
+            out.append(f"  {row['save']:<6} tick {row['tick']:>8}  levels {sum(row['levels'].values()):>4}  "
+                       f"{len(row['traj']):>3} actions  visits {row.get('visits', 0)}  "
+                       + ", ".join(f"{i} {explore.count_text(l, base)}" for i, l in top))
+        return out
+    if verb == "best":
+        if args:
+            k = next((k for k, row in arch.cells.items() if row["save"] == args[0]), None)
+            if k is None:
+                raise simmod.SimError(f"no cell {args[0]} (fk sim explore archive)")
+        else:
+            k = arch.best(1)[0][0]
+        text = arch.plan(k)
+        to = opts.get("to")
+        if to:
+            with open(to, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+            return [f"explore: the way to cell {arch.cells[k]['save']} written to {to} "
+                    "(fk sim play plays it)"]
+        return [text.rstrip("\n")]
+    if verb == "reset":
+        if arch.on:
+            raise simmod.SimError("fk sim explore off first")
+        import shutil
+        shutil.rmtree(arch.root, ignore_errors=True)
+        return ["explore: archive cleared (its save states x<k> stay in sim\\write\\saves)"]
+    raise simmod.SimError("fk sim explore on [--base 2] [--dist 4] [--budget 36000] "
+                          "[--chunk 600] [--prior K] | next | status | off | archive [N] | "
+                          "best [CELL] [--to plan.sim] | reset")
 
 
 def _adopt(a, cat):

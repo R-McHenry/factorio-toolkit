@@ -93,6 +93,11 @@ never the live game. Try a plan there before the live game does it.
 
 `docs\TOOLKIT.md`, "The speedrun planner", has all of it.
 
+`fk sim explore on` hands the planning to the planner. It picks a state from its archive of cells
+(how many of each item the base has made, in powers of two) and a goal a few cells further on, and
+you get there as fast as you can. Every new cell you reach on the way is kept, with the actions
+that got there, and a faster way to a known cell replaces the old one.
+
 ## You're free to just build
 
 You don't need permission and you don't need a finished plan. Something running beats something

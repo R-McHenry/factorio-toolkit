@@ -28,6 +28,10 @@ the machine allows, not in real time.
     remove X0,Y0,X1,Y1  everything there gone at once (not characters, not resources)
     decon X0,Y0,X1,Y1   everything there ordered out (the robots take it up)
     play SCRIPT         a playback: those actions in order, each at its tick (``play_lines``)
+    explore on | next | status | off | archive | best
+                        Go-Explore (2.0.64, ``fkcore.explore``): the planner picks a cell to start
+                        from and a goal cell, records what you do, and keeps every new cell and
+                        every faster way to one
 
 A position ``@X,Y`` is added to the blueprint's own coordinates (a design's are its factory's).
 Pure but for the server: stdlib, the toolkit's link, codec and catalog.
@@ -36,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import shutil
 import socket
 import subprocess
@@ -157,12 +162,23 @@ class Sim:
                                f"{os.path.join(self.root, 'server.log')}")
             try:
                 # a save keeps its speed; one being watched starts at real time
-                tick = self.lua("game.tick_paused = true "
-                                + ("game.speed = 1 " if spectate else "")
-                                + "rcon.print(game.tick)").strip()
-                if tick.isdigit():
-                    return (f"sim: running from save state {name}, paused at tick {tick}"
+                got = self.lua("local was = game.tick_paused game.tick_paused = true "
+                               + ("game.speed = 1 " if spectate else "")
+                               + "rcon.print(game.tick .. ' ' .. tostring(was))").strip().split()
+                if got and got[0].isdigit():
+                    tick = got[0]
+                    line = (f"sim: running from save state {name}, paused at tick {tick}"
                             + (f"; join to watch at {self.address()}" if spectate else ""))
+                    if got[1:] == ["false"]:
+                        # 2.0.64: a save written by a running server (the fetched start, a
+                        # fetch --live, the live game's own) isn't paused, so every boot ran on
+                        # until this call paused it, at its saved speed: tens to hundreds of
+                        # ticks, a different number each time (the opus player saw it). Saved
+                        # again now, paused, it loads at this tick every time
+                        self.save(name)
+                        line += (f" (it was saved running, so a boot ran on to here; saved again "
+                                 f"paused, it loads at tick {tick} from now on)")
+                    return line
             except (OSError, link.LinkError):
                 pass
             time.sleep(1)
@@ -231,6 +247,9 @@ class Sim:
         raise SimError(f"the game did not write {path}")
 
     def load(self, name):
+        if self.archive().on:
+            raise SimError("explore mode picks the state: fk sim explore next for another "
+                           "episode, or fk sim explore off")
         if not os.path.exists(self.save_path(name)):
             raise SimError(f"no save state {name} (fk sim saves)")
         st = self.state()
@@ -255,13 +274,20 @@ class Sim:
 
     def run(self, ticks=None, until=None, wait_s=None):
         """Move the game on ``ticks`` ticks (or to tick ``until``), then stand still again.
-        -> (the tick it stands at, a report line)."""
+        -> (the tick it stands at, a report line). In explore mode it runs in chunks and checks
+        the cell after each (``_explore_run``)."""
         now = self.tick()
         n = int(ticks) if ticks is not None else int(until) - now
         if n < 0:
             raise SimError(f"tick {until} is past: the game is at {now}")
         if n == 0:
             return now, f"sim: at tick {now}"
+        arch = self.archive()
+        if arch.on and arch.episode is not None:
+            return self._explore_run(arch, now, n, wait_s)
+        return self._run(now, n, wait_s)
+
+    def _run(self, now, n, wait_s=None):
         speed = float(self.lua("rcon.print(game.speed)").strip() or 1)
         budget = wait_s if wait_s is not None else max(30.0, n / 60.0 / max(speed, 0.01) * 3 + 30)
         self.lua(f"game.tick_paused = true game.ticks_to_run = {n} rcon.print('ok')")
@@ -321,12 +347,19 @@ class Sim:
                 f"{left} ghosts left){why}")
 
     def place(self, path, at, cat):
+        self._fair("place")
         return self._built(path, at, cat, True)
 
     def paste(self, path, at, cat):
-        return self._built(path, at, cat, False)
+        got = self._built(path, at, cat, False)
+        arch = self.archive()
+        if arch.on and arch.episode is not None:
+            arch.record(self.tick(), "paste", [arch.keep_file(os.path.abspath(path)), at[0], at[1]])
+            arch.write()
+        return got
 
     def remove(self, area):
+        self._fair("remove")
         return self.lua(f"""
 local s = game.get_surface('{SURFACE}')
 local n = 0
@@ -338,7 +371,164 @@ rcon.print('sim: removed ' .. n .. ' entities')
 
     def decon(self, area):
         n = self.lua(link.lua_decon(SURFACE, FORCE, area)).strip()
+        arch = self.archive()
+        if arch.on and arch.episode is not None:
+            arch.record(self.tick(), "decon", list(area))
+            arch.write()
         return f"sim: {n} entities ordered out"
+
+    # -- explore (2.0.64, fkcore.explore) -------------------------------------------------------------
+    def archive(self):
+        from . import explore
+        return explore.Archive(self.root)
+
+    def _fair(self, verb):
+        """In explore mode a trajectory is what the live game could do: ghosts and robots,
+        decon, research and Lua. A free build or a free removal would make its cells worthless."""
+        arch = self.archive()
+        if arch.on:
+            raise SimError(f"{verb} is off in explore mode (a free build makes the cells worthless "
+                           "as a speedrun): paste ghosts for the robots, decon for taking up; "
+                           "fk sim explore off ends the mode")
+
+    def made(self):
+        """{tick, made: {item: produced}, can: [items the force can make]} from the game."""
+        from . import explore
+        got = json.loads(self.lua(explore.LUA_MADE).strip() or "{}")
+        made = got.get("made") or {}
+        return {"tick": int(got.get("tick", 0)), "made": made if isinstance(made, dict) else {},
+                "can": list(got.get("can") or [])}
+
+    def _explore_check(self, arch):
+        """The cell now, offered to the archive. -> report lines (new / faster / goal)."""
+        from . import explore
+        st = arch.settings
+        got = self.made()
+        levels = explore.cell(got["made"], float(st["base"]))
+        ep = arch.episode
+        out = []
+        verdict = arch.offer(levels, got["tick"], ep["traj"], lambda name: self.save(name))
+        k = explore.key(levels)
+        if verdict:
+            row = arch.cells[k]
+            (ep["found"] if verdict == "new" else ep["faster"]).append(k)
+            go = arch.cells[ep["go"]]["levels"]
+            out.append(f"explore: {verdict} cell {row['save']} at tick {got['tick']} "
+                       f"({explore.distance(go, levels)} from the go cell)")
+        if ep.get("reached") is None and explore.reached(levels, ep["goal"]):
+            ep["reached"] = got["tick"]
+            out.append(f"explore: GOAL reached at tick {got['tick']}, "
+                       f"{got['tick'] - ep['start']} ticks after the go cell: "
+                       "fk sim explore next for the next one")
+        ep["now"] = levels
+        arch.write()
+        return out
+
+    def _explore_run(self, arch, now, n, wait_s):
+        chunk = max(60, int(arch.settings["chunk"]))
+        notes, done, t0 = [], 0, time.time()
+        while done < n:
+            step = min(chunk, n - done)
+            self._run(self.tick(), step, wait_s)
+            done += step
+            notes += self._explore_check(arch)
+            arch = self.archive()
+        at = self.tick()
+        ep = arch.episode
+        over = at - int(ep["start"]) - int(arch.settings["budget"])
+        line = f"sim: ran {n} ticks to tick {at} in {time.time() - t0:.1f} s, checking cells"
+        if ep.get("reached") is None:
+            line += f"; goal still: {arch.goal_text(ep.get('now'))}"
+            if over > 0:
+                line += (f"; {over} ticks over the episode's budget: fk sim explore next "
+                         "starts another")
+        return at, "\n".join([line] + notes)
+
+    def explore_on(self, base=None, dist=None, budget=None, chunk=None, prior=None, seed=None):
+        """Explore mode on (settings given are kept), the archive started from save state
+        ``start`` when it is empty, and an episode begun. -> report lines."""
+        from . import explore
+        arch = self.archive()
+        st = dict(arch.data.get("settings") or {})
+        for k, v in (("base", base), ("dist", dist), ("budget", budget), ("chunk", chunk),
+                     ("prior", prior)):
+            if v is not None:
+                st[k] = v
+        if float(st.get("base", 2)) <= 1:
+            raise SimError("--base is the log's base, above 1 (2 by default; smaller is finer)")
+        if arch.cells and st.get("base") is not None and \
+                float(st["base"]) != float(arch.settings["base"]):
+            raise SimError(f"the archive's cells are at base {arch.settings['base']}: "
+                           "fk sim explore reset starts another")
+        arch.data["settings"] = st
+        arch.data["on"] = True
+        out = []
+        if not arch.cells:
+            if not os.path.exists(self.save_path("start")):
+                raise SimError("no save state start (fk sim fetch)")
+            # the start as saved, never a game that has run on from it since. A save made by a
+            # running server isn't paused, so each boot runs a few ticks before RCON pauses it;
+            # the root is saved again here, paused, and loads at the same tick every time
+            self.stop()
+            self.start("start")
+            self.save("x0")
+            arch.data["root"] = "x0"
+            got = self.made()
+            levels = explore.cell(got["made"], float(arch.settings["base"]))
+            arch.cells[explore.key(levels)] = {"levels": levels, "tick": got["tick"],
+                                               "save": "x0", "traj": [], "visits": 0,
+                                               "found": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                               "episode": 0, "parent": None, "beaten": 0}
+            out.append(f"explore: archive started from save state start, kept paused as x0 "
+                       f"(tick {got['tick']}, {len(levels)} items made)")
+        arch.write()
+        return out + self.explore_next(seed)
+
+    def explore_next(self, seed=None):
+        """A new episode: a go cell loaded, a goal given. -> report lines."""
+        from . import explore
+        arch = self.archive()
+        if not arch.on:
+            raise SimError("explore mode is off (fk sim explore on)")
+        rng = random.Random(seed)
+        go = arch.pick_go(rng)
+        row = arch.cells[go]
+        self.stop()
+        self.start(row["save"])
+        self.lua("game.speed = 100 rcon.print('ok')")
+        got = self.made()
+        goal = arch.pick_goal(row["levels"], got["can"], arch.settings["dist"], rng)
+        ep = arch.start_episode(go, goal, got["tick"])
+        ep["now"] = row["levels"]
+        arch.write()
+        st = arch.settings
+        return [f"explore: episode {ep['n']}, from cell {row['save']} (tick {got['tick']}, "
+                f"{sum(row['levels'].values())} levels; {len(arch.cells)} cells in the archive)",
+                f"  goal ({st['dist']} steps at base {st['base']:g}): {arch.goal_text()}",
+                f"  budget {st['budget']} ticks; the game is loaded there and paused, speed 100. "
+                "Paste, decon, research (fk sim game research) and run: every new cell on the way "
+                "is kept"]
+
+    def explore_off(self):
+        arch = self.archive()
+        arch.data["on"] = False
+        arch.data["episode"] = None
+        arch.write()
+        return f"explore: off ({len(arch.cells)} cells kept in the archive; the game as it stands)"
+
+    def explore_game(self, args):
+        """Record a game command (``fk sim game research ...``) in the episode's trajectory."""
+        arch = self.archive()
+        if arch.on and arch.episode is not None:
+            args = list(args)
+            if args[:1] == ["lua"] and "--file" in args:
+                i = args.index("--file")
+                with open(args[i + 1], encoding="utf-8") as fh:
+                    args = ["lua", fh.read()]
+            arch.record(self.tick(), "game", args)
+            arch.write()
+            return True
+        return False
 
 
 def _lua_clear_marked(area):
@@ -420,10 +610,11 @@ def play_lines(text):
         run 600             600 ticks on
         place mine.fkp @0,0   paste mine.fkp @0,0   remove X0,Y0,X1,Y1   decon X0,Y0,X1,Y1
         save after-mine     a save state, as the game stands
+        game research automation    any fkcore game command, on the planner (2.0.64)
     """
     out = []
     verbs = {"from": 1, "speed": 1, "at": 1, "run": 1, "place": 2, "paste": 2, "remove": 1,
-             "decon": 1, "save": 1}
+             "decon": 1, "save": 1, "game": None}
     for i, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -432,7 +623,10 @@ def play_lines(text):
         verb, args = words[0], words[1:]
         if verb not in verbs:
             raise SimError(f"line {i}: {verb}: a playback line is one of {', '.join(verbs)}")
-        if len(args) != verbs[verb]:
+        if verbs[verb] is None:
+            if not args:
+                raise SimError(f"line {i}: game COMMAND ARGS ... (research NAME, lua --file F)")
+        elif len(args) != verbs[verb]:
             raise SimError(f"line {i}: {verb} takes {verbs[verb]} argument"
                            f"{'s' if verbs[verb] > 1 else ''}, got {len(args)}")
         if verb == "from" and out:
@@ -448,6 +642,20 @@ def play_lines(text):
             args = [int(args[0])]
         out.append((i, verb, args))
     return out
+
+
+def game_command(sim, args):
+    """An fkcore game command (``research NAME``, ``lua --file F``) run on the planner, as
+    ``fk sim game`` runs it. -> what it printed, on one line."""
+    import sys
+    game = os.path.join(os.path.dirname(sim.root), "game")
+    env = dict(os.environ, FK_LINK="on", **sim.env())
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r = subprocess.run([sys.executable, "-m", "fkcore", args[0], "."] + list(args[1:]),
+                       cwd=game if os.path.isdir(game) else None, env=env, capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
+    out = " ".join((r.stdout + r.stderr).split())
+    return f"game {args[0]}: {out[:200]}"
 
 
 def play(sim, text, cat, base_dir="."):
@@ -474,6 +682,9 @@ def play(sim, text, cat, base_dir="."):
             got = sim.remove(args[0])
         elif verb == "decon":
             got = sim.decon(args[0])
+        elif verb == "game":
+            got = game_command(sim, args)
+            sim.explore_game(args)
         else:
             got = sim.save(args[0])
         lines.append(f"[{i:>3}] tick {tick:>8}  {got}")
