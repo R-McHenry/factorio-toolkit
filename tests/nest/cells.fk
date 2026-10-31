@@ -17,12 +17,12 @@ module FurnaceCell<plate, ore> size 7x3 {
 # A column of three FurnaceCells, the ore chained along its foot from west to east: stacked east,
 # the columns stand side by side and the ore runs along all their feet. Each column's plates leave
 # by its own port at the bottom.
-module SmeltColumn<plate, ore> size 9x14 {
-  port ore_in  : in  $ore | $ore @w11
-  port ore_out : out $ore | $ore @e11
-  port pl      : out $plate      @s7
+module SmeltColumn<plate, ore> size 11x15 {
+  port ore_in  : in  $ore | $ore @w12
+  port ore_out : out $ore | $ore @e12
+  port pl      : out $plate      @s9
   stack ore_in -> ore_out
-  s = Stack<cell=FurnaceCell, n=3, plate=$plate, ore=$ore> @(1, 0)
+  s = Stack<cell=FurnaceCell, n=3, plate=$plate, ore=$ore> @(3, 0)
   net o: ore_in -> s.ore_in, ore_out
   net p: s.pl_out -> pl
 }
@@ -32,20 +32,22 @@ module LabCell size 5x3 {
   port p_in  : in  automation-science-pack | logistic-science-pack @s0
   port p_out : out automation-science-pack | logistic-science-pack @n0
   stack p_in -> p_out
-  lab = Lab @(2, 0)
+  lab = Lab<rate=7/min> @(2, 0)    # logistics-2 on the lab: 30 s units at speed 3.5
   net r items automation-science-pack: p_in -> lab, p_out
   net g items logistic-science-pack:   p_in -> lab, p_out
   lanes r | g
 }
 
-# A column of six labs with a pack header across its bottom, chained east: stacked east, the
-# columns make a field and the packs run along all their headers.
-module LabColumn size 8x23 {
-  port h_in  : in  automation-science-pack | logistic-science-pack @w20
-  port h_out : out automation-science-pack | logistic-science-pack @e20
-  stack h_in -> h_out
-  labs = Stack<cell=LabCell, n=6> @(1, 0)
-  net r items automation-science-pack: h_in -> labs.p_in, h_out
-  net g items logistic-science-pack:   h_in -> labs.p_in, h_out
-  lanes r | g
+# A column of six labs with a pack header across its bottom, chained east: a red belt and a green
+# belt, each splitting off into the column, where they meet on the column's belt a lane each.
+# Stacked east, the columns make a field and the packs run along all their headers.
+module LabColumn size 9x24 {
+  port r_in  : in  automation-science-pack @w20
+  port r_out : out automation-science-pack @e20
+  port g_in  : in  logistic-science-pack   @w22
+  port g_out : out logistic-science-pack   @e22
+  stack r_in -> r_out, g_in -> g_out
+  labs = Stack<cell=LabCell, n=6> @(3, 0)
+  net r: r_in -> labs.p_in, r_out
+  net g: g_in -> labs.p_in, g_out
 }

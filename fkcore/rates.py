@@ -219,9 +219,9 @@ def _lines(flat, pools, ends):
     cell at half while the model shared the shortfall over all 24 furnaces (96% each).
 
     The tree's nodes are the pool's nets, joined through its ports; ``tree[net]`` is (its
-    consumers, its children across a chain port, its other children). Only a pool fed at one
-    root net, by every driver it has, whose nets form a tree, gets one: any other pool is shared
-    by appetite as before."""
+    consumers, its children across a chain port, its other children); ``_in_order`` serves it.
+    Only a pool with a chain port in it, fed at one root net by every driver it has, whose nets
+    form a tree, gets one: any other pool is shared by appetite as before."""
     chain = getattr(flat, "chain", set())
     if not chain:
         return {}
@@ -284,8 +284,12 @@ def _lines(flat, pools, ends):
 
 def _in_order(cons, total, share, line):
     """Grants for ``cons`` [(key, rate, potential, duty)] on a pool that runs along a line
-    (``_lines``): at each net its consumers and the branches it feeds share what reaches it by
-    appetite, as on any net, and what they leave passes on into the next cell."""
+    (``_lines``), as the belt serves them: at each net its machines' inserters take first (sharing
+    by appetite, as on any net), and what they leave goes on. Where it goes on two ways or more
+    (the router's splitter: on into the next cell and up into a column, say), each way gets an
+    even share, and what one can't take goes to the others. On the lab (2.1, eight SmeltColumns
+    fed 5.8 ore/s along their feet) the first two columns ran full, the third took half of what
+    reached it, and each column after it half of the one before."""
     root, tree = line
     at = {row[0]: i for i, row in enumerate(cons)}
     if any(k not in at for n in tree for k in tree[n][0]) or \
@@ -305,23 +309,18 @@ def _in_order(cons, total, share, line):
         if total == INF or total >= appetite(n) - 1e-15:
             return
         rows, chained, other = tree[n]
-        level = [cons[at[k]][1:] for k in rows] + [(appetite(b), 1.0, 1.0) for b in other]
-        grants = _grant(level, total, share)
         used = 0.0
-        for k, g in zip(rows, grants):
+        for k, g in zip(rows, _grant([cons[at[k]][1:] for k in rows], total, share)):
             out[at[k]] = g
             used += cons[at[k]][1] * min(g, cons[at[k]][2])
-        for b, g in zip(other, grants[len(rows):]):
-            got = min(g, 1.0) * appetite(b)
-            used += got
-            give(b, got)
         left = max(0.0, total - used)
-        if len(chained) == 1:
-            give(chained[0], left)
-        elif chained:
-            for b, g in zip(chained, _grant([(appetite(b), 1.0, 1.0) for b in chained], left,
-                                            share)):
-                give(b, min(g, 1.0) * appetite(b))
+        ways = chained + other
+        if len(ways) == 1:
+            give(ways[0], left)
+        elif ways:
+            level = waterfill([(1.0, appetite(b)) for b in ways], left)
+            for b in ways:
+                give(b, appetite(b) if level == INF else min(level, appetite(b)))
 
     give(root, total)
     return out

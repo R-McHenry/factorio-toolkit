@@ -2,8 +2,8 @@
 # carries the packs along its bottom; four LabColumns stacked east make the field.
 import LabColumn from "cells.fk"
 
-packs = Chest<requester, item="automation-science-pack, logistic-science-pack", rate=1/s> @(0, 18)
+red   = Chest<requester, item=automation-science-pack, rate=3/s> @(0, 19)
+green = Chest<requester, item=logistic-science-pack, rate=3/s>   @(0, 24)
 field = Stack<cell=LabColumn, n=4> @(4, 0)
-net r items automation-science-pack: packs -> field.h_in
-net g items logistic-science-pack:   packs -> field.h_in
-lanes r | g
+net r items automation-science-pack: red -> field.r_in
+net g items logistic-science-pack:   green -> field.g_in

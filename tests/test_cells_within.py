@@ -246,12 +246,32 @@ class LastCellTest(unittest.TestCase):
         self.assertEqual(self.utils(LINE % "1.5", keys), [1.0, 1.0, 0.4, 0.0])
         self.assertEqual(self.utils(LINE % "3", keys), [1.0] * 4)
 
-    def test_a_short_bus_serves_its_columns_in_order(self):
+    def test_a_short_bus_splits_at_each_column(self):
+        # 4.5 ore/s: column 0 takes its 1.875 first; the rest splits evenly at each column's foot
+        # (a splitter), and the last column takes all that reaches it
         text = HEAD.replace("rate=15/s", "rate=4.5/s") + "box = Boxes\n" \
             "net each plates: cols[*].pl -> box"
         model = rates.solve(flat_of(text))
         got = [[round(model.util[f"cols/{c}/s/{k}/f/m0"], 3) for k in range(3)] for c in range(4)]
-        self.assertEqual(got, [[1.0] * 3, [1.0] * 3, [1.0, 0.2, 0.0], [0.0] * 3])
+        self.assertEqual(got, [[1.0] * 3, [1.0, 1.0, 0.1], [1.0, 0.05, 0.0], [1.0, 0.05, 0.0]])
+
+    def test_the_bus_as_measured_on_the_lab(self):
+        # tests/nest/bus.fk on the lab (2.1) took 5.78 ore/s along its feet; plates/min per furnace
+        path = os.path.join(NEST, "bus.fk")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read().replace("rate=15/s", "rate=5.782/s")
+        f = lang.parse(text, path)
+        from fkcore.elaborate import load
+        _f, modules = load(path)
+        flat = elaborate(f, dict(modules), CAT, "bus")
+        model = rates.solve(flat)
+        got = [[round(model.util[f"cols/{c}/s/{k}/f/m0"] * 37.5, 1) for k in range(3)]
+               for c in range(8)]
+        measured = [[37.5] * 3, [37.5] * 3, [37.5, 24.5, 0.0], [31.0, 0, 0], [15.5, 0, 0],
+                    [7.5, 0, 0], [4.0, 0, 0], [2.0, 0, 0]]
+        for c in range(7):          # the last column's dead-end belt was still filling
+            for k in range(3):
+                self.assertLess(abs(got[c][k] - measured[c][k]), 1.5, (c, k, got[c], measured[c]))
 
     def test_a_plain_net_is_shared_as_before(self):
         text = """

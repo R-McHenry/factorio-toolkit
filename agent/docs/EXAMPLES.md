@@ -363,6 +363,8 @@ Your own template: a 7x3 cell of one electric furnace between an ore belt and a 
 `Stack<cell=FurnaceCell, n=8>` lines up eight of them. The ore runs up through every cell and the
 plates come back down; the furnaces need no coal and each holds two productivity modules
 (`modules=`), which the robots bring with the paste. Six drills feed it (3 ore/s, 3.24 plates/s).
+That is ore for 5.3 furnaces, and the belt serves them in order: `fk rates` has the first five
+full, the sixth at a third and the last two waiting.
 
 ```
 module FurnaceCell size 7x3 {

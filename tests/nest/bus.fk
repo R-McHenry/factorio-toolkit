@@ -5,28 +5,28 @@ import SmeltColumn from "cells.fk"
 
 ore  = Chest<requester, item=iron-ore, rate=15/s> @(0, 4)
 cols = Stack<cell=SmeltColumn, n=8, plate=iron-plate, ore=iron-ore> @(4, 0)
-box  = Boxes @(4, 20)
+box  = Boxes @(4, 21)
 net feed: ore -> cols.ore_in
 net each plates: cols[*].pl -> box
 
 # Eight provider chests, one under each column, each with its belt in at the top.
-module Boxes size 72x4 {
-  port i0 : in iron-plate @n7
-  port i1 : in iron-plate @n16
-  port i2 : in iron-plate @n25
-  port i3 : in iron-plate @n34
-  port i4 : in iron-plate @n43
-  port i5 : in iron-plate @n52
-  port i6 : in iron-plate @n61
-  port i7 : in iron-plate @n70
-  c0 = Chest<provider> @(7, 3)
-  c1 = Chest<provider> @(16, 3)
-  c2 = Chest<provider> @(25, 3)
-  c3 = Chest<provider> @(34, 3)
-  c4 = Chest<provider> @(43, 3)
-  c5 = Chest<provider> @(52, 3)
-  c6 = Chest<provider> @(61, 3)
-  c7 = Chest<provider> @(70, 3)
+module Boxes size 88x4 {
+  port i0 : in iron-plate @n9
+  port i1 : in iron-plate @n20
+  port i2 : in iron-plate @n31
+  port i3 : in iron-plate @n42
+  port i4 : in iron-plate @n53
+  port i5 : in iron-plate @n64
+  port i6 : in iron-plate @n75
+  port i7 : in iron-plate @n86
+  c0 = Chest<provider> @(9, 3)
+  c1 = Chest<provider> @(20, 3)
+  c2 = Chest<provider> @(31, 3)
+  c3 = Chest<provider> @(42, 3)
+  c4 = Chest<provider> @(53, 3)
+  c5 = Chest<provider> @(64, 3)
+  c6 = Chest<provider> @(75, 3)
+  c7 = Chest<provider> @(86, 3)
   net n0: i0 -> c0
   net n1: i1 -> c1
   net n2: i2 -> c2

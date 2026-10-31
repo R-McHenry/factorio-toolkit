@@ -395,6 +395,55 @@ net out: line.g_out -> box
 - `Pole` pins a pole where a cell is packed so tight that no other tile reaches its inserters; a
   straight belt tunnels under it. `docs\examples\blue6.fk` is such a cell.
 - Reports list a stack's cells as `line/0`, `line/1` ...: each cell is an instance of its own.
+- On a short line the cells nearest the feed run full and the last ones get what is left, as on
+  the belt: `fk rates` says so cell by cell. Off a Stack's chain, a short net is shared evenly.
+
+### One cell, every cell: `line[k]`, `line[*]`, `net each`
+
+A cell's port that doesn't chain (each column's plates, say) is named through its cell:
+
+- `line[2].g_out` is cell 2's port (cells count from 0), and `line[-1].g_out` the last cell's.
+- `line[*].g_out` is every cell's port. In an ordinary net that is one net with all of them as
+  endpoints: `net plates: cols[*].pl -> box` merges every column's plates.
+- `net each NAME: A[*].P -> B[*].Q` is one net per cell, cell k of A with cell k of B, named
+  `NAME_0`, `NAME_1` ... One side may instead name a list of ports, a sealed module's: port k
+  takes cell k (`net each plates: cols[*].pl -> boxes`, where `Boxes` has eight `in` ports).
+  Both sides need the same count, and neither may be `n=auto`.
+- `[k]` follows a Stack and nothing else, an index past the last cell is refused, and `[*]` is
+  written only in a net.
+
+### Cells within cells
+
+A cell may hold a Stack, so a module of Stacks can be stacked too:
+
+```
+module SmeltColumn<plate, ore> size 11x15 {
+  port ore_in  : in  $ore | $ore @w12        # the ore along the foot, west to east
+  port ore_out : out $ore | $ore @e12
+  port pl      : out $plate      @s9         # this column's plates, a belt of their own
+  stack ore_in -> ore_out
+  s = Stack<cell=FurnaceCell, n=3, plate=$plate, ore=$ore> @(3, 0)   # room for the splitter
+  net o: ore_in -> s.ore_in, ore_out
+  net p: s.pl_out -> pl
+}
+cols  = Stack<cell=SmeltColumn, n=8, plate=iron-plate, ore=iron-ore> @(4, 0)
+net feed: ore -> cols.ore_in
+net each plates: cols[*].pl -> boxes           # eight belts, one per column
+```
+
+- The outer Stack's `n=auto` counts its cells (columns). A Stack inside a cell takes a number:
+  every copy of the cell is the same.
+- Where the foot splits into a column, the column gets half of what reaches it, and more when the
+  rest of the foot can't take its half. On a short feed the first columns run full and each one
+  after gets half of the one before; `fk rates` says so. On the lab, eight of these columns fed
+  5.8 ore/s measured within a plate a minute of the model in every furnace of columns 0 to 6.
+- `import SmeltColumn from "cells.fk"` brings the modules of that file it is built of
+  (`FurnaceCell` here), unless your file has its own of that name.
+- A lab field is built the same way: a `LabColumn` holds a Stack of `LabCell`s and the packs
+  along its foot, which it chains east, and `Stack<cell=LabColumn, n=6>` makes the rectangle.
+  The router doesn't split a belt of two paired lanes, so carry red and green along the foot on
+  a belt each (`port r_in : in automation-science-pack @w20`, and one for green) and let the
+  router join them into each column's belt. Feed each from a chest of its own.
 
 ## Circuits
 
