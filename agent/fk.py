@@ -722,5 +722,42 @@ def _wait_args(rest):
     return rest
 
 
+#: when this run last tried a stats sample (its mtime), and how often it tries (real seconds)
+SAMPLED = os.path.join(RUN, ".stats-sampled")    # outside game\, so no sync carries it
+SAMPLE_EVERY = 300
+
+
+def sample_when_due(argv):
+    """2.1.4: the run's stats sample after a command, at most every 5 minutes, so a run with no
+    loop (one driven from a conversation) keeps its history with no timer. Quiet: its output and
+    any failure stay out of the player's command; the host keeps the samples (``fk stats
+    --history`` pulls them), and the sample itself keeps only what is due."""
+    if not argv or argv[0] in ("-h", "--help", "stats"):
+        return
+    try:
+        if os.path.exists(SAMPLED) and time.time() - os.path.getmtime(SAMPLED) < SAMPLE_EVERY:
+            return
+        os.makedirs(os.path.dirname(SAMPLED), exist_ok=True)
+        with open(SAMPLED, "w", encoding="utf-8") as fh:
+            fh.write(f"{time.time():.0f}\n")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        saved = os.dup(1), os.dup(2)
+        null = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null, 1)
+            os.dup2(null, 2)
+            remote(_config(), ["stats", ".", "--sample"], footer=False)
+        finally:
+            os.dup2(saved[0], 1)
+            os.dup2(saved[1], 2)
+            for fd in saved + (null,):
+                os.close(fd)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    code = main(sys.argv[1:])
+    sample_when_due(sys.argv[1:])
+    sys.exit(code)
