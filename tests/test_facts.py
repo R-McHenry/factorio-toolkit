@@ -1,8 +1,7 @@
 """The game's facts as data (2.1.1): fkcore/data/facts.json (fkcore.facts) and the widened
 catalog.json, both read from the game by tools/read_facts.py.
 
-The dicts that were Python before 2.1.1 are reads of the file now; 2.1.1 keeps their old names
-and answers, so these tests pin them to the values they had.
+The dicts that were Python before 2.1.1 are reads of the file now, with the game's answers.
 """
 import json
 import unittest
@@ -113,9 +112,9 @@ class WideCatalogTest(unittest.TestCase):
             for key in ("placed_by", "energy", "circuit"):
                 self.assertIn(key, row, row["name"])
 
-    def test_measured_rows_keep_their_values(self):
+    def test_row_values(self):
         self.assertEqual(CAT.entity("electric-energy-interface")["collision_box"],
-                         [-0.9, -0.9, 0.9, 0.9])
+                         [-0.8984375, -0.8984375, 0.8984375, 0.8984375])
         self.assertEqual(CAT.entity("inserter")["rotation_speed"], 0.014)
 
     def test_items_are_what_places_an_entity(self):
@@ -132,21 +131,28 @@ class WideCatalogTest(unittest.TestCase):
             CAT.is_electric("no-such-thing")
 
 
-class KeptDictsTest(unittest.TestCase):
-    """2.1.1 keeps the old dicts' names and answers (docs/RELEASE-2.1.1.md lists the game's)."""
+class AdoptedDictsTest(unittest.TestCase):
+    """The dicts are the game's (docs/RELEASE-2.1.1.md lists what 2.1.1's first commit kept)."""
 
     def test_catalog_dicts(self):
-        self.assertEqual(catalog.FUEL_USE_W, {"stone-furnace": 90e3, "steel-furnace": 90e3,
-                                              "burner-mining-drill": 150e3, "boiler": 1.8e6})
-        self.assertEqual(catalog.FUEL_VALUE_J, {"coal": 4e6, "wood": 2e6, "solid-fuel": 12e6,
-                                                "rocket-fuel": 100e6})
-        self.assertEqual(list(catalog.MINING_TIME.items()),
-                         [("iron-ore", 1.0), ("copper-ore", 1.0), ("coal", 1.0), ("stone", 1.0),
-                          ("uranium-ore", 2.0)])
+        self.assertEqual(catalog.FUEL_USE_W, facts.burns("chemical"))
+        for name, w in (("stone-furnace", 90e3), ("steel-furnace", 90e3),
+                        ("burner-mining-drill", 150e3), ("boiler", 1.8e6),
+                        ("burner-inserter", 144e3), ("heating-tower", 40e6)):
+            self.assertEqual(catalog.FUEL_USE_W[name], w, name)
+        self.assertNotIn("biochamber", catalog.FUEL_USE_W)
+        for name, j in (("coal", 4e6), ("wood", 2e6), ("solid-fuel", 12e6), ("rocket-fuel", 100e6),
+                        ("nuclear-fuel", 1.21e9), ("carbon", 2e6)):
+            self.assertEqual(catalog.FUEL_VALUE_J[name], j, name)
+        self.assertNotIn("uranium-fuel-cell", catalog.FUEL_VALUE_J)
+        self.assertEqual(catalog.MINING_TIME["uranium-ore"], 2.0)
+        self.assertEqual(catalog.MINING_TIME["tungsten-ore"], 5.0)
+        self.assertNotIn("crude-oil", catalog.MINING_TIME)
         self.assertEqual(catalog.STEAM_PER_S, {"boiler": 60.0, "steam-engine": 30.0,
                                                "heat-exchanger": 10e6 / (485 * 200.0),
                                                "steam-turbine": 60.0})
-        self.assertEqual(catalog.HEAT_W, {"nuclear-reactor": 40e6, "heat-exchanger": 10e6})
+        self.assertEqual(catalog.HEAT_W, {"nuclear-reactor": 40e6, "heat-exchanger": 10e6,
+                                          "heating-tower": 40e6})
         self.assertEqual(catalog.REACTOR_FUEL_S, {"uranium-fuel-cell": 200.0})
         self.assertEqual(catalog.MINING_RADIUS, {"electric-mining-drill": 2.49,
                                                  "burner-mining-drill": 0.99,
@@ -154,26 +160,41 @@ class KeptDictsTest(unittest.TestCase):
         self.assertEqual(catalog.CIRCUIT_WIRE_REACH, 9.0)
 
     def test_templates_dicts(self):
-        self.assertEqual(templates.MODULE_SLOTS, {
-            "assembling-machine-2": 2, "assembling-machine-3": 4, "electric-furnace": 2,
-            "chemical-plant": 3, "oil-refinery": 3, "centrifuge": 2, "electric-mining-drill": 3,
-            "pumpjack": 2})
-        self.assertEqual(templates.MODULE_EFFECTS, {
-            "speed-module": (0.2, 0.0), "speed-module-2": (0.3, 0.0), "speed-module-3": (0.5, 0.0),
-            "productivity-module": (-0.05, 0.04), "productivity-module-2": (-0.10, 0.06),
-            "productivity-module-3": (-0.15, 0.10), "efficiency-module": (0.0, 0.0),
-            "efficiency-module-2": (0.0, 0.0), "efficiency-module-3": (0.0, 0.0)})
+        self.assertEqual(templates.MODULE_SLOTS["assembling-machine-3"], 4)
+        self.assertEqual(templates.MODULE_SLOTS["lab"], 2)
+        self.assertEqual(templates.MODULE_SLOTS["foundry"], 4)
+        self.assertEqual(len(templates.MODULE_SLOTS), 19)
+        self.assertEqual(templates.MODULE_EFFECTS["productivity-module-3"], (-0.15, 0.10))
+        self.assertEqual(templates.MODULE_EFFECTS["efficiency-module"], (0.0, 0.0))
+        self.assertEqual(templates.MODULE_EFFECTS["quality-module"], (-0.05, 0.0))
 
     def test_productive(self):
-        self.assertEqual(len(elaborate.PRODUCTIVE), 37)
+        self.assertEqual(elaborate.PRODUCTIVE, facts.productive())
         self.assertIn("rocket-part", elaborate.PRODUCTIVE)
-        self.assertNotIn("casting-iron", elaborate.PRODUCTIVE)
-        self.assertLessEqual(elaborate.PRODUCTIVE, facts.productive())
+        self.assertIn("casting-iron", elaborate.PRODUCTIVE)
+        self.assertNotIn("iron-chest", elaborate.PRODUCTIVE)
 
-    def test_is_electric_keeps_its_old_answers(self):
-        self.assertTrue(CAT.is_electric("biochamber"))
-        self.assertTrue(CAT.is_electric("captive-biter-spawner"))
-        self.assertFalse(CAT.is_electric("railgun-turret"))
+    def test_is_electric(self):
+        self.assertFalse(CAT.is_electric("biochamber"))
+        self.assertFalse(CAT.is_electric("captive-biter-spawner"))
+        self.assertTrue(CAT.is_electric("railgun-turret"))
+
+    def test_a_drill_mines_its_categories(self):
+        self.assertTrue(facts.mines("electric-mining-drill", "calcite"))
+        self.assertFalse(facts.mines("electric-mining-drill", "tungsten-ore"))
+        self.assertTrue(facts.mines("big-mining-drill", "tungsten-ore"))
+        with self.assertRaises(templates.TemplateError):
+            templates.miner_row({"n": 1, "resource": "tungsten-ore"}, CAT)
+        got = templates.miner_row({"n": 1, "resource": "tungsten-ore", "drill": "big-mining-drill"},
+                                  CAT)
+        self.assertEqual(got[0].makes, {"tungsten-ore": 2.5 / 5.0})
+
+    def test_circuit_reach(self):
+        self.assertEqual(CAT.circuit_reach("big-electric-pole"), 32.0)
+        self.assertEqual(CAT.circuit_reach("small-electric-pole"), 7.5)
+        self.assertEqual(CAT.circuit_reach("power-switch"), 10.0)
+        self.assertEqual(CAT.circuit_reach("inserter"), 9.0)
+        self.assertEqual(CAT.circuit_reach("pipe"), 9.0)          # no connector: the usual
 
 
 if __name__ == "__main__":

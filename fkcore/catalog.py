@@ -25,9 +25,8 @@ row for every placeable entity (145: combinators, power switch, speaker, display
 train stops ...), each with ``placed_by``, ``energy`` and ``circuit`` (its wire connector ids and
 reach); the measured rows keep their values. The facts above are reads of ``facts.json``
 (``fkcore.facts``), and this module's own fallback rows (the combinators, the fluid file's
-``infinity-pipe``) are gone. Where the game says more than the old dicts did, 2.1.1 keeps the old
-dicts' names and answers (``_only``, ``_KEPT_ELECTRIC``), so every design comes out as it did;
-docs/RELEASE-2.1.1.md lists each difference. Pure, stdlib only.
+``infinity-pipe``) are gone. Where the game said more than the old dicts did, its answers are
+taken (docs/RELEASE-2.1.1.md lists each). Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -46,38 +45,30 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", 
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
 FLUID_PATH = os.path.join(os.path.dirname(DEFAULT_PATH), "fluidboxes.json")
 
-def _only(game, names):
-    """``game`` cut to ``names``, in that order: the names the dict had before 2.1.1."""
-    return {n: game[n] for n in names}
-
-
 # Base-game facts the measured fixture does not record: reads of facts.json (fkcore.facts).
 #: Burner energy use in watts, for machines whose endpoints include a fuel input (every entity
-#: with a burner that takes chemical fuel). 2.1.1 keeps the old names; the game also has
-#: burner-inserter, burner-generator, heating-tower, car, tank and locomotive.
-FUEL_USE_W = _only(_facts.burns("chemical"),
-                   ("stone-furnace", "steel-furnace", "burner-mining-drill", "boiler"))
-#: Fuel value in joules (chemical fuels). 2.1.1 keeps the old names; the game has 12 more.
-FUEL_VALUE_J = _only(_facts.fuels("chemical"), ("coal", "wood", "solid-fuel", "rocket-fuel"))
-#: Mining time per resource (an electric drill at mining speed 0.5 makes 0.5/s of a time-1 ore).
-#: 2.1.1 keeps the old names; the game also has calcite, scrap and tungsten-ore.
-MINING_TIME = _only(_facts.solid_resources(),
-                    ("iron-ore", "copper-ore", "coal", "stone", "uranium-ore"))
+#: with a burner that takes chemical fuel).
+FUEL_USE_W = _facts.burns("chemical")
+#: Fuel value in joules (chemical fuels).
+FUEL_VALUE_J = _facts.fuels("chemical")
+#: Mining time per resource a drill mines into items (an electric drill at mining speed 0.5 makes
+#: 0.5/s of a time-1 ore), in the game's order.
+MINING_TIME = _facts.solid_resources()
 #: Steam per second: a boiler makes it from as much water (1.8 MW, 15 C to 165 C at the steam's
 #: 0.2 kJ a unit per degree: 60/s), a steam engine uses it at full power (fluid_usage_per_tick
 #: 0.5: 30/s, 900 kW). 2.0 (the starter reactor): an exchanger turns 10 MW into 500 C steam,
 #: 103.09/s; a turbine takes 60/s (5.82 MW).
 STEAM_PER_S = _facts.steam_per_s()
 #: Heat in watts (2.0, the starter reactor): a reactor makes 40 MW while a cell burns (200 s, 8 GJ)
-#: whatever is drawn; an exchanger takes 10 MW. The netlist carries heat as the item ``heat`` in MW.
-#: 2.1.1 keeps the old names; the game also has the heating tower.
-HEAT_W = _only(_facts.heat_w(), ("nuclear-reactor", "heat-exchanger"))
+#: whatever is drawn; an exchanger takes 10 MW (a heating tower 40 MW). The netlist carries heat as
+#: the item ``heat`` in MW.
+HEAT_W = _facts.heat_w()
 #: Seconds one fuel item burns in a reactor (its fuel value at the reactor's 40 MW).
 REACTOR_FUEL_S = {n: j / _facts.energy_w("nuclear-reactor")
                   for n, j in _facts.fuels("nuclear").items()}
 
-#: How far a red or green wire reaches between two entities that are not poles (the game's
-#: usual get_max_circuit_wire_distance; fnet's WIRE_REACH).
+#: How far a red or green wire reaches from an entity whose row has no reach of its own (the
+#: game's usual get_max_circuit_wire_distance; fnet's WIRE_REACH).
 CIRCUIT_WIRE_REACH = _facts.wire_reach()
 
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
@@ -99,9 +90,6 @@ FluidBox = namedtuple("FluidBox", "box fluid production conns")
 MINING_RADIUS = {n: float(r["mining_drill_radius"])
                  for n, r in _facts.load()["entities"].items() if "mining_drill_radius" in r}
 
-#: 2.1.1 keeps the old answer of ``is_electric`` (which went by entity type) where the game's
-#: differs: a biochamber and a captive spawner burn nutrients, a railgun turret takes power.
-_KEPT_ELECTRIC = {"biochamber": True, "captive-biter-spawner": True, "railgun-turret": False}
 
 
 class Catalog:
@@ -348,8 +336,6 @@ class Catalog:
         """The entity draws power from the grid (``fkcore.facts``: an electric energy source that
         takes input)."""
         self.entity(name)
-        if name in _KEPT_ELECTRIC:
-            return _KEPT_ELECTRIC[name]
         return _facts.electric_consumer(name)
 
     def craft_rate(self, recipe, machine) -> dict[str, float]:
@@ -389,12 +375,11 @@ class Catalog:
         return self.entity(name)["max_wire_distance"]
 
     def circuit_reach(self, name) -> float:
-        """How far a red or green wire from ``name`` reaches: a pole's wire reach, else the
-        game's default (2.0)."""
+        """How far a red or green wire from ``name`` reaches: its row's (the game's
+        get_max_circuit_wire_distance: 32 for a big pole, 10 for a power switch), else the
+        usual 9."""
         row = self.entity(name)
-        if row.get("type") == "electric-pole" and row.get("max_wire_distance"):
-            return float(row["max_wire_distance"])
-        return float(row.get("circuit_wire_max_distance") or CIRCUIT_WIRE_REACH)
+        return float((row.get("circuit") or {}).get("wire_reach") or CIRCUIT_WIRE_REACH)
 
     def is_item(self, name) -> bool:
         """An item: one that places an entity, or a recipe's item (2.0, for item signals in

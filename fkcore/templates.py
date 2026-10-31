@@ -33,16 +33,9 @@ CIRCUIT_PARAMS = ("keep", "fill", "guard")
 COMMON_PARAMS = ("duty", "dnp", "inserter", "modules") + CIRCUIT_PARAMS
 #: 2.0.53, ``modules=``: the module slots of the machines that take them, and each module's
 #: effect on speed and productivity (normal quality; efficiency changes no rate). 2.1.1: read
-#: from facts.json (``fkcore.facts``), keeping the old names: the game also gives slots to the
-#: beacon, lab, biolab, big drill, biochamber, crusher, cryogenic plant, electromagnetic plant,
-#: foundry, recycler and rocket silo, and has the three quality modules.
-MODULE_SLOTS = {n: _facts.module_slots()[n] for n in (
-    "assembling-machine-2", "assembling-machine-3", "electric-furnace", "chemical-plant",
-    "oil-refinery", "centrifuge", "electric-mining-drill", "pumpjack")}
-MODULE_EFFECTS = {n: _facts.module_effects()[n] for n in (
-    "speed-module", "speed-module-2", "speed-module-3", "productivity-module",
-    "productivity-module-2", "productivity-module-3", "efficiency-module", "efficiency-module-2",
-    "efficiency-module-3")}
+#: from facts.json (``fkcore.facts``): every entity with module slots, every module.
+MODULE_SLOTS = _facts.module_slots()
+MODULE_EFFECTS = _facts.module_effects()
 #: Items that pass by contact, with no carrier (2.0): a reactor heats the exchanger it touches.
 #: A net of only these has no route; it is connected when its machines touch.
 CONTACT = frozenset({"heat"})
@@ -223,6 +216,8 @@ def miner_row(params, cat):
     drill = _word(params, "drill", "electric-mining-drill")
     if resource not in MINING_TIME:
         raise TemplateError(f"unknown resource {resource}")
+    if _facts.entity(drill) and not _facts.mines(drill, resource):
+        raise TemplateError(f"{drill} does not mine {resource}")
     speed = cat.entity(drill).get("mining_speed")
     if speed is None:
         raise TemplateError(f"{drill} does not mine")

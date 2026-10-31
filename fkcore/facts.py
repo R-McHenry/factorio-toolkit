@@ -23,7 +23,7 @@ import json
 import os
 
 __all__ = ["PATH", "load", "entity", "energy_w", "is_burner", "burns", "mining_radius",
-           "mining_time", "solid_resources", "fuel_value", "fuels", "module_slots",
+           "mining_time", "mines", "solid_resources", "fuel_value", "fuels", "module_slots",
            "module_effects", "productive", "steam_per_s", "heat_w", "wire_reach", "signals",
            "never_transmit", "electric_consumer"]
 
@@ -76,6 +76,12 @@ def mining_radius(name):
 def mining_time(resource):
     r = load()["resources"].get(resource)
     return None if r is None else float(r["mining_time"])
+
+
+def mines(drill, resource) -> bool:
+    """``drill`` can mine ``resource`` (the resource's category is one of the drill's)."""
+    r = load()["resources"].get(resource) or {}
+    return r.get("category") in (entity(drill).get("resource_categories") or ())
 
 
 def solid_resources() -> dict:

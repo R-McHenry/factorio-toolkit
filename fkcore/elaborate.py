@@ -544,35 +544,8 @@ TIERS = {"Assembler": ("assembling-machine-1", "assembling-machine-2", "assembli
          "Furnace": ("stone-furnace", "steel-furnace"),
          "SmelterRow": ("stone-furnace", "steel-furnace"),
          "SmelterArray": ("stone-furnace", "steel-furnace")}
-#: recipes productivity modules go into: the game's (``allowed_effects``, facts.json). 2.1.1 keeps
-#: the old list, Nauvis's intermediate products: the game also allows productivity in the 85 of
-#: ``_GAME_ONLY_PRODUCTIVE`` (Space Age's casting, crushing and science packs, the parameter
-#: recipes, and the base game's uranium-fuel-cell, nuclear fuel, kovarex and reprocessing).
-_GAME_ONLY_PRODUCTIVE = frozenset({
-    "advanced-carbonic-asteroid-crushing", "advanced-metallic-asteroid-crushing",
-    "advanced-oxide-asteroid-crushing", "advanced-thruster-fuel", "advanced-thruster-oxidizer",
-    "agricultural-science-pack", "ammonia-rocket-fuel", "ammoniacal-solution-separation",
-    "artificial-jellynut-soil", "artificial-yumako-soil", "barrel", "bioflux", "biolubricant",
-    "bioplastic", "biosulfur", "burnt-spoilage", "carbon", "carbon-fiber",
-    "carbonic-asteroid-crushing", "casting-copper", "casting-copper-cable", "casting-iron",
-    "casting-iron-gear-wheel", "casting-iron-stick", "casting-low-density-structure",
-    "casting-steel", "coal-synthesis", "concrete-from-molten-iron", "copper-bacteria",
-    "copper-bacteria-cultivation", "cryogenic-science-pack", "electrolyte",
-    "electromagnetic-science-pack", "fluoroketone", "fusion-power-cell", "holmium-plate",
-    "holmium-solution", "ice-melting", "iron-bacteria", "iron-bacteria-cultivation",
-    "jellynut-processing", "kovarex-enrichment-process", "lithium", "lithium-plate",
-    "metallic-asteroid-crushing", "metallurgic-science-pack", "molten-copper",
-    "molten-copper-from-lava", "molten-iron", "molten-iron-from-lava", "nuclear-fuel",
-    "nuclear-fuel-reprocessing", "nutrients-from-bioflux", "nutrients-from-biter-egg",
-    "nutrients-from-spoilage", "nutrients-from-yumako-mash", "overgrowth-jellynut-soil",
-    "overgrowth-yumako-soil", "oxide-asteroid-crushing", "parameter-0", "parameter-1",
-    "parameter-2", "parameter-3", "parameter-4", "parameter-5", "parameter-6", "parameter-7",
-    "parameter-8", "parameter-9", "pentapod-egg", "promethium-science-pack", "quantum-processor",
-    "rocket-fuel-from-jelly", "simple-coal-liquefaction", "solid-fuel-from-ammonia",
-    "space-science-pack", "supercapacitor", "superconductor", "thruster-fuel",
-    "thruster-oxidizer", "tungsten-carbide", "tungsten-plate", "uranium-fuel-cell",
-    "wood-processing", "yumako-processing"})
-PRODUCTIVE = _facts.productive() - _GAME_ONLY_PRODUCTIVE
+#: recipes productivity modules go into: the game's (``allowed_effects``, facts.json)
+PRODUCTIVE = _facts.productive()
 
 
 @dataclass

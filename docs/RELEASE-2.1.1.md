@@ -58,7 +58,7 @@ until the prelude takes them.
 
 ## Where the game disagrees
 
-2.1.1 keeps the old answer in each case, so every design comes out as it did:
+The first commit keeps the old answer in each case, so every design comes out as it did:
 
 - `FUEL_USE_W`: the game also has a chemical burner in the burner inserter (144 kW), burner
   generator (1 MW), heating tower (40 MW), car (150 kW), tank and locomotive (600 kW).
@@ -83,11 +83,33 @@ until the prelude takes them.
 Every other value matches: burner W, fuel values, mining times and radii, steam, heat, reactor
 fuel time, module slots and effects, wire reach, and all 80 measured catalog rows.
 
+## The game's values, adopted
+
+A second commit takes the game's answer in every case above: the dicts are the file's, whole
+(`FUEL_USE_W`, `FUEL_VALUE_J`, `MINING_TIME`, `HEAT_W`, `MODULE_SLOTS`, `MODULE_EFFECTS`,
+`PRODUCTIVE`), `is_electric` is the game's for every entity, `circuit_reach` is each row's own
+(a big pole 32, a power switch 10, else 9), and the energy interface has the game's box.
+
+Two guards come with it, so a wider `MINING_TIME` doesn't plan what can't be mined:
+- `MinerRow` refuses a drill that doesn't mine its resource (`electric-mining-drill does not mine
+  tungsten-ore`); before, tungsten ore was an unknown resource.
+- `fk plan` counts a resource as mined only if its electric drill mines it (calcite and scrap
+  yes, tungsten ore no), and lists the raw rows iron, copper, coal, stone, uranium first, as
+  before.
+
+What changes for a player: `fuel=` takes the 12 new chemical fuels, `modules=` goes into a lab,
+foundry or any other machine with slots, the quality modules are known, productivity modules go
+into Space Age's recipes and uranium fuel cells, the power cover leaves biochambers out and
+powers railgun turrets, and `MinerRow` mines calcite, scrap and (with a big drill) tungsten.
+
 ## Checked
 
-- Golden check (`tools/golden.py`, 54 files): 54 of 54 identical to 2.0.78.
-- `tests/test_facts.py`: the file loads, the game's facts, the wide catalog, and the kept dicts
-  pinned to their old values.
+- Golden check (`tools/golden.py`, 54 files): 54 of 54 identical to 2.0.78, for the first commit
+  and for the second. No design in the corpus uses what the game's values change.
+- `fk plan` for ten items (electronic circuits to metallurgic science): identical text before and
+  after the second commit.
+- `tests/test_facts.py`: the file loads, the game's facts, the wide catalog, the dicts and the
+  drill guard.
 - `fkcore/__init__.py` says 2.1.1 (it said 2.0.43).
 - `tools/read_facts.py` run twice writes the same two files, byte for byte.
-- Full suite: 1164 tests OK.
+- Full suite: 1164 tests OK after the first commit, 1166 after the second.
