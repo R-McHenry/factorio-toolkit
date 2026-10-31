@@ -29,6 +29,9 @@ Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py capital SAVE.zip
                                             2.0.69: the working capital on a played map, two
                                             reads 30 game seconds apart
+    python tools/laptop_server.py fixes     2.1.3: capture takes its own slot, the REACH read,
+                                            fk request (robots bring the ammo), and the scaffold
+                                            order (a moved roboport goes; none held without stock)
     python tools/laptop_server.py stats [SAVE.zip]
                                             2.1: run stats on a small base made here: the
                                             scenario's recorder writes a sample every 5 game
@@ -700,6 +703,139 @@ def check_capital(save=None):
     return 0 if max(took) < 5 and out[0].startswith("capital nauvis") else 1
 
 
+def check_fixes():
+    """2.1.3, the fixes from the runs, in the game:
+
+    - capture: a slot's blueprint takes only what stands in it (a drill of the next slot whose box
+      reaches over the edge stays out);
+    - REACH: the read of the roboports that stand with power, and what it leaves out of reach;
+    - fk request: an item-request proxy, and robots bring the ammo into the turret; what the
+      network doesn't hold is said;
+    - scaffold: a roboport the design moved is ordered out, and so is an old one when the
+      network holds no roboport for the design's; with stock, an old one is held as before."""
+    import json as jsonmod
+    from fkcore import apply as applymod, capture, compose, fkp, link as linkmod, robots
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    watch = {"plots": "revert", "sanctioned": "revert", "notify": "off"}
+    results = {}
+
+    def make(r, name, x, y, **kw):
+        extra = "".join(f", {k} = {v}" for k, v in kw.items())
+        return r.lua(f"local e = game.get_surface('{s}').create_entity{{name = '{name}', "
+                     f"position = {{{x}, {y}}}, force = '{f}'{extra}}} "
+                     "rcon.print(e and 'ok' or 'no')").strip()
+
+    def at(r, name, x, y):
+        return r.lua(f"local o = {{}} for _, e in pairs(game.get_surface('{s}').find_entities_filtered"
+                     f"{{position = {{{x}, {y}}}, radius = 0.3}}) do if e.name == '{name}' or "
+                     f"(e.type == 'entity-ghost' and e.ghost_name == '{name}') then o[#o + 1] = "
+                     "(e.type == 'entity-ghost' and 'ghost' or 'built') .. "
+                     "(e.to_be_deconstructed() and '(decon)' or '') end end "
+                     "rcon.print(table.concat(o, ' '))").strip()
+
+    def design(plot, x, y, w, h, text):
+        return compose.compose(fkp.loads(f"fkp 1 surface lab\nplot {plot} at {x},{y} rot 0 size "
+                                         f"{w}x{h}\n"),
+                               {plot: fkp.loads(f"fkp 1 factory {plot}\nsize {w}x{h}\n"
+                                                "cover robots robots roboport=roboport\n" + text)},
+                               cat)
+
+    with LaptopServer("fixes", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(linkmod.lua_generate_area(s, f, (-32, -32, 400, 64)))
+            # -- capture: slot (0,0)-(20,20); a drill of the next slot at 20.5 reaches over the edge
+            make(r, "wooden-chest", 5.5, 5.5)
+            make(r, "electric-mining-drill", 20.5, 10.5)
+            got = capture.from_game(r, s, f, (0, 0, 20, 20))
+            results["capture takes its own slot only"] = (got.get("names"), {"wooden-chest": 1})
+
+            # -- a network with stock, power and robots (setup only), x 300..330
+            make(r, "roboport", 318, 10)
+            make(r, "small-electric-pole", 321.5, 12.5)
+            r.lua(f"local e = game.get_surface('{s}').create_entity{{name = 'electric-energy-"
+                  f"interface', position = {{323, 12}}, force = '{f}'}} e.power_production = "
+                  "2000000 e.electric_buffer_size = 2000000 rcon.print(1)")
+            make(r, "storage-chest", 325.5, 10.5)
+            r.lua(f"local s = game.get_surface('{s}') "
+                  "local c = s.find_entity('storage-chest', {325.5, 10.5}) "
+                  "c.insert{name = 'piercing-rounds-magazine', count = 20} "
+                  "c.insert{name = 'roboport', count = 5} "
+                  "s.find_entity('roboport', {318, 10}).insert{name = 'construction-robot', "
+                  "count = 10} rcon.print(1)")
+            make(r, "gun-turret", 331, 17)
+            time.sleep(2)
+            # -- REACH: the read of what stands with power
+            tag = f"fixes-ports-{os.getpid()}"
+            ports = linkmod.read_output(r, robots.lua_roboports(s, f, tag), tag, "roboports")
+            ports = [tuple(p) for p in (ports if isinstance(ports, list) else [])]
+            results["roboports read"] = (ports, [(318, 10, 25, 55)])
+            rows = [("in", "wooden-chest", 360.5, 10.5), ("out", "wooden-chest", 380.5, 10.5),
+                    ("far", "wooden-chest", 410.5, 10.5)]
+            results["REACH alone"] = (sorted(row[0] for row in robots.reach(rows, ports, cat)),
+                                      ["far", "out"])
+            rows.append(("hop", "roboport", 362, 10))
+            results["REACH with the paste's roboport"] = (
+                [row[0] for row in robots.reach(rows, ports, cat)], [])
+
+            # -- fk request
+            def request(pos, item, n, **kw):
+                return jsonmod.loads(r.lua(linkmod.lua_request(s, f, pos, item, n, **kw)).strip())
+            got = request((331, 17), "piercing-rounds-magazine", 10)
+            results["request asks"] = ((got.get("ok"), got.get("asked"), got.get("stock"),
+                                       got.get("reach")), (True, 10, 20, True))
+            short = request((331, 17), "firearm-magazine", 5)
+            results["request says the network is short"] = ((short.get("asked"),
+                                                            short.get("stock")), (5, 0))
+            proxy = r.lua(f"local p = game.get_surface('{s}').find_entities_filtered{{type = "
+                          "'item-request-proxy', position = {331, 17}}[1] rcon.print(p and "
+                          "#p.insert_plan or 0)").strip()
+            results["one proxy, both requests"] = (proxy, "2")
+            t0, ammo = time.time(), "0"
+            while time.time() - t0 < 40:
+                ammo = r.lua(f"rcon.print(game.get_surface('{s}').find_entity('gun-turret', "
+                             "{331, 17}).get_inventory(defines.inventory.turret_ammo)"
+                             ".get_item_count('piercing-rounds-magazine'))").strip()
+                if ammo == "10":
+                    break
+                time.sleep(1)
+            results["robots bring the ammo"] = (ammo, "10")
+            nothing = r.lua(linkmod.lua_request(s, f, (200.5, 40.5), "coal", 5)).strip()
+            results["request on empty ground"] = (jsonmod.loads(nothing).get("ok"), False)
+
+            # -- scaffold, no stock: plot sa at 200,0 (40x20)
+            v1 = "e robots/r0 roboport 6,6\n"
+            area = (200, 0, 240, 20)
+            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v1), cat, area, mode="play",
+                                 force=f, policy=watch)
+            r.lua(linkmod.lua_revive(s, area))
+            make(r, "roboport", 230, 14)              # an old roboport, not the toolkit's
+            v2 = "e robots/r0 roboport 18,6\n"
+            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v2), cat, area, mode="play",
+                                 force=f, policy=watch, own=rep.own)
+            results["moved roboport ordered out"] = (at(r, "roboport", 206, 6), "built(decon)")
+            results["old roboport, no stock: ordered out"] = (at(r, "roboport", 230, 14),
+                                                              "built(decon)")
+            results["the new one laid"] = (at(r, "roboport", 218, 6), "ghost")
+            results["report says why"] = (sorted(rep.released), sorted([applymod.MOVED_OUT,
+                                                                        applymod.STOCK_OUT]))
+            sa_lines = rep.lines()
+
+            # -- scaffold with stock: plot sb at 300,0 (20x20); the network holds 5 roboports
+            area = (300, 0, 320, 20)
+            rep = applymod.apply(r, design("sb", 300, 0, 20, 20, "e robots/r0 roboport 6,6\n"),
+                                 cat, area, mode="play", force=f, policy=watch)
+            results["with stock, the old one is held"] = (at(r, "roboport", 318, 10), "built")
+            results["held"] = (rep.held, 1)
+    bad = 0
+    print("\n".join(sa_lines))
+    for k, (got, want) in results.items():
+        ok = got == want
+        bad += not ok
+        print(f"{k:<40} {got!s:<50} {'OK' if ok else 'NOT ' + repr(want)}")
+    return 1 if bad else 0
+
+
 #: check_vision's base around games/lab-sense (iron 310,420 20x24, gears 332,420 16x16): power
 #: network A (an energy interface, poles, two assemblers, a laser turret, roboport A with robots
 #: and a storage chest, a requester), a power switch left open to network B (an assembler with no
@@ -1077,5 +1213,5 @@ if __name__ == "__main__":
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
                       "turned": check_turned, "health": check_health,
                       "settings": check_settings, "lab": check_lab,
-                      "capital": check_capital, "vision": check_vision,
-                      "stats": check_stats}[what]())
+                      "capital": check_capital, "fixes": check_fixes,
+                      "vision": check_vision, "stats": check_stats}[what]())

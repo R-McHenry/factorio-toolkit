@@ -517,6 +517,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _split_nets(flat, cat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
+    _port_pairs(flat, cat)
     _width_checks(flat, cat)
     _recorded_ports(flat, layout)
     _port_checks(flat)
@@ -1491,6 +1492,32 @@ def _resolve_lanes(flat, cat):
         key = f"{a}|{b}"
         flat.pairs[key] = (a, b)
         flat.lane_of[a] = flat.lane_of[b] = key
+
+
+def _port_pairs(flat, cat):
+    """Two nets that meet at a cell's paired port (``port f_in : in iron-ore | coal``), one on each
+    item, share a belt as the port's lanes say: an implied ``lanes A | B`` (2.1.3: the module's
+    own ``lanes`` line is enough; the runs needed a top-level one too). A net that already shares
+    a belt, or that carries more than its lane's item, is left as written."""
+    for key in sorted(flat.ports):
+        port = flat.ports[key]
+        if port.right is None or port.both or len(port.items) != 1 or len(port.right) != 1:
+            continue
+        hold = flat._in_hold if port.dir == "in" else flat._out_hold
+        nets = []
+        for item in (port.items[0], port.right[0]):
+            outer = [n for n in hold.get((key, item), []) if not n.startswith(port.scope + "/")]
+            nets.append(outer[0] if len(outer) == 1 else None)
+        a, b = nets
+        if a is None or b is None or a == b:
+            continue
+        if any(n in flat.lane_of or n not in flat.nets or n in flat.insts or
+               flat.nets[n].width > 1 or len(flat.nets[n].items) != 1 or
+               any(cat.is_fluid(i) for i in flat.nets[n].items) for n in (a, b)):
+            continue
+        pk = f"{a}|{b}"
+        flat.pairs[pk] = (a, b)
+        flat.lane_of[a] = flat.lane_of[b] = pk
 
 
 def _width_checks(flat, cat):

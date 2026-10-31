@@ -512,11 +512,18 @@ A belt that fills, machines that starve, a build that never happens. Read these 
   belt side-loaded onto an underground: only the lane on its open side gets through, and the other
   stops there
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
-  in the build script joins it to the plant's grid)
+  in the build script joins it to the plant's grid). `stop_on no-power` holds the paste until it
+  does
+- `TILE_SHARED (x, y): N pieces`: two pieces of one net's route on one tile, so one of them is
+  never laid. Splitting the net in two (or giving it room) fixes it
 - `UNREACHED` (diff, before the paste): entities the paste lays where no powered roboport's
   construction area reaches, counting the roboports the paste lays where robots reach: robots
   never build them. It names power-bridge poles among them, since a roboport powered only through
   such a bridge never gets its power
+- `REACH` (report_bom, 2.1.3): the ghosts of this paste that no construction area of a roboport
+  that stands reaches, counting a roboport the paste lays only when it stands in such an area and
+  joins that network; roboports first, then by item. Robots never build them. `stop_on reach` in
+  the build script holds such a paste. `fk build --to report_bom` lists them without pasting
 
 
 
@@ -529,7 +536,8 @@ answer is the next build. Nothing here is broken by itself.
 - `short-feed` (report_rates): a net's drivers make less than its consumers would take, so they
   run below speed; it names the net where the shortage starts (a short ore patch, not every step
   after it) and the `fk plan` line that sizes its drivers
-- `cannot-carry`: a net names a machine that has no endpoint for the net's items
+- `cannot-carry`: a net names a machine that has no endpoint for the net's items (that machine is
+  left off the route). The template's build script stops on it (2.1.3)
 - `feed-rides-on` (report_rates): a sink at the end of a belt that brings it a product and also a
   feed, an item machines upstream on the same belt consume (sulfur riding the blue packs' belt
   into the packs' chest): what they don't take of the feed fills the sink and stops the belt for
@@ -600,7 +608,12 @@ answer is the next build. Nothing here is broken by itself.
   kit's, and every one joined to it), which joins the network when it stands within 50 tiles of
   another one on both axes. It puts a storage chest beside each roboport it places, so what the
   robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
-  the chest out). Grow outward: the next factory within reach of the last.
+  the chest out). Grow outward: the next factory within reach of the last. It chains only from
+  roboports that stand, or that it lays in reach of them (2.1.3): a roboport no robot could reach
+  is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
+  the old one is ordered out (robots take it up and carry it to the new spot), and an old roboport
+  is ordered out at once when the network holds none for the new ones; otherwise the old ones
+  stand until the new ones do
 - `on-water-or-cliff`: something designed stands on water or a cliff
 - `no-water`: an offshore pump whose water side is dry ground (it gives no water)
 - `by-hand`: the build replaces or removes something someone placed by hand: who (when the game
@@ -716,7 +729,13 @@ fk tech NAME                     a technology, or what opens an item or recipe: 
                                  craft or build for it), what to research first
 fk recipes [NAME...] [--enabled] the locked recipes (or the enabled ones) and what opens each
 fk read-terrain --surface nauvis --area X0,Y0,X1,Y1
-                                 read more bare ground into map.terrain.json
+                                 read more bare ground into map.terrain.json: the new area is
+                                 merged into what the file had (--replace: the area alone)
+fk request X,Y|KEY ITEM N [--name E] [--inventory NAME]
+                                 an item request on a standing entity (a turret's ammo, a
+                                 machine's modules, a chest's stock): robots bring N of ITEM
+                                 from the network. It only asks: it says when the network holds
+                                 less, or no roboport's area reaches the entity
 fk chat                          the chat messages you have not dismissed yet
 fk say "text"                    one line in the game chat
 fk ack                           dismiss them (the only way; until then they keep coming back)
@@ -834,8 +853,11 @@ design` draws the surface as designed rather than as built.
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
-`stop_on no-route no-destination` holds a paste with a net unrouted or a maker whose product reaches no
-sink; add `stop_on no-feed` before a big paste so that check stops it too (`stop_on short-stock`
+`stop_on no-route no-destination cannot-carry` holds a paste with a net unrouted, a maker whose
+product reaches no sink, or a machine on a net whose items it takes none of (the 2.1.3 upgrade
+adds `cannot-carry` to an older script); `stop_on reach` holds one with ghosts no robot reaches,
+and `stop_on no-power` one whose poles reach no generation. Add `stop_on no-feed` before a big
+paste so that check stops it too (`stop_on short-stock`
 holds the paste until the network has what it lays: report_bom says when a paste would take up
 running machines while their replacements are short). `size`, after `elaborate`, counts
 the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --to

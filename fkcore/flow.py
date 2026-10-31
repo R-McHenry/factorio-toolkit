@@ -102,6 +102,7 @@ class Ctx:
     link_error: str | None = None
     link_lent: bool = False                          # the caller's link: not closed here
     last_diff: object = None                         # the last diff's SenseReport this run
+    roboports: list | None = None                    # what the last diff read stands (REACH)
     hands: tuple | None = None                       # the force's (hand, bulk hand, note), read once
     hand_requested: str | None = None                # route's --hand, as written (2.0.15)
     rates_runs: int = 0                              # report_rates steps run so far
@@ -282,15 +283,20 @@ def _save_hands(ctx, r):
     return 1 + a, 1 + b
 
 
-def _save_standing(ctx, rep):
+def _save_standing(ctx, rep, roboports=None):
     """The poles the diff finds built (ok) in ``out/standing.json``, updated over the diff's
     scope and kept elsewhere: the next build's cover step runs where there is no game link, and
-    keeps a built pole of another kind than its own (2.0.1)."""
+    keeps a built pole of another kind than its own (2.0.1). ``roboports`` (2.1.3): every roboport
+    that stands with power, [[x, y, logistic radius, construction radius]], for the next build's
+    ``cover robots`` (kept as it was when this diff read none)."""
     path = os.path.join(ctx.out, _STANDING_FILE)
-    poles = {}
+    poles, ports = {}, None
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
-            poles = dict(json.load(fh).get("poles") or {})
+            was = json.load(fh)
+        poles, ports = dict(was.get("poles") or {}), was.get("roboports")
+    if roboports is not None:
+        ports = [list(p) for p in roboports]
     for v in rep.verdicts:
         if not v.key or not ctx.cat.has_entity(v.name) \
                 or ctx.cat.kind(v.name) != "electric-pole":
@@ -300,9 +306,40 @@ def _save_standing(ctx, rep):
         else:
             poles.pop(v.key, None)
     os.makedirs(ctx.out, exist_ok=True)
+    data = {"poles": dict(sorted(poles.items()))}
+    if ports is not None:
+        data["roboports"] = ports
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump({"poles": dict(sorted(poles.items()))}, fh, indent=0)
+        json.dump(data, fh, indent=0)
         fh.write("\n")
+
+
+def _standing_roboports(ctx):
+    """The roboports the last diff found standing with power, [(x, y, logistic radius,
+    construction radius)] in map coordinates, or None when no diff has said (2.1.3)."""
+    path = os.path.join(ctx.out, _STANDING_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            ports = json.load(fh).get("roboports")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(ports, list):
+        return None
+    return [tuple(float(v) for v in p[:4]) for p in ports if len(p) >= 4]
+
+
+def _read_roboports(ctx, r):
+    """The live read behind ``_standing_roboports`` and ``REACH``: [(x, y, logistic radius,
+    construction radius)], or None when the read fails."""
+    from . import link, robots
+    tag = f"roboports-{os.getpid()}"
+    try:
+        got = link.read_output(r, robots.lua_roboports(ctx.surface.name, _force(ctx), tag), tag,
+                               "roboports", keep=False)
+    except (link.LinkError, OSError, ValueError):
+        return None
+    rows = got if isinstance(got, list) else list(got.values()) if isinstance(got, dict) else []
+    return [tuple(float(v) for v in p[:4]) for p in rows if len(p) >= 4]
 
 
 def _standing(ctx, factory):
@@ -1043,6 +1080,8 @@ def s_cover_robots(ctx, args):
             Check("no-robots", "cover robots", f"--storage {storage}: not an entity")]
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
+    # 2.1.3: new roboports only where one that stands builds them (the last diff's read)
+    standing = _standing_roboports(ctx)
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         near = robots.served(places, infra, ctx.layouts, factory, ctx.cat)
@@ -1050,12 +1089,16 @@ def s_cover_robots(ctx, args):
         prev = ctx.previous.get(factory)
         pinned = [] if o.get("fresh") is True else \
             _own(prev, "robots", "r") + _own(prev, "robots", "s")
+        reach = robots.in_frame(places, ctx.layouts, factory, standing)
         new, rep = robots.apply_robots(lay, ctx.cat, keep_out=keep_out, roboport=o["roboport"],
-                                       served=near, storage=storage, pinned=pinned)
+                                       served=near, storage=storage, pinned=pinned, reach=reach)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
+    if standing is not None:
+        lines.append(f"  {len(standing)} roboports stand with power (the last diff): a new one "
+                     "goes only where they, or one laid in reach of them, build it")
     return lines, checks
 
 
@@ -1404,7 +1447,47 @@ def _bom_live(ctx):
                 "and out/fkp-history/ keeps the layout before this one")
         lines.append(f"  {warn}")
         checks.append(Check("taken-up", ctx.surface.name, warn))
+    far = _reach(ctx)
+    if far is not None:
+        lines += far[0]
+        checks.append(far[1])
     return lines, checks
+
+
+#: how many ghosts out of reach report_bom names one by one
+_REACH_SHOWN = 40
+
+
+def _reach(ctx):
+    """``REACH`` (2.1.3): the ghosts the paste lays outside every construction area that stands
+    with power, or that its own roboports give it (``robots.reach``): robots never build them.
+    -> (report lines, Check), or None when every ghost is in reach or the diff read nothing. The
+    runs: a cover-robots roboport out of every area stood a ghost with the 47 entities it was to
+    cover, and 26 ghosts of a big paste waited out of reach until the player found them."""
+    from . import robots
+    if ctx.last_diff is None or ctx.roboports is None or ctx.surface.mode == "lab":
+        return None
+    rows = [(v.key, v.name, v.x, v.y) for v in ctx.last_diff.verdicts
+            if v.verdict.split()[0] in _TO_LAY]
+    far = robots.reach(rows, ctx.roboports, ctx.cat)
+    if not far:
+        return None
+
+    def name(row):
+        return f"{(row[0] or row[1]).split(':', 1)[-1]} ({row[1]} {fkp.fmt(row[2])},{fkp.fmt(row[3])})"
+    ports = [row for row in far if ctx.cat.kind(row[1]) == "roboport"]
+    msg = (f"{len(far)} of the {len(rows)} ghosts the paste lays are outside every construction "
+           f"area that stands with power, or that the paste's own roboports give it: robots never "
+           f"build them ({', '.join(name(row) for row in far[:4])}{' ...' if len(far) > 4 else ''})")
+    if ports:
+        msg += (f"; {len(ports)} of them are roboports, which bring no robots where none reach "
+                "them: lay one inside a standing network's area first")
+    msg += "; `stop_on reach` holds such a paste"
+    lines = [f"  REACH: {len(far)} ghosts out of every construction area:"]
+    lines += [f"    {name(row)}" for row in far[:_REACH_SHOWN]]
+    if len(far) > _REACH_SHOWN:
+        lines.append(f"    ... {len(far) - _REACH_SHOWN} more")
+    return lines, Check("REACH", ctx.surface.name, msg)
 
 
 #: the carriers whose shortage leaves a re-laid net cut (inserters stay with their machine)
@@ -1598,8 +1681,10 @@ def s_diff(ctx, args):
         _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
         pass
+    if ctx.surface.mode != "lab":
+        ctx.roboports = _read_roboports(ctx, r)
     try:
-        _save_standing(ctx, rep)       # for the next build's cover step, on the laptop
+        _save_standing(ctx, rep, ctx.roboports)   # for the next build's cover steps, on the laptop
     except (OSError, ValueError):
         pass
     ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "ghost"})
@@ -1783,6 +1868,14 @@ def _stop_code(word):
     return _OLD_STOPS.get(w, w)
 
 
+def _stopping(ctx, checks):
+    """The checks a ``stop_on`` word names. 2.1.3: a dash and an underscore are one, so
+    ``stop_on no-power`` holds the paste on cover power's ``NO_POWER`` as ``stop_on NO_POWER``
+    does (2.0.52 named the new checks with dashes; the older ones kept their capitals)."""
+    want = {s.replace("_", "-") for s in ctx.stop_on}
+    return [c for c in checks if c.code.lower().replace("_", "-") in want]
+
+
 def s_stop_on(ctx, args):
     # the first lead run (2026-10-21): "stop_on: INVARIANT" as a full build's last line read as
     # the failure behind a nonzero exit, which came from the worker's own shell chain
@@ -1917,7 +2010,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) 
                 _report, checks = STEPS[ln.cmd](ctx, ln.args)
                 ctx.checks += [(ln.cmd, c) for c in checks]
                 _write_checkpoint(ctx, ln.cmd, lines[:j + 1])
-                stops = [c for c in checks if c.code.lower() in ctx.stop_on]
+                stops = _stopping(ctx, checks)
                 if stops:
                     echo(f"stopped at line {ln.n} ({ln.cmd}), laid out again: {len(stops)} "
                          f"{stops[0].code} line(s), first: {stops[0]}")
@@ -1945,7 +2038,7 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) 
         written.add(ln.cmd)
         if ln.cmd in _LAYOUT or ln.cmd == "floorplan":
             _write_checkpoint(ctx, ln.cmd, lines[:i + 1])
-        stops = [c for c in checks if c.code.lower() in ctx.stop_on]
+        stops = _stopping(ctx, checks)
         head = report[0] if report else ""
         summary = (f"[{i + 1:>2}/{width}] {ln.text:<44} {head[:70]}"
                    + (f"  ({len(checks)} check lines)" if checks else ""))

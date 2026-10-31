@@ -37,7 +37,9 @@ def _q(text):
 
 def lua_capture(surface, force, area, tag, skip=LAB_OWN):
     """Lua that blueprints ``area`` (x0, y0, x1, y1) on ``surface`` without the entities named in
-    ``skip``, and writes ``fk5/<tag>.json``: ``{bp, n, names}``; it replies with the count."""
+    ``skip``, and writes ``fk5/<tag>.json``: ``{bp, n, names}``; it replies with the count. Only
+    an entity whose centre is in the area is taken (2.1.3: a blueprint takes every entity whose box
+    touches the area, and ``capture lab u0`` took a drill of the next slot)."""
     x0, y0, x1, y1 = area
     drop = ", ".join(f"[{_q(n)}] = true" for n in skip)
     return f"""
@@ -46,11 +48,16 @@ if not s or not f then rcon.print('no surface or force') return end
 local inv = game.create_inventory(1)
 inv.insert{{name = 'blueprint'}}
 local st = inv[1]
-st.create_blueprint{{surface = s, force = f, area = {{{{{x0}, {y0}}}, {{{x1}, {y1}}}}},
-  include_trains = false, include_fuel = false, include_station_names = false}}
+local src = st.create_blueprint{{surface = s, force = f, area = {{{{{x0}, {y0}}}, {{{x1}, {y1}}}}},
+  include_trains = false, include_fuel = false, include_station_names = false}} or {{}}
+local function inside(e)
+  if not (e and e.valid) then return true end
+  local p = e.position
+  return p.x >= {x0} and p.x < {x1} and p.y >= {y0} and p.y < {y1}
+end
 local drop, names, kept = {{{drop}}}, {{}}, {{}}
 for _, b in pairs(st.is_blueprint_setup() and st.get_blueprint_entities() or {{}}) do
-  if not drop[b.name] then
+  if not drop[b.name] and inside(src[b.entity_number]) then
     kept[#kept + 1] = b
     names[b.name] = (names[b.name] or 0) + 1
   end
