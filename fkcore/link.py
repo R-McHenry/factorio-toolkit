@@ -286,6 +286,93 @@ rcon.print(n)
 """
 
 
+def lua_request(surface, force, pos, item, n, name=None, inventory=None):
+    """An item-request proxy (2.1.2, ``fk request``): robots bring ``n`` of ``item`` to the entity
+    that stands at ``pos`` (``name``: of that prototype), into the inventory its kind takes the
+    item in (robots into a roboport, ammo into a turret, fuel into a burner, modules into the
+    module slots, the rest into a machine's input or a chest), or into ``inventory`` (a
+    ``defines.inventory`` name). It only asks: the robots take the items from the network, and
+    the proxy waits for what the network doesn't hold. The game's own mechanism, as a blueprint's
+    item request is; nothing is created or moved. Replies JSON: {ok, name, x, y, inventory,
+    asked, room, stock, reach, had} or {ok = false, why}."""
+    x, y = float(pos[0]), float(pos[1])
+    want = "nil" if not name else _q(name)
+    inv = "nil" if not inventory else _q(inventory)
+    return f"""
+local s, f = game.get_surface({_q(surface)}), game.forces[{_q(force)}]
+local function out(t) rcon.print(helpers.table_to_json(t)) end
+if not s or not f then out{{ok = false, why = 'no surface or force'}} return end
+local item, n, want, invname = {_q(item)}, {int(n)}, {want}, {inv}
+local ip = prototypes.item[item]
+if not ip then out{{ok = false, why = 'no item ' .. item}} return end
+local e
+for _, c in pairs(s.find_entities_filtered{{position = {{{x}, {y}}}, force = f}}) do
+  if c.type ~= 'entity-ghost' and c.type ~= 'item-request-proxy' and c.type ~= 'tile-ghost'
+      and (not want or c.name == want) then e = c break end
+end
+if not e then out{{ok = false, why = 'nothing of the force stands at {x},{y}' .. (want and (' named ' .. want) or '')}} return end
+local I, t = defines.inventory, e.type
+local id
+if invname then id = I[invname]
+elseif t == 'roboport' then id = (ip.type == 'repair-tool') and I.roboport_material or I.roboport_robot
+elseif t == 'ammo-turret' then id = I.turret_ammo
+elseif t == 'artillery-turret' then id = I.artillery_turret_ammo
+elseif ip.type == 'module' and t == 'assembling-machine' then id = I.assembling_machine_modules
+elseif ip.type == 'module' and t == 'furnace' then id = I.furnace_modules
+elseif ip.type == 'module' and t == 'mining-drill' then id = I.mining_drill_modules
+elseif ip.type == 'module' and t == 'lab' then id = I.lab_modules
+elseif ip.type == 'module' and t == 'beacon' then id = I.beacon_modules
+elseif (ip.fuel_value or 0) > 0 and e.get_inventory(I.fuel) then id = I.fuel
+elseif t == 'assembling-machine' or t == 'rocket-silo' then id = I.assembling_machine_input
+elseif t == 'furnace' then id = I.furnace_source
+elseif t == 'lab' then id = I.lab_input
+elseif t == 'reactor' or t == 'boiler' or t == 'burner-generator' then id = I.fuel
+else id = I.chest end
+local inv = id and e.get_inventory(id)
+if not inv then out{{ok = false, why = e.name .. ' has no inventory for ' .. item .. (invname and (' (' .. invname .. ')') or '')}} return end
+local size = ip.stack_size
+local spots, left, room = {{}}, n, 0
+for i = 1, #inv do
+  local st = inv[i]
+  local free = 0
+  if not st.valid_for_read then
+    if st.can_set_stack{{name = item, count = 1}} then free = size end
+  elseif st.name == item then free = size - st.count end
+  room = room + free
+  if free > 0 and left > 0 then
+    local k = math.min(free, left)
+    spots[#spots + 1] = {{inventory = id, stack = i - 1, count = k}}
+    left = left - k
+  end
+end
+local asked = n - left
+local stock = 0
+for _, net in pairs((f.logistic_networks or {{}})[s.name] or {{}}) do stock = stock + net.get_item_count(item) end
+local reach = false
+for _, r in pairs(s.find_entities_filtered{{type = 'roboport', force = f}}) do
+  local c = r.logistic_cell
+  if c and c.transmitting then
+    local d = c.construction_radius
+    if math.abs(e.position.x - r.position.x) <= d and math.abs(e.position.y - r.position.y) <= d then reach = true break end
+  end
+end
+local had = 0
+if asked > 0 then
+  local plan = {{id = {{name = item, quality = 'normal'}}, items = {{in_inventory = spots}}}}
+  local p = s.find_entities_filtered{{type = 'item-request-proxy', position = e.position, force = f}}[1]
+  if p and p.proxy_target == e then
+    local plans = p.insert_plan
+    had = #plans
+    plans[#plans + 1] = plan
+    p.insert_plan = plans
+  else
+    s.create_entity{{name = 'item-request-proxy', position = e.position, force = f, target = e, modules = {{plan}}}}
+  end
+end
+out{{ok = true, name = e.name, x = e.position.x, y = e.position.y, inventory = id, asked = asked, room = room, stock = stock, reach = reach, had = had}}
+"""
+
+
 def lua_decon_area(surface, force, area, names=(), cancel=False):
     """``fk decon`` (2.0.62): the deconstruction planner over ``area``, as a player drags it:
     every entity of ``force`` there (only those named in ``names``, when given) ordered out, or
