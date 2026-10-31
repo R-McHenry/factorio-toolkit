@@ -136,9 +136,27 @@ Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on obj
 NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
 before the floorplan (`out\floorplan.txt`, the `circuits` lines, says what each one set), and the
 .fkp shows them on the entity lines (`if=`, `logistic=`, `read=`, `filter=`, `signals=`) and as
-`wire` / `w` lines. Change a limit and the next build lays the inserters it touches fresh, so the
-game has the new one (`out\apply.txt`: "with new circuit settings"); no script sets them, and a
-rebuild never loses them.
+`wire` / `w` lines. Change a limit and the next build writes it on the inserters that stand: the
+paste sets every setting, so nothing is taken up and robots make no trip; a rebuild never loses
+them. Drills and offshore pumps are the exception: the game takes no settings from a paste on
+them, so the build lays them fresh.
+
+A build changes what stands in one of three ways, and `out\apply.txt` names each with why:
+
+- **written in place:** new settings, or a hand edit set back. The paste writes them.
+- **upgraded:** another entity of the same fast-replace group and size stands on a design
+  entity's spot: inserter tiers (not the long-handed one), assembler 1, 2 and 3, belt,
+  underground and splitter tiers, any chest to any other chest, stone to steel furnace, small to
+  medium pole. Robots swap it, and its settings, wires and contents stay.
+- **laid fresh:** everything else (another size or group, turned, a carrier that held another
+  net's items): it is taken up and built new.
+
+Wires follow the design too. After the paste, and again when `fk wait built` finds the robots
+done, the build adds the design's missing red, green and copper wires and cuts the ones between
+your design's entities that the design doesn't have. A pole robots build joins itself to the
+poles in reach that its own paste didn't lay (another plot's, say); this takes that back. Wires
+to anything outside the design are left alone. `out\apply.txt` gives one line, `wires: 3 added,
+1 cut`; a circuit wire made by hand is named once as `by-hand` before it goes.
 
 A build also takes back what it built before and your design no longer has: a row you replaced,
 the old ground of a plot you moved or shrank, a factory you emptied, its unbuilt ghosts too. The
@@ -608,9 +626,9 @@ answer is the next build. Nothing here is broken by itself.
   on; adopt it into your source, leave it out, or come back to it. A Claude lead hears it like
   chat (`out\hand.txt` keeps every one). It also names settings changed by hand on what the
   toolkit placed, with what the paste does: `rory_618 changed inserter at 14.5,0.5 (mall/i0):
-  logistic=copper-plate>7 (the paste sets logistic=iron-plate<50)`. A paste writes the design's
-  condition, request, chest limit and recipe over the one set by hand; a wire or condition the
-  design lacks stays. To keep it, write it into the source (`logistic=copper-plate>7`);
+  logistic=copper-plate>7 (the paste sets logistic=iron-plate<50)`. A build sets every setting
+  back to the design's (condition, request, filter, chest limit, recipe), cuts a wire the design
+  lacks and adds one it has. To keep it, write it into the source (`logistic=copper-plate>7`);
   `stop_on by-hand` holds a paste until you have
 - `re-laid` (diff, before the paste): belts, undergrounds, splitters or inserters stand on their
   design tiles under the right name but facing another way (or as the other underground end), so
