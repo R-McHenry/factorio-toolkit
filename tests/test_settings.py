@@ -83,10 +83,10 @@ class SettingsTest(unittest.TestCase):
     def test_a_wire_added_by_hand_stays(self):
         got = drifts(i0_condition=DESIGNED, request=REQUEST, wire=True)
         self.assertEqual([d.line().split("): ", 1)[1] for d in got],
-                         ["red wire to inserter at 5.5,7.5 (the design has none: the paste "
-                          "leaves it)",
-                          "red wire to inserter at 5.5,5.5 (the design has none: the paste "
-                          "leaves it)"])
+                         ["red wire to inserter at 5.5,7.5 (the design has none: the build "
+                          "cuts them)",
+                          "red wire to inserter at 5.5,5.5 (the design has none: the build "
+                          "cuts them)"])
 
     def test_only_what_stands_where_the_design_has_it(self):
         ghost = [Verdict("ghost", "inserter", 5.5, 5.5, "nauvis:mall/m/i0")] + VERDICTS[1:]

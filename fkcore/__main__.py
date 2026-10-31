@@ -341,8 +341,10 @@ def _look(a, cat):
 
 def _wait(a, cat):
     """``wait built``: a bounded wait for the ghosts in an area (fkcore.wait), through the link.
-    The area is the design's, as a look without one, unless given; one line at the end."""
-    from . import link, look, wait as waitmod
+    The area is the design's, as a look without one, unless given; one line at the end. Then
+    (2.1) the wire pass (``fkcore.wires``): a pole robots built joined itself to its neighbours,
+    so the wires are set as the design has them, with a count line when any changed."""
+    from . import link, look, wait as waitmod, wires as wiresmod
     try:
         max_s = waitmod.parse_duration(a.max)
         poll_s = waitmod.parse_duration(a.poll)
@@ -373,6 +375,10 @@ def _wait(a, cat):
     try:
         with r:
             code, lines = waitmod.run(r, sf.name, area, names, max_s, poll_s)
+            got = wiresmod.run(r, s, cat, area, tag="wait-wires")
+            if got.line():
+                lines.append(got.line())
+            lines += [f"  by-hand: {h}" for h in got.hand]
     except KeyboardInterrupt:
         print("wait built: interrupted; the link is closed and no game call is left running",
               file=sys.stderr)
