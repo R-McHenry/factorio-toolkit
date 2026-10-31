@@ -1,0 +1,262 @@
+# cells.fk: starter cells, yours to change. A cell is one slice of a line of machines: its belts
+# run straight across it, edge to edge, so cells stacked in a line make one long line.
+#
+#   import FurnaceCell from "cells.fk"
+#   col = Stack<cell=FurnaceCell, n=12> @(10, 12)
+#   net ore_:   drills -> col.ore_in
+#   net plates: col.pl_out -> bus
+#
+# Copy a cell and change it: another recipe (change the items in its ports too), modules
+# (`modules=productivity-module`), a machine more, a belt more. Rename the copy. Each port is where
+# a belt crosses the cell's edge; `stack NEAR -> FAR` pairs the two ends of one belt, so the next
+# cell's NEAR meets this one's FAR. docs\LANGUAGE.md, "Stacks", has the rules.
+
+# One electric furnace beside two belts: the ore runs up through every cell on the west belt, the
+# plates come back down the east one. No coal. One side, so the plates ride one lane: about 12 of
+# these fill it (7.5/s on yellow).
+module FurnaceCell size 7x3 {
+  port ore_in  : in  iron-ore   @s0
+  port ore_out : out iron-ore   @n0
+  port pl_in   : in  iron-plate @n6
+  port pl_out  : out iron-plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=iron-plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# Two electric furnaces facing each other across the plate belt, an ore belt outside each: the
+# plates ride both lanes, so 24 of these furnaces (12 cells) fill one yellow belt at 15/s.
+module FurnacePair size 13x3 {
+  port oa_in  : in  iron-ore   @s0
+  port oa_out : out iron-ore   @n0
+  port pl_in  : in  iron-plate @n6
+  port pl_out : out iron-plate @s6
+  port ob_in  : in  iron-ore   @s12
+  port ob_out : out iron-ore   @n12
+  stack oa_in -> oa_out, pl_out -> pl_in, ob_in -> ob_out
+  w = Furnace<recipe=iron-plate, machine=electric-furnace> @(2, 0)
+  e = Furnace<recipe=iron-plate, machine=electric-furnace> @(8, 0)
+  net a: oa_in -> w, oa_out
+  net b: ob_in -> e, ob_out
+  net p: pl_in, w, e -> pl_out
+}
+
+# One stone furnace: ore and coal on the two lanes of one belt (ore left, coal right), one inserter
+# takes both. The plates go back on the other belt. Feed it `net ore_ ... -> col.f_in` and
+# `net fuel ... -> col.f_in` with `lanes ore_ | fuel`.
+module StoneFurnaceCell size 6x2 {
+  port f_in   : in  iron-ore | coal @s0
+  port f_out  : out iron-ore | coal @n0
+  port pl_in  : in  iron-plate @n5
+  port pl_out : out iron-plate @s5
+  stack f_in -> f_out, pl_out -> pl_in
+  f = Furnace<recipe=iron-plate> @(2, 0)
+  net o items iron-ore: f_in -> f, f_out
+  net c items coal:     f_in -> f, f_out
+  lanes o | c
+  net p: pl_in, f -> pl_out
+}
+
+# Two stone furnaces back to back, both taking ore and coal from the middle belt (ore left, coal
+# right); the plates go out on the two outer belts, one each side. 12 of these (24 furnaces) eat
+# one yellow lane of ore. Join the two plate belts in your factory (`net plates: col.pw_out,
+# col.pe_out -> ...`); several lines on one `lanes ore_ | fuel` pair make a bigger smelter, and
+# the router puts their plates on both lanes when they need it. It replaces the SmelterArray row:
+# on the lab, 12 cells made 450 plates/min to the stack's 445.
+module SmelterPair size 11x2 {
+  port pw_in  : in  iron-plate      @n0
+  port pw_out : out iron-plate      @s0
+  port f_in   : in  iron-ore | coal @s5
+  port f_out  : out iron-ore | coal @n5
+  port pe_in  : in  iron-plate      @n10
+  port pe_out : out iron-plate      @s10
+  stack f_in -> f_out, pw_out -> pw_in, pe_out -> pe_in
+  w = Furnace<recipe=iron-plate> @(2, 0)
+  e = Furnace<recipe=iron-plate> @(7, 0)
+  net o items iron-ore: f_in -> w, e, f_out
+  net c items coal:     f_in -> w, e, f_out
+  lanes o | c
+  net pw: pw_in, w -> pw_out
+  net pe: pe_in, e -> pe_out
+}
+
+# Green circuits: a column of cable assemblers beside a column of circuit assemblers, offset by a
+# row, so the inserters between them zigzag. Three cable assemblers to two circuit assemblers
+# (the middle cable assembler hands to both), 3 cable/s for each circuit assembler: all it uses.
+# Copper comes up the middle belt, both lanes, to the cable columns on either side; iron comes up
+# each outer belt, reached by a long-handed inserter over the circuits belt beside it, which takes
+# the circuits back down. Two cells are eight circuit assemblers: 480 circuits/min on the lab, to
+# the CircuitStack row's 450.
+module CircuitCell size 23x9 {
+  port wi_in  : in  iron-plate         @s0
+  port wi_out : out iron-plate         @n0
+  port wo_in  : in  electronic-circuit @n1
+  port wo_out : out electronic-circuit @s1
+  port cu_in  : in  copper-plate | copper-plate @s11
+  port cu_out : out copper-plate | copper-plate @n11
+  port eo_in  : in  electronic-circuit @n21
+  port eo_out : out electronic-circuit @s21
+  port ei_in  : in  iron-plate         @s22
+  port ei_out : out iron-plate         @n22
+  stack wi_in -> wi_out, wo_out -> wo_in, cu_in -> cu_out, eo_out -> eo_in, ei_in -> ei_out
+  wa = Assembler<recipe=electronic-circuit> @(3, 1)
+  wb = Assembler<recipe=electronic-circuit> @(3, 5)
+  w0 = Assembler<recipe=copper-cable>       @(7, 0)
+  w1 = Assembler<recipe=copper-cable>       @(7, 3)
+  w2 = Assembler<recipe=copper-cable>       @(7, 6)
+  e0 = Assembler<recipe=copper-cable>       @(13, 0)
+  e1 = Assembler<recipe=copper-cable>       @(13, 3)
+  e2 = Assembler<recipe=copper-cable>       @(13, 6)
+  ea = Assembler<recipe=electronic-circuit> @(17, 1)
+  eb = Assembler<recipe=electronic-circuit> @(17, 5)
+  net wi: wi_in -> wa, wb, wi_out
+  net ei: ei_in -> ea, eb, ei_out
+  net cu: cu_in -> w0, w1, w2, e0, e1, e2, cu_out
+  net kw0: w0 -> wa
+  net kw1: w1 -> wa, wb
+  net kw2: w2 -> wb
+  net ke0: e0 -> ea
+  net ke1: e1 -> ea, eb
+  net ke2: e2 -> eb
+  net wo: wo_in, wa, wb -> wo_out
+  net eo: eo_in, ea, eb -> eo_out
+}
+
+# One assembler: plates up the west belt, gears back down the east one. Change the recipe and the
+# items of its ports for anything with one ingredient.
+module GearCell size 7x3 {
+  port in_in   : in  iron-plate      @s0
+  port in_out  : out iron-plate      @n0
+  port out_in  : in  iron-gear-wheel @n6
+  port out_out : out iron-gear-wheel @s6
+  stack in_in -> in_out, out_out -> out_in
+  a = Assembler<recipe=iron-gear-wheel> @(2, 0)
+  net i: in_in -> a, in_out
+  net g: out_in, a -> out_out
+}
+
+# One lab: red and green packs on the two lanes of one belt, which runs on to the next lab.
+module LabCell size 5x3 {
+  port p_in  : in  automation-science-pack | logistic-science-pack @s0
+  port p_out : out automation-science-pack | logistic-science-pack @n0
+  stack p_in -> p_out
+  lab = Lab @(2, 0)
+  net r items automation-science-pack: p_in -> lab, p_out
+  net g items logistic-science-pack:   p_in -> lab, p_out
+  lanes r | g
+}
+
+# Blue science (~2510k, the real base's BLUE LINE): one assembling-machine-2 on chemical-science-
+# pack. Engines and advanced circuits come up the west belt on its two lanes, sulfur up the
+# middle belt, and the packs go back down the east belt (a long-handed inserter over the sulfur
+# belt). 2 packs per 24 s (asm2 0.75: 3.75/min a cell); a cell eats 3.75 engines + 5.6 adv
+# circuits + 1.9 sulfur a minute, so a yellow lane of each feeds far more cells than we'll lay.
+module ChemCell size 8x3 {
+  port ea_in  : in  engine-unit | advanced-circuit @s0
+  port ea_out : out engine-unit | advanced-circuit @n0
+  port su_in  : in  sulfur                         @s6
+  port su_out : out sulfur                         @n6
+  port bp_in  : in  chemical-science-pack          @n7
+  port bp_out : out chemical-science-pack          @s7
+  stack ea_in -> ea_out, su_in -> su_out, bp_out -> bp_in
+  b = Assembler<recipe=chemical-science-pack, machine=assembling-machine-2> @(2, 0)
+  net e items engine-unit:      ea_in -> b, ea_out
+  net a items advanced-circuit: ea_in -> b, ea_out
+  lanes e | a
+  net s: su_in -> b, su_out
+  net p: bp_in, b -> bp_out
+}
+
+# Engines (~2555k, feeds the BLUE LINE): one assembling-machine-2 on engine-unit (1 steel + 1 gear
+# + 2 pipe per 10 s, asm2: 4.5/min a cell). Steel and gears up the west belt on its two lanes,
+# pipes up the middle belt, engines back down the east belt. 7 cells feed 8 ChemCells.
+module EngineCell size 8x3 {
+  port sg_in  : in  steel-plate | iron-gear-wheel @s0
+  port sg_out : out steel-plate | iron-gear-wheel @n0
+  port pi_in  : in  pipe                          @s6
+  port pi_out : out pipe                          @n6
+  port en_in  : in  engine-unit                   @n7
+  port en_out : out engine-unit                   @s7
+  stack sg_in -> sg_out, pi_in -> pi_out, en_out -> en_in
+  m = Assembler<recipe=engine-unit, machine=assembling-machine-2> @(2, 0)
+  net s items steel-plate:     sg_in -> m, sg_out
+  net g items iron-gear-wheel: sg_in -> m, sg_out
+  lanes s | g
+  net p: pi_in -> m, pi_out
+  net e: en_in, m -> en_out
+}
+
+# Advanced circuits (~2560k, feeds the BLUE LINE): one assembling-machine-2 on advanced-circuit
+# (2 green + 2 plastic + 4 cable per 6 s, asm2: 7.5/min a cell). Green circuits and plastic up the
+# west belt on its two lanes, cable up the middle belt, advanced circuits back down the east belt.
+# 6 cells (45/min) feed 8 ChemCells; one asm2 on cable (180/min) feeds 6 cells.
+module AdvCircuitCell size 8x3 {
+  port gp_in  : in  electronic-circuit | plastic-bar @s0
+  port gp_out : out electronic-circuit | plastic-bar @n0
+  port cb_in  : in  copper-cable                     @s6
+  port cb_out : out copper-cable                     @n6
+  port ac_in  : in  advanced-circuit                 @n7
+  port ac_out : out advanced-circuit                 @s7
+  stack gp_in -> gp_out, cb_in -> cb_out, ac_out -> ac_in
+  m = Assembler<recipe=advanced-circuit, machine=assembling-machine-2> @(2, 0)
+  net g items electronic-circuit: gp_in -> m, gp_out
+  net p items plastic-bar:        gp_in -> m, gp_out
+  lanes g | p
+  net c: cb_in -> m, cb_out
+  net a: ac_in, m -> ac_out
+}
+
+# ChemCell2 / AdvCircuitCell2 (~2585k): the same cells with each input on its own belt, for a
+# line whose inputs come off other stacks' ports (a module port can't drive half of a `lanes`
+# pair: FRICTION ~2585k). West belts x0, x1 (a long-handed and a fast inserter at x2), the machine
+# at x3..5, the middle input at x7 and the product at x8 (fast and long-handed at x6).
+module ChemCell2 size 9x3 {
+  port e_in   : in  engine-unit            @s0
+  port e_out  : out engine-unit            @n0
+  port a_in   : in  advanced-circuit       @s1
+  port a_out  : out advanced-circuit       @n1
+  port su_in  : in  sulfur                 @s7
+  port su_out : out sulfur                 @n7
+  port bp_in  : in  chemical-science-pack  @n8
+  port bp_out : out chemical-science-pack  @s8
+  stack e_in -> e_out, a_in -> a_out, su_in -> su_out, bp_out -> bp_in
+  b = Assembler<recipe=chemical-science-pack, machine=assembling-machine-2> @(3, 0)
+  net e: e_in -> b, e_out
+  net a: a_in -> b, a_out
+  net s: su_in -> b, su_out
+  net p: bp_in, b -> bp_out
+}
+
+module AdvCircuitCell2 size 9x3 {
+  port g_in   : in  electronic-circuit     @s0
+  port g_out  : out electronic-circuit     @n0
+  port p_in   : in  plastic-bar            @s1
+  port p_out  : out plastic-bar            @n1
+  port cb_in  : in  copper-cable           @s7
+  port cb_out : out copper-cable           @n7
+  port ac_in  : in  advanced-circuit       @n8
+  port ac_out : out advanced-circuit       @s8
+  stack g_in -> g_out, p_in -> p_out, cb_in -> cb_out, ac_out -> ac_in
+  m = Assembler<recipe=advanced-circuit, machine=assembling-machine-2> @(3, 0)
+  net g: g_in -> m, g_out
+  net p: p_in -> m, p_out
+  net c: cb_in -> m, cb_out
+  net a: ac_in, m -> ac_out
+}
+
+# CopperPair (~2860k, the real base's copper at map x522..556, y-164..-124): FurnacePair on copper.
+module CopperPair size 13x3 {
+  port oa_in  : in  copper-ore   @s0
+  port oa_out : out copper-ore   @n0
+  port pl_in  : in  copper-plate @n6
+  port pl_out : out copper-plate @s6
+  port ob_in  : in  copper-ore   @s12
+  port ob_out : out copper-ore   @n12
+  stack oa_in -> oa_out, pl_out -> pl_in, ob_in -> ob_out
+  w = Furnace<recipe=copper-plate, machine=electric-furnace> @(2, 0)
+  e = Furnace<recipe=copper-plate, machine=electric-furnace> @(8, 0)
+  net a: oa_in -> w, oa_out
+  net b: ob_in -> e, ob_out
+  net p: pl_in, w, e -> pl_out
+}

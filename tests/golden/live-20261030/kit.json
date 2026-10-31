@@ -1,0 +1,131 @@
+{
+ "note": "the starter kit setup_v1 puts down (kickoff/setup_v1.py: BOOTSTRAP + CHESTS), as the world design declares it",
+ "entities": [
+  {
+   "name": "solar-panel",
+   "wx": 8.5,
+   "wy": 15.5,
+   "d": 0
+  },
+  {
+   "name": "solar-panel",
+   "wx": 12.5,
+   "wy": 15.5,
+   "d": 0
+  },
+  {
+   "name": "solar-panel",
+   "wx": 16.5,
+   "wy": 15.5,
+   "d": 0
+  },
+  {
+   "name": "solar-panel",
+   "wx": 8.5,
+   "wy": 19.5,
+   "d": 0
+  },
+  {
+   "name": "solar-panel",
+   "wx": 12.5,
+   "wy": 19.5,
+   "d": 0
+  },
+  {
+   "name": "solar-panel",
+   "wx": 16.5,
+   "wy": 19.5,
+   "d": 0
+  },
+  {
+   "name": "accumulator",
+   "wx": 21,
+   "wy": 15,
+   "d": 0
+  },
+  {
+   "name": "accumulator",
+   "wx": 21,
+   "wy": 19,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 8.5,
+   "wy": 11.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 10.5,
+   "wy": 14.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 14.5,
+   "wy": 14.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 10.5,
+   "wy": 18.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 14.5,
+   "wy": 18.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 21.5,
+   "wy": 13.5,
+   "d": 0
+  },
+  {
+   "name": "medium-electric-pole",
+   "wx": 21.5,
+   "wy": 17.5,
+   "d": 0
+  },
+  {
+   "name": "storage-chest",
+   "wx": 2.5,
+   "wy": 8.5,
+   "d": 0
+  },
+  {
+   "name": "storage-chest",
+   "wx": 3.5,
+   "wy": 8.5,
+   "d": 0
+  },
+  {
+   "name": "storage-chest",
+   "wx": 4.5,
+   "wy": 8.5,
+   "d": 0
+  },
+  {
+   "name": "storage-chest",
+   "wx": 2.5,
+   "wy": 9.5,
+   "d": 0
+  },
+  {
+   "name": "storage-chest",
+   "wx": 3.5,
+   "wy": 9.5,
+   "d": 0
+  },
+  {
+   "name": "storage-chest",
+   "wx": 4.5,
+   "wy": 9.5,
+   "d": 0
+  }
+ ]
+}

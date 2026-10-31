@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 *.writer-bak-*
 out/
+
+# the golden check's frozen designs keep their out/ (force.json, avail.json)
+!tests/golden/*/out/
