@@ -31,6 +31,7 @@ import difflib
 import math
 from dataclasses import dataclass, field
 
+from . import facts as _facts
 from .catalog import FUEL_USE_W, FUEL_VALUE_J, MINING_TIME, STEAM_PER_S
 
 __all__ = ["PlanError", "Plan", "Row", "plan", "parse_rate", "parse_recipes", "report",
@@ -47,6 +48,9 @@ CRUDE_PER_PUMPJACK = 10.0
 WATER_PER_PUMP = 1200.0
 #: Raw inputs a machine without a recipe gets, besides the ores of ``MINING_TIME``.
 RESOURCES = ("crude-oil", "water", "steam")
+#: The order the raw rows are listed in: Nauvis's ores as before 2.1.1, then the others ``DRILL``
+#: mines (calcite, scrap), then ``RESOURCES``.
+RAW_FIRST = ("iron-ore", "copper-ore", "coal", "stone", "uranium-ore")
 
 #: Recipe category -> the Nauvis machine that makes it ("asm" and "furnace": the plan's own).
 #: Space Age's x-or-y categories hold recipes its own machines make too; a category only those
@@ -227,7 +231,8 @@ def plan(cat, item, rate=None, machines=None, asm="assembling-machine-2",
             rows.append(Row(x, demand[x], st.recipe, st.machine, None if i else st.count,
                             takers=takers.get(x, {}), surplus={} if i else surplus,
                             shared=bool(i)))
-    first = list(MINING_TIME) + list(RESOURCES)
+    first = list(RAW_FIRST) + [r for r in MINING_TIME if r not in RAW_FIRST
+                               and _facts.mines(DRILL, r)] + list(RESOURCES)
     for x in sorted((x for x in seen if choice[x] is None),
                     key=lambda x: (first.index(x) if x in first else len(first), seen.index(x))):
         machine, each, source = _raw_source(cat, x, raw, mining_productivity)
@@ -375,7 +380,7 @@ def _raw_source(cat, item, raw, productivity):
     bonus = 1.0 + 0.1 * productivity
     if item in raw:
         return None, None, "given (--raw)"
-    if item in MINING_TIME:
+    if item in MINING_TIME and _facts.mines(DRILL, item):
         return DRILL, cat.entity(DRILL)["mining_speed"] / MINING_TIME[item] * bonus, "mined"
     if item == "crude-oil":
         return "pumpjack", CRUDE_PER_PUMPJACK * bonus, "a 100% yield well"

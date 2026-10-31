@@ -1,0 +1,5 @@
+# kit.fk: the starter kit the kickoff puts down before your first build - six storage chests holding
+# your supplies, the roboport with its robots, six solar panels, two accumulators and the poles that
+# power them. setup_v1 creates exactly these entities, and declaring them here makes them the plot's
+# own: the build keeps them, and no tile inside the plot belongs to anything else.
+kit = Literal<file="kit.json", box="0,0,30,30"> @(0, 0)

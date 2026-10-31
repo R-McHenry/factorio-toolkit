@@ -1,4 +1,4 @@
-# Toolkit 2.1.2 (draft): fixes from the runs
+# Toolkit 2.1.3: fixes from the runs
 
 PLAN-2.1, "Fixes from the runs (review of 2026-10-31)". Each fix comes from something a player hit.
 
@@ -41,7 +41,7 @@ FAIR-PLAY.md now says it: moving items by script is never a player's button; `fk
 
 ## The small ones
 
-- `cannot-carry` is in the template's `stop_on`, and the 2.1.2 upgrade adds it to a run's script.
+- `cannot-carry` is in the template's `stop_on`, and the 2.1.3 upgrade adds it to a run's script.
 - `stop_on` treats `no-power` and `NO_POWER` (dash or underscore, any case) alike, so
   `stop_on no-power` holds a paste.
 - `fk read-terrain --area` merges into the file: the new area wins tile by tile, the rest stays.

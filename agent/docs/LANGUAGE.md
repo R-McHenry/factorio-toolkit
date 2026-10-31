@@ -294,7 +294,7 @@ module GearRib size 16x10 {
 - `port NAME : in|out|inout ITEM [| ITEM2] [@side[pos][L|R]]`. A port is a **lane** of one belt end:
   `Belt[… ]` is retired (a belt end is two lanes). `item | item2` is the two lanes of the pair; the
   same item twice is one item on both. Two nets may feed the two lanes of a paired port, one item
-  each (2.1.2): they share one belt to it as if you had written `lanes A | B`, and the module's own
+  each (2.1.3): they share one belt to it as if you had written `lanes A | B`, and the module's own
   `lanes` line inside is enough. A fluid port is refused ("pipes have no lanes"), and a net may
   name a port only in the module that declares it: naming one from outside the module is an error
   that says which `port` line to add.

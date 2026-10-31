@@ -70,7 +70,7 @@ class StopsTest(unittest.TestCase):
         self.assertIn("stop_on         no-destination cannot-carry ", new)
         self.assertNotIn("no-route no-destination", new)
         self.assertIn("stop_on         invariant\nstop_on         no-destination", new)
-        # 2.1.2: a 2.0.12 script gets cannot-carry alone
+        # 2.1.3: a 2.0.12 script gets cannot-carry alone
         new = upgrade_run._stops(OLD + "stop_on         no-route no-destination\n")
         self.assertEqual(new.splitlines()[-1].split("#")[0].split(), ["stop_on", "cannot-carry"])
 

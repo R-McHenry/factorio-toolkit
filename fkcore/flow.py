@@ -286,7 +286,7 @@ def _save_hands(ctx, r):
 def _save_standing(ctx, rep, roboports=None):
     """The poles the diff finds built (ok) in ``out/standing.json``, updated over the diff's
     scope and kept elsewhere: the next build's cover step runs where there is no game link, and
-    keeps a built pole of another kind than its own (2.0.1). ``roboports`` (2.1.2): every roboport
+    keeps a built pole of another kind than its own (2.0.1). ``roboports`` (2.1.3): every roboport
     that stands with power, [[x, y, logistic radius, construction radius]], for the next build's
     ``cover robots`` (kept as it was when this diff read none)."""
     path = os.path.join(ctx.out, _STANDING_FILE)
@@ -316,7 +316,7 @@ def _save_standing(ctx, rep, roboports=None):
 
 def _standing_roboports(ctx):
     """The roboports the last diff found standing with power, [(x, y, logistic radius,
-    construction radius)] in map coordinates, or None when no diff has said (2.1.2)."""
+    construction radius)] in map coordinates, or None when no diff has said (2.1.3)."""
     path = os.path.join(ctx.out, _STANDING_FILE)
     try:
         with open(path, encoding="utf-8") as fh:
@@ -1080,7 +1080,7 @@ def s_cover_robots(ctx, args):
             Check("no-robots", "cover robots", f"--storage {storage}: not an entity")]
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
-    # 2.1.2: new roboports only where one that stands builds them (the last diff's read)
+    # 2.1.3: new roboports only where one that stands builds them (the last diff's read)
     standing = _standing_roboports(ctx)
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
@@ -1459,7 +1459,7 @@ _REACH_SHOWN = 40
 
 
 def _reach(ctx):
-    """``REACH`` (2.1.2): the ghosts the paste lays outside every construction area that stands
+    """``REACH`` (2.1.3): the ghosts the paste lays outside every construction area that stands
     with power, or that its own roboports give it (``robots.reach``): robots never build them.
     -> (report lines, Check), or None when every ghost is in reach or the diff read nothing. The
     runs: a cover-robots roboport out of every area stood a ghost with the 47 entities it was to
@@ -1869,7 +1869,7 @@ def _stop_code(word):
 
 
 def _stopping(ctx, checks):
-    """The checks a ``stop_on`` word names. 2.1.2: a dash and an underscore are one, so
+    """The checks a ``stop_on`` word names. 2.1.3: a dash and an underscore are one, so
     ``stop_on no-power`` holds the paste on cover power's ``NO_POWER`` as ``stop_on NO_POWER``
     does (2.0.52 named the new checks with dashes; the older ones kept their capitals)."""
     want = {s.replace("_", "-") for s in ctx.stop_on}

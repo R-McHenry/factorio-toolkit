@@ -44,6 +44,12 @@ use the game link, and only with FK_LINK=on)
                                           fluid) on the surface; --series N adds the window's
                                           graph in N points, oldest first (a free read, never an
                                           alert)
+    stats GAME_DIR --sample [--now] | --history | --page
+                                          the run's history (2.1, fkcore.runstats): --sample
+                                          keeps the samples due (the scenario recorder's, or one
+                                          RCON read every 5 game minutes) in out/stats/ and the
+                                          capital every 10; --history the research, the latest
+                                          window and the trend; --page out/stats/index.html
     stock GAME_DIR [--force F]            what the base holds, per item: chests and roboports
                                           apart (a free read, never an alert). A robot in a chest
                                           is idle: the line says how many are where
@@ -193,11 +199,22 @@ def _world(a, cat, what, body):
     return 0
 
 
+def _view(a):
+    """The look's vision.View from --zoom, --layers and --image; exits with the reason."""
+    from . import vision
+    try:
+        layers = vision.parse_layers(a.layers)
+    except ValueError as exc:
+        raise SystemExit(f"error: look --layers: {exc}")
+    return vision.View(a.zoom, layers, a.image)
+
+
 def _look_world(a, cat):
     from . import look
     area = _area(a.area)
+    view = _view(a)
     return _world(a, cat, "look --source world", lambda r: look.run(
-        r, a.game, cat, area, a.notify, a.watch, a.write_marks).lines())
+        r, a.game, cat, area, a.notify, a.watch, a.write_marks, view=view).lines())
 
 
 def _alerts(a, cat):
@@ -214,6 +231,8 @@ def _free_read(a, cat):
         print(f"error: {exc}", file=sys.stderr)
         return 2
     force = a.force or force_for(sf.mode)
+    if a.cmd == "stats" and (a.sample or a.history or a.page):
+        return _run_stats(a, cat, force, sf.name)
     if a.cmd == "chart":
         return _world(a, cat, "chart", lambda r: freereads.chart_lines(
             freereads.chart(r, force, sf.name)))
@@ -229,6 +248,21 @@ def _free_read(a, cat):
         return 2
     return _world(a, cat, "stats", lambda r: freereads.stats_lines(
         freereads.stats(r, force, sf.name, items, a.window, a.fluids, a.series)))
+
+
+def _run_stats(a, cat, force, surface):
+    """``stats --sample | --history | --page``: the run's history (fkcore.runstats, 2.1). Only
+    the sample reads the game; the history and the page read out/stats."""
+    from . import runstats
+    code = 0
+    if a.sample:
+        code = _world(a, cat, "stats --sample", lambda r: runstats.sample(
+            r, a.game, cat, force, surface, now=a.now))
+    if a.history:
+        print("\n".join(runstats.history_lines(a.game)))
+    if a.page:
+        print(f"stats page: {os.path.abspath(runstats.write_page(a.game))}")
+    return code
 
 
 def _capital(a, cat):
@@ -282,6 +316,23 @@ def _look(a, cat):
         print(f"error: {exc}", file=sys.stderr)
         return 2
     box = _area(a.area)
+    view = _view(a)
+    if not view.plain:
+        from . import scene, vision
+        box = box or look.default_area(s, cat)
+        if box is None:
+            print("error: nothing is designed on this surface", file=sys.stderr)
+            return 2
+        if view.image == "":
+            view = vision.View(view.zoom, view.layers, look.image_path(a.game, box, view.zoom))
+        tags = vision.design_tags(a.game, sf, s)
+        lines, _img = vision.compose_view(view, vision.Frame(box, view.zoom), cat,
+                                          scene.design_scene(s, cat, list(box)), plots=tags[0],
+                                          tags=tags, title=f"look {sf.name} --source design")
+        print(f"look {sf.name} --source design: {len(s.plots)} plots, {len(s.entities)} "
+              f"entities, {len(s.problems)} invariant problems; zoom {view.zoom}")
+        print("\n".join(lines))
+        return 0
     print(f"look {sf.name} --source design: {len(s.plots)} plots, {len(s.entities)} entities, "
           f"{len(s.problems)} invariant problems (. plot, : claim, ! mark, blank sanctioned)")
     print(compose.render(s, cat, box))
@@ -547,7 +598,7 @@ def _request_at(a, cat):
 
 
 def _request(a, cat):
-    """fk request ENTITY ITEM N (2.1.2): an item-request proxy, the game's own way to have robots
+    """fk request ENTITY ITEM N (2.1.3): an item-request proxy, the game's own way to have robots
     bring items to an entity that stands (robots into a roboport, ammo into a turret, barrels into
     a machine). It only asks, and says what the network doesn't hold."""
     from . import link
@@ -1095,7 +1146,7 @@ def _read_terrain(a):
     os.makedirs(a.game, exist_ok=True)
     path = os.path.join(a.game, f"{a.name}.terrain.json")
     got, note = terrain.from_dict(data), None
-    # 2.1.2: an area is read into the file, never over it (the 10-29 run's north read dropped the
+    # 2.1.3: an area is read into the file, never over it (the 10-29 run's north read dropped the
     # whole base's terrain); --replace writes the one area alone, as before
     if os.path.exists(path) and not a.replace:
         try:
@@ -1227,6 +1278,13 @@ def main(argv=None):
     lk.add_argument("--notify", choices=("nearby", "all", "off"))
     lk.add_argument("--watch", help="strict | keep | revert | mark DUR, or plots=A,sanctioned=B")
     lk.add_argument("--write-marks", action="store_true")
+    lk.add_argument("--zoom", type=int, default=1, choices=(1, 2, 4, 8, 16, 32),
+                    help="tiles a cell (2.1): 1 draws every tile; from 8 up, a map with plots")
+    lk.add_argument("--layers", default="", metavar="NAME[,NAME]|all",
+                    help="robots, power, defense, pollution, pipes, recipes, tags, or all")
+    lk.add_argument("--image", nargs="?", const="", default=None, metavar="PATH",
+                    help="write a PNG instead of the text renders (default "
+                         "<game>/out/look-X0_Y0_X1_Y1-zN.png) and print its path")
     wt = sub.add_parser("wait", description="a bounded wait for the ghosts in an area (fkcore.wait)")
     wt.add_argument("game")
     wt.add_argument("what", choices=("built",))
@@ -1250,6 +1308,13 @@ def main(argv=None):
     st.add_argument("--fluids", action="store_true")
     st.add_argument("--series", type=int, default=0, choices=range(0, 301), metavar="N")
     st.add_argument("--force")
+    st.add_argument("--sample", action="store_true",
+                    help="take the run's stats sample when one is due (fkcore.runstats)")
+    st.add_argument("--now", action="store_true", help="with --sample: take it now")
+    st.add_argument("--history", action="store_true",
+                    help="the run's history: research, the latest window and the trend")
+    st.add_argument("--page", action="store_true",
+                    help="write the run's stats page, out/stats/index.html")
     ch = sub.add_parser("chart")
     ch.add_argument("game")
     ch.add_argument("--force")

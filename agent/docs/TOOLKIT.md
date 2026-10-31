@@ -17,6 +17,9 @@ fk build --to diff               a dry run: the design against the world and wha
                                  take up; nothing written, nothing pasted
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
+fk look AREA --zoom 16 --layers all --image
+                                 zoomed out, with every layer, as a PNG (see "Zoom, layers and
+                                 images")
 ```
 
 Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, and `fk wait built
@@ -155,7 +158,12 @@ short-stock / needs-research per item. A ghost that stays is a blocked build, no
 marks it ghost SHORT or ghost needs-research (below), and waiting won't change that.
 
 Every command ends with the game's new alerts (grouped per kind), Rory's new chat lines and the
-research line (`RESEARCH: NONE` when nothing researches).
+research line: the research under way, its progress, the packs the labs used in the last game
+minute and the time left at that pace, as in `research military-3 34%, 41 packs/min, ~22 min
+left`. It is loud when nothing researches (`RESEARCH: NONE`), and when the labs used no pack in
+the last minute while a research is queued (`RESEARCH STALLED`), with the cause when the game
+shows it: `no lab holds military-science-pack`, `no lab holds all 4 packs (chemical-science-pack
+missing in 9 of 12 labs)`, or the labs have no power.
 
 ## How many machines and drills for a rate
 
@@ -424,6 +432,55 @@ Anything in the area that the design doesn't explain is:
 - `unowned`: nobody owns it; the next build removes it. This is also what the toolkit built and
   your design no longer has ("the toolkit's own, dropped from the design")
 
+### Zoom, layers and images
+
+`fk look AREA --zoom N` draws N tiles in one cell (N is 1, 2, 4, 8, 16 or 32). Zoom 1 draws every
+tile, as before; without a layer it is the same text as before.
+
+- **A cell shows what matters most in it**, in this order: a machine (the commonest kind), a
+  roboport, a turret, belt when at least half of what is in the cell is belt (its main direction:
+  `^ > v <`), a tank `K`, a chest, an accumulator `Z`, a solar panel `Y`, a beacon `b`, a radar `r`,
+  any belt, a pump `P`, an inserter, a combinator `c`, a pipe, a pole, a power switch `$`, a wall
+  `#`. `?` is anything else, `.` free ground. A line under the render names the glyphs it shows.
+- **From zoom 8 up, each plot is its outline** (`*---*`, `|`) with its name and how many machines
+  stand in it, like the game's map view.
+- **Zoom 8 and up, or more than 65536 tiles, is a map look.** It reads counts per cell, not every
+  entity, so a look at the whole base is quick (a base of 1024 x 1024 tiles and 87,000 entities
+  reads in about 1.3 s). It gives no verdicts: look at zoom 1 to 4 for those.
+- **In play mode a zoomed-out look reads only charted chunks**, what your map view shows. An
+  uncharted chunk is blank. The lab is all charted.
+
+`--layers NAME,...` (or `--layers all`) adds one panel for each layer, design | live, each with
+legend lines under it. A layer's marks go on free cells, and its points go over anything.
+
+- **`robots`**: each roboport's logistic area in its network's key (`1`, `2`...) and its
+  construction area as `,`. The legend gives each logistic network's robots: logistic and
+  construction, busy and idle, in flight, docked and charging. `!` is a ghost outside every
+  construction area: robots never build it.
+- **`power`**: each electric network's pole supply area in its key, `X` a machine with no power,
+  `~` one with low power, and each power switch, `$` on or `/` off.
+- **`defense`**: turret ranges (`g` gun, `l` laser, `f` flamethrower, `a` artillery, `*` two
+  kinds), `T` a turret and `0` one with no ammo, `x` land mines, `#` walls and `G` gates, `!` a wall
+  outside every turret's range (a gap in the ring), `@` a nest and `w` a worm. The legend gives the
+  ammo.
+- **`pollution`**: each chunk's pollution in bands (`1` up to 20, `2` up to 100, `3` up to 500, `4`
+  more), and `!` a nest the pollution reaches.
+- **`pipes`**: each pipeline in its own letter, with its fluid and how full it is in the legend,
+  `K` a tank, `P` a pump, and `!` a machine with a fluid connection nothing meets.
+- **`recipes`**: each machine's recipe as a short tag on its top row (`gear`, `circ`, `adv`) and
+  its status below it (`*` working, `n` no ingredients, `f` output full, `P` no power...). Zoomed
+  out, a cell shows the recipe's key, or `!` when a machine there doesn't work. The tags are in
+  `fkcore/data/recipe-tags.json`; a recipe it lacks gets one made from its name.
+- **`tags`**: your design's plots (outlined) and instances (a letter on each one's corner).
+
+The design side gets the layers the design knows: coverage, networks, turret ranges, recipes and
+tags. Pollution and pipes are the game's only.
+
+`--image` writes a PNG instead of the text renders, and prints its path (`out/look-X0_Y0_X1_Y1-zN.png`
+under the game folder, or `--image PATH`). It has the same render and the same layers: cells in
+colour, layers as tints and outlines, and labels. Read it like a screenshot. The legend lines stay
+in the text.
+
 ## The checks
 
 Checks are report lines, never errors: the build goes on and tells you. Read them; most are
@@ -463,7 +520,7 @@ A belt that fills, machines that starve, a build that never happens. Read these 
   construction area reaches, counting the roboports the paste lays where robots reach: robots
   never build them. It names power-bridge poles among them, since a roboport powered only through
   such a bridge never gets its power
-- `REACH` (report_bom, 2.1.2): the ghosts of this paste that no construction area of a roboport
+- `REACH` (report_bom, 2.1.3): the ghosts of this paste that no construction area of a roboport
   that stands reaches, counting a roboport the paste lays only when it stands in such an area and
   joins that network; roboports first, then by item. Robots never build them. `stop_on reach` in
   the build script holds such a paste. `fk build --to report_bom` lists them without pasting
@@ -480,7 +537,7 @@ answer is the next build. Nothing here is broken by itself.
   run below speed; it names the net where the shortage starts (a short ore patch, not every step
   after it) and the `fk plan` line that sizes its drivers
 - `cannot-carry`: a net names a machine that has no endpoint for the net's items (that machine is
-  left off the route). The template's build script stops on it (2.1.2)
+  left off the route). The template's build script stops on it (2.1.3)
 - `feed-rides-on` (report_rates): a sink at the end of a belt that brings it a product and also a
   feed, an item machines upstream on the same belt consume (sulfur riding the blue packs' belt
   into the packs' chest): what they don't take of the feed fills the sink and stops the belt for
@@ -552,7 +609,7 @@ answer is the next build. Nothing here is broken by itself.
   another one on both axes. It puts a storage chest beside each roboport it places, so what the
   robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
   the chest out). Grow outward: the next factory within reach of the last. It chains only from
-  roboports that stand, or that it lays in reach of them (2.1.2): a roboport no robot could reach
+  roboports that stand, or that it lays in reach of them (2.1.3): a roboport no robot could reach
   is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
   the old one is ordered out (robots take it up and carry it to the new spot), and an old roboport
   is ordered out at once when the network holds none for the new ones; otherwise the old ones
@@ -637,6 +694,16 @@ fk stats [--items iron-plate,copper-plate] [--window 10min]
 fk stats --items iron-plate --window 1h --series 30
                                  the panel's graph too: made and used per minute in 30 points
                                  over the window, oldest first
+fk stats --history               the run's history: the research first (rate and time left),
+                                 then the latest 5-minute window (capital and how much of it
+                                 works, the top items made and used per minute, power made and
+                                 used per kind, the machines per state and the recipes that
+                                 mostly stand) and the trend (the last 30 game minutes against
+                                 the 30 before). The run keeps a sample every 5 game minutes by
+                                 itself, in game\out\stats
+fk stats --page                  the run's stats page, game\out\stats\index.html: every series
+                                 over game time (research, capital, power, machine states, each
+                                 item and fluid made and used)
 fk stock                         what the base holds, per item: chests, roboports, your pack and
                                  the robots in the air (free to read). A robot in a chest is an
                                  item and does nothing; the line says how many are flying, how
@@ -787,7 +854,7 @@ design` draws the surface as designed rather than as built.
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
 `stop_on no-route no-destination cannot-carry` holds a paste with a net unrouted, a maker whose
-product reaches no sink, or a machine on a net whose items it takes none of (the 2.1.2 upgrade
+product reaches no sink, or a machine on a net whose items it takes none of (the 2.1.3 upgrade
 adds `cannot-carry` to an older script); `stop_on reach` holds one with ghosts no robot reaches,
 and `stop_on no-power` one whose poles reach no generation. Add `stop_on no-feed` before a big
 paste so that check stops it too (`stop_on short-stock`

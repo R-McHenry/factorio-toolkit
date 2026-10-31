@@ -38,7 +38,7 @@ def _q(text):
 def lua_capture(surface, force, area, tag, skip=LAB_OWN):
     """Lua that blueprints ``area`` (x0, y0, x1, y1) on ``surface`` without the entities named in
     ``skip``, and writes ``fk5/<tag>.json``: ``{bp, n, names}``; it replies with the count. Only
-    an entity whose centre is in the area is taken (2.1.2: a blueprint takes every entity whose box
+    an entity whose centre is in the area is taken (2.1.3: a blueprint takes every entity whose box
     touches the area, and ``capture lab u0`` took a drill of the next slot)."""
     x0, y0, x1, y1 = area
     drop = ", ".join(f"[{_q(n)}] = true" for n in skip)

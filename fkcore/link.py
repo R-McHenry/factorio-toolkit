@@ -181,12 +181,13 @@ def _area(area):
 
 
 #: entity types a snapshot leaves out: the ground, the player's body, and what is not built
-_SKIP = "{" + ", ".join(f"'{t}'" for t in (
+SKIP_TYPES = (
     "resource", "fish", "character", "corpse", "character-corpse", "item-entity", "item-request-proxy",
     "construction-robot", "logistic-robot", "combat-robot",
     "highlight-box", "speech-bubble", "explosion", "smoke-with-trigger", "particle-source",
     "projectile", "beam", "stream", "sticker", "fire", "deconstructible-tile-proxy",
-    "tile-ghost")) + "}"
+    "tile-ghost")
+_SKIP = "{" + ", ".join(f"'{t}'" for t in SKIP_TYPES) + "}"
 
 
 def lua_snapshot(surface, area, tag="snap"):
@@ -247,6 +248,259 @@ rcon.print(#out)
 """
 
 
+#: fk look's vision read (2.1): the chunks one game call reads at most (each call stays far
+#: under 5 s: measured on a laptop server, docs/RELEASE-2.1-vision.md).
+VISION_CHUNKS_PER_CALL = 64
+
+
+def lua_vision(cfg, tag):
+    """The vision read of a batch of chunks (``fkcore.vision``), read only. ``cfg`` (JSON):
+    surface, force, area, chunks [[cx, cy]], zoom, play (read only charted chunks), want
+    {cells, robots, power, defense, pollution, pipes, recipes}, classes {types, names, dirs}
+    for the cell counts, machines (the classes that are machines), plots [[name, x0, y0, x1,
+    y1]]. Each entity counts in the chunk holding its centre, once in every cell its bounding
+    box touches. Writes ``fk5/<tag>.json``; replies the chunk count."""
+    return f"""
+local cfg = helpers.json_to_table({_q(json.dumps(cfg, sort_keys=True))})
+local s, f = game.get_surface(cfg.surface), game.forces[cfg.force]
+if not s or not f then rcon.print('no surface or force') return end
+local W, a, z = cfg.want, cfg.area, cfg.zoom
+local stn = {{}}
+for k, v in pairs(defines.entity_status) do stn[v] = k end
+local machine = {{}}
+for _, c in pairs(cfg.machines) do machine[c] = true end
+local out = {{tick = game.tick, dark = {{}}, cells = {{}}, ghosts = {{}}, nghosts = 0, poles = {{}},
+  machines = {{}}, switches = {{}}, mines = {{}}, walls = {{}}, nests = {{}}, pipes = {{}}, opens = {{}},
+  pollution = {{}}, plot_machines = {{}}}}
+local function cls_of(t, n, d)
+  local c = cfg.classes.names[n] or cfg.classes.types[t]
+  if c == 'belt' then return cfg.classes.dirs[tostring(math.floor(d / 4) * 4)] or '>' end
+  if c == '' then return nil end
+  return c or '?'
+end
+local function fluidrow(e)
+  local fb = e.fluidbox
+  if not fb or #fb < 1 then return nil end
+  local fl = fb[1]
+  local okc, cap = pcall(fb.get_capacity, 1)
+  local oks, seg = pcall(fb.get_fluid_segment_id, 1)
+  return {{e.position.x, e.position.y, e.name, e.type, e.direction, oks and seg or -1,
+    fl and fl.name or '', fl and fl.amount or 0, okc and cap or 0}}
+end
+local function opens(e)
+  local fb = e.fluidbox
+  if not fb or #fb < 1 then return 0 end
+  local n = 0
+  for i = 1, #fb do
+    local okf, filt = pcall(fb.get_filter, i)
+    if fb[i] or (okf and filt) then
+      local ok, conns = pcall(fb.get_pipe_connections, i)
+      if ok and conns then
+        for _, c in pairs(conns) do
+          if c.connection_type == 'normal' and not c.target then n = n + 1 end
+        end
+      end
+    end
+  end
+  return n
+end
+for _, ch in pairs(cfg.chunks) do
+  local cx, cy = ch[1], ch[2]
+  if cfg.play and not f.is_chunk_charted(s, {{cx, cy}}) then
+    out.dark[#out.dark + 1] = {{cx, cy}}
+  else
+    local X0, Y0 = cx * 32, cy * 32
+    if W.pollution then
+      out.pollution[#out.pollution + 1] = {{cx, cy, s.get_pollution{{X0 + 16, Y0 + 16}},
+        s.count_entities_filtered{{area = {{{{X0, Y0}}, {{X0 + 32, Y0 + 32}}}}, type = 'unit-spawner'}}}}
+    end
+    local bx0, by0 = math.max(X0, a[1]), math.max(Y0, a[2])
+    local bx1, by1 = math.min(X0 + 32, a[3]), math.min(Y0 + 32, a[4])
+    if cfg.scan and bx0 < bx1 and by0 < by1 then
+      for _, e in pairs(s.find_entities_filtered{{area = {{{{bx0, by0}}, {{bx1, by1}}}}, type = cfg.skip, invert = true}}) do
+        local p = e.position
+        if p.x >= X0 and p.x < X0 + 32 and p.y >= Y0 and p.y < Y0 + 32 then
+          local g = e.type == 'entity-ghost'
+          local t = g and e.ghost_type or e.type
+          local n = g and e.ghost_name or e.name
+          local fo = e.force.name
+          local ours = fo ~= 'enemy' and fo ~= 'neutral'
+          local c = ours and cls_of(t, n, e.direction) or nil
+          if W.cells and c then
+            local bb = e.bounding_box
+            local i0 = math.max(math.floor(bb.left_top.x + 1e-6), a[1])
+            local i1 = math.min(math.ceil(bb.right_bottom.x - 1e-6) - 1, a[3] - 1)
+            local j0 = math.max(math.floor(bb.left_top.y + 1e-6), a[2])
+            local j1 = math.min(math.ceil(bb.right_bottom.y - 1e-6) - 1, a[4] - 1)
+            if i1 < i0 then i1 = i0 end
+            if j1 < j0 then j1 = j0 end
+            for ci = math.floor((i0 - a[1]) / z), math.floor((i1 - a[1]) / z) do
+              for cj = math.floor((j0 - a[2]) / z), math.floor((j1 - a[2]) / z) do
+                local k = ci .. ',' .. cj
+                local box = out.cells[k]
+                if not box then box = {{}} out.cells[k] = box end
+                box[c] = (box[c] or 0) + 1
+              end
+            end
+          end
+          if ours and not g and c and machine[c] then
+            for _, pl in pairs(cfg.plots) do
+              if p.x >= pl[2] and p.x < pl[4] and p.y >= pl[3] and p.y < pl[5] then
+                out.plot_machines[pl[1]] = (out.plot_machines[pl[1]] or 0) + 1
+              end
+            end
+          end
+          if ours and g then
+            out.nghosts = out.nghosts + 1
+            if W.robots and #out.ghosts < 3000 then out.ghosts[#out.ghosts + 1] = {{p.x, p.y, n}} end
+          elseif ours then
+            if W.power and t == 'electric-pole' then
+              local ok, sup = pcall(function() return e.prototype.get_supply_area_distance() end)
+              if not ok then ok, sup = pcall(function() return e.prototype.supply_area_distance end) end
+              out.poles[#out.poles + 1] = {{p.x, p.y, n, ok and sup or 2.5, e.electric_network_id or -1}}
+            end
+            if (W.power or W.recipes) and c and machine[c] then
+              local rc = ''
+              if t == 'assembling-machine' or t == 'furnace' or t == 'rocket-silo' then
+                local ok, r = pcall(e.get_recipe)
+                if ok and r then rc = r.name end
+              end
+              out.machines[#out.machines + 1] = {{p.x, p.y, n, t, e.direction, stn[e.status] or '', rc,
+                e.electric_network_id or -1}}
+            end
+            if W.power and t == 'power-switch' then
+              out.switches[#out.switches + 1] = {{p.x, p.y, e.power_switch_state}}
+            end
+            if W.defense and t == 'land-mine' then out.mines[#out.mines + 1] = {{p.x, p.y}} end
+            if W.defense and (t == 'wall' or t == 'gate') then out.walls[#out.walls + 1] = {{p.x, p.y, t}} end
+            if W.pipes then
+              if t == 'pipe' or t == 'pipe-to-ground' or t == 'pump' or t == 'storage-tank' then
+                local row = fluidrow(e)
+                if row then out.pipes[#out.pipes + 1] = row end
+              elseif c and (machine[c] or t == 'fluid-turret') then
+                local k = opens(e)
+                if k > 0 then out.opens[#out.opens + 1] = {{p.x, p.y, n, k}} end
+              end
+            end
+          elseif fo == 'enemy' and (W.defense or W.pollution) and (t == 'unit-spawner' or t == 'turret') then
+            out.nests[#out.nests + 1] = {{p.x, p.y, n, t}}
+          end
+        end
+      end
+    end
+  end
+end
+helpers.write_file('fk5/{tag}.json', helpers.table_to_json(out), false)
+rcon.print(#cfg.chunks)
+"""
+
+
+def lua_vision_wide(cfg, tag):
+    """The vision read of what reaches into the area from outside it, read only: roboports
+    (within 70 tiles) with their cells and logistic networks, turrets (within 40) with range and
+    ammo, poles in the 10-tile ring around the area. In play mode, only those on charted
+    chunks."""
+    return f"""
+local cfg = helpers.json_to_table({_q(json.dumps(cfg, sort_keys=True))})
+local s, f = game.get_surface(cfg.surface), game.forces[cfg.force]
+if not s or not f then rcon.print('no surface or force') return end
+local W, a = cfg.want, cfg.area
+local out = {{tick = game.tick, roboports = {{}}, networks = {{}}, turrets = {{}}, poles = {{}}}}
+local function seen(p)
+  if not cfg.play then return true end
+  return f.is_chunk_charted(s, {{math.floor(p.x / 32), math.floor(p.y / 32)}})
+end
+local function around(m) return {{{{a[1] - m, a[2] - m}}, {{a[3] + m, a[4] + m}}}} end
+if W.robots then
+  for _, e in pairs(s.find_entities_filtered{{area = around(70), type = 'roboport', force = f}}) do
+    if seen(e.position) then
+      local c = e.logistic_cell
+      local net = c and c.logistic_network
+      local id = net and net.network_id or -1
+      out.roboports[#out.roboports + 1] = {{e.position.x, e.position.y, e.name,
+        c and c.logistic_radius or 0, c and c.construction_radius or 0, id,
+        c and c.stationed_logistic_robot_count or 0, c and c.stationed_construction_robot_count or 0,
+        c and c.charging_robot_count or 0, c and c.to_charge_robot_count or 0}}
+      if net and not out.networks[tostring(id)] then
+        out.networks[tostring(id)] = {{net.all_logistic_robots, net.available_logistic_robots,
+          net.all_construction_robots, net.available_construction_robots}}
+      end
+    end
+  end
+end
+if W.defense then
+  for _, e in pairs(s.find_entities_filtered{{area = around(40), type = {{'ammo-turret', 'electric-turret', 'fluid-turret', 'artillery-turret'}}, force = f}}) do
+    if seen(e.position) then
+      local ok, rng = pcall(function() return e.prototype.attack_parameters.range end)
+      local ammo = {{}}
+      if e.type == 'ammo-turret' then
+        local inv = e.get_inventory(defines.inventory.turret_ammo)
+        if inv then for _, it in pairs(inv.get_contents()) do ammo[it.name] = (ammo[it.name] or 0) + it.count end end
+      end
+      out.turrets[#out.turrets + 1] = {{e.position.x, e.position.y, e.name, e.type, ok and rng or 0, ammo}}
+    end
+  end
+end
+if W.power then
+  for _, e in pairs(s.find_entities_filtered{{area = around(10), type = 'electric-pole', force = f}}) do
+    local p = e.position
+    if (p.x < a[1] or p.x >= a[3] or p.y < a[2] or p.y >= a[4]) and seen(p) then
+      local ok, sup = pcall(function() return e.prototype.get_supply_area_distance() end)
+      if not ok then ok, sup = pcall(function() return e.prototype.supply_area_distance end) end
+      out.poles[#out.poles + 1] = {{p.x, p.y, e.name, ok and sup or 2.5, e.electric_network_id or -1}}
+    end
+  end
+end
+helpers.write_file('fk5/{tag}.json', helpers.table_to_json(out), false)
+rcon.print(1)
+"""
+
+
+def vision_read(rcon, cfg, tag="vision", per_call=None, timings=None):
+    """The vision read of ``cfg``'s area (``lua_vision`` in batches of ``per_call`` chunks, then
+    ``lua_vision_wide``), merged into one dict. ``timings``: a list the seconds of each game call
+    are appended to."""
+    import time
+    per_call = per_call or VISION_CHUNKS_PER_CALL
+    tag = f"{tag}-{os.getpid()}"
+    chunks = list(cfg["chunks"])
+    merged = {"cells": {}, "dark": [], "ghosts": [], "nghosts": 0, "poles": [], "machines": [],
+              "switches": [], "mines": [], "walls": [], "nests": [], "pipes": [], "opens": [],
+              "pollution": [], "plot_machines": {}}
+    for k in range(0, max(1, len(chunks)), per_call):
+        part = dict(cfg, chunks=chunks[k:k + per_call])
+        t0 = time.time()
+        got = read_output(rcon, lua_vision(part, tag), tag, "vision read", keep=False)
+        if timings is not None:
+            timings.append(time.time() - t0)
+        merged["tick"] = got.get("tick")
+        for key, v in (got.get("cells") or {}).items():
+            box = merged["cells"].setdefault(key, {})
+            for c, n in v.items():
+                box[c] = box.get(c, 0) + n
+        for key in ("dark", "ghosts", "poles", "machines", "switches", "mines", "walls", "nests",
+                    "pipes", "opens", "pollution"):
+            v = got.get(key) or []
+            merged[key] += list(v.values()) if isinstance(v, dict) else list(v)
+        merged["nghosts"] += int(got.get("nghosts") or 0)
+        for name, n in (got.get("plot_machines") or {}).items():
+            merged["plot_machines"][name] = merged["plot_machines"].get(name, 0) + n
+    if any(cfg["want"].get(w) for w in ("robots", "defense", "power")):
+        t0 = time.time()
+        wide = read_output(rcon, lua_vision_wide(cfg, tag), tag, "vision read", keep=False)
+        if timings is not None:
+            timings.append(time.time() - t0)
+        for key in ("roboports", "turrets"):
+            v = wide.get(key) or []
+            merged[key] = list(v.values()) if isinstance(v, dict) else list(v)
+        v = wide.get("poles") or []
+        merged["poles"] += list(v.values()) if isinstance(v, dict) else list(v)
+        merged["networks"] = wide.get("networks") or {}
+    if not cfg["want"].get("cells"):
+        merged["cells"] = None
+    return merged
+
+
 def lua_paste(surface, force, bp, at):
     return f"""
 local s = game.get_surface({_q(surface)})
@@ -287,7 +541,7 @@ rcon.print(n)
 
 
 def lua_request(surface, force, pos, item, n, name=None, inventory=None):
-    """An item-request proxy (2.1.2, ``fk request``): robots bring ``n`` of ``item`` to the entity
+    """An item-request proxy (2.1.3, ``fk request``): robots bring ``n`` of ``item`` to the entity
     that stands at ``pos`` (``name``: of that prototype), into the inventory its kind takes the
     item in (robots into a roboport, ammo into a turret, fuel into a burner, modules into the
     module slots, the rest into a machine's input or a chest), or into ``inventory`` (a

@@ -26,7 +26,8 @@ RUN_DIR gets:
   play.cmd             with --player claude: starts the goal loop (.toolkit/claude_loop.py and
                        its hook claude_hook.py, from SHA) for this folder; kickoff-v1.ps1 opens it.
                        The loop starts .toolkit/watchdog.py, which opens it again when the loop
-                       dies (2.0.12)
+                       dies (2.0.12), and takes the run's stats every 5 game minutes with
+                       .toolkit/stats_sample.py into game/out/stats (2.1)
   NOTES.md             with --notes FILE: what the players before wrote down for the next one
                        (kickoff-v1.ps1 passes the newest run's NOTES.md)
   .claude/agents/worker.md
@@ -113,8 +114,10 @@ def write_worker(run, agent, model="inherit", brief="worker-v1"):
 
 
 #: a Claude Code player's goal loop and what it runs, copied into the run's .toolkit: its hooks,
-#: and (2.0.12) the watchdog the loop starts, which starts play.cmd again when the loop dies
-LOOP = ("claude_loop.py", "claude_hook.py", "wait_hook.py", "watchdog.py")
+#: (2.0.12) the watchdog the loop starts, which starts play.cmd again when the loop dies, and
+#: (2.1) the stats sampler. The game's side of the run stats needs nothing here: a new map starts
+#: from the fk-play scenario (kickoff-v1.sh), whose fk_stats.lua records every 5 game minutes
+LOOP = ("claude_loop.py", "claude_hook.py", "wait_hook.py", "watchdog.py", "stats_sample.py")
 
 #: a Claude Code player's goal loop, in its own window
 PLAY = """@echo off

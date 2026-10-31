@@ -1,4 +1,4 @@
-"""2.1.2, robots that can't reach (the runs of 10-29 to 10-31):
+"""2.1.3, robots that can't reach (the runs of 10-29 to 10-31):
 
 - ``cover robots`` lays a roboport only where one that stands (or one it lays in reach of them)
   builds it and takes it into its network, chaining toward chests out of reach;

@@ -400,7 +400,7 @@ def _module_fragment(flat, path, cat):
         # 2.0.48: a paired port's lanes are a ``lanes A | B`` pair on one side: its role is the
         # pair's (both lanes come in, or go out, on the one belt across the edge). A one-item
         # port that drives one lane of a pair drives that lane's own net, as a machine does
-        # (2.1.2: bound to the pair, the route took it for a belt already paired and failed)
+        # (2.1.3: bound to the pair, the route took it for a belt already paired and failed)
         lane_of = getattr(flat, "lane_of", {})
         paired = port.right is not None and not port.both
         for role, nets, side in ((inside_role, inner, inside_side),

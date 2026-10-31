@@ -93,7 +93,7 @@ def cover_robots(lay, cat, owner="robots", keep_out=(), roboport="roboport", ser
     that still fits and still reaches a chest of the factory stays where it stands, and so does
     its storage chest where that still fits; new roboports go only where no kept one reaches.
 
-    ``reach`` (2.1.2): [(x, y, logistic radius, construction radius)] of the roboports that stand
+    ``reach`` (2.1.3): [(x, y, logistic radius, construction radius)] of the roboports that stand
     and have power, in this factory's frame (the last diff's read), or None when none was read.
     With it, a roboport goes only where one that stands, or one this step lays in reach of them,
     builds it and takes it into its network (inside its construction area, logistic squares
@@ -219,7 +219,7 @@ _CHAIN = 12
 
 class _Links:
     """The roboports that stand (with power) and those laid in reach of them, for ``cover robots``
-    (2.1.2): a spot joins when it is inside one's construction area (robots build it there) and
+    (2.1.3): a spot joins when it is inside one's construction area (robots build it there) and
     their logistic squares meet (it joins that network, whose robots then work from it)."""
 
     def __init__(self, standing, radius):
@@ -269,7 +269,7 @@ class _Links:
 
 
 def reach(rows, standing, cat):
-    """REACH (2.1.2): of ``rows`` [(key, name, x, y)], what the paste lays, the ones outside every
+    """REACH (2.1.3): of ``rows`` [(key, name, x, y)], what the paste lays, the ones outside every
     construction area that stands or that the paste's own roboports give it. ``standing``: [(x, y,
     logistic radius, construction radius)] of the roboports that stand with power. A roboport of
     the paste gives its construction area once it is inside one that stands (robots build it) and

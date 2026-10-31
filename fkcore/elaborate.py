@@ -39,6 +39,7 @@ import dataclasses
 import os
 from dataclasses import dataclass, field
 
+from . import facts as _facts
 from . import lang
 from .templates import CONTACT, MSpec, TemplateError, literal_machines, machines as template_machines
 
@@ -544,17 +545,8 @@ TIERS = {"Assembler": ("assembling-machine-1", "assembling-machine-2", "assembli
          "Furnace": ("stone-furnace", "steel-furnace"),
          "SmelterRow": ("stone-furnace", "steel-furnace"),
          "SmelterArray": ("stone-furnace", "steel-furnace")}
-#: recipes productivity modules go into (Factorio 2.0's intermediate products)
-PRODUCTIVE = frozenset({
-    "iron-plate", "copper-plate", "steel-plate", "stone-brick", "iron-gear-wheel", "copper-cable",
-    "iron-stick", "electronic-circuit", "advanced-circuit", "processing-unit", "engine-unit",
-    "electric-engine-unit", "plastic-bar", "sulfur", "sulfuric-acid", "battery", "lubricant",
-    "explosives", "solid-fuel-from-light-oil", "solid-fuel-from-heavy-oil",
-    "solid-fuel-from-petroleum-gas", "rocket-fuel", "low-density-structure",
-    "flying-robot-frame", "basic-oil-processing", "advanced-oil-processing",
-    "heavy-oil-cracking", "light-oil-cracking", "coal-liquefaction", "uranium-processing",
-    "automation-science-pack", "logistic-science-pack", "military-science-pack",
-    "chemical-science-pack", "production-science-pack", "utility-science-pack", "rocket-part"})
+#: recipes productivity modules go into: the game's (``allowed_effects``, facts.json)
+PRODUCTIVE = _facts.productive()
 
 
 @dataclass
@@ -1284,7 +1276,7 @@ def _resolve_lanes(flat, cat):
 
 def _port_pairs(flat, cat):
     """Two nets that meet at a cell's paired port (``port f_in : in iron-ore | coal``), one on each
-    item, share a belt as the port's lanes say: an implied ``lanes A | B`` (2.1.2: the module's
+    item, share a belt as the port's lanes say: an implied ``lanes A | B`` (2.1.3: the module's
     own ``lanes`` line is enough; the runs needed a top-level one too). A net that already shares
     a belt, or that carries more than its lane's item, is left as written."""
     for key in sorted(flat.ports):

@@ -68,7 +68,7 @@ HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capi
 AREA_FIRST = ("fresh", "measure", "decon")
 #: files only the host writes: pulled, never pushed
 HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/chat-ack.json", "out/alerts.json",
-             "out/inbox.txt", "out/capital")
+             "out/inbox.txt", "out/capital", "out/stats")
 #: the build steps that read or write the game
 LINK_STEPS = ("diff", "apply")
 
@@ -218,13 +218,15 @@ def push(cfg):
     return n
 
 
-def pull(cfg):
+def pull(cfg, stats=False):
     """Bring what the host wrote in its copy of game\\ back here. A file whose content changed
-    here since the last sync keeps the change (the next push sends it)."""
+    here since the last sync keeps the change (the next push sends it). The run's stats
+    (out\\stats, 2.1: they grow all run long) come only with ``stats``: a stats command."""
     if cfg["host"] == "local":
         return
     with _turn():
-        r = _ssh(cfg, f"tar -cf - -C {shlex.quote(cfg['host_game'])} .", capture=True)
+        skip = "" if stats else "--exclude=./out/stats "
+        r = _ssh(cfg, f"tar -cf - {skip}-C {shlex.quote(cfg['host_game'])} .", capture=True)
         if r.returncode:
             sys.exit(f"fk: pull from {cfg['host']} failed")
         synced = _synced()
@@ -529,6 +531,18 @@ def main(argv):
         return code
     if cmd == "lua":
         return lua(cfg, rest)
+    if cmd == "stats" and "--sample" in rest:
+        # 2.1: the run's stats sample, on the host; no footer, so a sampler that runs on its own
+        # never takes the player's new alerts or chat
+        code = remote(cfg, ["stats", "."] + rest, footer=False)
+        pull(cfg, stats=True)
+        return code
+    if cmd == "stats" and ("--history" in rest or "--page" in rest) and cfg["host"] != "local":
+        # 2.1: pure reads of out/stats, which the host keeps: here, after a pull
+        pull(cfg, stats=True)
+        code = local(cfg, ["stats", "."] + rest)
+        footer(cfg)
+        return code
     if cmd in AREA_FIRST:
         rest = _area(rest)
     if cmd in HOST:

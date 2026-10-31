@@ -30,7 +30,13 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
   `.claude\\agents\\worker.md` (the old one kept in `.upgrade-<old sha>\\`).
 - 2.0.12: the build script gets the template's `stop_on no-route no-destination` (the stops it lacks),
   and a Claude player's `.toolkit` the loop's watchdog (watchdog.py), which the loop starts.
-- 2.1.2: and `cannot-carry`: no paste with a machine on a net whose items it takes none of.
+- 2.1.3: and `cannot-carry`: no paste with a machine on a net whose items it takes none of.
+- 2.1.0 (run stats): a Claude player's `.toolkit` gets stats_sample.py and the loop that runs it every
+  5 game minutes. The run's map keeps the script it was made with, so a map made before the fk-play
+  recorder is read over RCON, read-only; its save is not changed and nothing is registered in it.
+  A run without the loop (one driven from a conversation) gets its samples from
+  `python <run>\\.toolkit\\stats_sample.py <run>` on a schedule (any interval: it keeps only what is
+  due), or `fk stats --sample`, which skips the footer.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """
@@ -113,7 +119,7 @@ def _write_last(text):
 
 
 #: the template's second stop_on line (2.0.12): no paste with a net unrouted, or a maker whose
-#: product reaches no sink; and (2.1.2) none with a machine on a net it takes nothing from (the
+#: product reaches no sink; and (2.1.3) none with a machine on a net it takes nothing from (the
 #: 10-29 run's pole maker, dropped from its route, starved for an hour)
 STOPS = ("no-route", "no-destination", "cannot-carry")
 #: what an older run's script may still say for a stop (2.0.52's rename): read either way, so an

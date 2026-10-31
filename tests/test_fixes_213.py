@@ -1,4 +1,4 @@
-"""2.1.2, the small fixes from the runs (review of 2026-10-31): read-terrain merges an area into
+"""2.1.3, the small fixes from the runs (review of 2026-10-31): read-terrain merges an area into
 the file, a stop_on word matches a check whether it is written with dashes or underscores, and
 the template stops on cannot-carry."""
 import contextlib

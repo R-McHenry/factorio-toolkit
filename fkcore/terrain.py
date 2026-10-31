@@ -289,7 +289,7 @@ def merge(surface, area, parts) -> "Terrain":
 
 
 def combine(old: "Terrain", new: "Terrain") -> "Terrain":
-    """A read of ``new.area`` merged into what ``old`` holds (2.1.2: ``read-terrain --area`` had
+    """A read of ``new.area`` merged into what ``old`` holds (2.1.3: ``read-terrain --area`` had
     replaced the whole file with the one area, and a run lost its base's terrain). Inside the new
     area the new read wins, tile by tile; outside it the old file stays. The area is the box round
     both. Counts (enemies, blocking tiles by name) add up when the two areas don't meet, and take

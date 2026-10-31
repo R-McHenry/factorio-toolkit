@@ -105,7 +105,7 @@ class ApplyReport:
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
-    released: dict = field(default_factory=dict)  # roboports not held, and why (2.1.2)
+    released: dict = field(default_factory=dict)  # roboports not held, and why (2.1.3)
     hand: list = field(default_factory=list)   # placed by hand, replaced or removed (2.0)
     turned: list = field(default_factory=list)  # keys found turned, ordered out, laid fresh (2.0.5)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
@@ -425,7 +425,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     return rep
 
 
-#: why an old roboport is not held up (2.1.2)
+#: why an old roboport is not held up (2.1.3)
 MOVED_OUT = "the toolkit's own, moved or dropped in the design"
 STOCK_OUT = "since the network holds too few roboports to build the design's: theirs build them"
 
@@ -453,7 +453,7 @@ def _waiting_roboports(before, cat):
 
 def _scaffold_stock(r, surface, force, before, cat):
     """{roboport name: items of it in the networks whose construction areas reach the design's
-    roboports waiting to be built}, or None when none waits or the read fails (2.1.2)."""
+    roboports waiting to be built}, or None when none waits or the read fails (2.1.3)."""
     waiting = _waiting(before, cat)
     if not waiting:
         return None
@@ -489,7 +489,7 @@ rcon.print(helpers.table_to_json(out))
 
 def _released(before, s, cat, area, held):
     """{why: how many} of the built unowned roboports :func:`scaffold` would have held before
-    2.1.2 and orders out now."""
+    2.1.3 and orders out now."""
     old = scaffold(before, s, cat, area, moved=False)
     out = {}
     for v in before.verdicts:
@@ -507,7 +507,7 @@ def scaffold(before, s, cat, area, stock=None, moved=True):
     yet (a ghost, missing, or under something else). One under a design tile goes as before (the
     paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}.
 
-    2.1.2: a roboport the design moved or dropped (the toolkit's own) is never held: it goes as
+    2.1.3: a roboport the design moved or dropped (the toolkit's own) is never held: it goes as
     any unowned entity does (the 10-31 run's moved roboports stood after two applies; ``moved``
     False keeps the 1.7 rule). ``stock``: {roboport name: items in the network} for the design's
     roboports waiting; no old roboport is held while the network holds fewer than they need: the

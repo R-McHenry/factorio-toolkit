@@ -93,14 +93,14 @@ class LexerTest(unittest.TestCase):
 
 class LabScenarioTest(unittest.TestCase):
     def test_lua_files_are_well_formed(self):
-        for name in ("control.lua", "fk_lab.lua", "fk_chat.lua"):
+        for name in ("control.lua", "fk_lab.lua", "fk_chat.lua", "fk_stats.lua"):
             check_blocks(lex(read(name)))
 
     def test_control_is_freeplay_plus_the_lab(self):
         code = code_only(read("control.lua"))
         libs = re.findall(r'add_lib \( require \( "([^"]+)" \) \)', code)
         self.assertEqual(libs, ["__base__/script/freeplay/freeplay", "space-finish-script",
-                                "silo-script", "fk_lab", "fk_chat"])
+                                "silo-script", "fk_lab", "fk_chat", "fk_stats"])
         self.assertIn('script . active_mods [ "space-age" ]', code)
         desc = json.loads(read("description.json"))
         self.assertTrue(desc["multiplayer-compatible"])
@@ -141,6 +141,25 @@ class LabScenarioTest(unittest.TestCase):
         self.assertIn("storage . fk_chat", code)
         self.assertIn("local MAX = 200", code)
         self.assertIn("table . remove ( t , 1 )", code)        # a ring: the oldest goes first
+
+    def test_stats_recorder_rules(self):
+        """2.1: one on_nth_tick handler through event_handler (scenario code), every 5 game
+        minutes, that only reads: its sample in a pcall, written on the server only."""
+        code = code_only(read("fk_stats.lua"))
+        self.assertIn("local EVERY = 5 * 60 * 60", code)
+        self.assertIn("stats . on_nth_tick = { [ EVERY ] = function ( event )", code)
+        self.assertNotIn("script . on_", code)
+        self.assertNotIn("commands . add_command", code)
+        self.assertNotIn("defines . events", code)
+        self.assertNotRegex(code, r"\bstorage\b")         # nothing kept in the save
+        self.assertNotRegex(code, r"\bglobal\b")
+        self.assertIn("pcall ( fk_stats_sample , f , s )", code)
+        self.assertIn("helpers . write_file ( FILE , helpers . table_to_json ( sample ) .. "
+                      '"\\n" , true , 0 )', code)
+        # what it reads, it only reads: no assignment to a game object's field
+        for bad in ("create_entity", "destroy", ".insert", "set_recipe", "research_queue=",
+                    "add_research", "tick_paused", ".speed="):
+            self.assertNotIn(bad, code.replace(" ", ""))
 
 
 if __name__ == "__main__":

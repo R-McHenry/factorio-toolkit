@@ -29,9 +29,15 @@ Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py capital SAVE.zip
                                             2.0.69: the working capital on a played map, two
                                             reads 30 game seconds apart
-    python tools/laptop_server.py fixes     2.1.2: capture takes its own slot, the REACH read,
+    python tools/laptop_server.py fixes     2.1.3: capture takes its own slot, the REACH read,
                                             fk request (robots bring the ammo), and the scaffold
                                             order (a moved roboport goes; none held without stock)
+    python tools/laptop_server.py stats [SAVE.zip]
+                                            2.1: run stats on a small base made here: the
+                                            scenario's recorder writes a sample every 5 game
+                                            minutes, the RCON read gives the same numbers, the
+                                            research line's rate and its stall; with a save, the
+                                            RCON path and the capital on that map
 """
 from __future__ import annotations
 
@@ -698,7 +704,7 @@ def check_capital(save=None):
 
 
 def check_fixes():
-    """2.1.2, the fixes from the runs, in the game:
+    """2.1.3, the fixes from the runs, in the game:
 
     - capture: a slot's blueprint takes only what stands in it (a drill of the next slot whose box
       reaches over the edge stays out);
@@ -830,9 +836,382 @@ def check_fixes():
     return 1 if bad else 0
 
 
+#: check_vision's base around games/lab-sense (iron 310,420 20x24, gears 332,420 16x16): power
+#: network A (an energy interface, poles, two assemblers, a laser turret, roboport A with robots
+#: and a storage chest, a requester), a power switch left open to network B (an assembler with no
+#: power), roboport B far east (its own logistic network), ghosts inside A's construction area
+#: (robots fly) and two outside every construction area, two gun turrets (one empty), a wall with a
+#: gate and a gap, land mines, a nest and a worm, pollution, a water line with a pump and a tank, a
+#: crude line, and a chemical plant no pipe meets. Test setup, by Lua.
+VISION_SETUP = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local function at(name, x, y, extra)
+  local t = {name = name, position = {x, y}, force = f}
+  for k, v in pairs(extra or {}) do t[k] = v end
+  return s.create_entity(t)
+end
+local function wire(a, b, ida, idb)
+  a.get_wire_connector(ida or defines.wire_connector_id.pole_copper, true).connect_to(
+    b.get_wire_connector(idb or defines.wire_connector_id.pole_copper, true))
+end
+local eei = at('electric-energy-interface', 281, 461)
+eei.power_production = 1000000
+eei.electric_buffer_size = 10000000
+local pa = {at('medium-electric-pole', 283.5, 461.5), at('medium-electric-pole', 290.5, 461.5),
+            at('medium-electric-pole', 297.5, 461.5), at('medium-electric-pole', 283.5, 468.5),
+            at('medium-electric-pole', 283.5, 475.5), at('medium-electric-pole', 290.5, 468.5)}
+wire(pa[1], pa[2]) wire(pa[2], pa[3]) wire(pa[1], pa[4]) wire(pa[4], pa[5]) wire(pa[2], pa[6])
+at('assembling-machine-2', 288.5, 465.5, {recipe = 'iron-gear-wheel'})
+at('assembling-machine-2', 293.5, 465.5, {recipe = 'copper-cable'})
+at('laser-turret', 291, 471)
+local sw = at('power-switch', 301, 462)
+local pb = at('medium-electric-pole', 307.5, 461.5)
+wire(pa[3], sw, nil, defines.wire_connector_id.power_switch_left_copper)
+wire(pb, sw, nil, defines.wire_connector_id.power_switch_right_copper)
+sw.power_switch_state = false
+at('assembling-machine-2', 310.5, 465.5, {recipe = 'electronic-circuit'})
+local ra = at('roboport', 287, 477)
+ra.insert{name = 'construction-robot', count = 10}
+ra.insert{name = 'logistic-robot', count = 5}
+local st = at('storage-chest', 293.5, 477.5)
+st.insert{name = 'wooden-chest', count = 50}
+st.insert{name = 'iron-plate', count = 200}
+local rq = at('requester-chest', 309.5, 498.5)
+rq.get_logistic_sections().get_section(1).set_slot(1, {value = 'iron-plate', min = 200})
+for k = 0, 9 do at('entity-ghost', 330.5 + k, 497.5, {inner_name = 'wooden-chest'}) end
+at('entity-ghost', 343.5, 492.5, {inner_name = 'wooden-chest'})
+at('entity-ghost', 343.5, 493.5, {inner_name = 'wooden-chest'})
+local rb = at('roboport', 400, 476)
+rb.insert{name = 'construction-robot', count = 2}
+local g1 = at('gun-turret', 360, 470)
+g1.insert{name = 'firearm-magazine', count = 20}
+at('gun-turret', 372, 470)
+for x = 350, 390 do
+  if x == 370 then at('gate', x + 0.5, 486.5, {direction = defines.direction.east})
+  else at('stone-wall', x + 0.5, 486.5) end
+end
+for k = 0, 2 do at('land-mine', 355.5 + 2 * k, 495.5) end
+s.create_entity{name = 'biter-spawner', position = {410, 440}, force = 'enemy'}
+s.create_entity{name = 'small-worm-turret', position = {405, 455}, force = 'enemy'}
+for x = 320, 327 do at('pipe', x + 0.5, 472.5).insert_fluid{name = 'water', amount = 50} end
+at('pump', 329, 472.5, {direction = defines.direction.east})
+for x = 330, 335 do at('pipe', x + 0.5, 472.5).insert_fluid{name = 'water', amount = 20} end
+local tank = at('storage-tank', 317.5, 473.5)
+tank.insert_fluid{name = 'water', amount = 8000}
+for x = 320, 326 do at('pipe', x + 0.5, 477.5).insert_fluid{name = 'crude-oil', amount = 40} end
+at('chemical-plant', 340.5, 476.5, {recipe = 'plastic-bar'})
+game.map_settings.pollution.enabled = true
+s.pollute({400, 430}, 200)
+s.pollute({300, 470}, 50)
+s.pollute({330, 430}, 800)
+rcon.print('ok')
+"""
+
+#: check_vision's big base: per chunk of the area, nine assemblers, a belt row, inserters and
+#: poles (about 60 entities a chunk), laid in batches of chunks.
+VISION_BIG = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local n = 0
+for cx = CX0, CX1 do for cy = CY0, CY1 do
+  local x, y = cx * 32, cy * 32
+  for i = 0, 2 do for j = 0, 2 do
+    if s.create_entity{name = 'assembling-machine-2', position = {x + 2.5 + 4 * i, y + 2.5 + 4 * j}, force = f, recipe = 'iron-gear-wheel'} then n = n + 1 end
+  end end
+  for i = 0, 31 do
+    if s.create_entity{name = 'transport-belt', position = {x + i + 0.5, y + 14.5}, direction = defines.direction.east, force = f} then n = n + 1 end
+    if s.create_entity{name = 'transport-belt', position = {x + 20.5, y + i + 0.5}, direction = defines.direction.south, force = f} then n = n + 1 end
+  end
+  for i = 0, 8 do
+    if s.create_entity{name = 'inserter', position = {x + 1.5 + i, y + 13.5}, force = f} then n = n + 1 end
+  end
+  for i = 0, 3 do
+    if s.create_entity{name = 'medium-electric-pole', position = {x + 24.5, y + 0.5 + 8 * i}, force = f} then n = n + 1 end
+  end
+end end
+rcon.print(n)
+"""
+
+
+#: check_stats' base: power from an energy interface and solar panels (always day), an accumulator,
+#: two assemblers (one with plates, one without), an electric furnace with ore, two labs (one with
+#: red packs) on a queue of red techs, and a second network of its own (a panel and a lamp)
+STATS_SETUP = """
+local s, f = game.surfaces.nauvis, game.forces.player
+s.always_day = true
+s.request_to_generate_chunks({0, 0}, 3)
+s.force_generate_chunk_requests()
+local tiles = {}
+for x = -10, 45 do for y = -10, 20 do tiles[#tiles + 1] = {name = 'landfill', position = {x, y}} end end
+s.set_tiles(tiles)
+for _, e in pairs(s.find_entities_filtered{area = {{-10, -10}, {45, 20}}}) do
+  if e.valid and e.type ~= 'character' then e.destroy() end
+end
+local eei = s.create_entity{name = 'electric-energy-interface', position = {1, 1}, force = f}
+eei.power_production = 3000000 / 60
+eei.electric_buffer_size = 3000000
+s.create_entity{name = 'solar-panel', position = {4.5, 1.5}, force = f}
+s.create_entity{name = 'accumulator', position = {8, 1}, force = f}
+local a1 = s.create_entity{name = 'assembling-machine-2', position = {11.5, 1.5}, force = f}
+a1.set_recipe('iron-gear-wheel')
+a1.insert{name = 'iron-plate', count = 400}
+local a2 = s.create_entity{name = 'assembling-machine-2', position = {15.5, 1.5}, force = f}
+a2.set_recipe('iron-gear-wheel')
+local l1 = s.create_entity{name = 'lab', position = {19.5, 1.5}, force = f}
+l1.insert{name = 'automation-science-pack', count = 400}
+s.create_entity{name = 'lab', position = {23.5, 1.5}, force = f}
+local fu = s.create_entity{name = 'electric-furnace', position = {27.5, 1.5}, force = f}
+fu.insert{name = 'iron-ore', count = 20}
+for _, x in pairs{2.5, 9.5, 16.5, 23.5, 28.5} do
+  s.create_entity{name = 'medium-electric-pole', position = {x, -1.5}, force = f}
+end
+s.create_entity{name = 'solar-panel', position = {38.5, 10.5}, force = f}
+s.create_entity{name = 'small-lamp', position = {40.5, 12.5}, force = f}
+s.create_entity{name = 'medium-electric-pole', position = {40.5, 10.5}, force = f}
+for _, t in pairs{'steam-power', 'electronics', 'automation-science-pack'} do
+  f.technologies[t].researched = true
+end
+for _, t in pairs{'automation', 'logistics', 'steel-processing', 'fast-inserter', 'logistic-science-pack'} do
+  f.add_research(t)
+end
+local ids = {}
+for _, p in pairs(s.find_entities_filtered{type = 'electric-pole'}) do ids[p.electric_network_id] = true end
+local n = 0
+for _ in pairs(ids) do n = n + 1 end
+rcon.print(n)
+"""
+
+
+def check_vision():
+    """2.1 vision: a small base around games/lab-sense (VISION_SETUP) looked at with --layers
+    all at zoom 1, 4 and 16, as text and as a PNG; then a big base (about 60k entities on 1024
+    chunks) looked at zoom 16 and 32 over the whole of it, timed; then fair play on nauvis in play
+    mode: a map look draws only the charted chunk. Everything goes to out/vision-check/."""
+    import json
+    from unittest import mock
+    from fkcore import apply as applymod, look, vision
+    from fkcore.catalog import Catalog
+    cat = Catalog.load()
+    out = os.path.join(ROOT, "out", "vision-check")
+    game = os.path.join(out, "game")
+    shutil.rmtree(game, ignore_errors=True)
+    shutil.copytree(os.path.join(ROOT, "games", "lab-sense"), game)
+    play = os.path.join(out, "game-play")
+    shutil.rmtree(play, ignore_errors=True)
+    os.makedirs(play)
+    with open(os.path.join(play, "nauvis.surface"), "w", encoding="utf-8") as fh:
+        fh.write("surface  nauvis\nmode     play\nterrain  none\ncatalog  base\n")
+    area = (270, 410, 420, 500)
+    big = (1024, -512, 2048, 512)
+    results, ok = {}, True
+
+    def save(name, lines):
+        with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+
+    with LaptopServer("vision", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area("lab", "lab", (area[0] - 64, area[1] - 64,
+                                                        area[2] + 64, area[3] + 64)))
+            sf, _lay, _p, s = look.composed(game, cat)
+            rep = applymod.apply(r, s, cat, mode="lab", force="lab")
+            print("\n".join(rep.lines()[:3]))
+            print("setup:", r.lua(VISION_SETUP).strip())
+            time.sleep(1)
+            for z in (1, 4, 16):
+                t0 = time.time()
+                lk = look.run(r, game, cat, area, notify="off",
+                              view=vision.View(z, vision.LAYERS))
+                took = time.time() - t0
+                lines = lk.lines()
+                save(f"look-z{z}.txt", lines)
+                png = os.path.join(out, f"look-z{z}.png")
+                lki = look.run(r, game, cat, area, notify="off",
+                               view=vision.View(z, vision.LAYERS, png))
+                save(f"look-z{z}-image.txt", lki.lines())
+                results[f"z{z}"] = (took, len(lines), png)
+                print(f"zoom {z}: {len(lines)} lines in {took:.2f} s; {png}")
+            cap = link.snapshot(r, "lab", area, "plain", keep=False)
+            with mock.patch.object(link, "snapshot", lambda *_a, **_k: cap):
+                plain = look.run(r, game, cat, area, notify="off")
+                same = plain.lines() == look.run(r, game, cat, area, notify="off",
+                                                 view=vision.View()).lines()
+            save("look-plain.txt", plain.lines())
+            print("zoom 1, no layers: the plain look", "OK" if same else "NOT the same")
+            ok = ok and same
+            # the big base
+            r.lua(link.lua_generate_area("lab", "lab", big))
+            laid, t0 = 0, time.time()
+            cxs = list(range(big[0] // 32, big[2] // 32))
+            for k in range(0, len(cxs), 2):
+                lua = (VISION_BIG.replace("CX0", str(cxs[k])).replace("CX1", str(cxs[min(k + 1, len(cxs) - 1)]))
+                       .replace("CY0", str(big[1] // 32)).replace("CY1", str(big[3] // 32 - 1)))
+                laid += int(r.lua(lua).strip())
+            print(f"big base: {laid} entities laid in {time.time() - t0:.1f} s")
+            for z, layers in ((32, ()), (16, ()), (16, vision.LAYERS), (8, ())):
+                t0 = time.time()
+                lk = look.run(r, game, cat, big, notify="off",
+                              view=vision.View(z, layers, os.path.join(
+                                  out, f"big-z{z}{'-all' if layers else ''}.png")))
+                took = time.time() - t0
+                save(f"big-z{z}{'-all' if layers else ''}.txt", lk.lines())
+                results[f"big z{z}{' all' if layers else ''}"] = (took, max(lk.calls), len(lk.calls))
+                print(f"big base, zoom {z}{' layers all' if layers else ''}: {took:.2f} s, "
+                      f"{len(lk.calls)} game calls, longest {max(lk.calls):.2f} s")
+                ok = ok and max(lk.calls) < 5
+            lk = look.run(r, game, cat, big, notify="off", view=vision.View(16))
+            save("big-z16.txt", lk.lines())
+            # fair play: nauvis in play mode, two chunks built and charted by nobody (a
+            # headless server with no player charts nothing, even after force.chart)
+            setup = """
+local s, f = game.surfaces.nauvis, game.forces.player
+s.request_to_generate_chunks({1040, 16}, 2)
+s.force_generate_chunk_requests()
+local tiles = {}
+for x = 1024, 1087 do for y = 0, 31 do tiles[#tiles + 1] = {name = 'landfill', position = {x, y}} end end
+s.set_tiles(tiles)
+for _, e in pairs(s.find_entities_filtered{area = {{1024, 0}, {1088, 32}}}) do e.destroy() end
+f.cancel_charting(s)
+for _, c in pairs({{1032.5, 8.5}, {1064.5, 8.5}}) do
+  s.create_entity{name = 'assembling-machine-2', position = c, force = f}
+end
+f.chart(s, {{1024, 0}, {1055, 31}})
+rcon.print(tostring(f.is_chunk_charted(s, {32, 0})) .. ' ' .. tostring(f.is_chunk_charted(s, {33, 0})))
+"""
+            print("play setup (chunk 32,0 and 33,0 charted):", r.lua(setup).strip())
+            time.sleep(1)
+            pl = look.run(r, play, cat, (1024, 0, 1088, 32), notify="off",
+                          view=vision.View(8, ("recipes", "power")))
+            save("play-z8.txt", pl.lines())
+            rows = [ln for ln in pl.lines() if ln[:5].strip().lstrip("-").isdigit()]
+            print("\n".join(pl.lines()))
+            fair = bool(rows) and all(r_[17:25] == "        " for r_ in rows) \
+                and "recipes: no crafting machine here" in pl.lines()
+            print("fair play (uncharted chunks are blank, their machines unread):",
+                  "OK" if fair else "NOT")
+            ok = ok and fair
+    with open(os.path.join(out, "results.json"), "w", encoding="utf-8") as fh:
+        json.dump(results, fh, indent=1)
+    print("vision:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
+def _run_to(r, tick, speed=64, limit=120):
+    """Run the paused game to ``tick`` exactly (ticks_to_run), fast, and pause it there."""
+    now = int(r.lua("rcon.print(game.tick)").strip())
+    if tick > now:
+        r.lua(f"game.speed = {speed} game.tick_paused = true game.ticks_to_run = {tick - now} "
+              "rcon.print(1)")
+    t0 = time.time()
+    while int(r.lua("rcon.print(game.tick)").strip()) < tick and time.time() - t0 < limit:
+        time.sleep(0.3)
+    return int(r.lua("game.speed = 1 rcon.print(game.tick)").strip())
+
+
+def check_stats(save=None):
+    """2.1: the run stats on a laptop server (module docstring)."""
+    import json
+    import tempfile
+    from fkcore import runstats, supply
+    from fkcore.catalog import Catalog
+    save = save or (sys.argv[2] if len(sys.argv) > 2 else None)
+    if save:
+        return _check_stats_save(save)
+    cat = Catalog.load()
+    tmp = tempfile.mkdtemp(prefix="fk-stats-")
+    rec, viarcon, empty = (os.path.join(tmp, n) for n in ("rec", "rcon", "empty"))
+    os.makedirs(empty)
+    took, ok = [], True
+    with LaptopServer("stats21", scenario="fk-play") as srv:
+        out = os.path.join(srv.write, "script-output")
+        with srv.rcon() as r:
+            print("setup: electric networks", r.lua(STATS_SETUP).strip())
+            r.lua("game.tick_paused = true rcon.print(1)")
+            for k in (1, 2, 3):
+                # the RCON read at the tick the recorder writes at; the recorder's line is there
+                # once that tick has run
+                for game, where, now in ((viarcon, empty, True), (rec, out, False)):
+                    tick = _run_to(r, k * runstats.EVERY + (game == rec))
+                    t0 = time.time()
+                    lines = runstats.sample(r, game, cat, "player", "nauvis", now=now,
+                                            out_dir=where)
+                    took.append(time.time() - t0)
+                    print(f"tick {tick} {'recorder' if game == rec else 'rcon'}: "
+                          + " | ".join(lines))
+            sup = supply.read(r, "player", "nauvis")
+            busy = supply.research_line(sup.research)
+            r.lua("for _, l in pairs(game.surfaces.nauvis.find_entities_filtered{type = 'lab'}) do "
+                  "l.get_inventory(defines.inventory.lab_input).clear() end rcon.print(1)")
+            _run_to(r, 3 * runstats.EVERY + 2 * 3600 + 1)
+            stalled = supply.research_line(supply.read(r, "player", "nauvis").research)
+        recorded = open(os.path.join(out, *runstats.RECORDER.split("/")), encoding="utf-8").read()
+    print(f"recorder file: {len(recorded.splitlines())} lines, {len(recorded)} bytes")
+    print(f"research line, labs busy: {busy}")
+    print(f"research line, packs taken out, 2 game minutes on: {stalled}")
+    a, b = runstats.Store(rec), runstats.Store(viarcon)
+    worst = 0.0
+    for series in ("items", "fluids", "power"):
+        ra = {(x["from"], x["tick"]): x for x in runstats.windows(a.read(series))}
+        rb = {(x["from"], x["tick"]): x for x in runstats.windows(b.read(series))}
+        both = sorted(set(ra) & set(rb))
+        print(f"{series}: recorder windows {sorted(ra)}, rcon windows {sorted(rb)}")
+        ok = ok and len(both) == 3
+        for key in both:
+            for side in ("made", "used"):
+                da, db = ra[key].get(side) or {}, rb[key].get(side) or {}
+                for n in set(da) | set(db):
+                    va, vb = float(da.get(n, 0)), float(db.get(n, 0))
+                    worst = max(worst, abs(va - vb) / max(1.0, abs(va), abs(vb)))
+    print(f"recorder against RCON, the same windows: largest relative difference {worst:.2e}")
+    print("\n".join(runstats.history_lines(rec)))
+    path = runstats.write_page(rec, "stats21 laptop check")
+    print(f"page: {path}, {os.path.getsize(path)} bytes")
+    m = runstats.Store(rec).read("machines")[-1]
+    print("machines:", json.dumps(m["machines"], sort_keys=True), json.dumps(m["recipes"],
+                                                                             sort_keys=True))
+    p = runstats.windows(a.read("power"))[-1]
+    print("power, the last window:", json.dumps(runstats.power_classes(p)))
+    print(f"samples took {', '.join(f'{t:.2f}' for t in took)} s")
+    ok = (ok and worst < 1e-6 and max(took) < 5 and len(recorded.splitlines()) == 3
+          and busy.startswith("research ") and "packs/min" in busy
+          and stalled.startswith("RESEARCH STALLED")
+          and "no lab holds automation-science-pack" in stalled)
+    print("run stats:", "OK" if ok else "NOT as designed")
+    print(f"(the stores are in {tmp})")
+    return 0 if ok else 1
+
+
+def _check_stats_save(save):
+    """The RCON path and the capital on a played map: two samples 5 game minutes apart."""
+    import tempfile
+    from fkcore import runstats, supply
+    from fkcore.catalog import Catalog
+    cat, game = Catalog.load(), tempfile.mkdtemp(prefix="fk-stats-save-")
+    took = []
+    with LaptopServer("stats21save", save=save) as srv:
+        with srv.rcon() as r:
+            r.lua("game.tick_paused = true rcon.print(1)")
+            start = int(r.lua("rcon.print(game.tick)").strip())
+            for k in (0, 1):
+                _run_to(r, start + k * runstats.EVERY)
+                t0 = time.time()
+                lines = runstats.sample(r, game, cat, "player", "nauvis",
+                                        out_dir=os.path.join(srv.write, "script-output"))
+                took.append(time.time() - t0)
+                print(" | ".join(lines))
+            print(supply.research_line(supply.read(r, "player", "nauvis").research))
+        recorder = os.path.exists(os.path.join(srv.write, "script-output", "fk-stats"))
+    print("\n".join(runstats.history_lines(game)))
+    print("the map's own recorder:", "wrote samples" if recorder else "none (read over RCON)")
+    path = runstats.write_page(game, os.path.basename(save))
+    print(f"page: {path}, {os.path.getsize(path)} bytes; samples took "
+          + ", ".join(f"{t:.2f}" for t in took) + " s")
+    return 0 if max(took) < 5 else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
                       "turned": check_turned, "health": check_health,
                       "settings": check_settings, "lab": check_lab,
-                      "capital": check_capital, "fixes": check_fixes}[what]())
+                      "capital": check_capital, "fixes": check_fixes,
+                      "vision": check_vision, "stats": check_stats}[what]())

@@ -1,4 +1,4 @@
-"""2.1.2: two nets into a cell's paired port (``f_in : in iron-ore | coal``), one per lane.
+"""2.1.3: two nets into a cell's paired port (``f_in : in iron-ore | coal``), one per lane.
 
 The runs fed SmelterPair's ``f_in`` and ChemCell's ``ea_in`` from two nets whose drivers were
 module ports, and route failed: ``expand`` bound the one-item driver port to the pair itself, so
