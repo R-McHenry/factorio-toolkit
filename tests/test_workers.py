@@ -215,6 +215,20 @@ class WatchTest(unittest.TestCase):
             self.watch.check()
             self.assertIn("nothing researches", self.watch.take_notes())   # again, a new gap
 
+    def test_the_working_capital_ends_the_world_line(self):
+        # 2.0.69: read every CAPITAL seconds, kept between reads
+        status = {"ghosts": [], "research": {"name": "robotics", "pct": 48}}
+        self.watch.cfg = {"host": "computah-ct"}
+        said = []
+        with mock.patch.object(claude_loop, "host_status", lambda *a: dict(status)), \
+                mock.patch.object(claude_loop, "host_capital",
+                                  lambda *a: said.append(1) or "working capital 41% of 3k"):
+            self.watch.check(world=True)
+            self.watch.check(world=True)
+        with open(os.path.join(self.run, ".loop", "world.txt"), encoding="utf-8") as fh:
+            self.assertTrue(fh.read().rstrip().endswith("; working capital 41% of 3k."))
+        self.assertEqual(said, [1])                                # once per CAPITAL seconds
+
     def test_a_dead_base_and_the_reactors_fuel_are_notes_once_each_time(self):
         # 2.0.12, the solo run: the base stood dead 13:55-16:09 while the player watched research
         dead = {"iron-plate": {"min": 0, "ever": 9}, "copper-plate": {"min": 0, "ever": 9}}

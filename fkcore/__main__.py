@@ -46,6 +46,15 @@ use the game link, and only with FK_LINK=on)
                                           is idle: the line says how many are where
     chart GAME_DIR [--force F]            the surface's charted chunks: count and bounding box
                                           (a free read, never an alert)
+    capital GAME_DIR [--area X0,Y0,X1,Y1] [--brief] [--force F]
+                                          working capital: what the base owns, in raw units,
+                                          working (machines that ran, robots in the air,
+                                          research in use) against idle (stock, machines that
+                                          stood, unused research); infrastructure left out
+                                          (a free read, never an alert; fkcore.capital)
+    capital GAME_DIR --park X0,Y0,X1,Y1 --why TEXT | --unpark N | --weight TECH=W
+                                          leave an area out on purpose (always reported), or
+                                          weigh a technology (1 counts it fully, 0 not at all)
     split-to-chest GAME_DIR FACTORY NET NAME --at X,Y [--requester --item I [--rate R]]
                                           a chest joins NET as one more endpoint; only NET
                                           is re-routed by the next build
@@ -211,6 +220,47 @@ def _free_read(a, cat):
     items = [i for i in (a.items or "").split(",") if i] or None
     return _world(a, cat, "stats", lambda r: freereads.stats_lines(
         freereads.stats(r, force, sf.name, items, a.window)))
+
+
+def _capital(a, cat):
+    """``capital``: the working capital read (fkcore.capital), or a change to what is parked."""
+    from . import capital
+    from .apply import force_for
+    store = capital.Store(a.game, _area(a.area) if a.area else None)
+    cfg = store.config
+    if a.park or a.unpark or a.weight:
+        if a.park:
+            if not a.why:
+                print("error: capital --park: say why with --why", file=sys.stderr)
+                return 2
+            cfg["parked"].append({"area": list(_area(a.park)), "why": a.why})
+            print(f"parked {len(cfg['parked'])}: {a.park} ({a.why}): left out of the working "
+                  "capital, and reported as parked")
+        if a.unpark:
+            if not 1 <= a.unpark <= len(cfg["parked"]):
+                print(f"error: capital --unpark: {len(cfg['parked'])} areas are parked",
+                      file=sys.stderr)
+                return 2
+            p = cfg["parked"].pop(a.unpark - 1)
+            print(f"unparked {a.unpark}: {p.get('area')} ({p.get('why')}): counted again")
+        if a.weight:
+            tech, _, w = a.weight.partition("=")
+            try:
+                cfg["weights"][tech] = float(w)
+            except ValueError:
+                print("error: capital --weight TECH=W, W a number", file=sys.stderr)
+                return 2
+            print(f"weight {tech} = {float(w):g}")
+        store.save_config(cfg)
+        return 0
+    try:
+        sf = surfacemod.load_game(a.game)
+    except (surfacemod.SurfaceError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    force = a.force or force_for(sf.mode)
+    return _world(a, cat, "capital", lambda r: capital.run(
+        r, a.game, cat, force, sf.name, _area(a.area) if a.area else None, a.brief))
 
 
 def _look(a, cat):
@@ -1103,6 +1153,17 @@ def main(argv=None):
                                              "in roboports (a free read, never an alert)")
     sk.add_argument("game")
     sk.add_argument("--force")
+    ca = sub.add_parser("capital", description="working capital: what the base owns in raw "
+                                               "units, working against idle (a free read, "
+                                               "never an alert)")
+    ca.add_argument("game")
+    ca.add_argument("--area")
+    ca.add_argument("--brief", action="store_true")
+    ca.add_argument("--force")
+    ca.add_argument("--park")
+    ca.add_argument("--why")
+    ca.add_argument("--unpark", type=int)
+    ca.add_argument("--weight")
     se = sub.add_parser("sense")
     se.add_argument("game")
     se.add_argument("capture")
@@ -1283,6 +1344,8 @@ def main(argv=None):
         return _world(a, cat, "fresh", lambda r: fresh.run(r, a.game, cat, _area(a.area)))
     if a.cmd in ("stats", "chart", "stock"):
         return _free_read(a, cat)
+    if a.cmd == "capital":
+        return _capital(a, cat)
     if a.cmd == "sense":
         return _sense(a, cat)
     if a.cmd == "split-to-chest":

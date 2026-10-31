@@ -579,6 +579,15 @@ fk stock                         what the base holds, per item: chests, roboport
                                  the robots in the air (free to read). A robot in a chest is an
                                  item and does nothing; the line says how many are flying, how
                                  many in roboports and how many in chests
+fk capital [--area X0,Y0,X1,Y1]  working capital (free to read): what the base owns in raw units,
+                                 working against idle. Working: machines as they ran since the last
+                                 read, robots in the air, research whose unlocks are in use. Idle:
+                                 every item anywhere (malls' stock too), machines that stood, robots
+                                 in roboports, research nothing uses. Belts, inserters, poles,
+                                 chests, roboports and power are left out. The world line carries it
+fk capital --park X0,Y0,X1,Y1 --why TEXT
+                                 leave an area out of it on purpose (it stays in the report as
+                                 parked); --unpark N counts it again, --weight TECH=W weighs a tech
 fk chart                         how much of the map is explored (free to read)
 fk alerts                        the alert panel now (new alerts also come by themselves)
 fk lua "CODE"                    run a Lua chunk in the game: its rcon.print comes back (read,

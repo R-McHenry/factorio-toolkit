@@ -61,13 +61,14 @@ STAMP = os.path.join(GAME, "out", ".synced")
 LOCAL = {"rates", "plan", "check", "explain", "unfold", "dnp", "render", "layout", "split-to-chest",
          "merge", "insert", "chests-to-net", "net-to-chests"}
 #: commands that need the game: they run on the host, with the link on
-HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "read-terrain", "measure",
-        "adopt", "sense", "research", "tech", "recipes", "lua", "fresh", "avail", "decon"}
+HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capital",
+        "read-terrain", "measure", "adopt", "sense", "research", "tech", "recipes", "lua", "fresh",
+        "avail", "decon"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
 AREA_FIRST = ("fresh", "measure", "decon")
 #: files only the host writes: pulled, never pushed
 HOST_MADE = ("out/.synced", "out/chat-cursor.json", "out/chat-ack.json", "out/alerts.json",
-             "out/inbox.txt")
+             "out/inbox.txt", "out/capital")
 #: the build steps that read or write the game
 LINK_STEPS = ("diff", "apply")
 

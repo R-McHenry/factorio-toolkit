@@ -88,6 +88,7 @@ MIN_ROUND = 60                # seconds: a quicker round waits out the rest befo
 WATCH = 30                    # seconds between two reads of the game
 REMIND = 600                  # seconds: the world line again while something stays blocked
 SETTLE = 120                  # seconds: the world line changes at most this often
+CAPITAL = 120                 # seconds between two reads of the working capital (2.0.69)
 FRESH_AT = 200000             # tokens of context: then a hand-over round and a fresh conversation
 FRESH_MIN = 3                 # rounds a conversation runs at least before it is handed over
 QUIET = 15                    # seconds the player is idle, nothing of its running: the round ends
@@ -705,6 +706,29 @@ def host_status(cfg, cursor, folder=None):
     return None
 
 
+def host_capital(cfg, folder=None):
+    """The working capital in one sentence (``fk capital --brief``, 2.0.69) through the run's own
+    toolkit on the game host, or None. It keeps its last read in the game's out/capital/, so the
+    machines' shares of the time are measured between two of these."""
+    if cfg.get("host") == "local":
+        env = dict(os.environ, FK_LINK="on", PYTHONDONTWRITEBYTECODE="1",
+                   PYTHONPATH=os.path.join(folder, ".toolkit"),
+                   **{k: v for k, v in (cfg.get("env") or {}).items() if v})
+        r = subprocess.run([sys.executable, "-m", "fkcore", "capital", ".", "--brief"],
+                           cwd=os.path.join(folder, "game"), env=env, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30)
+    else:
+        cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
+               f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} timeout 15 python3 -m fkcore "
+               "capital . --brief")
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", cfg["host"], cmd], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30)
+    for line in reversed(r.stdout.splitlines()):
+        if line.startswith("working capital"):
+            return line.strip()
+    return None
+
+
 #: a maker's status (a defines.entity_status name) as the world line says it; others lose their _
 STALLED = {"item_ingredient_shortage": "no ingredients", "fluid_ingredient_shortage": "no fluid",
            "no_input_fluid": "no fluid", "full_output": "output full",
@@ -866,6 +890,7 @@ class Watch(threading.Thread):
         self.key, self.said = None, 0.0
         self.woke = set()                # the WAKE keys noted while they last
         self.health_error = None         # the health read's last error, logged once
+        self.capital, self.capital_at = None, 0.0   # the working capital's sentence, and when
         self.mutex = threading.Lock()
 
     def note(self, text):
@@ -967,6 +992,14 @@ class Watch(threading.Thread):
                 with open(self.cursor_file, "w") as f:
                     f.write(str(self.cursor))
             line, key = status_line(st)
+            if time.time() - self.capital_at > CAPITAL:
+                self.capital_at = time.time()
+                try:
+                    self.capital = host_capital(self.cfg, self.folder) or self.capital
+                except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+                    pass                       # the line goes on without it
+            if self.capital:
+                line = line.rstrip(".") + "; " + self.capital + "."
             err = _dict(st.get("health")).get("error")
             if err and err != self.health_error:
                 self.log(f"  (watch: the health read failed: {short(err, 200)})")

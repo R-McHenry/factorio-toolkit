@@ -26,6 +26,9 @@ Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py health    2.0.12: the loop's world-line read on a small base:
                                             reactor fuel (with its feeding chest), robots and
                                             items in chests, stalled makers, plates made
+    python tools/laptop_server.py capital SAVE.zip
+                                            2.0.69: the working capital on a played map, two
+                                            reads 30 game seconds apart
 """
 from __future__ import annotations
 
@@ -662,8 +665,38 @@ def check_lab():
     return 0 if ok else 1
 
 
+def check_capital(save=None):
+    """2.0.69: the working capital on a played map (a sim save: ``capital SAVE.zip``), two reads
+    30 game seconds apart, each in under 5 s, and the report."""
+    import tempfile
+    from fkcore import capital
+    from fkcore.catalog import Catalog
+    save = save or (sys.argv[2] if len(sys.argv) > 2 else None)
+    if not save:
+        print("capital: give a save (.zip) to read")
+        return 2
+    cat, game = Catalog.load(), tempfile.mkdtemp(prefix="fk-capital-")
+    took = []
+    with LaptopServer("capital", save=save) as srv:
+        with srv.rcon() as r:
+            r.lua("game.tick_paused = false rcon.print(1)")     # a sim save stands still
+            for i in range(2):
+                t0 = time.time()
+                out = capital.run(r, game, cat, "player", "nauvis")
+                took.append(time.time() - t0)
+                if i == 0:
+                    tick = int(r.lua("rcon.print(game.tick)").strip())
+                    while int(r.lua("rcon.print(game.tick)").strip()) < tick + 30 * 60:
+                        time.sleep(0.5)
+    print("\n".join(out))
+    print(f"reads took {', '.join(f'{t:.2f}' for t in took)} s")
+    shutil.rmtree(game, True)
+    return 0 if max(took) < 5 and out[0].startswith("capital nauvis") else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
                       "turned": check_turned, "health": check_health,
-                      "settings": check_settings, "lab": check_lab}[what]())
+                      "settings": check_settings, "lab": check_lab,
+                      "capital": check_capital}[what]())
