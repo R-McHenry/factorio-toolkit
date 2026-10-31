@@ -422,11 +422,68 @@ set pipe.out            : logistic=pipe<100             # a row, all its output 
     than one consumer, so the condition lands on the hand you mean and not on all of them.
 - Properties: `logistic=ITEM<N` (the logistic network's count, no wire), `if=ITEM<N` (a circuit
   condition; name the chest with `-> CHEST` so it reads that chest), `filter=`, `read=`, `signal=`,
-  `signals=`.
+  `signals=`, and any raw field, `cb.FIELD=` or `bp.FIELD=` (next section).
 - Every `set` reports the hands it hit (`on 2 hands (~out/i0, ~out/i1)`), and one that matches
   nothing is a `no-match` line, never a silent no-op.
 - A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
   `limited`.
+
+### Any setting of any building: `cb.` and `bp.`
+
+The properties above are the short way to write the common cases. Anything else a building can
+be set to is written as the game's blueprint names it:
+
+- `cb.FIELD=VALUE` writes one field of the building's control behaviour (what its circuit
+  connection does): `cb.read_robot_stats=true`, `cb.circuit_condition="iron-plate<50"`.
+- `bp.FIELD=VALUE` writes any other blueprint field: a speaker's `parameters` and
+  `alert_parameters`, a display panel's `text`, a lamp's `color`, a train stop's `station`.
+
+They go in a `set` line, or as parameters of an instance or a kind:
+
+```
+box  = Chest<storage>                                     @(2, 4)
+spk  = Alarm<bp.alert_parameters={show_alert: true, show_on_map: true,
+             icon_signal_id: iron-plate, alert_message: "Iron plates low"}>   @(6, 4)
+note = Display<cb.parameters=[{condition: "iron-plate<50", icon: iron-plate, text: "Iron low"},
+                              {condition: "iron-plate>=50", icon: signal-check, text: "Iron OK"}]> @(40, 4)
+set spk: cb.circuit_condition="iron-plate<50"
+wire stock red: box -> spk, note
+```
+
+A value is written like JSON:
+
+- a number (`5`, `-2.5`), `true` or `false`;
+- a string in double quotes (`"Iron plates low"`; it can't hold a double quote), or a bare word,
+  which is a string too (`signal-C`, `global`);
+- an object `{key: value, ...}` (a key is a word or a quoted string) or a list `[value, ...]`;
+  they can span lines.
+
+Two conveniences, anywhere in a value, so you write signals and conditions as elsewhere:
+
+- a string in a field that holds a signal (a name ending in `_signal` or `signal_id`, or `signal`
+  or `icon`) becomes the game's signal, typed from the game's list: `icon: iron-plate` is
+  `{"type": "item", "name": "iron-plate"}`;
+- a string in a field that holds a condition (a name ending in `condition`) is `S<N` or `S>=T` as
+  `if=` takes it.
+
+An object is taken as written, so `{type: recipe, name: iron-gear-wheel}` picks a type by hand.
+
+- **Field names** are the game's, as a blueprint exports them; copy them from a blueprint string
+  of a building you set up by hand (`fk look` or the game's export).
+- **On a kind**, raw settings make a preset (see "Kinds and the prelude"); the instance's own field
+  wins over its kind's, field by field.
+- **On what**: any instance's buildings, or a selector's hands (`set gear.in: cb.FIELD=...`). A
+  module instance takes none; set them on its machines.
+- **A `cb.` field and a typed property** that write the same field (`if=` and
+  `cb.circuit_condition`): the `cb.` one goes in the blueprint, and a `CIRCUIT` line says so.
+- **Refused** (`CIRCUIT`): `bp.` for a field the build writes itself (`name`, `position`,
+  `direction`, `recipe`, `tags`, `wires`, `type`, `control_behavior`: write `cb.` fields for that),
+  a field set twice to two values, and a condition string that isn't one. `no-signal`: a signal
+  name the game hasn't got, or one that never goes out on a wire where one is sent.
+- **Drift**: a raw field changed in the game is a hand edit, named before the next paste, as any
+  other setting is.
+- **The rate model** takes a raw condition as always open, as it takes a `when` with no `cycle`:
+  it doesn't know what a building's circuit does. Say what you expect in a `behave` block.
 
 ### The two shorthands, and when to write `set` instead
 
@@ -477,17 +534,31 @@ gears = Assembler<recipe=iron-gear-wheel> @(9, 0) when network.iron-gear-wheel <
 - `wire NAME red|green: drivers -> consumers`: one network of one colour. A driver puts signals
   on it: a chest its contents, `Reactor<read=temperature, signal=S>` its temperature,
   `Constant<signals="S=N, T=M">` its signals, a net (one of its belts reads what is on it; the
-  reading reaches nothing until the belt is on a wire).
+  reading reaches nothing until the belt is on a wire), or any building whose `cb.` settings make
+  it send (a `RobotCounter`).
+- **Any building with a circuit connector** can be a wire's end: a roboport, a pump, a lamp, a
+  speaker, a display panel, a train stop, an `Entity` of any kind. One without a connector (a
+  pipe, a beacon) is a `no-wire` line.
 - `when A < N` on a net gates it: every inserter and pump of its route moves items only while it
   holds. On an instance, it enables the machine itself. `A` is `no-wire.no-signal` (that wire),
   `network.ITEM` (the logistic network's count, no wire) or `INSTANCE.no-signal` (what that chest
   or machine puts out, on a red wire of its own). The comparisons are `<`, `>`, `<=`, `>=`, `=`
   and `!=`, against a whole number or another signal on the same wire.
-- Signals are virtual signals (`signal-A`, `signal-T`), items or fluids, by name, or the names
-  you declare with `signal`.
-- The build wires each wire net's entities by the shortest wires; a wire reaches 9 tiles
-  (`wire-too-far` when two are further apart). Two wires of one colour on one entity are one
-  network in the game and their signals add (`wires-share`).
+- Signals are every signal the game has, by name: virtual signals (`signal-A`, `signal-alarm`),
+  items, fluids, recipes, entities, qualities, space locations and asteroid chunks; or the names
+  you declare with `signal`. A name that is several (an item, its recipe and its building) is the
+  item. `signal-each`, `-anything` and `-everything` read in a condition but never go out on a wire,
+  so a `Constant`, a reading or a raw output signal that sends one is a `no-signal` line; the
+  parameter signals and `signal-unknown` are refused anywhere.
+- The build wires each wire net's entities by the shortest wires. A wire reaches 9 tiles (a big
+  pole 32). **A longer one is carried on poles:** it hops along the poles of the area that carry
+  no other wire of its colour, and where there is a gap the build adds a pole on a free tile
+  (`circuit-poles/p1`, ...; the power cover's pole, else a medium pole), the fewest it can. The
+  report says so (`wire stock red: 3 entities, 5 wires; on poles: spk/m0 to note/m0 34.0 tiles over
+  3 poles (3 added)`). The added poles join the power network too. Only when no chain of poles
+  and free tiles joins two ends is it a `wire-too-far` line.
+- Two wires of one colour on one entity are one network in the game and their signals add
+  (`wires-share`).
 - `no-signal` says a condition reads a signal nothing on its wire makes, or a name that is no
   signal; `no-wire` a wire nothing drives or reads.
 
@@ -576,6 +647,16 @@ Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `Chem
 `Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run (the
 toolkit's own if the run has none). Change it, or write a kind or tiers line of the same name in a
 file, and that file uses yours. A prelude holds kind and tiers lines only.
+
+The prelude also has presets for buildings the language has no kind of, made of `Entity` and raw
+settings. Add your own the same way, with no toolkit release:
+
+| kind | is | what it does |
+|---|---|---|
+| `RobotCounter` | a roboport | puts its robots on its wire: `signal-X`/`-Y` logistic robots free/total, `signal-Z`/`-T` construction, `signal-R` roboports |
+| `ColourLamp` | a small lamp | takes its colour from `signal-red`, `-green` and `-blue` |
+| `Alarm` | a programmable speaker | a siren heard everywhere, and an alert on the map; give it `cb.circuit_condition` and its own `alert_message` |
+| `Display` | a display panel | always shows its text, on the map too; give it `bp.text`, or `cb.parameters` (messages with conditions) |
 
 ## Power
 
