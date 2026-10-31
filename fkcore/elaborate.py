@@ -91,6 +91,9 @@ class FlatNet:
     scope: str = ""            # the path of the body it is written in (2.0.28)
     width: int = 1             # 2.0.54, `net NAME width 2:` both lanes of one belt
     lane: str | None = None    # 2.0.54, `net NAME lane L:` its lane where it ends on a belt
+    #: 2.1, `net each NAME`: the group's path-qualified name (``flat.each`` lists its nets in
+    #: cell order), None for any other net
+    group: str | None = None
 
     @property
     def sushi(self):
@@ -215,6 +218,11 @@ class Flat:
     stack_ends: set = field(default_factory=set)    # port keys a stack leaves open: dead ends
     #: 2.0.63, do not populate: the instance paths that are DNP (each with all it holds)
     dnp: set = field(default_factory=set)
+    #: 2.1, `net each NAME`: group name -> its nets, cell 0 first (one belt each; a ribbon later)
+    each: dict = field(default_factory=dict)
+    #: 2.1: the port keys of every Stack cell's (and head's) `stack` pairs, where a belt runs on
+    #: from one cell to the next (the rate model serves a short line's cells in that order)
+    chain: set = field(default_factory=set)
 
     def is_dnp(self, key):
         """A machine key or instance path inside a DNP instance (2.0.63)."""
@@ -277,9 +285,39 @@ def _imports(f, folder, modules, seen, kinds=None, tiers=None):
                 # body placed by nauvis.fk finds the Mall module world.fk defines)
                 for other, m in g.modules.items():
                     modules.setdefault(other, m)
-            if name in modules and modules[name] is not mod:
+            if name in modules and modules[name] is not mod and \
+                    not getattr(modules[name], "_brought", False):
                 raise ElabError(f.path, line, f"import: module {name} is defined twice")
             modules[name] = mod
+            # 2.1, cells within cells: a module brings the modules of its file it is built of (a
+            # SmeltColumn its FurnaceCell), unless the importer has its own of that name
+            for other in _uses(g, name):
+                if other not in modules:
+                    dep = g.modules[other]
+                    dep._brought = True
+                    modules[other] = dep
+
+
+def _uses(g, name):
+    """The modules of file ``g`` that its module ``name`` is built of, deepest last: its instances'
+    kinds, a Stack's ``cell=`` and ``head=``, and the modules its file's kinds name."""
+    out, todo = [], [name]
+    while todo:
+        mod = g.modules.get(todo.pop())
+        if mod is None:
+            continue
+        for inst in mod.insts:
+            names = [inst.kind] + [v for k, v in inst.params.items()
+                                   if k in ("cell", "head") and isinstance(v, str)]
+            for n in names:
+                seen = set()
+                while n in g.kinds and n not in seen:     # a kind of a module: its module
+                    seen.add(n)
+                    n = g.kinds[n].target if hasattr(g.kinds[n], "target") else n
+                if n in g.modules and n != name and n not in out:
+                    out.append(n)
+                    todo.append(n)
+    return out
 
 
 def _placement_hints(inst):
@@ -509,6 +547,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._lanes = []
     flat._port_named = {}
     flat._dnp_named = {}
+    flat._auto_n = set()        # 2.1: the Stacks whose n=auto the size step counts
     _expand(flat, f.body, "", modules, cat, 1.0, f.path, ())
     for path, (line, src) in sorted(flat._dnp_named.items()):
         if path not in flat.insts:
@@ -612,6 +651,17 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             stacked = inst
             # 2.0.59: `n=auto`, the size step's count of cells
             stack_auto = _auto(flat, path, inst, src)
+            outer = next((s[len("Stack:"):] for s in stack if s.startswith("Stack:")), None)
+            if stack_auto is not None and outer is not None:
+                # 2.1, cells within cells: every copy of a cell is the same, so a Stack inside
+                # one has a count of its own; the outer Stack's n=auto counts the cells
+                raise ElabError(src, inst.line, f"{path.replace('/', '.')}: {stack_auto[3]}=auto "
+                                                f"inside a cell of Stack {outer.replace('/', '.')}: "
+                                                "every cell is the same, so give this Stack a "
+                                                f"number; {outer.replace('/', '.')}'s own n=auto "
+                                                "counts its cells")
+            if stack_auto is not None and stack_auto[3] == "n":
+                flat._auto_n.add(path)
             if stack_auto is not None:
                 inst = dataclasses.replace(inst, params=dict(inst.params,
                                                              **{stack_auto[3]: stack_auto[2]}))
@@ -693,13 +743,26 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
         flat.insts[path] = node
     for net in mod.nets:
         full = _join(prefix, net.name)
-        if full in flat.nets:
+        if full in flat.nets or full in flat.each:
             raise ElabError(src, net.line, f"net {net.name} is defined twice")
         if full in flat.insts and flat.insts[full].kind == "Bus":
             raise ElabError(src, net.line, f"net {net.name}: {net.name} is a Bus, which is a net "
                                            "of its own (its belts carry it); name this net "
                                            "otherwise")
-        flat.nets[full] = _Pending(net, prefix, src)
+        if getattr(net, "each", False):
+            # 2.1, cells within cells: one net per cell, kept together as a group
+            group = []
+            for one in _each_nets(flat, net, prefix, src):
+                name = _join(prefix, one.name)
+                if name in flat.nets:
+                    raise ElabError(src, net.line, f"net each {net.name}: its cell nets are "
+                                                   f"{net.name}_0, {net.name}_1, ..., and a net "
+                                                   f"{one.name} exists")
+                flat.nets[name] = _Pending(one, prefix, src, full)
+                group.append(name)
+            flat.each[full] = group
+            continue
+        flat.nets[full] = _Pending(_net_refs(flat, net, prefix, src), prefix, src)
     for a in mod.asserts:
         flat.asserts.append((a, prefix))
     for c in mod.covers:
@@ -872,6 +935,14 @@ class _Pending:
     net: lang.Net
     scope: str
     src: str
+    group: str | None = None     # 2.1: the `net each` group it is one cell's net of
+
+
+@dataclass
+class _KeyRef(lang.Ref):
+    """A ref that names one endpoint already resolved (2.1, `net each`: port k of a list of ports
+    on one side). ``parts`` keep the text for messages."""
+    key: str = ""
 
 
 def _port_items(p):
@@ -931,6 +1002,8 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
     deeper: everything else is refused with the port it would need (2.0.28, PLAN-MODULES).
     """
     src = src or flat.path
+    if isinstance(ref, _KeyRef):
+        return None, [ref.key]
     names = flat.scopes.get(scope, {})
     node = names.get(ref.parts[0])
     if node is None:
@@ -943,8 +1016,14 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
             return None, [key]
         return None, []
     used = 1
-    while used < len(ref.parts) and node.path not in flat.sealed:
+    while used < len(ref.parts):
         part = ref.parts[used]
+        if lang.is_index(part):         # 2.1: `cols[2]`, one cell of a Stack
+            node = _cell(flat, node, part, ref, src)
+            used += 1
+            continue
+        if node.path in flat.sealed:
+            break
         if node.scope is not None and part in node.scope:
             node = node.scope[part]
             used += 1
@@ -960,6 +1039,117 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
     if node.path in flat.sealed:
         return _sealed_ref(flat, node, ref, used, items, side, src)
     return node, list(node.machines)
+
+
+def _cell(flat, node, part, ref, src):
+    """Stack ``node``'s cell ``part`` (``[k]``, ``[-1]``): its Inst. 2.1, cells within cells."""
+    if node.path not in flat.stacks:
+        what = node.kind if node.scope is None or node.kind != node.module else \
+            f"module {node.kind}"
+        raise ElabError(src, ref.line, f"{ref}: {node.path.replace('/', '.')} is a {what}, not a "
+                                       "Stack: [k] names one of a Stack's cells")
+    n = flat.stacks[node.path][1]
+    if part == "[*]":
+        raise ElabError(src, ref.line, f"{ref}: [*] is every cell, which a net names (`net NAME: "
+                                       f"{ref} -> ...`, or `net each`); here name one, [0] to "
+                                       f"[{n - 1}]")
+    k = int(part[1:-1])
+    kk = k + n if k < 0 else k
+    if not 0 <= kk < n:
+        raise ElabError(src, ref.line, f"{ref}: {node.path.replace('/', '.')} has {n} cells, [0] "
+                                       f"to [{n - 1}] (or [-1] to [-{n}] from the end)")
+    return node.scope[str(kk)]
+
+
+def _stars(flat, ref, scope, src, what):
+    """``ref`` with every ``[*]`` spelled out -> [(k of its first [*], concrete Ref)] in cell order,
+    or None when it has no ``[*]`` (2.1). Each ``[*]`` follows a Stack; ``what`` names the net."""
+    if isinstance(ref, _KeyRef) or "[*]" not in ref.parts:
+        return None
+    i = ref.parts.index("[*]")
+    head = lang.Ref(ref.parts[:i], False, ref.line)
+    node, _keys = _resolve(flat, head, scope, src=src)
+    if node is None or node.path not in flat.stacks:
+        kind = "nothing" if node is None else node.kind
+        raise ElabError(src, ref.line, f"{what}: {ref}: {head} is {'a ' if node else ''}{kind}, not a "
+                                       "Stack: [*] names every cell of a Stack")
+    out = []
+    for k in range(flat.stacks[node.path][1]):
+        one = lang.Ref(ref.parts[:i] + [f"[{k}]"] + ref.parts[i + 1:], ref.star, ref.line)
+        out += [(k, r) for _k, r in (_stars(flat, one, scope, src, what) or [(k, one)])]
+    return out
+
+
+def _star_auto(flat, ref, scope, src):
+    """The Stack an ``n=auto`` makes that ``ref``'s first ``[*]`` follows, or None."""
+    i = ref.parts.index("[*]")
+    node, _keys = _resolve(flat, lang.Ref(ref.parts[:i], False, ref.line), scope, src=src)
+    return node.path if node is not None and node.path in flat._auto_n else None
+
+
+def _net_refs(flat, net, scope, src):
+    """An ordinary net's refs with ``cols[*].P`` spelled out: every cell's P an endpoint (2.1)."""
+    def spread(refs):
+        out = []
+        for ref in refs:
+            got = _stars(flat, ref, scope, src, f"net {net.name}")
+            out += [ref] if got is None else [r for _k, r in got]
+        return out
+    drivers, consumers = spread(net.drivers), spread(net.consumers)
+    if drivers == net.drivers and consumers == net.consumers:
+        return net
+    return dataclasses.replace(net, drivers=drivers, consumers=consumers)
+
+
+def _each_nets(flat, net, scope, src):
+    """``net each NAME: A[*].P -> B[*].Q`` -> [lang.Net] (2.1): one net per cell, ``NAME_k``
+    joining cell k of each side. A side's ref without ``[*]`` names a list of ports (a sealed
+    module's loads, its ports in their written order), port k going to net k."""
+    what = f"net each {net.name}"
+    if net.split:
+        raise ElabError(src, net.line, f"{what}: split and each don't go together yet; split the "
+                                       "cells' nets inside the cell")
+    if not any("[*]" in ref.parts for ref in net.drivers + net.consumers):
+        raise ElabError(src, net.line, f"{what}: an each net names a Stack's cells with [*] "
+                                       "(like cols[*].pl_out)")
+    rows, counts = [], []
+    for side, refs in (("driver", net.drivers), ("consumer", net.consumers)):
+        for ref in refs:
+            if ref.star:
+                raise ElabError(src, ref.line, f"{what}: {ref}: name the ports (X[*].P), not .*")
+            got = _stars(flat, ref, scope, src, what)
+            if got is not None:
+                if sum(1 for p in ref.parts if p == "[*]") > 1:
+                    raise ElabError(src, ref.line, f"{what}: {ref}: one [*] a ref, so cell k "
+                                                   "meets cell k")
+                auto = _star_auto(flat, ref, scope, src)
+                if auto is not None:
+                    raise ElabError(src, ref.line, f"{what}: {ref}: {auto.replace('/', '.')} is "
+                                                   "n=auto, and an each net needs a fixed count "
+                                                   "on both sides; give it n=")
+                rows.append((side, ref, [r for _k, r in got]))
+                counts.append((str(ref), len(got), "cells"))
+                continue
+            _node, keys = _resolve(flat, ref, scope, side=side, src=src)
+            ports = [k for k in keys if k in flat.ports]
+            if len(keys) < 2 or len(ports) != len(keys):
+                raise ElabError(src, ref.line, f"{what}: {ref} is one endpoint; an each net pairs "
+                                               "cell k with cell k, so each ref is X[*].P or names "
+                                               "a list of ports (a sealed module's)")
+            rows.append((side, ref, [_KeyRef(ref.parts + [flat.ports[k].name], False, ref.line,
+                                             key=k) for k in keys]))
+            counts.append((str(ref), len(keys), "ports"))
+    if len({n for _r, n, _w in counts}) > 1:
+        have = ", ".join(f"{r} {n} {w}" for r, n, w in counts)
+        raise ElabError(src, net.line, f"{what}: both sides need the same count, and they have "
+                                       f"{have}")
+    out = []
+    for k in range(counts[0][1]):
+        drivers = [refs[k] for side, _ref, refs in rows if side == "driver"]
+        consumers = [refs[k] for side, _ref, refs in rows if side == "consumer"]
+        out.append(dataclasses.replace(net, name=f"{net.name}_{k}", drivers=drivers,
+                                       consumers=consumers, each=False))
+    return out
 
 
 def _conn_direction(flat, keys, ref, item, src):
@@ -1100,6 +1290,9 @@ def _stack_module(flat, inst, path, modules, src):
         flat.stack_ends.add(_join(path, str(n - 1), far))
         if head is None:
             flat.stack_ends.add(_join(path, "0", near))
+        else:
+            flat.chain.add(_join(path, "head", far))
+        flat.chain.update(_join(path, str(k), q) for k in range(n) for q in (near, far))
     alias = {}
     if head is not None:
         for q in head.ports:
@@ -1548,7 +1741,8 @@ def _resolve_nets(flat, cat):
                                   p.net.items is not None, p.net.line,
                                   getattr(p.net, "limited", False),
                                   None if when is None else (when, p.scope), p.scope,
-                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None))
+                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None),
+                                  p.group)
     flat._out_hold, flat._in_hold = out_hold, in_hold
 
 

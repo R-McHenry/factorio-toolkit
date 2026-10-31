@@ -1,0 +1,9 @@
+# labs.fk: a lab field (2.1, cells within cells). LabCells stack north into a LabColumn, which
+# carries the packs along its bottom; four LabColumns stacked east make the field.
+import LabColumn from "cells.fk"
+
+packs = Chest<requester, item="automation-science-pack, logistic-science-pack", rate=1/s> @(0, 18)
+field = Stack<cell=LabColumn, n=4> @(4, 0)
+net r items automation-science-pack: packs -> field.h_in
+net g items logistic-science-pack:   packs -> field.h_in
+lanes r | g

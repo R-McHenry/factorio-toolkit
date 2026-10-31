@@ -11,10 +11,11 @@
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
-    net     := 'net' name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
+    net     := 'net' 'each'? name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
                'split'? 'limited'? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
-    refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
+    refs    := ref (',' ref)*          ref := name index? ('.' name index?)* ('.' '*')?
+    index   := '[' (int | '*') ']'    # a Stack's cell k, [-1] the last, [*] every one (2.1)
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
     param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
@@ -176,7 +177,15 @@ class Ref:
     line: int
 
     def __str__(self):
-        return ".".join(self.parts) + (".*" if self.star else "")
+        out = ""
+        for p in self.parts:
+            out += p if p.startswith("[") else ("." if out else "") + p
+        return out + (".*" if self.star else "")
+
+
+def is_index(part):
+    """A ref part that is a Stack's cell index (2.1): ``[2]``, ``[-1]`` or ``[*]``."""
+    return part.startswith("[")
 
 
 @dataclass
@@ -226,6 +235,7 @@ class Net:
     width: int = 1         # 2.0.54: the lanes it takes, 1 or 2 (both lanes of one belt)
     lane: str | None = None    # 2.0.54: the lane (L or R) its items are on where it ends
     split: bool = False    # 2.0.76: one net per item, two to a belt (a lane each)
+    each: bool = False     # 2.1: `net each`: one net per Stack cell, cell k with cell k
 
 
 @dataclass
@@ -813,13 +823,33 @@ class _P:
     def ref(self):
         tok = self.name("instance name")
         parts, star = [tok.text], False
-        while self.peek().text == ".":
+        while True:
+            if self.peek().text == "[" and self.peek().kind == "op":
+                parts.append(self.cell_index(parts))
+                continue
+            if self.peek().text != ".":
+                break
             self.next()
             if self.accept("*"):
                 star = True
                 break
             parts.append(self.name("instance name").text)
         return Ref(parts, star, tok.line)
+
+    def cell_index(self, parts):
+        """``[k]``, ``[-1]`` or ``[*]`` after a Stack's name (2.1, cells within cells): one cell,
+        counted from 0 (from the end when negative), or every cell. Kept as the part ``"[k]"``."""
+        self.expect("[")
+        tok = self.next()
+        if tok.text == "*":
+            k = "*"
+        elif tok.kind == "num" and re.fullmatch(r"-?\d+", tok.text):
+            k = str(int(tok.text))
+        else:
+            self.err(f"{'.'.join(parts)}[{tok.text}]: a Stack's cell is [k] (a whole number, from "
+                     "0; [-1] is the last) or [*] (every cell)", tok)
+        self.expect("]")
+        return f"[{k}]"
 
     def refs(self):
         out = [self.ref()]
@@ -830,6 +860,10 @@ class _P:
 
     def net(self):
         line = self.expect("net").line
+        # 2.1: `net each NAME: A[*].P -> B[*].Q`, one net per cell (a net named `each` stays one)
+        each = self.peek().text == "each" and self.peek(1).kind == "word"
+        if each:
+            self.next()
         name = self.name("net name").text
         items = None
         if self.accept("items"):
@@ -856,7 +890,7 @@ class _P:
         self.expect("->")
         consumers = self.refs()
         when = self.cond() if self.accept("when") else None
-        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split)
+        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split, each)
 
     def lanes(self):
         line = self.expect("lanes").line

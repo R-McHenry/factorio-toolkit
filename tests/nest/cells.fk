@@ -1,0 +1,51 @@
+# cells.fk for cells within cells (2.1): the parameterised FurnaceCell and the kickoff template's
+# LabCell, and the two columns built of them.
+
+# One electric furnace beside two belts: the ore runs up through every cell on the west belt, the
+# plates come back down the east one.
+module FurnaceCell<plate, ore> size 7x3 {
+  port ore_in  : in  $ore   @s0
+  port ore_out : out $ore   @n0
+  port pl_in   : in  $plate @n6
+  port pl_out  : out $plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=$plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# A column of three FurnaceCells, the ore chained along its foot from west to east: stacked east,
+# the columns stand side by side and the ore runs along all their feet. Each column's plates leave
+# by its own port at the bottom.
+module SmeltColumn<plate, ore> size 9x14 {
+  port ore_in  : in  $ore | $ore @w11
+  port ore_out : out $ore | $ore @e11
+  port pl      : out $plate      @s7
+  stack ore_in -> ore_out
+  s = Stack<cell=FurnaceCell, n=3, plate=$plate, ore=$ore> @(1, 0)
+  net o: ore_in -> s.ore_in, ore_out
+  net p: s.pl_out -> pl
+}
+
+# One lab: red and green packs on the two lanes of one belt, which runs on to the next lab.
+module LabCell size 5x3 {
+  port p_in  : in  automation-science-pack | logistic-science-pack @s0
+  port p_out : out automation-science-pack | logistic-science-pack @n0
+  stack p_in -> p_out
+  lab = Lab @(2, 0)
+  net r items automation-science-pack: p_in -> lab, p_out
+  net g items logistic-science-pack:   p_in -> lab, p_out
+  lanes r | g
+}
+
+# A column of six labs with a pack header across its bottom, chained east: stacked east, the
+# columns make a field and the packs run along all their headers.
+module LabColumn size 8x23 {
+  port h_in  : in  automation-science-pack | logistic-science-pack @w20
+  port h_out : out automation-science-pack | logistic-science-pack @e20
+  stack h_in -> h_out
+  labs = Stack<cell=LabCell, n=6> @(1, 0)
+  net r items automation-science-pack: h_in -> labs.p_in, h_out
+  net g items logistic-science-pack:   h_in -> labs.p_in, h_out
+  lanes r | g
+}

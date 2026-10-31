@@ -211,6 +211,122 @@ def _grant(rows, total, share):
     return [1.0 if level == INF else min(1.0, level * d) for _w, _c, d in rows]
 
 
+def _lines(flat, pools, ends):
+    """{pool: (root net, tree)} for each pool that runs along a Stack's cells (2.1): a belt that
+    passes a cell's machines before it crosses into the next cell (a ``stack`` pair's out port,
+    ``flat.chain``), so on a short line the cells upstream take what they need and the last ones
+    get what is left. Both of the 20261030 run's lab lines (Stacks of FurnacePair) ran their last
+    cell at half while the model shared the shortfall over all 24 furnaces (96% each).
+
+    The tree's nodes are the pool's nets, joined through its ports; ``tree[net]`` is (its
+    consumers, its children across a chain port, its other children). Only a pool fed at one
+    root net, by every driver it has, whose nets form a tree, gets one: any other pool is shared
+    by appetite as before."""
+    chain = getattr(flat, "chain", set())
+    if not chain:
+        return {}
+    holds = (getattr(flat, "_in_hold", {}), getattr(flat, "_out_hold", {}))
+    members = {}
+    for ni, pk in pools.items():
+        members.setdefault(pk, []).append(ni)
+    out = {}
+    for pk, nis in members.items():
+        item = pk[1]
+        names = {n for n, _i in nis}
+        if any(_is_bus(flat, n) for n in names):
+            continue
+        edges, is_chain = [], False
+        for key, m in flat.machines.items():
+            if not m.extra.get("port") or key not in flat.ports:
+                continue
+            ins = [n for n in holds[0].get((key, item), ()) if n in names]
+            outs = [n for n in holds[1].get((key, item), ()) if n in names]
+            c = key in chain and flat.ports[key].dir == "out"
+            for a in ins:
+                for b in outs:
+                    edges.append((a, b, c))
+                    is_chain = is_chain or c
+        if not is_chain:
+            continue
+        parent = {}
+        for a, b, _c in edges:
+            if b in parent:
+                parent = None
+                break
+            parent[b] = a
+        if parent is None:
+            continue
+        roots = names - set(parent)
+        if len(roots) != 1:
+            continue
+        root = roots.pop()
+        if not set(ends[pk]["drivers"]) <= {k for k, i in flat.nets[root].drivers if i == item}:
+            continue                    # fed along the line too: no order to serve it in
+        tree = {n: ([], [], []) for n in names}
+        for a, b, c in edges:
+            tree[a][1 if c else 2].append(b)
+        seen, todo, placed = set(), [root], set()
+        while todo:
+            n = todo.pop(0)
+            if n in seen:
+                continue
+            seen.add(n)
+            for k, i in flat.nets[n].consumers:
+                if i == item and k not in placed and not flat.machines[k].extra.get("port"):
+                    tree[n][0].append(k)
+                    placed.add(k)
+            todo += tree[n][1] + tree[n][2]
+        if seen != names:
+            continue
+        out[pk] = (root, tree)
+    return out
+
+
+def _in_order(cons, total, share, line):
+    """Grants for ``cons`` [(key, rate, potential, duty)] on a pool that runs along a line
+    (``_lines``): at each net its consumers and the branches it feeds share what reaches it by
+    appetite, as on any net, and what they leave passes on into the next cell."""
+    root, tree = line
+    at = {row[0]: i for i, row in enumerate(cons)}
+    if any(k not in at for n in tree for k in tree[n][0]) or \
+            len(at) != sum(len(t[0]) for t in tree.values()):
+        return _grant([r[1:] for r in cons], total, share)
+    out = [1.0] * len(cons)
+    want = {}
+
+    def appetite(n):
+        if n not in want:
+            rows, chained, other = tree[n]
+            want[n] = sum(cons[at[k]][1] * cons[at[k]][2] for k in rows) + \
+                sum(appetite(b) for b in chained + other)
+        return want[n]
+
+    def give(n, total):
+        if total == INF or total >= appetite(n) - 1e-15:
+            return
+        rows, chained, other = tree[n]
+        level = [cons[at[k]][1:] for k in rows] + [(appetite(b), 1.0, 1.0) for b in other]
+        grants = _grant(level, total, share)
+        used = 0.0
+        for k, g in zip(rows, grants):
+            out[at[k]] = g
+            used += cons[at[k]][1] * min(g, cons[at[k]][2])
+        for b, g in zip(other, grants[len(rows):]):
+            got = min(g, 1.0) * appetite(b)
+            used += got
+            give(b, got)
+        left = max(0.0, total - used)
+        if len(chained) == 1:
+            give(chained[0], left)
+        elif chained:
+            for b, g in zip(chained, _grant([(appetite(b), 1.0, 1.0) for b in chained], left,
+                                            share)):
+                give(b, min(g, 1.0) * appetite(b))
+
+    give(root, total)
+    return out
+
+
 def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Model:
     if share not in ("appetite", "level"):
         raise ValueError(f"share must be appetite or level, got {share!r}")
@@ -221,6 +337,7 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
     unbounded = set(unbounded) | {pk[0] for ni, pk in pools.items() if ni[0] in unbounded}
     ends, feeds, outs = _structure(flat, pools)
     machines = flat.machines
+    lines = _lines(flat, pools, ends)
 
     # A sink's rate cap, split over the (net, item) endpoints it sits on by full-speed supply.
     full_make = {}
@@ -364,7 +481,9 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
             can_take = would_take + sink_caps[ni]
             stats[ni].can_make, stats[ni].can_take = can_make, can_take
             stats[ni].would_take = would_take
-            for row, g in zip(cons, _grant([r[1:] for r in cons], can_make, share)):
+            got = _in_order(cons, can_make, share, lines[ni]) if ni in lines else \
+                _grant([r[1:] for r in cons], can_make, share)
+            for row, g in zip(cons, got):
                 new[(row[0], "in", n, item)] = g
             for row, g in zip(prod, _grant([r[1:] for r in prod], can_take, share)):
                 new[(row[0], "out", n, item)] = g
