@@ -9,8 +9,9 @@ box  = Boxes @(100, 34)
 net feed: ore -> cols.ore_in
 net each plates: cols[*].pl -> box
 
-# Eight provider chests in a row, each with its belt in at the top, the eight ports side by side.
-module Boxes size 8x4 {
+# Eight provider chests in a row, each with its belt in at the top, the eight ports side by side;
+# the row under the chests is for the poles of their inserters.
+module Boxes size 8x5 {
   port i0 : in iron-plate @n0
   port i1 : in iron-plate @n1
   port i2 : in iron-plate @n2

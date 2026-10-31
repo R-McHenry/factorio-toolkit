@@ -70,6 +70,19 @@ maker by one inserter straight from the requester. An inserter that loads a belt
 several items is filtered to its net's items (2.0.76; the route report's `unfiltered` line names
 one that can't be, a long-handed one where no fast inserter fits).
 
+A ribbon (2.1: a `net each`, a `bundle`, a `width 8` net; LANGUAGE.md "Belts side by side") is
+routed as one. `out\route.txt` gives each of its nets a line, then one line for the ribbon:
+
+```
+routed    plates_3: 1 -> 1, belt 3 of the ribbon plates (8 belts side by side): 70 belts, 0 underground ends; its driver's way in: 6 belts, 0 underground ends, 0 splitters
+ribbon    plates: 8 belts side by side (plates_0, plates_1, ... plates_7), belts 7 6 5 4 3 2 1 0 from left to right looking along it; head 13,15 S, tail 100,33 S; 2 bus turns, 0 crossings (every belt under together), 533 belts, 0 underground ends; 1 belt starts where its driver's belt does, 7 from a belt laid to it; 8 belts end where its consumer's belt starts, 0 on in a belt of its own
+```
+
+The net's line says which belt of the ribbon it is and how it got on and off. The ribbon's line
+says where it starts and ends, its turns and crossings, and how its belts joined and left it. A
+ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates (8 belts): ...`
+with the reason, and lays none of its belts.
+
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report
 to `game\out\<step>.txt`: read the one that matters

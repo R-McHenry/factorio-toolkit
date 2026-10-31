@@ -218,6 +218,12 @@ share, below): the drivers put items on it, the consumers take them.
   furnaces in a row put 15 plates/s on one yellow belt. `net NAME width 2:` asks for it outright.
   One driver brings one lane (its belt's), except a two-sided MinerRow; when no join fits, the net
   goes on one lane and the route report says so.
+- **Whole belts side by side** (2.1): `net plates width 8:` is 8 lanes, four belts side by side,
+  laid as a ribbon (below). The width is 1, 2 or an even number. The router deals the drivers out
+  at the head, in the order they stand, so that no belt gets more than its two lanes (15/s on
+  yellow), and splits the consumers the same way: each belt runs from its own drivers to its own
+  consumers. So it needs at least one driver and one consumer per belt; with fewer it says so, and
+  a group of drivers too fast for one belt is refused.
 - **The lane it ends on**: `net NAME lane L:` (or `R`) puts the net's items on that lane, looking
   downstream, where it ends on a belt (a row's input belt, a port, a bus). Into a machine by an
   inserter the lane does nothing: an inserter takes from both.
@@ -250,6 +256,38 @@ lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on th
   empty. The build's `could-pair` check names the pair when you leave it on two belts, whoever drives
   them; `SmelterArray` and `CircuitStack` are the exception, since they side-load two nets onto
   their own feed belts and want them apart.
+
+## Belts side by side: ribbons
+
+A **ribbon** (2.1) is several belts laid side by side as one: belt k beside belt k+1, in order,
+all the way. Rory's eight-column smelter bus is the case: eight columns of plates, eight belts
+running together to a row of consumers.
+
+- The nets of a `net each` are a ribbon already, belt k carrying net k: `net each plates:
+  cols[*].pl -> boxes` lays eight belts side by side.
+- `bundle NAME: a, b, c` makes a ribbon of nets you declared yourself, belt 0 carrying `a`. They
+  must run the same way: their drivers on one side, their consumers on the other.
+- A wide net (`width 8`, above) is a ribbon of its own belts.
+
+What the router keeps:
+
+- the belts stay adjacent and in order;
+- a turn is nested, the inner belt turning first, and no belt crosses another;
+- at a crossing every belt goes under together, side by side, all the same length;
+- each belt joins the ribbon from the side, at its own place, and leaves it the same way: the
+  outer belt first, at its own offset, and the rest don't close up.
+
+A ribbon that finds no path is reported unrouted, every net of it; it is never split into loose
+belts. Refused: a ribbon's nets running different ways, a net in two ribbons, a fluid net, a
+`lanes` pair, a bus, and a width that is odd.
+
+```
+net each plates: cols[*].pl -> boxes        # eight belts, side by side
+net a: m1 -> c1
+net b: m2 -> c2
+bundle ab: a, b                             # a and b side by side, a on the left
+net plates width 8: smelt -> users          # four belts, the smelters dealt out among them
+```
 
 ## Buffers
 
@@ -499,7 +537,8 @@ A cell's port that doesn't chain (each column's plates, say) is named through it
 - `net each NAME: A[*].P -> B[*].Q` is one net per cell, cell k of A with cell k of B, named
   `NAME_0`, `NAME_1` ... One side may instead name a list of ports, a sealed module's: port k
   takes cell k (`net each plates: cols[*].pl -> boxes`, where `Boxes` has eight `in` ports).
-  Both sides need the same count, and neither may be `n=auto`.
+  Both sides need the same count, and neither may be `n=auto`. Its nets are laid as one ribbon
+  (2.1, "Belts side by side: ribbons"): belt k beside belt k+1 all the way.
 - `[k]` follows a Stack and nothing else, an index past the last cell is refused, and `[*]` is
   written only in a net.
 
