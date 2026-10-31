@@ -980,8 +980,8 @@ def _widen(flat, cat, js):
     for net, job in list(js.items()):
         fn = flat.nets.get(net)
         if fn is None or job.parts or job.fluid or job.skip or not job.drivers() or \
-                not job.consumers() or net in getattr(flat, "lane_of", {}):
-            continue
+                not job.consumers() or net in getattr(flat, "lane_of", {}) or fn.width > 2:
+            continue          # 2.1: a wide net (width above 2) is a ribbon (fkcore.ribbons)
         pin = fn.lane if fn.width < 2 else None
         if pin is None and (job.drivers() < 2 or
                             fn.width < 2 and _flow(flat, fn) <= cap + 1e-9):
@@ -2104,20 +2104,55 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
     retries = len(todo) if retries is None else retries
     claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
+    # 2.1: ribbons (a net each, a bundle, a wide net) are routed as one, first: they need the
+    # widest ways. A ribbon is routed whole only when every net of it is laid this run.
+    from . import ribbons as ribmod
+    pending = set(todo) | {n for n in js if n not in have and n not in patch and n not in abut
+                           and not js[n].fluid}
+    ribs = ribmod.plan(flat, cat, js, pending)
+    ribs = {k: r for k, r in ribs.items() if any(n in todo for n in r.nets)}
+    rib_of = {n: k for k, r in ribs.items() for n in r.nets}
+    rib_lines, rib_seen = {}, {}
     best = None
-    order = list(todo)
+    order = list(ribs) + [n for n in todo if n not in rib_of]
+
+    def unrouted(key, failed):
+        if key in ribs:
+            return any(n in failed for n in ribs[key].nets)
+        return key in failed
+
     for attempt in range(retries + 2):
         # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
         promo = attempt == retries + 1
         if promo and (best is None or not best[2]):
             break
         ents = list(base.entities.values())
-        added, failed, how, swaps = {}, {}, {}, []
+        added, failed, how, swaps, rlines = {}, {}, {}, [], {}
         for net in order:
             avoid = set()
             for other, tiles in claims.items():
-                if other != net:
+                if other != net and rib_of.get(other) != net:
                     avoid |= tiles
+            if net in ribs:
+                rib = ribs[net]
+                fnet, bnet = net_frames(rib.nets[0])
+                # the same ground as a pass before (the same nets laid first): the same answer
+                seen = (net, tuple(sorted(added)), tuple(s[2] for s in swaps))
+                if seen not in rib_seen:
+                    rib_seen[seen] = ribmod.route(cat, rib, ents, fnet, js, bnet, limit,
+                                                  terrain, avoid, joints)
+                got, why, summary = rib_seen[seen]
+                if got is None:
+                    for m in rib.nets:
+                        if js[m].skip is None:
+                            failed[m] = why
+                    continue
+                for m, laid in got.items():
+                    added[m] = laid
+                    how[m] = why[m]
+                    ents += laid
+                rlines[net] = summary
+                continue
             fnet, bnet = net_frames(net)
             got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
                                   allow=joints)
@@ -2141,12 +2176,14 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             ents += got
         score = (len(added), -len(swaps), -attempt)
         if best is None or score > best[0]:
-            best = (score, added, failed, how, attempt + 1, list(order), swaps)
+            best = (score, added, failed, how, attempt + 1, list(order), swaps, rlines)
         if not failed:
             break
-        order = [n for n in order if n in failed] + [n for n in order if n not in failed]
-    _score, added, failed, how, passes, order, swaps = best
-    added, failed, how = dict(added), dict(failed), dict(how)
+        order = [n for n in order if unrouted(n, failed)] + \
+            [n for n in order if not unrouted(n, failed)]
+    _score, added, failed, how, passes, order, swaps, rlines = best
+    added, failed, how, rib_lines = dict(added), dict(failed), dict(how), dict(rlines)
+    order = [m for n in order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
     new = base.copy()
     for gone, _new, _text in swaps:
         for k in gone:
@@ -2158,8 +2195,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
-    _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain, swaps)
+    _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain, swaps,
+            (ribs, rib_of, rib_lines, net_frames, claims, joints))
     for net in sorted(failed):
+        if net in rib_of:
+            continue          # a ribbon's net is never tried alone (it would be a loose belt)
         guard = _guarded(cat, js[net], list(new.entities.values()), frames, js, box, limit,
                          terrain)
         if guard:
@@ -2200,6 +2240,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for gone, _more, text in swaps:
         lines.append(f"promoted  {text.split(' crossed ', 1)[0]}: {gone[0]}, {gone[1]}, {gone[2]} "
                      f"are an underground pair now, so another net's belt crosses it")
+    for key in sorted(rib_lines, key=fkpmod.natural_key):
+        if all(n in added for n in ribs[key].nets):
+            lines.append(rib_lines[key])
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
@@ -2323,18 +2366,60 @@ def _abuts(job):
 
 
 def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain,
-            swaps=None):
+            swaps=None, ribbons=None):
     """Judge the belt routes laid this run; re-route a net that leaks or does not connect around
     the tiles at fault (promoting other nets' belts when nothing else routes, into ``swaps``),
-    else refuse it (its carriers go, the judge's line is the reason)."""
+    else refuse it (its carriers go, the judge's line is the reason). A ribbon's net (2.1,
+    ``ribbons``: the ribbons, net -> ribbon, their report lines, net_frames, claims, joints) is
+    re-routed with its whole ribbon, or the whole ribbon is refused."""
     avoid = {}
+    ribs, rib_of, rib_lines, net_frames, claims, joints = ribbons or ({}, {}, {}, None, {}, ())
     for round_ in range(_REPAIRS + 1):
         mine = [n for n in order if n in added]
         bad = _judge(flat, new, cat, mine, js)
         if not bad:
             return
+        seen = set()
         for net in sorted(bad, key=order.index):
             reason, tiles = bad[net]
+            if net in rib_of:
+                key = rib_of[net]
+                if key in seen:
+                    continue
+                seen.add(key)
+                rib = ribs[key]
+                why_all = "; ".join(f"{m}: {bad[m][0]}" for m in dict.fromkeys(rib.nets)
+                                    if m in bad)
+                for m in dict.fromkeys(rib.nets):
+                    if m in bad:
+                        avoid.setdefault(key, set()).update(bad[m][1])
+                    for e in added.pop(m, ()):
+                        new.entities.pop(e.key, None)
+                    how.pop(m, None)
+                rib_lines.pop(key, None)
+                if round_ == _REPAIRS or not avoid.get(key):
+                    for m in rib.nets:
+                        failed[m] = f"ribbon {key}: {why_all}"
+                    continue
+                fnet, bnet = net_frames(rib.nets[0])
+                near = set(avoid[key])
+                for other, ts in claims.items():
+                    if other not in rib.nets:
+                        near |= ts
+                from . import ribbons as ribmod
+                got, why, summary = ribmod.route(cat, rib, list(new.entities.values()), fnet, js,
+                                                 bnet, limit, terrain, near, joints)
+                if got is None:
+                    for m in rib.nets:
+                        failed[m] = f"ribbon {key}: {why_all}; re-routed around it: {why}"
+                    continue
+                for m, laid in got.items():
+                    added[m] = laid
+                    how[m] = why[m]
+                    for e in laid:
+                        new.add(e)
+                rib_lines[key] = summary
+                continue
             for e in added.pop(net):
                 del new.entities[e.key]
             how.pop(net, None)

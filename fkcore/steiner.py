@@ -21,6 +21,10 @@ carriers. Changes since the copy:
 - A forward branch to a tap sink never ends on an underground exit whose tile ahead is taken
   (2.0.78): a belt's last tile is turned off another net's belt (route._settle_leaves), but an
   exit can't turn, and the 10-30 run's cb5o side-loaded onto the coal belt from one (SPILL).
+- ``ribbon`` (2.1, PLAN-2.1 "Bus routing: ribbons"): several belts routed as one path, side by
+  side and in order. One A* over the ribbon's cross-sections, its footprint as wide as the
+  ribbon: straight steps, bus turns (an n x n square, the inner belt turning first) and every
+  belt under a crossing together. ``fkcore.ribbons`` turns the result into belts.
 
 The original docstring follows.
 
@@ -58,7 +62,7 @@ import heapq
 import math
 import time
 
-__all__ = ["Grid", "Tree", "FixedSink", "TapSink", "grow", "dw", "COSTS"]
+__all__ = ["Grid", "Tree", "FixedSink", "TapSink", "grow", "dw", "COSTS", "ribbon"]
 
 DX = (0, 1, 0, -1)
 DY = (-1, 0, 1, 0)
@@ -850,3 +854,275 @@ def dw(grid, root, sinks, costs=None, margin=6, iters=12, history_inc=3.0):
     tree, probs = best
     return {"tree": tree, "cost": tree.cost(), "counts": tree.counts(), "problems": probs,
             "seconds": round(time.time() - t0, 2), "log": log, "region": [W, H]}
+
+
+# -- ribbons: several belts as one path (2.1) ------------------------------------------------------
+#: A ribbon of n belts is searched by its cross-section: n tiles side by side across its heading,
+#: belt k on the k-th tile to the right of belt 0 (looking along the heading), all pointing ahead.
+#: A state is (x, y, h, exited, live): belt 0's tile, the heading, whether the cross-section is the
+#: belts' underground exits, and the belts still in the ribbon (a bit each). Moves:
+#:
+#:   step   every live belt one tile ahead;
+#:   turn   a bus turn: the n x n square ahead, each belt running on to its turning row and across;
+#:          turning right, belt n-1 (the inner one) turns first, on the square's first row, and
+#:          belt 0 last; turning left, belt 0 first. The move ends on the cross-section beyond the
+#:          square, so every belt there runs straight again and the order is the same: belt k is
+#:          still k tiles right of belt 0;
+#:   jump   every live belt under what is ahead together: its entrance on the cross-section, its
+#:          exit j tiles on (2..max_ug), side by side and the same length.
+#:
+#: A belt leaves the ribbon at its fixed end (its tile and heading there; it costs nothing and the
+#: rest keep their offsets) or, every live belt at once, onto the tiles ahead of them (``walks``:
+#: loose belts from there on, at ``loose`` times their walking distance). The ribbon starts on any
+#: of ``sources`` (a cross-section and what reaching it costs).
+
+
+def _turn_rel(n):
+    """{(side, k): [(dx, dy) per tile]} for heading north, from belt k's own tile: its tiles
+    through a turn, the tile on the cross-section beyond the square last."""
+    out = {}
+    for k in range(n):
+        # north: ahead is (0, -1), right is (1, 0); (i, c) = i ahead, c to the right of belt 0
+        out[1, k] = [(0, -i) for i in range(1, n - k + 1)] + [(c - k, -(n - k)) for c in
+                                                            range(k + 1, n + 1)]
+        out[3, k] = [(0, -i) for i in range(1, k + 2)] + [(c - k, -(k + 1))
+                                                          for c in range(k - 1, -2, -1)]
+    return out
+
+
+def _rot(dx, dy, h):
+    """(dx, dy) laid out for heading north, turned to heading ``h``."""
+    for _ in range(h):
+        dx, dy = -dy, dx
+    return dx, dy
+
+
+def _cross(x, y, h, k):
+    r = (h + 1) % 4
+    return (x + DX[r] * k, y + DY[r] * k)
+
+
+def ribbon(grid, n, sources, fixed=None, walks=None, costs=None, loose=2.0, limit=400000,
+           own=None):
+    """One ribbon of ``n`` belts over ``grid`` (module comment above). ``sources``:
+    [((x, y, h), g0)]; ``fixed``: per belt, (tile, heading) where it may end, or None; ``walks``:
+    per belt, {tile: steps} from its loose ends, or None (no loose end); ``own``: {tile: (belt,
+    heading)}, tiles only that belt may take, and only on a cross-section with that heading (its
+    own end: another belt there, or itself turned, would feed or block it). -> {"lines": per belt
+    [[tile, kind]] in search order (kind "belt", "in" or "out"), "heads": per belt the heading of
+    its last tile, "ends": per belt ("fixed",) or ("loose", tile ahead), "start", "cost",
+    "counts", "seconds", "expanded"}, or {"fail": reason}."""
+    t0 = time.time()
+    k_ = dict(COSTS, **(costs or {}))
+    fixed = list(fixed or [None] * n)
+    walks = list(walks or [None] * n)
+    full = (1 << n) - 1
+    max_ug = int(k_["max_ug"])
+    c_belt, c_turn, c_ug = k_["belt"], k_["turn"], k_["ug"]
+    rel = _turn_rel(n)
+    turns = {(h, side, b): [_rot(dx, dy, h) for dx, dy in rel[side, b]]
+             for h in range(4) for side in (1, 3) for b in range(n)}
+    own = dict(own or {})
+    gblocked = grid.blocked
+
+    def blocked(t):
+        return gblocked(t) or t in own
+
+    def taken(t, b, h):
+        """Belt b may not stand on t, heading h, as a cross-section's tile."""
+        if t in own:
+            return own[t] != (b, h)
+        return gblocked(t)
+
+    def settle(x, y, h, mask):
+        for b in range(n):
+            if mask >> b & 1 and fixed[b] is not None:
+                t, fh = fixed[b]
+                if fh == h and _cross(x, y, h, b) == tuple(t):
+                    mask &= ~(1 << b)
+        return mask
+
+    def hh(x, y, h, mask):
+        tot = 0
+        for b in range(n):
+            if not mask >> b & 1:
+                continue
+            t = _cross(x, y, h, b)
+            best = INF
+            if fixed[b] is not None:
+                ft = fixed[b][0]
+                best = abs(t[0] - ft[0]) + abs(t[1] - ft[1])
+            if walks[b] is not None:
+                w = walks[b].get(t)
+                if w is not None and w < best:
+                    best = w
+            if best == INF:
+                return INF
+            tot += best
+        return tot
+
+    heap, g, parent, count = [], {}, {}, 0
+    for (x, y, h), g0 in sources:
+        if any(taken(_cross(x, y, h, b), b, h) for b in range(n)):
+            continue
+        st = (x, y, h, 0, settle(x, y, h, full))
+        if g0 < g.get(st, INF):
+            f = g0 + hh(x, y, h, st[4])
+            if f == INF and st[4]:
+                continue
+            g[st] = g0
+            parent[st] = (None, ("start",))
+            count += 1
+            heapq.heappush(heap, (f, -g0, count, st))
+    if not heap:
+        return {"fail": "no free cross-section to start from"}
+
+    def push(st, prev, move, cost):
+        nonlocal count
+        if cost >= g.get(st, INF):
+            return
+        f = cost + (hh(st[0], st[1], st[2], st[4]) if st[0] != "fan" and st[4] else 0.0)
+        if f == INF:
+            return
+        g[st] = cost
+        parent[st] = (prev, move)
+        count += 1
+        heapq.heappush(heap, (f, -cost, count, st))
+
+    done, end = set(), None
+    while heap:
+        _f, ng, _c, st = heapq.heappop(heap)
+        gs = -ng
+        if st in done or gs > g.get(st, INF):
+            continue
+        done.add(st)
+        if st[0] == "fan" or st[4] == 0:
+            end = st
+            break
+        if len(done) > limit:
+            return {"fail": f"the search gave up after {limit} cross-sections"}
+        x, y, h, ex, mask = st
+        live = [b for b in range(n) if mask >> b & 1]
+        fx, fy = DX[h], DY[h]
+        # every live belt leaves here, onto the tile ahead of it (loose from there)
+        if all(walks[b] is not None for b in live):
+            extra = 0.0
+            for b in live:
+                a = _cross(x + fx, y + fy, h, b)
+                w = walks[b].get(a)
+                if w is None or blocked(a):
+                    break
+                extra += loose * (w + 1)
+            else:
+                push(("fan", st), st, ("fan",), gs + extra)
+        # the outermost belt on either side leaves alone (the rest keep their offsets)
+        if len(live) > 1:
+            for b in {live[0], live[-1]}:
+                if walks[b] is None:
+                    continue
+                a = _cross(x + fx, y + fy, h, b)
+                w = walks[b].get(a)
+                if w is not None and not blocked(a):
+                    push((x, y, h, ex, mask & ~(1 << b)), st, ("drop", b),
+                         gs + loose * (w + 1))
+        # step
+        nx, ny = x + fx, y + fy
+        if not any(taken(_cross(nx, ny, h, b), b, h) for b in live):
+            push((nx, ny, h, 0, settle(nx, ny, h, mask)), st, ("step",), gs + len(live) * c_belt)
+        # bus turns
+        r = (h + 1) % 4
+        for side in (1, 3):
+            laid, ok = 0, True
+            nh = (h + 1) % 4 if side == 1 else (h + 3) % 4
+            for b in live:
+                bx, by = _cross(x, y, h, b)
+                path = turns[h, side, b]
+                for i, (dx, dy) in enumerate(path):
+                    t = (bx + dx, by + dy)
+                    if taken(t, b, nh) if i == len(path) - 1 else blocked(t):
+                        ok = False
+                        break
+                    laid += 1
+                if not ok:
+                    break
+            if not ok:
+                continue
+            if side == 1:
+                sx, sy, sh = x + n * fx + n * DX[r], y + n * fy + n * DY[r], (h + 1) % 4
+            else:
+                sx, sy, sh = x + fx - DX[r], y + fy - DY[r], (h + 3) % 4
+            push((sx, sy, sh, 0, settle(sx, sy, sh, mask)), st, ("turn", side),
+                 gs + laid * c_belt + len(live) * c_turn)
+        # every live belt under what is ahead, together
+        if ex:
+            continue
+        theirs = grid.spans[_axis(h)]
+        seen_block = False
+        for j in range(1, max_ug + 1):
+            hidden = [_cross(x + fx * j, y + fy * j, h, b) for b in live]
+            if any(t in theirs for t in hidden) or \
+                    any(_cross(x, y, h, b) in theirs for b in live):
+                break
+            if j >= 2 and seen_block and not any(taken(t, b, h) for t, b in zip(hidden, live)):
+                push((x + fx * j, y + fy * j, h, 1, settle(x + fx * j, y + fy * j, h, mask)),
+                     st, ("jump", j), gs + len(live) * c_ug)
+            if any(gblocked(t) for t in hidden):
+                seen_block = True
+    if end is None:
+        return {"fail": "no path for the ribbon"}
+    # the path, start first
+    chain = []
+    s = end
+    while s is not None:
+        prev, move = parent[s]
+        chain.append((s, move))
+        s = prev
+    chain.reverse()
+    fan = chain[-1][0][0] == "fan"
+    if fan:
+        chain = chain[:-1]
+    (x0, y0, h0, _e, _m), _mv = chain[0]
+    lines = [[[_cross(x0, y0, h0, b), "belt"]] for b in range(n)]
+    heads = [h0] * n
+    ends = [("fixed",) if not chain[0][0][4] >> b & 1 else None for b in range(n)]
+    counts = {"belts": 0, "undergrounds": 0, "turns": 0, "crossings": 0}
+    for (prev, _pm), (st, move) in zip(chain, chain[1:]):
+        x, y, h, _ex, mask = prev
+        live = [b for b in range(n) if mask >> b & 1]
+        if move[0] == "drop":
+            b = move[1]
+            ends[b] = ("loose", _cross(x + DX[h], y + DY[h], h, b))
+            heads[b] = h
+            continue
+        if move[0] == "step":
+            for b in live:
+                lines[b].append([_cross(st[0], st[1], h, b), "belt"])
+        elif move[0] == "turn":
+            counts["turns"] += 1
+            for b in live:
+                bx, by = _cross(x, y, h, b)
+                for dx, dy in turns[h, move[1], b]:
+                    lines[b].append([(bx + dx, by + dy), "belt"])
+        else:
+            counts["crossings"] += 1
+            for b in live:
+                lines[b][-1][1] = "in"
+                lines[b].append([_cross(st[0], st[1], h, b), "out"])
+        for b in live:
+            heads[b] = st[2]
+            if not st[4] >> b & 1:
+                ends[b] = ("fixed",)
+    x, y, h, _ex, mask = chain[-1][0]
+    for b in range(n):
+        if mask >> b & 1:
+            ends[b] = ("loose", _cross(x + DX[h], y + DY[h], h, b))
+    for b in range(n):
+        for _t, kind in lines[b]:
+            if kind == "belt":
+                counts["belts"] += 1
+            else:
+                counts["undergrounds"] += 1
+    cost = g[end]
+    return {"lines": lines, "heads": heads, "ends": ends, "start": (x0, y0, h0),
+            "cost": round(cost, 3), "counts": counts, "seconds": round(time.time() - t0, 2),
+            "expanded": len(done)}

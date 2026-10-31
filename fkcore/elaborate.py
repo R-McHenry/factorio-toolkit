@@ -226,8 +226,11 @@ class Flat:
     buffers: dict = field(default_factory=dict)
     #: 2.1, a Literal's names (its file's "names"): instance path -> {name: machine key}
     literal_names: dict = field(default_factory=dict)
-    #: 2.1, `net each NAME`: group name -> its nets, cell 0 first (one belt each; a ribbon later)
+    #: 2.1, `net each NAME`: group name -> its nets, cell 0 first (one belt each, routed as one
+    #: ribbon: ``fkcore.ribbons``)
     each: dict = field(default_factory=dict)
+    #: 2.1, `bundle NAME: a, b`: bundle name -> its nets in ribbon order (belt k carries the k-th)
+    bundles: dict = field(default_factory=dict)
     #: 2.1: the port keys of every Stack cell's (and head's) `stack` pairs, where a belt runs on
     #: from one cell to the next (the rate model serves a short line's cells in that order)
     chain: set = field(default_factory=set)
@@ -301,7 +304,8 @@ def _imports(f, folder, modules, seen, kinds=None, tiers=None):
                                   asserts=body.asserts, covers=body.covers, signals=body.signals,
                                   wires=body.wires, behaves=body.behaves, expects=body.expects,
                                   lanes=body.lanes, sets=body.sets, ports=body.ports,
-                                  size=body.size, stacks=body.stacks)
+                                  size=body.size, stacks=body.stacks,
+                                  bundles=getattr(body, "bundles", []))
                 # 2.1: the body uses its own file's modules, so they come with it (a world.fk
                 # body placed by nauvis.fk finds the Mall module world.fk defines)
                 for other, m in g.modules.items():
@@ -577,6 +581,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     flat._layout = layout
     flat._sizes = dict(sizes or {})
     flat._lanes = []
+    flat._bundles = []
     flat._port_named = {}
     flat._dnp_named = {}
     flat._auto_n = set()        # 2.1: the Stacks whose n=auto the size step counts
@@ -589,6 +594,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _split_nets(flat, cat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
+    _resolve_bundles(flat, cat)
     _port_pairs(flat, cat)
     _width_checks(flat, cat)
     _recorded_ports(flat, layout)
@@ -909,6 +915,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                                                      for node in getattr(mod, kind, ()))
     for ln in getattr(mod, "lanes", ()):
         flat._lanes.append((ln, prefix, src))
+    for b in getattr(mod, "bundles", ()):
+        flat._bundles.append((b, prefix, src))
 
 
 def _auto(flat, path, inst, src, core=None):
@@ -2104,8 +2112,11 @@ def _resolve_lanes(flat, cat):
                 raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} is a "
                                 "fluid's, and pipes have no lanes")
             if flat.nets[name].width > 1:
+                w = flat.nets[name].width
                 raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} is "
-                                "width 2, both lanes of its belt, so it shares a belt with none")
+                                + ("width 2, both lanes of its belt, so it shares a belt with none"
+                                   if w == 2 else f"width {w}, a ribbon of {w // 2} belts, so it "
+                                   "shares a belt with none"))
             if name in flat.lane_of:
                 raise ElabError(src, ln.line, f"lanes {ln.left} | {ln.right}: net {short} "
                                 f"already shares a belt ({flat.lane_of[name]}), and a belt has "
@@ -2113,6 +2124,54 @@ def _resolve_lanes(flat, cat):
         key = f"{a}|{b}"
         flat.pairs[key] = (a, b)
         flat.lane_of[a] = flat.lane_of[b] = key
+
+
+def _resolve_bundles(flat, cat):
+    """``bundle NAME: a, b, c`` (2.1) -> ``flat.bundles``: the module's own nets, routed as one
+    ribbon in that order. Refused: a name a net or another ribbon has, a net that isn't one of the
+    module's, a fluid's net (pipes), a wide net (a ribbon of its own), a net that shares a belt
+    (``lanes``) and a net that is in a ribbon already (a bundle or a ``net each``)."""
+    taken = {n: f"net each {g.rsplit('/', 1)[-1]}" for g, ns in flat.each.items() for n in ns}
+    for b, prefix, src in getattr(flat, "_bundles", ()):
+        full = _join(prefix, b.name)
+        what = f"bundle {b.name}"
+        if full in flat.nets or full in flat.each or full in flat.bundles:
+            raise ElabError(src, b.line, f"{what}: {b.name} names a net or a ribbon already; "
+                                         "give the bundle a name of its own")
+        nets = []
+        for short in b.nets:
+            name = _join(prefix, short)
+            if name not in flat.nets:
+                raise ElabError(src, b.line, f"{what}: no net {short} in this module")
+            net = flat.nets[name]
+            if name in flat.insts and flat.insts[name].kind == "Bus":
+                raise ElabError(src, b.line, f"{what}: {short} is a Bus, belts of its own")
+            if net.items and any(cat.is_fluid(i) for i in net.items):
+                raise ElabError(src, b.line, f"{what}: net {short} is a fluid's, and a ribbon "
+                                             "is belts")
+            if net.width > 2:
+                raise ElabError(src, b.line, f"{what}: net {short} is width {net.width}, a "
+                                             "ribbon of its own; a bundle's nets are a belt "
+                                             "each")
+            if name in flat.lane_of:
+                raise ElabError(src, b.line, f"{what}: net {short} shares a belt "
+                                             f"({flat.lane_of[name]}); a bundle's nets are a "
+                                             "belt each")
+            if name in taken:
+                raise ElabError(src, b.line, f"{what}: net {short} is in a ribbon already "
+                                             f"({taken[name]})")
+            nets.append(name)
+        for name in nets:
+            taken[name] = what
+        flat.bundles[full] = nets
+
+
+def ribbons(flat):
+    """{ribbon name: [net, ...]} (2.1): every ``net each`` group and every ``bundle``, in belt
+    order. A wide net (``width`` above 2) is a ribbon of one net, which the router deals out."""
+    out = {g: list(ns) for g, ns in getattr(flat, "each", {}).items()}
+    out.update({b: list(ns) for b, ns in getattr(flat, "bundles", {}).items()})
+    return out
 
 
 def _port_pairs(flat, cat):
@@ -2158,8 +2217,21 @@ def _width_checks(flat, cat):
         if net.width < 2:
             continue
         if net.items and all(cat.is_fluid(i) for i in net.items):
-            flat.checks.append(Check("width", f"net {name}", "width 2 on a fluid's net: pipes "
-                                     "have no lanes, so it is one pipe", net.line))
+            flat.checks.append(Check("width", f"net {name}", f"width {net.width} on a fluid's "
+                                     "net: pipes have no lanes, so it is one pipe", net.line))
+            continue
+        if net.width > 2:
+            # 2.1: a wide net is width/2 belts side by side, its drivers and consumers dealt out
+            belts = net.width // 2
+            for side, ends in (("drivers", net.drivers), ("consumers", net.consumers)):
+                have = len({flat.machines[k].inst if k in flat.machines else k
+                            for k, _i in ends})
+                if have < belts:
+                    flat.checks.append(Check(
+                        "width", f"net {name}",
+                        f"width {net.width} is {belts} belts side by side, and it has {have} "
+                        f"{side[:-1] if have == 1 else side}: the router deals them out, one belt "
+                        f"each at least, so it needs {belts}", net.line))
             continue
         insts = list(dict.fromkeys(flat.machines[k].inst for k, _i in net.drivers))
         if len(insts) == 1:
