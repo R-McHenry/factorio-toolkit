@@ -899,7 +899,7 @@ def _fixed_hands(ctx):
             if inst.kind == "Literal":
                 fixed |= {k for k, e in lay.entities.items() if e.owner == path}
                 continue
-            want = inst.params.get("inserter")
+            want = (getattr(inst, "kparams", None) or inst.params).get("inserter")
             if want is None or availmod.is_any(want):
                 continue
             fixed |= {k for k, e in lay.entities.items() if e.owner == path}

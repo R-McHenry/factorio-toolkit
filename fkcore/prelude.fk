@@ -1,0 +1,12 @@
+# prelude.fk: the everyday kinds every .fk file gets without an import (toolkit 2.1).
+#
+# A run's own game/prelude.fk is used in place of this one, and a file's own kind or module of
+# the same name wins over a kind here. `kind NAME = KIND<params>` names a kind with some of its
+# parameters set; an instance's own parameters override them:
+#   a = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>
+# `machine=` and `entity=` are one parameter of a Machine.
+
+kind Assembler = Machine<entity=assembling-machine-1>
+kind Furnace   = Machine<entity=stone-furnace, fuel=coal>
+kind ChemPlant = Machine<entity=chemical-plant>
+kind Refinery  = Machine<entity=oil-refinery, recipe=basic-oil-processing>

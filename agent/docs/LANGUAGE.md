@@ -53,13 +53,14 @@ The built-in kinds:
 | `Pole`, `Pole<pole=small-electric-pole>` | one pole, pinned: for a cell packed so tight that its pole's tile is part of its design (the power step keeps it and adds only what is missing) | none |
 | `Lab`, `Lab<rate=2/min>` | one lab, its inserters laid like an Assembler's: several Labs around one multi-item requester chest each take their packs by one inserter, no belt | by inserters next to it |
 | `Roboport` | one roboport, 4x4: it takes construction and logistic robots into its robot inventory from a net, so the loader is a `Chest<requester, item="logistic-robot", request=50>` beside it and `net load: chest -> roboport`: the router lays the inserter (2.0.16). The kit's robots come out of a storage chest only into a roboport, so a build that takes up a roboport strands its robots until one of these stands again. `cover robots` counts it as coverage | by an inserter next to it |
-| `Assembler<recipe>` | one assembler | by inserters next to it |
-| `Furnace<recipe>` | one furnace | |
+| `Machine<entity, recipe>` | one machine of any crafting building: an assembler, a furnace, a chemical plant, a refinery, a centrifuge (`Machine<entity=centrifuge, recipe=uranium-processing>`). `machine=` is the same as `entity=`. A furnace may take `ore=` in place of `recipe=`; a burner takes `fuel=` (coal if not given). A recipe with a fluid the building has no fluid box for is refused (`no-fluidbox`): an assembling-machine-1 never runs lubricant | inserters, and pipes for fluids |
+| `Assembler<recipe>`, `Furnace<recipe>` (or `ore=`), `ChemPlant<recipe>`, `Refinery` | kinds of `Machine` from the prelude (below): an assembling-machine-1, a stone furnace on coal, a chemical plant, an oil refinery on basic oil processing. `machine=` changes the building: `Assembler<recipe=gear, machine=assembling-machine-2>` | as `Machine` |
+| `Entity<name=small-lamp>` | any other building that moves no items: a lamp, a speaker, a display panel, a beacon. It is placed, powered and wireable; its size, power and circuit connectors come from the game | wires |
 | `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request: the request's count is never above it, and a changed request on a standing chest is laid again by the next `fk build`). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said cannot-carry). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
 | `OffshorePump<rate=1200/s>` | water from the lake: it stands on the shore, open to the water (rot 3 faces west, water west of it) | pipes |
 | `Boiler<fuel=coal>` | one boiler, 3x2: water in and out at its short ends, steam out of its long north side (rot 0), coal by an inserter beside it; 60 steam/s on 0.45 coal/s | pipes |
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
-| `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines. A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
+| `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines (`ChemPlant` and `Refinery` are `Machine`s). A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
 | `Reactor<read=temperature, signal=S>`, `HeatExchanger`, `SteamTurbine` | nuclear power: a reactor heats the exchangers it touches (`net heat items heat: reactor -> hx`, no route), 10 MW each, 103 steam/s for 1.7 turbines | pipes, an inserter for the cells |
 | `Constant<signals="S=N, T=M">` | a constant combinator (Circuits, below) | wires |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. A listed entity sets itself too: `"request": {"logistic-robot": 50}` (a requester's request), `"recipe"`, or `"config"` (the game's fields as JSON). Its frame is its entities' box, so a lone roboport needs a pole of its own beside it. `fk capture` writes such a file from anything built: a lab slot, an area of the game or the planner, or an instance of your design. So a build made in the lab or by hand goes anywhere, inside a module too | |
@@ -538,6 +539,27 @@ import Mall from "mall.fk"
 ```
 
 A module instance's machines are named with a dot: `left.smelt`.
+
+## Kinds and the prelude
+
+`kind NAME = KIND<params>` gives a kind, a module or another kind a name with some of its
+parameters set. It goes at the top of a file, outside any module:
+
+```
+kind Asm2  = Assembler<machine=assembling-machine-2>
+kind Gears = Asm2<recipe=iron-gear-wheel>
+g = Gears @(4, 2)                    # an assembling-machine-2 on gears, named g
+h = Gears<machine=assembling-machine-3> @(8, 2)   # the instance's own parameters win
+```
+
+The instance keeps its own name, so a net still names `g`. A kind can name a kind; a loop of
+kinds is refused. `import Gears from "lib.fk"` brings in a kind, and a module from another file
+brings the kinds of its file with it.
+
+Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `ChemPlant` and
+`Refinery` are kind lines in it. It is `game\prelude.fk` in your run (the toolkit's own if the run
+has none). Change it, or write a kind of the same name in a file, and that file uses yours. A
+prelude holds kind lines only.
 
 ## Power
 

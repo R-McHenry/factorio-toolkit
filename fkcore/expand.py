@@ -43,19 +43,30 @@ from . import placer
 from .codec import config_text
 from .compose import turn
 from .fragments import E, N, S, W, FEnt, Fragment, FragmentError, Role, _finish, fragment
-from .templates import CONTACT
+from .templates import CONTACT, SINGLE
 from .terrain import fmt_amount
 
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
            "frame_of", "planned_frame", "frame_overlaps"]
 
-_SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump", "Pole",
-           "Boiler", "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger",
-           "SteamTurbine", "Constant", "Roboport")
+#: 2.1: the core kinds that are one machine each (``templates.SINGLE``); an instance is single when
+#: its kind resolves to one of them (``Assembler`` is a ``Machine``)
+_SINGLE = SINGLE
 _NO_DIRECTION = ("infinity-pipe",)          # fluid prototypes the game never turns
 _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)
 _DY = (-1, 0, 1, 0)
+
+
+def _core(inst):
+    """The core kind an instance is built as (2.1, ``elaborate.core_of``)."""
+    return getattr(inst, "core", None) or inst.kind
+
+
+def _params(inst):
+    """An instance's parameters with its kinds' defaults (2.1, ``elaborate.params_of``)."""
+    kp = getattr(inst, "kparams", None)
+    return inst.params if kp is None else kp
 
 
 def belts(flat, key, side):
@@ -420,24 +431,25 @@ def fragment_of(flat, path, cat):
             raise FragmentError(f"{path}: its machines sit on different nets, so no single row "
                                 "belt can serve them")
     m0 = flat.machines[keys[0]]
-    if inst.kind in _SINGLE:
+    kind = _core(inst)
+    if kind in _SINGLE:
         frag = _single(flat, keys, cat, ins, outs)
     else:
-        params = {k: v for k, v in inst.params.items() if k not in ("duty", "dnp")}
+        params = {k: v for k, v in _params(inst).items() if k not in ("duty", "dnp")}
         if params.get("inserter") is not None:
             params["inserter"] = _hand_param(path, params["inserter"], cat)
-        elif inst.kind != "SmelterArray":
+        elif kind != "SmelterArray":
             # 2.0.15 (Rory, 2026-10-25): a row laid without inserter= comes in on the lowest hand
             # the network can build, and the hands step raises the connectors the flow needs more
             # of. A SmelterArray keeps its own plain default (Rory's stack).
             params["inserter"] = availmod.choose("hand", "any", need=_row_hands(inst))[0]
-        if inst.kind in ("SmelterRow", "SmelterArray"):
+        if kind in ("SmelterRow", "SmelterArray"):
             params["_recipe"] = m0.recipe
             fuel = [i for i in m0.needs if i not in cat.recipe_rates(m0.recipe, 1)[0]]
             params["_fuel"] = fuel[0] if fuel else None
-        if inst.kind == "SmelterArray":
+        if kind == "SmelterArray":
             params["_per"] = _array_column(cat, m0)
-        frag = fragment(inst.kind, params, [b[1] for b in ins], [b[1] for b in outs])
+        frag = fragment(kind, params, [b[1] for b in ins], [b[1] for b in outs])
         _row_modules(frag, flat, path, cat)
     binding = {}
     names_in = [r for r in frag.roles if frag.roles[r].side == "in"]
@@ -861,12 +873,12 @@ def _on_patch(flat, lay, path, cat, ground):
     placed, and the line says why (and how many drills would fit: n is never changed)."""
     inst = flat.insts[path]
     res = inst.hints["patch"]
-    if inst.kind != "MinerRow":
+    if _core(inst) != "MinerRow":
         return None, f"{path}: @patch places MinerRow rows only in V1; give it an @(x, y) hint", \
             None, None
-    if inst.params.get("resource") != res:
-        return None, (f"{path}: @patch({res}), but the row mines {inst.params.get('resource')}"), \
-            None, None
+    mines = _params(inst).get("resource")
+    if mines != res:
+        return None, f"{path}: @patch({res}), but the row mines {mines}", None, None
     if ground is None:
         return None, (f"{path}: @patch({res}) needs the terrain (read_terrain <name>) and the "
                       "factory's plot"), None, None
@@ -874,7 +886,7 @@ def _on_patch(flat, lay, path, cat, ground):
         frag, binding = fragment_of(flat, path, cat)
     except FragmentError as exc:
         return None, f"{path}: {exc}", None, None
-    n = int(inst.params["n"])
+    n = int(_params(inst)["n"])
     ore = ground.ore.get(res, {})
     where = "the plot" + (f" (patch {ground.patch})" if ground.patch else "")
     if not ore:
