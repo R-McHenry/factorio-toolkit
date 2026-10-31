@@ -1480,6 +1480,8 @@ class _Subst:
                 y = self.value(x, line)
                 out.extend(y if isinstance(y, list) else [y])
             return out
+        if isinstance(v, lang.Raw):
+            return lang.Raw(self.raw(v.value, line))
         if not isinstance(v, str) or "$" not in v:
             return v
         m = _PARAM.fullmatch(v)
@@ -1487,7 +1489,21 @@ class _Subst:
             return self.one(m.group(1), m.group(2), line)
         return self.text(v, line)
 
+    def raw(self, v, line):
+        """Inside a raw setting's value (``cb.`` / ``bp.``): ``$p`` alone is p's value, ``$p``
+        in a string its text, at any depth of objects and lists."""
+        if isinstance(v, dict):
+            return {k: self.raw(x, line) for k, x in v.items()}
+        if isinstance(v, list):
+            return [self.raw(x, line) for x in v]
+        if not isinstance(v, str) or "$" not in v:
+            return v
+        m = _PARAM.fullmatch(v)
+        return self.one(m.group(1), m.group(2), line) if m else self.text(v, line)
+
     def text(self, v, line):
+        if isinstance(v, lang.Raw):
+            return lang.Raw(self.raw(v.value, line))
         if not isinstance(v, str) or "$" not in v:
             return v
         return _PARAM.sub(lambda m: _value_text(self.one(m.group(1), m.group(2), line)), v)

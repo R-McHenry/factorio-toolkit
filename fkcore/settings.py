@@ -27,6 +27,13 @@ What a paste does, as measured on that server (2.0.77, again for 2.1 on 2026-10-
 - a wire stays: the apply's wire pass (``fkcore.wires``) cuts it.
 So the design's explicit defaults (``RESET_CB``, a false flag, an empty list, a whitelist) and an
 absent field compare equal here: ``_clean`` drops both.
+
+Raw settings (2.1): a ``cb.`` field is part of the control behaviour, compared whole as before; a
+``bp.`` field (a speaker's ``parameters``, a display panel's ``text``, a lamp's ``color``) is
+compared where the design sets it. The game's defaults for the buildings they reach (a
+roboport's output signals, a speaker's instrument) are dropped like the others, and a number is
+compared to 6 decimals (the game keeps a volume or a colour as a 32-bit float: 0.8 comes back
+0.800000011920929).
 Pure but for ``read``; stdlib only.
 """
 from __future__ import annotations
@@ -53,7 +60,19 @@ _DEFAULTS = {"stack_control_input_signal": {"type": _V, "name": "signal-S"},
              "green_signal": {"type": _V, "name": "signal-green"},
              "blue_signal": {"type": _V, "name": "signal-blue"},
              "rgb_signal": {"type": _V, "name": "signal-white"},
-             "circuit_read_resources": True, "circuit_resource_read_mode": 0}
+             "circuit_read_resources": True, "circuit_resource_read_mode": 0,
+             # 2.1, measured on a laptop server (2.0.77): a roboport's and a speaker's own
+             "available_logistic_output_signal": {"type": _V, "name": "signal-X"},
+             "total_logistic_output_signal": {"type": _V, "name": "signal-Y"},
+             "available_construction_output_signal": {"type": _V, "name": "signal-Z"},
+             "total_construction_output_signal": {"type": _V, "name": "signal-T"},
+             "roboport_count_output_signal": {"type": _V, "name": "signal-R"},
+             "circuit_parameters": {"instrument_id": 0, "note_id": 0,
+                                    "signal_value_is_pitch": False,
+                                    "stop_playing_sounds": False}}
+#: the blueprint fields that say what and where an entity is, not how it is set: never compared
+_PLACE = frozenset({"entity_number", "name", "position", "direction", "tags", "wires",
+                    "quality", "type"})
 #: conditions: one with no first signal never holds (``codec.RESET_CB``), as good as none
 _CONDITIONS = ("circuit_condition", "logistic_condition")
 #: the source's comparators, back from the game's
@@ -139,7 +158,7 @@ def _clean(v):
     if isinstance(v, dict):
         out = {}
         for k, x in v.items():
-            if k in _DEFAULTS and codec._normal(x, "first_signal") == _DEFAULTS[k]:
+            if k in _DEFAULTS and codec._normal(x, k) == codec._normal(_DEFAULTS[k], k):
                 continue
             if k in _CONDITIONS and isinstance(x, dict) and not x.get("first_signal"):
                 continue
@@ -153,6 +172,9 @@ def _clean(v):
         return out
     if isinstance(v, list):
         return [x for x in (_clean(x) for x in v) if not _empty(x)]
+    if isinstance(v, float):
+        v = round(v, 6)
+        return int(v) if v.is_integer() else v
     return v
 
 
@@ -161,8 +183,14 @@ def _empty(x):
     return x is None or x is False or x == [] or x == {}
 
 
-def _fields(entity):
-    got = {k: entity[k] for k in KEYS if k in entity}
+def _fields(entity, extra=()):
+    """The entity's settings as compared: ``KEYS`` and ``extra`` (the design's ``bp.`` fields,
+    2.1); ``extra=None`` keeps every field but those that place it (what stands, which the
+    design's fields pick from)."""
+    if extra is None:
+        got = {k: x for k, x in entity.items() if k not in _PLACE}
+    else:
+        got = {k: entity[k] for k in tuple(KEYS) + tuple(extra) if k in entity}
     return codec._normal(_clean(got))
 
 
@@ -183,7 +211,7 @@ def live(data):
                 wires.add((ca, by_n[b], cb))
             elif b == mine and a in by_n:
                 wires.add((cb, by_n[a], ca))
-        out[by_n[mine]] = (_fields(e), wires)
+        out[by_n[mine]] = (_fields(e, None), wires)
     return out
 
 
@@ -194,7 +222,8 @@ def design(rows, s):
     for i, row in enumerate(rows):
         e = codec.entity_json(row, i + 1)
         ats.append(_at(row["name"], row["x"], row["y"]))
-        out[ats[-1]] = (_fields(e), set())
+        _cb, bp = codec.raw_fields(row.get("attrs") or {}, row.get("src"))
+        out[ats[-1]] = (_fields(e, sorted(bp)), set())
     for a, ca, b, cb in codec.wire_list(rows, None, codec.links_of(rows, getattr(s, "wires", ()))):
         if ca in codec.COPPER or cb in codec.COPPER:
             continue
@@ -214,7 +243,8 @@ def drifts(want, have, verdicts, users):
         (wf, ww), (hf, hw) = want[k], have[k]
         ww = {w for w in ww if w[1] in both}
         hw = {w for w in hw if w[1] in both}
-        keys = [f for f in KEYS if wf.get(f) != hf.get(f)]
+        # 2.1: the design's bp. fields too, where it sets them
+        keys = [f for f in list(KEYS) + sorted(set(wf) - set(KEYS)) if wf.get(f) != hf.get(f)]
         v = judged[k]
         if keys:
             w = describe({f: wf[f] for f in keys if f in wf})
@@ -258,8 +288,12 @@ def describe(fields, wires=None):
         sig = [f"{f.get('name')}:{f.get('count')}" for s in sections.get("sections") or ()
                for f in s.get("filters") or ()]
         parts.append("signals=" + "|".join(sig))
-    if cb:
-        parts.append("circuit " + ", ".join(sorted(cb)))
+    for key in sorted(cb):
+        # 2.1: any other control behaviour field, as a raw cb. setting writes it
+        parts.append(f"cb.{key}={codec.config_text(cb[key])}")
+    for key in sorted(k for k in fields if k not in KEYS):
+        # 2.1: a raw bp. field, as the source writes it
+        parts.append(f"bp.{key}={codec.config_text(fields[key])}")
     if fields.get("filters") or fields.get("use_filters"):
         names = [f.get("name") for f in fields.get("filters") or () if f.get("name")]
         mode = " (blacklist)" if fields.get("filter_mode") == "blacklist" else ""

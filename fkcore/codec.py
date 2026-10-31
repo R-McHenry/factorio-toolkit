@@ -42,13 +42,15 @@ inserter's filters), and the layout's ``w`` records become the blueprint's ``wir
 - ``signals=S:N|T:M``: a constant combinator's output (each filter with its quality, else it
   sends nothing: fnet's CLAUDE.md gotcha).
 
-A signal is typed by its name: a virtual signal (fnet's list), a fluid, else an item. The
-comparators are the game's (``>=`` is ``≥``). The typed settings also ride in ``tags.fkp``, so a
-blueprint read back gives them back and drops the ``control_behavior`` they make, as long as the
-entity's fields are what they make (an item signal the game exported without its ``type`` counts
-as an item); otherwise the entity's own fields win, in ``config``, as they do for a blueprint
-without typed settings (an imported Literal). The keys were checked on a laptop test server
-(2.0.77, 2026-10-22): every one survives a paste and a capture.
+A signal is typed by its name, as the game lists its signals (``fkcore.facts``, 2.1): a virtual
+signal, an item, a fluid, an entity, a recipe, a quality, a space location or an asteroid chunk;
+an unknown name is an item (the game's default type). The comparators are the game's (``>=`` is
+``≥``). The typed settings also ride in ``tags.fkp``, so a blueprint read back gives them back
+and drops the ``control_behavior`` they make, as long as the entity's fields are what they make
+(an item signal the game exported without its ``type`` counts as an item); otherwise the
+entity's own fields win, in ``config``, as they do for a blueprint without typed settings (an
+imported Literal). The keys were checked on a laptop test server (2.0.77, 2026-10-22): every one
+survives a paste and a capture.
 
 A ``w`` record is ``[a, c, b, c]`` with red 1 and green 2, a combinator's output 3 and 4 (fnet's
 connector table); reading a blueprint that carries its records leaves the wires they explain out
@@ -67,6 +69,14 @@ holds). Mining drills, pumpjacks and offshore pumps take no settings from a past
 a new condition): the apply lays them fresh (``PASTE_SKIPS``). Reading a blueprint drops
 ``RESET_CB`` again.
 
+Raw settings (2.1, PLAN-2.1 "Circuits that reach any building"): ``cb`` and ``bp`` are JSON
+objects of blueprint fields as the game names them, set from the source's ``cb.FIELD=`` and
+``bp.FIELD=`` (``fkcore.circuits`` turns signal names and condition strings into the game's
+forms first). ``cb`` fields go into the entity's ``control_behavior``, over any field a typed
+setting makes; ``bp`` fields go on the entity itself, except the fields the codec writes from the
+row (``BP_REFUSED``). They ride in ``tags.fkp`` as the typed settings do, and come back the same
+way.
+
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
@@ -81,7 +91,8 @@ from . import fkp as fkpmod
 __all__ = ["CodecError", "BLUEPRINT_VERSION", "rows_of", "blueprint", "read_blueprint",
            "parse_blueprint", "fkp_to_blueprint", "blueprint_to_fkp", "pole_wires",
            "circuit_wires", "wire_attrs", "POLE_COPPER", "CIRCUIT_ATTRS", "control_behavior",
-           "parse_condition", "signal_type", "connector", "links_of", "VIRTUAL_SIGNALS"]
+           "parse_condition", "signal_type", "connector", "links_of", "RAW_ATTRS", "BP_REFUSED",
+           "made_fields", "raw_fields", "condition_json", "signal_json"]
 
 #: defines.wire_connector_id.pole_copper (read from the game, 2.0.77)
 POLE_COPPER = 5
@@ -101,18 +112,19 @@ _OWN = ("entity_number", "name", "position", "direction", "tags")
 
 #: an entity's typed circuit settings (2.0), in the order the .fkp writes them
 CIRCUIT_ATTRS = ("if", "logistic", "read", "signal", "filter", "signals")
+#: an entity's raw settings (2.1): JSON objects of control behaviour (``cb``) and blueprint
+#: (``bp``) fields
+RAW_ATTRS = ("cb", "bp")
+#: blueprint fields a ``bp.`` setting may not write: the codec writes them from the row, and a
+#: control behaviour is ``cb.``
+BP_REFUSED = frozenset({"entity_number", "name", "position", "direction", "tags", "wires",
+                        "recipe", "type", "control_behavior"})
 #: the entity fields the typed settings make (dropped on reading when ``tags.fkp`` has them)
 _CIRCUIT_FIELDS = ("control_behavior", "use_filters", "filters")
 #: the source's comparators -> the game's
 _COMPARATOR = {"<": "<", ">": ">", "=": "=", "<=": "≤", ">=": "≥", "!=": "≠"}
 _CONDITION = re.compile(r"^(?P<a>[A-Za-z0-9_\-]+?)(?P<op><=|>=|!=|<|>|=)"
                         r"(?P<b>-?\d+|[A-Za-z][A-Za-z0-9_\-]*)$")
-#: the game's fluids (the catalog's, 2.0.77 with Space Age): a signal of one is typed fluid
-_FLUIDS = frozenset((
-    "ammonia", "ammoniacal-solution", "crude-oil", "electrolyte", "fluorine", "fluoroketone-cold",
-    "fluoroketone-hot", "heavy-oil", "holmium-solution", "lava", "light-oil", "lithium-brine",
-    "lubricant", "molten-copper", "molten-iron", "petroleum-gas", "steam", "sulfuric-acid",
-    "thruster-fuel", "thruster-oxidizer", "water"))
 #: belt reading modes (2.0 ``circuit_contents_read_mode``, with ``circuit_read_hand_contents``:
 #: measured on a laptop test server, 2.0.77, by the lead engineer, 2026-10-22). 2.1: ``hold-all``
 #: is 2.0's "hold, all belts" (``entire_belt_hold``, 2): the whole belt's contents, not one tile's,
@@ -120,19 +132,6 @@ _FLUIDS = frozenset((
 _BELT_READ = {"pulse": 0, "hold": 1, "hold-all": 2}
 #: where a signal ID sits in the fields the typed settings make
 _SIGNAL_KEYS = ("first_signal", "second_signal", "temperature_signal")
-#: the virtual signals of the game (fnet's signal_space.VIRTUAL_SIGNALS, copied 2026-10-22)
-VIRTUAL_SIGNALS = frozenset(
-    [f"signal-{i}" for i in range(10)] + [f"signal-{chr(65 + i)}" for i in range(26)] + [
-        "down-arrow", "down-left-arrow", "down-right-arrow", "left-arrow", "right-arrow",
-        "shape-circle", "shape-corner", "shape-cross", "shape-curve", "shape-diagonal",
-        "shape-diagonal-cross", "shape-horizontal", "shape-t", "shape-vertical",
-        "signal-any-quality", "signal-anything", "signal-black", "signal-blue", "signal-check",
-        "signal-cyan", "signal-deny", "signal-dot", "signal-each", "signal-everything",
-        "signal-fluid-parameter", "signal-fuel-parameter", "signal-ghost", "signal-green",
-        "signal-grey", "signal-heart", "signal-info", "signal-item-parameter", "signal-pink",
-        "signal-red", "signal-signal-parameter", "signal-skull", "signal-stack-size",
-        "signal-unknown", "signal-white", "signal-yellow", "up-arrow", "up-left-arrow",
-        "up-right-arrow"])
 #: connector ids by colour: (entity or combinator input, combinator output)
 _CONNECTOR = {"red": (1, 3), "green": (2, 4)}
 #: entity types whose control behaviour a paste writes whole when it differs from the game's
@@ -162,14 +161,20 @@ def rows_of(lay):
 
 
 def signal_type(name):
-    """A signal's type by its name: ``virtual``, ``fluid`` or ``item``."""
-    if name in VIRTUAL_SIGNALS:
-        return "virtual"
-    return "fluid" if name in _FLUIDS else "item"
+    """A signal's type by its name, from the game's list (``fkcore.facts.signal_type``):
+    ``virtual``, ``item``, ``fluid``, ``entity``, ``recipe``, ``quality``, ...; ``item`` for an
+    unknown name."""
+    from . import facts
+    return facts.signal_type(name)
 
 
 def _signal(name):
     return {"type": signal_type(name), "name": name}
+
+
+def signal_json(name):
+    """A signal name as the game's SignalID: ``{"type": ..., "name": ...}``."""
+    return _signal(name)
 
 
 def parse_condition(text, where="condition"):
@@ -180,6 +185,26 @@ def parse_condition(text, where="condition"):
                          f"(op one of {', '.join(_COMPARATOR)}), got {text!r}")
     b = m.group("b")
     return m.group("a"), m.group("op"), int(b) if re.fullmatch(r"-?\d+", b) else b
+
+
+def is_signal_key(key):
+    """A blueprint field that holds a SignalID (2.1, for raw settings too): ``first_signal``,
+    ``temperature_signal``, ``available_construction_output_signal``, ``icon_signal_id``,
+    ``icon``, ..."""
+    if not isinstance(key, str):
+        return False
+    return (key in _SIGNAL_KEYS or key.endswith("_signal") or key.endswith("signal_id")
+            or key in ("signal", "icon"))
+
+
+def is_condition_key(key):
+    """A blueprint field that holds a condition (``circuit_condition``, ``condition``, ...)."""
+    return isinstance(key, str) and key.endswith("condition")
+
+
+def condition_json(text, where="condition"):
+    """``S<N`` / ``S>=T`` as the game's condition object."""
+    return _condition(text, where)
 
 
 def _condition(text, where):
@@ -241,6 +266,41 @@ def control_behavior(attrs, where="entity"):
     return fields
 
 
+def raw_fields(attrs, where="entity"):
+    """An entity's raw settings (2.1): ({cb field: value}, {bp field: value}) from its ``cb`` and
+    ``bp`` attrs (JSON objects); a ``bp`` field the codec writes from the row is refused."""
+    out = []
+    for name in RAW_ATTRS:
+        text = attrs.get(name)
+        if text is None or text == "":
+            out.append({})
+            continue
+        try:
+            got = json.loads(text) if isinstance(text, str) else text
+        except ValueError:
+            raise CodecError(f"{where}: {name} is not JSON: {text!r}") from None
+        if not isinstance(got, dict):
+            raise CodecError(f"{where}: {name} must be a JSON object, got {text!r}")
+        out.append(got)
+    clash = sorted(k for k in out[1] if k in BP_REFUSED)
+    if clash:
+        raise CodecError(f"{where}: bp.{clash[0]}: the codec writes {clash[0]} from the design"
+                         + (" (write cb. fields for a control behaviour)"
+                            if clash[0] == "control_behavior" else ""))
+    return out[0], out[1]
+
+
+def made_fields(attrs, where="entity"):
+    """Every entity field an entity's settings make: the typed ones' (:func:`control_behavior`)
+    with the raw ``cb`` fields over them in its ``control_behavior``, and the raw ``bp`` fields."""
+    fields = control_behavior(attrs, where)
+    cb, bp = raw_fields(attrs, where)
+    if cb:
+        fields["control_behavior"] = dict(fields.get("control_behavior") or {}, **cb)
+    fields.update(bp)
+    return fields
+
+
 def _normal(v, key=None):
     """Game fields as the codec compares them: an item signal the game exported without its
     ``type`` (item is the game's default, and it drops it) gets it back."""
@@ -249,7 +309,8 @@ def _normal(v, key=None):
     if not isinstance(v, dict):
         return v
     out = {k: _normal(x, k) for k, x in v.items()}
-    if key in _SIGNAL_KEYS or (key == "filters" and "count" in out and "name" in out):
+    if (key in _SIGNAL_KEYS or (is_signal_key(key) and "name" in out)
+            or (key == "filters" and "count" in out and "name" in out)):
         out.setdefault("type", "item")
     return out
 
@@ -259,11 +320,17 @@ def _settings_back(extra, fkp_attrs):
     they make, and those fields are dropped, while the entity's fields are what they make. A
     blueprint the game exported (an item signal without its type) still matches; one whose
     fields differ (changed in the game) keeps the game's fields, and the typed settings go."""
-    typed = {k: fkp_attrs[k] for k in CIRCUIT_ATTRS if k in fkp_attrs}
+    typed = {k: fkp_attrs[k] for k in CIRCUIT_ATTRS + RAW_ATTRS if k in fkp_attrs}
     if not typed:
         return
-    game = {f: extra[f] for f in _CIRCUIT_FIELDS if f in extra}
-    if _normal(game) == _normal(control_behavior(typed)):
+    try:
+        want = made_fields(typed)
+    except CodecError:
+        for k in typed:
+            del fkp_attrs[k]
+        return
+    game = {f: extra[f] for f in set(_CIRCUIT_FIELDS) | set(want) if f in extra}
+    if _normal(game) == _normal(want):
         for f in game:
             del extra[f]
     else:
@@ -324,8 +391,9 @@ def _entity_json(row, number):
             raise CodecError(f"{row.get('src')}: ug must be in or out, got {ug!r}")
         entity["type"] = _UG[ug]
     attrs.pop("wire", None)                    # blueprint() writes it into the wires
-    # the typed circuit settings make game fields, and stay in tags.fkp to come back as written
-    entity.update(control_behavior(attrs, row.get("src")))
+    # the typed circuit settings make game fields, and stay in tags.fkp to come back as written;
+    # the raw ones (2.1) too
+    entity.update(made_fields(attrs, row.get("src")))
     config = attrs.pop("config", None)
     if config is not None:
         entity.update(_config(row, config, entity))

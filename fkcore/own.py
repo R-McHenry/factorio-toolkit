@@ -105,8 +105,8 @@ def settings(e, wires=()):
     """The signature of entity ``e``'s circuit settings: its typed circuit attrs, a chest's slot
     limit (``bar``) and request (``request_filters``) and the circuit wires ``wires`` (``w``
     records) that touch it, by colour and the other end's key. None when it has none of them."""
-    from .codec import CIRCUIT_ATTRS
-    got = [[k, e.attrs[k]] for k in CIRCUIT_ATTRS if e.attrs.get(k)]
+    from .codec import CIRCUIT_ATTRS, RAW_ATTRS
+    got = [[k, e.attrs[k]] for k in CIRCUIT_ATTRS + RAW_ATTRS if e.attrs.get(k)]
     try:
         config = json.loads(e.attrs.get("config") or "{}")
     except (ValueError, AttributeError):

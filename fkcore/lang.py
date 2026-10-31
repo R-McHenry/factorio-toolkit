@@ -19,15 +19,21 @@
     index   := '[' (int | '*') ']'    # a Stack's cell k, [-1] the last, [*] every one (2.1)
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
-    param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
+    param   := name '=' value | name | raw              # a bare name is a flag (Chest<provider>)
     value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
     word    := WORD | '$' name ('[' num ']')?               # $p: a module parameter (2.1)
+    raw     := ('cb' | 'bp') '.' word '=' rawval        # a blueprint field as the game names it (2.1)
+    rawval  := number | STRING | 'true' | 'false' | word
+             | '{' (key ':' rawval (',' key ':' rawval)*)? '}' | '[' (rawval (',' rawval)*)? ']'
+    key     := word | STRING
     signal  := 'signal' name ('=' word)?                # pinned to a game signal, or auto
     wire    := 'wire' name ('red' | 'green') ':' refs ('->' refs)?
     cond    := operand op (operand | number)       op := '<' | '>' | '<=' | '>=' | '=' | '==' | '!='
     operand := name ('.' word)+                         # the last word is the signal
     behave  := 'behave' name 'on' name '{' line* '}'    # state | require | expect | cycle | fails
     expect  := 'expect' <the rest of the line>
+    set     := 'set' name ('.' ('out' | 'in'))? ('->' name)? ':' prop (',' prop)*
+    prop    := name '=' <the rest up to a comma> | raw
 
 The tokenizer is the one in C:\\fk-lead\\repo\\fkc\\lang.py (d6018d3), with ``*`` added for ``X.*``.
 Words may contain dashes (item names); instance, module and net names may not. Every node keeps its
@@ -93,7 +99,14 @@ one colour; ``when`` gates a net (every inserter of its route) or enables a mach
 operand is ``W.S`` (signal S on wire W), ``network.S`` (the logistic network's count) or ``I.S``
 (what instance I puts on a wire). ``behave`` and ``expect`` keep their lines as written, by line:
 the tokenizer drops newlines, so a line is the tokens that share a line number. The circuit
-meaning is ``fkcore.circuits``. Pure, stdlib only.
+meaning is ``fkcore.circuits``.
+
+Raw settings (2.1, PLAN-2.1 "Circuits that reach any building"): ``cb.FIELD=VALUE`` writes one
+field of an entity's control behaviour and ``bp.FIELD=VALUE`` any other blueprint field, named as
+the game's blueprint names them, in a ``set`` line or as an instance's or a kind's parameter. A
+value is JSON-ish: a number, a quoted string (no escapes; it can't hold a double quote), ``true``
+or ``false``, a bare word (a string: ``signal-C``), an object ``{key: value, ...}`` (keys are words
+or strings) or a list ``[value, ...]``. It is a :class:`Raw`. Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -102,7 +115,8 @@ from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
            "Module", "Port", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand",
-           "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers", "MParam", "RESERVED"]
+           "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers", "MParam", "RESERVED", "Raw",
+           "RAW_PREFIXES", "is_raw"]
 
 
 class FkSyntaxError(Exception):
@@ -161,6 +175,29 @@ def tokenize(text, path="<fk>"):
 
 
 # -- AST ------------------------------------------------------------------------------------------
+#: the two kinds of raw setting (2.1): a control behaviour field, any other blueprint field
+RAW_PREFIXES = ("cb", "bp")
+
+
+def is_raw(key):
+    """``cb.FIELD`` or ``bp.FIELD``: a raw setting's key."""
+    return isinstance(key, str) and key.partition(".")[0] in RAW_PREFIXES and "." in key
+
+
+@dataclass(frozen=True)
+class Raw:
+    """A raw setting's value as written (2.1): None, a bool, a number, a string, a list or a dict
+    of them. ``str()`` is its compact JSON."""
+    value: object
+
+    def __str__(self):
+        import json
+        return json.dumps(self.value, separators=(",", ":"), ensure_ascii=True)
+
+    def __hash__(self):
+        return hash(str(self))
+
+
 @dataclass(frozen=True)
 class Auto:
     """``n=auto`` or ``n=auto LO..HI``: a count the build's ``size`` step chooses, the fewest
@@ -364,6 +401,7 @@ class Props:
     attrs: dict               # attr -> value as written (a string; codec parses it)
     line: int
     wire: str | None = None   # the chest whose contents an ``if=`` reads (a lowered ``fill=``)
+    inline: bool = False      # 2.1: an instance's (or its kind's) own cb./bp. parameters
 
 
 @dataclass
@@ -758,14 +796,73 @@ class _P:
         self.expect(":")
         attrs = {}
         while True:
-            key = self.word("a property: logistic, if, filter, read, signal or signals").text
+            key = self.word("a property: logistic, if, filter, read, signal, signals, cb.FIELD or "
+                            "bp.FIELD").text
+            raw = key in RAW_PREFIXES and self.peek().text == "."
+            if raw:
+                key = self.raw_key(key)
             if key in attrs:
                 self.err(f"property {key} given twice")
             self.expect("=")
-            attrs[key] = self.prop_value(line)
+            attrs[key] = Raw(self.raw_value()) if raw else self.prop_value(line)
             if not self.accept(","):
                 break
         return Props(target, side, into, attrs, line)
+
+    def raw_key(self, prefix):
+        """After ``cb`` / ``bp``: ``.FIELD`` -> ``cb.FIELD``."""
+        self.expect(".")
+        tok = self.word(f"a blueprint field after {prefix}.")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tok.text):
+            self.err(f"{prefix}.{tok.text}: a blueprint field is a word of letters, digits and _",
+                     tok)
+        return f"{prefix}.{tok.text}"
+
+    def raw_value(self):
+        """A raw setting's value (2.1): a number, a quoted string, true, false, a bare word (a
+        string), an object ``{key: value, ...}`` or a list ``[value, ...]``. Inside a module a
+        value may be ``$p`` and a string may hold ``$p``: elaboration substitutes them."""
+        tok = self.peek()
+        if tok.kind == "param":
+            return self.pword("a value")
+        if tok.kind == "num":
+            return self.number()
+        if tok.kind == "string":
+            self.next()
+            return tok.text[1:-1]
+        if tok.kind == "word":
+            self.next()
+            return {"true": True, "false": False}.get(tok.text, tok.text)
+        if tok.text == "{":
+            self.next()
+            out = {}
+            if self.accept("}"):
+                return out
+            while True:
+                k = self.next()
+                if k.kind not in ("word", "string"):
+                    self.err(f"an object's key is a word or a quoted string, got "
+                             f"{k.text or k.kind!r}", k)
+                key = k.text[1:-1] if k.kind == "string" else k.text
+                if key in out:
+                    self.err(f"key {key} given twice", k)
+                self.expect(":")
+                out[key] = self.raw_value()
+                if self.accept("}"):
+                    return out
+                self.expect(",")
+        if tok.text == "[":
+            self.next()
+            out = []
+            if self.accept("]"):
+                return out
+            while True:
+                out.append(self.raw_value())
+                if self.accept("]"):
+                    return out
+                self.expect(",")
+        self.err("a raw value is a number, a quoted string, true, false, a word, {key: value, ...} "
+                 f"or [value, ...], got {tok.text or tok.kind!r}", tok)
 
     def prop_value(self, line):
         """A property value as written, without the spaces around ``<``, ``>`` and ``=``
@@ -1050,6 +1147,11 @@ class _P:
 
     def param(self):
         key = self.name("parameter").text
+        if key in RAW_PREFIXES and self.peek().text == ".":
+            # 2.1: a raw setting, cb.FIELD=VALUE or bp.FIELD=VALUE
+            key = self.raw_key(key)
+            self.expect("=")
+            return key, Raw(self.raw_value())
         if not self.accept("="):
             return key, True
         return key, self.value()

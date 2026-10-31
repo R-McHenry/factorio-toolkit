@@ -586,12 +586,18 @@ answer is the next build. Nothing here is broken by itself.
   requester without `rate=` is unbounded)
 - `no-match`: a `set` that matches nothing (no such instance, no hand whose sink is the named one,
   or an `if=` with no chest to read), or an unknown property
+- `CIRCUIT`: two settings for one field of one entity (it keeps the first), a `cb.` field that a
+  typed property writes too (the `cb.` one wins), a `bp.` field the build writes itself, or a
+  raw condition that isn't one
 - `cannot-filter`: a `guard` whose input inserters can't filter (plain inserters; fast ones can)
-- `no-signal` / `no-wire`: a condition reads a signal nothing on its wire makes, or a name that is no
-  signal / a wire nothing drives or reads, or a belt reading on no wire (its reading reaches
-  nothing until the belt is wired)
-- `wire-too-far` / `wires-share`: two entities of a wire further apart than a wire reaches (9 tiles)
-  / two wires of one colour on one entity, so their signals add
+- `no-signal` / `no-wire`: a condition reads a signal nothing on its wire makes, a name the game
+  has no signal of, or one that never goes out on a wire where one is sent (`signal-each` in a
+  `Constant`) / a wire nothing drives or reads, a wire's end on a building with no circuit
+  connector (a pipe, a beacon), or a belt reading on no wire (its reading reaches nothing until
+  the belt is wired)
+- `wire-too-far` / `wires-share`: two entities of a wire further apart than a wire reaches, with
+  no chain of poles and free tiles to carry it (2.1: a longer wire hops along poles, and the build
+  adds poles in a gap) / two wires of one colour on one entity, so their signals add
 - `gate-open` / `require-not-met`: a gated net the rate model takes as always open (no `behave` cycle on its
   wire) / a `behave` block's `require` that doesn't hold
 - `taken-up`: the build takes up a lot, and the robots need minutes for it (the structures, the items

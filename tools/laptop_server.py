@@ -41,6 +41,11 @@ Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py fixes     2.1.3: capture takes its own slot, the REACH read,
                                             fk request (robots bring the ammo), and the scaffold
                                             order (a moved roboport goes; none held without stock)
+    python tools/laptop_server.py circuits  2.1 open circuits: a speaker and a display panel (Entity
+                                            kinds and raw cb./bp. settings) warn when a chest's
+                                            plates run low; the panel's 34-tile wire hops along
+                                            poles, read back from the game; raw fields changed by
+                                            hand are named by the diff
     python tools/laptop_server.py stats [SAVE.zip]
                                             2.1: run stats on a small base made here: the
                                             scenario's recorder writes a sample every 5 game
@@ -1562,6 +1567,117 @@ def _check_stats_save(save):
     return 0 if max(took) < 5 else 1
 
 
+#: 2.1 open circuits: a building the toolkit never modelled, written with Entity kinds of the
+#: prelude and raw settings only; the panel's wire is 34 tiles long, so it hops along poles
+ALERT_FK = """# a programmable speaker and a display panel warn when the plate chest runs low
+size 48x12
+
+box  = Chest<storage>   @(2, 4)
+spk  = Alarm<bp.alert_parameters={show_alert: true, show_on_map: true, icon_signal_id: iron-plate,
+                                  alert_message: "Iron plates low"}>   @(6, 4)
+note = Display<cb.parameters=[{condition: "iron-plate<50", icon: iron-plate, text: "Iron plates low"},
+                              {condition: "iron-plate>=50", icon: signal-check, text: "Iron plates OK"}]>  @(40, 4)
+set spk: cb.circuit_condition="iron-plate<50"
+wire stock red: box -> spk, note
+"""
+
+
+def check_circuits():
+    """2.1 open circuits on the lab (``fk lab``): ``ALERT_FK`` built; the wires read back from the
+    game (chest - speaker - poles - panel); the chest stocked with 100, 20 and 100 plates, and each
+    time what the speaker and the panel see on their wire, whether the speaker's condition holds
+    (the game's own ``fulfilled``: its alert sounds and shows while it does) and the panel's shown
+    text; then the diff, before and after raw fields are changed by hand."""
+    import json
+    import tempfile
+    from fkcore import flow, lab
+    run = tempfile.mkdtemp(prefix="fkcircuits-")
+    game = os.path.join(run, "game")
+    os.makedirs(game)
+    for name, text in (("alert.fk", ALERT_FK),
+                       ("nauvis.surface", "surface  nauvis\nmode     play\nterrain  none\n"
+                        "catalog  base\n\nplace alert = alert plot 10,10 48x12\n"),
+                       ("nauvis.build.fkb", "read_surface nauvis\n")):
+        with open(os.path.join(game, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    # AREA is the slot's box, filled in per call (the Lua has % signs of its own)
+    probe = ("local s = game.get_surface('lab') local out = {} "
+             "local function sig(e) return e.get_signal({type = 'item', name = 'iron-plate'}, "
+             "defines.wire_connector_id.circuit_red) end "
+             "for _, e in pairs(s.find_entities_filtered{area = AREA, force = 'lab'}) do "
+             "if e.name == 'programmable-speaker' then out.speaker = {sees = sig(e), "
+             "fulfilled = e.get_control_behavior().circuit_condition.fulfilled} "
+             "elseif e.name == 'display-panel' then "
+             "out.panel = {sees = sig(e), shows = e.display_panel_text} "
+             "elseif e.name == 'storage-chest' then out.chest = e.get_item_count('iron-plate') "
+             "end end rcon.print(helpers.table_to_json(out))")
+    wires = ("local s = game.get_surface('lab') local rows = {} "
+             "for _, e in pairs(s.find_entities_filtered{area = AREA, force = 'lab'}) do "
+             "local c = e.get_wire_connectors(false)[defines.wire_connector_id.circuit_red] "
+             "if c then for _, w in pairs(c.connections) do local o = w.target.owner "
+             "if e.position.x < o.position.x then rows[#rows + 1] = {e.position.x, e.name .. '@' "
+             ".. e.position.x .. ',' .. e.position.y .. ' -> ' .. o.name .. '@' .. o.position.x "
+             ".. ',' .. o.position.y} end end end end "
+             "table.sort(rows, function(a, b) return a[1] < b[1] end) local out = {} "
+             "for _, r in ipairs(rows) do out[#out + 1] = r[2] end "
+             "rcon.print(helpers.table_to_json(out))")
+    stock = ("local c = game.get_surface('lab').find_entities_filtered{area = AREA, "
+             "name = 'storage-chest'}[1] local inv = c.get_inventory(defines.inventory.chest) "
+             "inv.clear() inv.insert{name = 'iron-plate', count = COUNT} "
+             "rcon.print(c.get_item_count('iron-plate'))")
+    edit = ("local s = game.get_surface('lab') "
+            "local sp = s.find_entities_filtered{area = AREA, name = 'programmable-speaker'}[1] "
+            "local p = sp.parameters p.playback_volume = 0.5 sp.parameters = p "
+            "local dp = s.find_entities_filtered{area = AREA, name = 'display-panel'}[1] "
+            "dp.display_panel_always_show = false rcon.print('edited')")
+    ok = True
+    with LaptopServer("circuits", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            lines = lab.build(r, game, "alert", size=(48, 12))
+            print("\n".join(lines))
+            x, y, w, h = lab.slots(game)["alert"]
+            box = "{{%d, %d}, {%d, %d}}" % (x - 1, y - 1, x + w + 1, y + h + 1)
+            chain = json.loads(r.lua(wires.replace("AREA", box)).strip())
+            print("red wires read back from the game, west to east:")
+            for row in chain:
+                print("  ", row)
+            names = [row.split("@")[0] for row in chain] + [chain[-1].split(" -> ")[1].split("@")[0]]
+            ok &= names == ["storage-chest", "programmable-speaker", "medium-electric-pole",
+                            "medium-electric-pole", "medium-electric-pole", "display-panel"]
+            for n, holds, shows in ((100, False, "Iron plates OK"), (20, True, "Iron plates low"),
+                                    (100, False, "Iron plates OK")):
+                r.lua(stock.replace("AREA", box).replace("COUNT", str(n)))
+                time.sleep(2)
+                got = json.loads(r.lua(probe.replace("AREA", box)).strip())
+                print(f"chest {got.get('chest')} plates: the speaker sees {got['speaker']['sees']} "
+                      f"and its condition holds: {got['speaker']['fulfilled']}; the panel sees "
+                      f"{got['panel']['sees']} and shows {got['panel']['shows']!r}")
+                ok &= got["speaker"]["fulfilled"] is holds and got["panel"]["shows"] == shows
+                ok &= got["speaker"]["sees"] == n and got["panel"]["sees"] == n
+            ws = lab.workspace(game, "alert")
+            with open(os.path.join(ws, "lab.build.fkb"), encoding="utf-8") as fh:
+                script = [ln for ln in fh.read().splitlines() if not ln.startswith("apply")]
+            with open(os.path.join(ws, "check.fkb"), "w", encoding="utf-8") as fh:
+                fh.write("\n".join(script) + "\n")
+
+            def hand():
+                _code, ctx = flow.run(os.path.join(ws, "check.fkb"), echo=lambda _s: None,
+                                      link=r)
+                return [c.msg for _step, c in ctx.checks if c.code == "by-hand"]
+            before = hand()
+            print(f"hand edits after the build: {len(before)}")
+            r.lua(edit.replace("AREA", box))
+            after = hand()
+            print(f"after a hand edit of the speaker's volume and the panel's always_show: "
+                  f"{len(after)}")
+            for line in after:
+                print("  ", line)
+            ok &= not before and len(after) == 2
+    shutil.rmtree(run, True)
+    print("open circuits:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
 #: 2.1 (fluid ports): the lab's acid drill cell: acid in on the west pipe row and through to the
 #: east, one electric drill on uranium, its ore onto the cell's through belt; three cells, the acid
 #: from an infinity pipe outside the Stack, the ore into a chest.
@@ -1733,4 +1849,5 @@ if __name__ == "__main__":
                       "robots": check_robots, "lab": check_lab,
                       "capital": check_capital, "fixes": check_fixes,
                       "vision": check_vision, "stats": check_stats,
+                      "circuits": check_circuits,
                       "fluidports": check_fluidports}[what]())
