@@ -18,6 +18,9 @@ carriers. Changes since the copy:
   red2's inserter on the splitter's second tile, the attach found it taken and laid no tap, and
   the tree still counted red2 reached ("partly-connected" on every build). ``problems`` now names
   a tap sink with fewer taps than it takes (UNTAPPED).
+- A forward branch to a tap sink never ends on an underground exit whose tile ahead is taken
+  (2.0.78): a belt's last tile is turned off another net's belt (route._settle_leaves), but an
+  exit can't turn, and the 10-30 run's cb5o side-loaded onto the coal belt from one (SPILL).
 
 The original docstring follows.
 
@@ -185,6 +188,9 @@ class TapSink:
         return got
 
     def goal(self, state, tree, path=None, taken=()):
+        x, y, d, ex = state
+        if ex and not tree.grid.drop_taps and tree.grid.blocked((x + DX[d], y + DY[d])):
+            return False     # an exit can't turn: it would feed what stands ahead (2.0.78)
         return len(self.pick(path or [state], tree, taken)) >= self.k
 
     def h(self, x, y):

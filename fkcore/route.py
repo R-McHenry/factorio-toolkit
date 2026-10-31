@@ -85,6 +85,11 @@ place of a straight belt, an inserter off a belt), a new driver into where it re
 consumer (side-loaded onto a belt, into the back of a belt nothing feeds, an inserter onto one).
 A lane pair is patched by its two nets, each new driver on its own lane (2.0.2). A patch that
 can't be laid or that the judge refuses is routed again as a whole, with the reason.
+
+**Promotion** (2.0.78): a net that finds no route is tried once more with other nets' straight
+route belts as ground it may cross (``_promotable``); each tile its route takes turns that net's
+belts behind, on and ahead of it into an underground pair (``_promote``), pinned or not, when no
+inserter, drill or side-load touches them. ``promoted`` lines name each one.
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
@@ -380,6 +385,131 @@ def _ground(cat, ents, frames, js, net, terrain=()):
         if other != net:
             blocked |= set(job.ends())
     return blocked - set(js[net].ends())
+
+
+# -- promotion: another net's belt becomes an underground pair (2.0.78) ----------------------------
+#: Rory, 2026-10-31: "a mutation option for a belt that is blocking a path to be modified into an
+#: underground. Even if its pinned ... as long as that does not affect inserter connectivity".
+#: A net that finds no route is tried once more with every promotable tile of another net's
+#: route as ground it may cross; each tile its route takes turns that net's three belts there
+#: (behind, on, ahead) into an underground entrance and exit, the same items on the same lanes.
+_PROMOTE_NEAR = 6        # no underground end of the run's axis this close along its line
+
+
+def _promotable(cat, ents, js, net, frames, terrain):
+    """{tile: (axis, (behind, on, ahead) entities, underground name)} for every tile of another
+    net's route belt that may become the hidden middle of an underground pair: a straight run of
+    five plain belts of one name, one owner and one heading (two behind, two ahead), the three in
+    the middle touched by no inserter or drill and fed by nothing but the belt behind them, no
+    underground end of the same axis within ``_PROMOTE_NEAR`` tiles along the line, and the tile
+    in no frame, terrain or net end."""
+    belts, into = {}, {}
+    for e in ents:
+        if not _is_belt(cat, e):
+            continue
+        h = _heading(e)
+        if cat.kind(e.name) == "transport-belt":
+            (t,) = fkpmod.tiles_of(cat, e)
+            belts[t] = (e, h)
+        if h is None or e.attrs.get("ug") == "in":
+            continue
+        for tx, ty in fkpmod.tiles_of(cat, e):
+            f = (tx + _DX[h], ty + _DY[h])
+            into[f] = into.get(f, 0) + 1
+    hands = set(_hand_tiles(cat, ents))
+    ugs = {}
+    for e in ents:
+        if cat.has_entity(e.name) and cat.kind(e.name) == "underground-belt" \
+                and _heading(e) is not None:
+            ugs.setdefault(_heading(e) % 2, set()).add((math.floor(e.x), math.floor(e.y)))
+    ends = set()
+    for other, job in js.items():
+        ends |= set(job.ends())
+    out = {}
+    for t, (e, h) in belts.items():
+        if h is None or not e.owner.startswith("~") or e.owner[1:] == net \
+                or t in frames or t in terrain or t in ends:
+            continue
+        ug = e.name.replace("transport-belt", "underground-belt")
+        if not cat.has_entity(ug):
+            continue
+        line = [(t[0] + _DX[h] * k, t[1] + _DY[h] * k) for k in (-2, -1, 0, 1, 2)]
+        run = [belts.get(q) for q in line]
+        if any(r is None or r[1] != h or r[0].name != e.name or r[0].owner != e.owner
+               for r in run):
+            continue
+        if any(q in hands or into.get(q, 0) != 1 for q in line[1:4]):
+            continue
+        near = {(t[0] + _DX[h] * k, t[1] + _DY[h] * k)
+                for k in range(-_PROMOTE_NEAR, _PROMOTE_NEAR + 1)}
+        if near & ugs.get(h % 2, set()):
+            continue
+        out[t] = (h % 2, tuple(r[0] for r in run[1:4]), ug)
+    return out
+
+
+def _promote(cat, ents, got, promote):
+    """The swaps ``got`` (a route laid with ``promote``'s tiles as ground) takes: [(removed
+    keys, new entities, text)], one per tile its carriers stand on; None when two of them meet on
+    one run (their pairs would overlap)."""
+    mine = set()
+    for e in got:
+        mine |= fkpmod.tiles_of(cat, e)
+    used = sorted(t for t in promote if t in mine)
+    taken, swaps = set(), []
+    keys = {e.key for e in ents}
+    for t in used:
+        _axis, (a, m, b), ug = promote[t]
+        tiles = {(math.floor(x.x), math.floor(x.y)) for x in (a, m, b)}
+        if tiles & taken:
+            return None
+        taken |= tiles
+        pre = re.fullmatch(r"([lr]?)([a-z])(\d+)", a.key.rsplit("/", 1)[1])
+        prefix = pre[1] if pre else ""
+        new = [fkpmod.Entity(f"{a.owner}/{prefix}u", ug, a.x, a.y, a.dir, dict(a.attrs, ug="in")),
+               fkpmod.Entity(f"{a.owner}/{prefix}u", ug, b.x, b.y, b.dir, dict(b.attrs, ug="out"))]
+        new = _fresh_keys(new, a.owner[1:], {k for k in keys if k.startswith(a.owner + "/")},
+                          prefix)
+        keys |= {e.key for e in new}
+        swaps.append(((a.key, m.key, b.key), new,
+                      f"{a.owner[1:]} crossed at {t[0]},{t[1]} ({a.key}..{b.key}: an underground "
+                      f"pair now)"))
+    return swaps
+
+
+def _route_promoted(cat, job, ents, frames, js, box, limit, terrain, avoid, allow):
+    """``_route_one`` again with other nets' promotable belt tiles as ground. -> (carriers,
+    report text, swaps) or None."""
+    if job.parts or job.fluid:
+        return None
+    promote = _promotable(cat, ents, js, job.net, frames, terrain)
+    promote = {t: p for t, p in promote.items() if t not in avoid}
+    if not promote:
+        return None
+    spans = _ug_spans(cat, ents)
+    spans = {0: set(spans[0]), 1: set(spans[1])}
+    for t, (axis, run, _ug) in promote.items():
+        spans[axis] |= {(math.floor(x.x), math.floor(x.y)) for x in run}
+    free = set(promote)
+    shown = [fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, e.attrs) for e in ents
+             if not (fkpmod.tiles_of(cat, e) & free and _is_belt(cat, e))]
+    got, how = _route_one(cat, job, shown, frames, js, box, limit, terrain, avoid, spans, allow,
+                          promoted=free)
+    if got is None:
+        return None
+    swaps = _promote(cat, ents, got, promote)
+    if swaps is None:
+        return None
+    return got, "; ".join([how] + [s[2] for s in swaps]), swaps
+
+
+def _swap_added(added, swaps):
+    """The carriers of nets routed this pass with the promoted belts swapped for their pairs."""
+    gone = {k for s in swaps for k in s[0]}
+    for other in added:
+        if any(e.key in gone for e in added[other]):
+            added[other] = [e for e in added[other] if e.key not in gone] + \
+                [e for s in swaps for e in s[1] if e.owner == f"~{other}"]
 
 
 def _belt_tiles(cat, ents):
@@ -875,21 +1005,25 @@ def _near_box(job, box, margin=None):
 
 
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
-               allow=frozenset()):
+               allow=frozenset(), promoted=frozenset()):
     """One net's route in ``box``: first in its own neighbourhood (``_near_box``), then, if that
-    fails, in the whole box, so bounding the search never loses a route the box allowed."""
+    fails, in the whole box, so bounding the search never loses a route the box allowed.
+    ``promoted``: tiles freed for it (``_route_promoted``)."""
     near = _near_box(job, box)
     if near is not None:
-        got, how = _route_in(cat, job, ents, frames, js, near, limit, terrain, avoid, spans, allow)
+        got, how = _route_in(cat, job, ents, frames, js, near, limit, terrain, avoid, spans, allow,
+                             promoted)
         if got is not None:
             return got, how
-    got, how = _route_in(cat, job, ents, frames, js, box, limit, terrain, avoid, spans, allow)
+    got, how = _route_in(cat, job, ents, frames, js, box, limit, terrain, avoid, spans, allow,
+                         promoted)
     if got is not None or not (job.wide or job.pin):
         return got, how
     # 2.0.54: no join routes, so the net goes on as one lane, the way it went before
     plain = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
                    sources=list(job.sources), owners=list(job.owners), anchors=dict(job.anchors))
-    got, text = _route_one(cat, plain, ents, frames, js, box, limit, terrain, avoid, spans, allow)
+    got, text = _route_one(cat, plain, ents, frames, js, box, limit, terrain, avoid, spans, allow,
+                           promoted)
     if got is None:
         return None, how
     what = "both lanes" if job.wide else f"lane {job.pin}"
@@ -897,7 +1031,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
 
 
 def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
-              allow=frozenset()):
+              allow=frozenset(), promoted=frozenset()):
     net = job.net
     if job.parts:
         joined = _prejoined(job)
@@ -917,7 +1051,8 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
             if e.name not in _BELT_NAMES:
                 e.attrs["net"] = fkpmod.hand_net(net)
         return laid, f"a straight belt of both lanes, {len(laid)} carriers (paired at its port)"
-    blocked = _ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))
+    blocked = (_ground(cat, ents, frames, js, net, terrain) | (set(avoid) - set(job.ends()))) \
+        - set(promoted)
     spans = _ug_spans(cat, ents) if spans is None else spans
     clear = _belt_tiles(cat, ents)
     if job.straight:
@@ -1942,9 +2077,13 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
     best = None
     order = list(todo)
-    for attempt in range(retries + 1):
+    for attempt in range(retries + 2):
+        # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
+        promo = attempt == retries + 1
+        if promo and (best is None or not best[2]):
+            break
         ents = list(base.entities.values())
-        added, failed, how = {}, {}, {}
+        added, failed, how, swaps = {}, {}, {}, []
         for net in order:
             avoid = set()
             for other, tiles in claims.items():
@@ -1953,6 +2092,16 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             fnet, bnet = net_frames(net)
             got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
                                   allow=joints)
+            if got is None and promo:
+                # once more, crossing other nets' straight belts by promoting them
+                prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
+                                       joints)
+                if prom is not None:
+                    got, why, mine = prom
+                    gone = {k for s in mine for k in s[0]}
+                    ents = [e for e in ents if e.key not in gone] + [e for s in mine for e in s[1]]
+                    _swap_added(added, mine)
+                    swaps += mine
             if got is None:
                 failed[net] = why
                 continue
@@ -1961,19 +2110,26 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             added[net] = got
             how[net] = why
             ents += got
-        score = (len(added), -attempt)
+        score = (len(added), -len(swaps), -attempt)
         if best is None or score > best[0]:
-            best = (score, added, failed, how, attempt + 1, list(order))
+            best = (score, added, failed, how, attempt + 1, list(order), swaps)
         if not failed:
             break
         order = [n for n in order if n in failed] + [n for n in order if n not in failed]
-    _score, added, failed, how, passes, order = best
+    _score, added, failed, how, passes, order, swaps = best
     added, failed, how = dict(added), dict(failed), dict(how)
     new = base.copy()
+    for gone, _new, _text in swaps:
+        for k in gone:
+            new.entities.pop(k, None)
+    for _gone, more, _text in swaps:
+        for e in more:
+            if e.owner[1:] not in added:
+                new.add(e)         # a standing net's (an added one's are in its carriers now)
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
-    _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain)
+    _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain, swaps)
     for net in sorted(failed):
         guard = _guarded(cat, js[net], list(new.entities.values()), frames, js, box, limit,
                          terrain)
@@ -2012,6 +2168,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, {how[net]}")
         else:
             lines.append(f"FAILED    {net}: {failed.get(net)}")
+    for gone, _more, text in swaps:
+        lines.append(f"promoted  {text.split(' crossed ', 1)[0]}: {gone[0]}, {gone[1]}, {gone[2]} "
+                     f"are an underground pair now, so another net's belt crosses it")
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
@@ -2134,9 +2293,11 @@ def _abuts(job):
     return sh == gh and tuple(st) == (gt[0] + _DX[gh], gt[1] + _DY[gh])
 
 
-def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain):
+def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain,
+            swaps=None):
     """Judge the belt routes laid this run; re-route a net that leaks or does not connect around
-    the tiles at fault, else refuse it (its carriers go, the judge's line is the reason)."""
+    the tiles at fault (promoting other nets' belts when nothing else routes, into ``swaps``),
+    else refuse it (its carriers go, the judge's line is the reason)."""
     avoid = {}
     for round_ in range(_REPAIRS + 1):
         mine = [n for n in order if n in added]
@@ -2154,6 +2315,19 @@ def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, t
             avoid.setdefault(net, set()).update(tiles)
             got, why = _route_one(cat, js[net], list(new.entities.values()), frames, js, box,
                                   limit, terrain, avoid[net], allow=_crossings(flat))
+            if got is None and swaps is not None:
+                prom = _route_promoted(cat, js[net], list(new.entities.values()), frames, js, box,
+                                       limit, terrain, avoid[net], _crossings(flat))
+                if prom is not None:
+                    got, why, mine = prom
+                    gone = {k for s in mine for k in s[0]}
+                    for k in gone:
+                        del new.entities[k]
+                    for s in mine:
+                        for e in s[1]:
+                            new.add(e)
+                    _swap_added(added, mine)
+                    swaps += mine
             if got is None:
                 failed[net] = f"{reason}; re-routed around it: {why}"
                 continue

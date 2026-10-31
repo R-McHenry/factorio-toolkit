@@ -1,6 +1,6 @@
 import unittest
 
-from fkcore.steiner import Grid, TapSink, grow
+from fkcore.steiner import Grid, TapSink, Tree, grow
 
 
 class SplitTapTest(unittest.TestCase):
@@ -33,6 +33,19 @@ class SplitTapTest(unittest.TestCase):
         self.assertEqual(res["problems"], [])
         res["tree"].taps = []
         self.assertIn("UNTAPPED red: 0 of 1 inserters", res["tree"].problems([TapSink("red", red)]))
+
+    def test_a_tap_branch_never_ends_on_an_exit_facing_what_stands(self):
+        """2.0.78: the 10-30 run's cb5o ended on an underground exit pointing into the coal belt
+        (an exit can't turn, so the leaf fix-up couldn't help): a SPILL the judge refused."""
+        red = (2, 0, 5, 2)                           # north of the exit: a tap at (3, 2)
+        machine = {(x, y) for x in range(2, 5) for y in range(0, 2)}
+        grid = Grid(machine | {(4, 3)})              # (4, 3): the tile ahead of an exit at (3, 3)
+        tree = Tree(grid, (0, 3, 1, 0))
+        sink = TapSink("red", red)
+        exit_ = (3, 3, 1, 1)                         # heading east, just out of a tunnel
+        self.assertFalse(sink.goal(exit_, tree, [exit_]))
+        open_ = Tree(Grid(machine), (0, 3, 1, 0))
+        self.assertTrue(sink.goal(exit_, open_, [exit_]))
 
 
 if __name__ == "__main__":

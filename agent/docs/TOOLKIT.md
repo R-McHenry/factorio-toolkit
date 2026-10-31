@@ -115,6 +115,16 @@ Room for routes. Most routes that failed in the 10-30 run had no room, not a rou
 - A patch that won't fit fails alone and leaves the rest standing. Move the new machine a few
   tiles, or `--reroute` the net it joins, before you redesign the whole block.
 
+A net that finds no way through another net's belts may cross them by promotion: a straight run of
+another route's belt turns into an underground pair under the crossing, pinned or not. Items and
+lanes stay as they were. A belt is promoted only where nothing else changes: the run is straight
+for two belts either side, no inserter or drill touches the three belts that change, nothing
+side-loads onto them, and no underground of the same axis is within 6 tiles along the line. It's a
+last resort: the router tries it only for a net that every other pass left unrouted.
+`out\route.txt` names each one in a `promoted` line (`promoted  coal: ~coal/b40, ~coal/b41,
+~coal/b42 are an underground pair now ...`), and the paste swaps those three belts for two
+underground ends. Each promotion takes 2 undergrounds from stock.
+
 Any step takes options for one build without editing the script: `fk build --with 'cover robots
 --fresh'`, `fk build --with 'route --effort high' --with 'tier --allow yellow,red'` (repeat
 `--with` as often as you like; the step's own options stay, the ones you add win).
