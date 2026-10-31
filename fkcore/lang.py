@@ -7,7 +7,8 @@
     module  := 'module' Name ('<' mparam (',' mparam)* '>')? 'buffer'? ('size' WxH)? 'buffer'?
                '{' stmt* '}'                            # buffer: before or after size, once
     mparam  := name ('=' value)?                          # no default: required (2.1)
-    stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
+    stmt    := inst | net | lanes | bundle | assert | cover | signal | wire | behave | expect | set
+             | port
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
@@ -15,6 +16,7 @@
     net     := 'net' 'each'? name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
                'split'? ('limited' STRING?)? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
+    bundle  := 'bundle' name ':' name (',' name)*    # nets routed as one ribbon, in order (2.1)
     refs    := ref (',' ref)*          ref := name index? ('.' name index?)* ('.' '*')?
     index   := '[' (int | '*') ']'    # a Stack's cell k, [-1] the last, [*] every one (2.1)
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
@@ -49,6 +51,10 @@ share a belt) says nets A and B share every belt they are on, A on the left lane
 right looking downstream: the router lays them as one pair (``fkcore.pairs``). ``split`` on a net
 (2.0.76) gives each of its items a lane of its own: elaboration makes it one net per item and pairs
 them two to a belt, each loaded by its own inserter filtered to its item.
+
+Ribbons (2.1, PLAN-2.1 "Bus routing: ribbons"): ``width N`` above 2 is a wide net, N lanes, so N/2
+belts routed side by side as one ribbon (N even). ``bundle NAME: a, b, c`` routes the nets a, b
+and c as one ribbon, belt k carrying the k-th; the nets of one ``net each`` are a ribbon too.
 
 Ports (2.0.28, lane-level in 2.0.29; PLAN-MODULES): a module body may declare
 ``port NAME : in|out|inout ITEM[, ITEM][ | ITEM[, ITEM]] @SIDE[POS][L|R]``, and the definition may
@@ -321,6 +327,14 @@ class Lanes:
 
 
 @dataclass
+class Bundle:
+    """``bundle NAME: a, b, c`` (2.1): the nets routed as one ribbon, belt k carrying nets[k]."""
+    name: str
+    nets: list           # [net name], in ribbon order
+    line: int
+
+
+@dataclass
 class Assert:
     ref: Ref
     op: str
@@ -350,6 +364,7 @@ class Module:
     behaves: list = field(default_factory=list)
     expects: list = field(default_factory=list)
     lanes: list = field(default_factory=list)      # [Lanes]: two nets that share a belt
+    bundles: list = field(default_factory=list)    # [Bundle]: nets routed as one ribbon (2.1)
     sets: list = field(default_factory=list)       # [Props]: properties on named objects (2.0.27)
     ports: list = field(default_factory=list)      # [Port]: the module's interface (2.0.28)
     size: tuple | None = None                      # (W, H) of its frame as written, or None
@@ -730,7 +745,8 @@ class _P:
         if tok.kind == "param":
             self.word("a statement (an instance's name)")     # refused: $p names nothing
         if tok.kind == "word" and self.peek(1).kind == "param" and tok.text in (
-                "net", "lanes", "signal", "wire", "behave", "set", "port", "stack", "dnp"):
+                "net", "lanes", "bundle", "signal", "wire", "behave", "set", "port", "stack",
+                "dnp"):
             self.next()
             self.word(f"the name after {tok.text}")             # refused: $p names nothing
         if tok.kind != "word":
@@ -739,6 +755,8 @@ class _P:
             mod.nets.append(self.net())
         elif tok.text == "lanes" and self.peek(1).kind == "word":
             mod.lanes.append(self.lanes())
+        elif tok.text == "bundle" and self.peek(1).kind == "word" and self.peek(2).text == ":":
+            mod.bundles.append(self.bundle())
         elif tok.text == "assert":
             mod.asserts.append(self.assert_())
         elif tok.text in _COVER_KINDS and self.peek(1).kind == "word" and self.peek(2).text == ":":
@@ -985,9 +1003,14 @@ class _P:
         if self.accept("width"):
             tok = self.peek()
             width = self.number()
-            if width not in (1, 2):
-                self.err(f"width {width}: a net takes 1 lane or 2 (both lanes of a belt); "
-                         "more is 2.1's buses", tok)
+            if width != int(width) or width < 1 or width > 2 and width % 2:
+                self.err(f"width {tok.text}: a net takes 1 lane, 2 (both lanes of a belt) or "
+                         "whole belts side by side, an even number of lanes (width 8 is four "
+                         "belts)", tok)
+            width = int(width)
+            if each and width > 2:
+                self.err(f"net each {name} width {width}: the nets of a net each are a ribbon "
+                         "already, one belt each", tok)
         lane = None
         if self.accept("lane"):
             tok = self.word("lane")
@@ -1020,6 +1043,22 @@ class _P:
         if right == left:
             self.err(f"lanes {left} | {right}: a net is one lane; name two nets")
         return Lanes(left, right, line)
+
+    def bundle(self):
+        line = self.expect("bundle").line
+        name = self.name("bundle name").text
+        self.expect(":")
+        nets = [self.name("net name").text]
+        while self.accept(","):
+            nets.append(self.name("net name").text)
+        if len(nets) < 2:
+            self.err(f"bundle {name}: a ribbon is two nets or more, like bundle {name}: a, b")
+        seen = set()
+        for n in nets:
+            if n in seen:
+                self.err(f"bundle {name}: net {n} is named twice; each net is one belt of it")
+            seen.add(n)
+        return Bundle(name, nets, line)
 
     def assert_(self):
         line = self.expect("assert").line

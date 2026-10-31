@@ -1,0 +1,38 @@
+# bus-ribbon.fk: the eight-belt smelter bus of 2.1.12 routed as a ribbon (2.1 ribbons): eight
+# SmeltColumns side by side, each column's plates on a belt of its own (`net each plates`), the
+# eight belts side by side to a row of eight chests south-east of them.
+import SmeltColumn from "cells.fk"
+
+ore  = Chest<requester, item=iron-ore, rate=15/s> @(0, 4)
+cols = Stack<cell=SmeltColumn, n=8, plate=iron-plate, ore=iron-ore> @(4, 0)
+box  = Boxes @(100, 34)
+net feed: ore -> cols.ore_in
+net each plates: cols[*].pl -> box
+
+# Eight provider chests in a row, each with its belt in at the top, the eight ports side by side.
+module Boxes size 8x4 {
+  port i0 : in iron-plate @n0
+  port i1 : in iron-plate @n1
+  port i2 : in iron-plate @n2
+  port i3 : in iron-plate @n3
+  port i4 : in iron-plate @n4
+  port i5 : in iron-plate @n5
+  port i6 : in iron-plate @n6
+  port i7 : in iron-plate @n7
+  c0 = Chest<provider> @(0, 3)
+  c1 = Chest<provider> @(1, 3)
+  c2 = Chest<provider> @(2, 3)
+  c3 = Chest<provider> @(3, 3)
+  c4 = Chest<provider> @(4, 3)
+  c5 = Chest<provider> @(5, 3)
+  c6 = Chest<provider> @(6, 3)
+  c7 = Chest<provider> @(7, 3)
+  net n0: i0 -> c0
+  net n1: i1 -> c1
+  net n2: i2 -> c2
+  net n3: i3 -> c3
+  net n4: i4 -> c4
+  net n5: i5 -> c5
+  net n6: i6 -> c6
+  net n7: i7 -> c7
+}

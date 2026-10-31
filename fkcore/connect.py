@@ -587,8 +587,8 @@ def endpoints(flat, surface=None, factory=None):
     ``main/gear``)."""
     pre = f"{surface}:{factory}/" if surface and factory else ""
     netpre = f"{factory}/" if surface and factory else ""
-    table = {netpre + name: ([(pre + k, i) for k, i in n.drivers],
-                             [(pre + k, i) for k, i in n.consumers])
+    table = {netpre + name: (Dealt if getattr(n, "width", 1) > 2 else tuple)(
+                 ([(pre + k, i) for k, i in n.drivers], [(pre + k, i) for k, i in n.consumers]))
              for name, n in flat.nets.items()}
     # A bus's mouth has no entity of its own: the bus's own belt under the mouth is its carrier.
     # Swap the machine key for the carrier key, so the net reaches it and a crossing there is a
@@ -606,10 +606,18 @@ def endpoints(flat, surface=None, factory=None):
             if name.startswith("in") and name[2:].isdigit():
                 alias[key] = f"{path}/b{int(name[2:])}_0"
     if alias:
-        for name, (drivers, consumers) in table.items():
-            table[name] = ([(alias.get(k, k), i) for k, i in drivers],
-                           [(alias.get(k, k), i) for k, i in consumers])
+        for name, ends in table.items():
+            drivers, consumers = ends
+            table[name] = type(ends)(([(alias.get(k, k), i) for k, i in drivers],
+                                      [(alias.get(k, k), i) for k, i in consumers]))
     return table
+
+
+class Dealt(tuple):
+    """(drivers, consumers) of a wide net (2.1, ``width`` above 2: a ribbon of belts, its drivers
+    and consumers dealt out to them, ``fkcore.ribbons``): it is connected when every driver reaches
+    a consumer and every consumer is reached, not every driver every consumer."""
+    dealt = True
 
 
 def _keys(ends):
@@ -932,7 +940,7 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
         table = {}
         for name, ends in nets.items():
             d, c = (ends.drivers, ends.consumers) if hasattr(ends, "drivers") else ends
-            table[name] = (_keys(d), _keys(c))
+            table[name] = (Dealt if getattr(ends, "dealt", False) else tuple)((_keys(d), _keys(c)))
             items[name] = (_with_items(d), _with_items(c))
     fluid = _fluid_nets(g, cat, table, items, carried)
     owners = _box_owners(g, fluid, items, nets is None)
@@ -947,7 +955,7 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
     for name in sorted(table, key=natural_key):
         drivers, consumers = table[name]
         missing = [k for k in _keys(drivers + consumers) if k not in g.nodes]
-        reached, unreached = 0, []
+        reached, unreached, reach_of = 0, [], {}
         contact = bool(items.get(name)) and all(
             i in CONTACT for _k, i in items[name][0] + items[name][1] if i is not None)
         for d in drivers:
@@ -965,6 +973,15 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
                     reached += 1
                 else:
                     unreached.append((d, c))
+            if getattr(table[name], "dealt", False):
+                reach_of[d] = got
+        if getattr(table[name], "dealt", False) and drivers and consumers:
+            # a wide net: each driver on one of its belts, each consumer off one
+            served = set().union(*reach_of.values()) if reach_of else set()
+            dead = {d for d in drivers if not reach_of.get(d, set()) & set(consumers)}
+            unreached = [(d, c) for d in drivers for c in consumers
+                         if d in dead or c not in served]
+            reached = len(drivers) * len(consumers) - len(unreached)
         mine = carried.get(name, [])
         r = NetReport(name, drivers, consumers, missing, len(drivers) * len(consumers), reached,
                       unreached, _segments(g, mine), len(mine),
