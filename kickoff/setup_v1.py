@@ -23,7 +23,8 @@ Steps, each one RCON call (``fkcore.link``: 5 s, nothing registered):
    Small on purpose (Rory, 2026-10-21: the player owns its supplies and manages the scarce
    logistic chests), with 10 burner mining drills added that day: a kit of plates and no drill
    deadlocked the lead world when its starter iron went to belts first (every electric drill
-   takes plates; a burner drill mines on the kit's coal).
+   takes plates; a burner drill mines on the kit's coal). One active provider chest since 2.0.72
+   (Rory, 2026-10-30): the output chest of the circuit auto mall.
 3. **rules**: robot speed 1 and cargo 1 only, steam power and electronics granted (there is no
    character to unlock them by hand), every player a spectator, no crash site.
 
@@ -55,6 +56,7 @@ OIL = [(6.5, -9.5, 300000), (11.5, -9.5, 300000), (16.5, -9.5, 300000)]   # 3000
 CHESTS = [(x + 0.5, y + 0.5) for x, y in ((2, 8), (3, 8), (4, 8), (2, 9), (3, 9), (4, 9))]
 KIT = [("roboport", 5), ("assembling-machine-1", 3), ("medium-electric-pole", 93),
        ("storage-chest", 10), ("requester-chest", 10), ("passive-provider-chest", 10),
+       ("active-provider-chest", 1),
        ("nuclear-reactor", 1), ("uranium-fuel-cell", 100), ("heat-exchanger", 8),
        ("steam-turbine", 10), ("heat-pipe", 30), ("offshore-pump", 4), ("iron-plate", 200),
        ("copper-plate", 200), ("iron-ore", 400), ("copper-ore", 400), ("coal", 200),
