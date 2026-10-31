@@ -1,4 +1,5 @@
-"""Prototype facts, read from fkcore/data/catalog.json and fkcore/data/fluidboxes.json.
+"""Prototype facts, read from fkcore/data/catalog.json, fkcore/data/fluidboxes.json and
+fkcore/data/facts.json.
 
 Copied from C:\\fk-lead\\repo\\fk\\catalog.py (d6018d3) with its measured fixture fk/catalog-v5.json
 (Factorio 2.0 + Space Age prototypes). Added for V1: a default path, ``load()`` with no argument,
@@ -17,8 +18,15 @@ every fluid prototype's boxes and pipe connections per direction, and per crafti
 recipe the boxes the recipe makes live. :meth:`Catalog.fluid_boxes_at` turns them into world
 tiles: for an entity at (x, y) facing ``direction`` with ``recipe``, each live box with its
 fluid (filter or recipe) and its connections (the tile inside the entity, the side it faces, the
-tile a pipe must stand on). An entity the measured fixture lacks (``infinity-pipe``) is added from
-that file. Pure, stdlib only.
+tile a pipe must stand on).
+
+2.1.1 (facts into data): ``tools/read_facts.py`` reads the game over RCON. ``catalog.json`` has a
+row for every placeable entity (145: combinators, power switch, speaker, display panel, lamps,
+train stops ...), each with ``placed_by``, ``energy`` and ``circuit`` (its wire connector ids and
+reach); the measured rows keep their values. The facts above are reads of ``facts.json``
+(``fkcore.facts``), and this module's own fallback rows (the combinators, the fluid file's
+``infinity-pipe``) are gone. Where the game said more than the old dicts did, its answers are
+taken (docs/RELEASE-2.1.1.md lists each). Pure, stdlib only.
 """
 from __future__ import annotations
 
@@ -26,6 +34,8 @@ import json
 import math
 import os
 from collections import namedtuple
+
+from . import facts as _facts
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
            "MINING_RADIUS", "STEAM_PER_S", "HEAT_W", "REACTOR_FUEL_S", "CIRCUIT_WIRE_REACH",
@@ -35,47 +45,31 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", 
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
 FLUID_PATH = os.path.join(os.path.dirname(DEFAULT_PATH), "fluidboxes.json")
 
-# Base-game facts the measured fixture does not record (Factorio 2.0 prototype values).
-#: Burner energy use in watts, for machines whose endpoints include a fuel input.
-FUEL_USE_W = {"stone-furnace": 90e3, "steel-furnace": 90e3, "burner-mining-drill": 150e3,
-              "boiler": 1.8e6}
-#: Fuel value in joules.
-FUEL_VALUE_J = {"coal": 4e6, "wood": 2e6, "solid-fuel": 12e6, "rocket-fuel": 100e6}
-#: Mining time per resource (an electric drill at mining speed 0.5 makes 0.5/s of a time-1 ore).
-MINING_TIME = {"iron-ore": 1.0, "copper-ore": 1.0, "coal": 1.0, "stone": 1.0, "uranium-ore": 2.0}
-#: Steam per second: a boiler makes it from as much water (1.8 MW at 30 kJ a unit, 165 C), a steam
-#: engine uses it at full power (fluid_usage_per_tick 0.5, read from the game: 900 kW).
-STEAM_PER_S = {"boiler": 60.0, "steam-engine": 30.0,
-               # 2.0 (the starter reactor): 10 MW into 500 C steam at 0.2 kJ a unit per degree
-               # from 15 C, 103.09/s; a turbine takes 60/s (5.82 MW)
-               "heat-exchanger": 10e6 / (485 * 200.0), "steam-turbine": 60.0}
+# Base-game facts the measured fixture does not record: reads of facts.json (fkcore.facts).
+#: Burner energy use in watts, for machines whose endpoints include a fuel input (every entity
+#: with a burner that takes chemical fuel).
+FUEL_USE_W = _facts.burns("chemical")
+#: Fuel value in joules (chemical fuels).
+FUEL_VALUE_J = _facts.fuels("chemical")
+#: Mining time per resource a drill mines into items (an electric drill at mining speed 0.5 makes
+#: 0.5/s of a time-1 ore), in the game's order.
+MINING_TIME = _facts.solid_resources()
+#: Steam per second: a boiler makes it from as much water (1.8 MW, 15 C to 165 C at the steam's
+#: 0.2 kJ a unit per degree: 60/s), a steam engine uses it at full power (fluid_usage_per_tick
+#: 0.5: 30/s, 900 kW). 2.0 (the starter reactor): an exchanger turns 10 MW into 500 C steam,
+#: 103.09/s; a turbine takes 60/s (5.82 MW).
+STEAM_PER_S = _facts.steam_per_s()
 #: Heat in watts (2.0, the starter reactor): a reactor makes 40 MW while a cell burns (200 s, 8 GJ)
-#: whatever is drawn; an exchanger takes 10 MW. The netlist carries heat as the item ``heat`` in MW.
-HEAT_W = {"nuclear-reactor": 40e6, "heat-exchanger": 10e6}
-#: Seconds one fuel item burns in a reactor.
-REACTOR_FUEL_S = {"uranium-fuel-cell": 200.0}
+#: whatever is drawn; an exchanger takes 10 MW (a heating tower 40 MW). The netlist carries heat as
+#: the item ``heat`` in MW.
+HEAT_W = _facts.heat_w()
+#: Seconds one fuel item burns in a reactor (its fuel value at the reactor's 40 MW).
+REACTOR_FUEL_S = {n: j / _facts.energy_w("nuclear-reactor")
+                  for n, j in _facts.fuels("nuclear").items()}
 
-#: 2.0: the combinators the measured fixture lacks (it was read before circuits were in the
-#: source), with the base game's prototype sizes: a constant combinator 1x1, a decider or an
-#: arithmetic one 1x2 standing north. Not measured on the game; they need no power but the
-#: decider and the arithmetic, which ``is_electric`` leaves to the grid.
-#: 2.0.71: the selector combinator (1x2, powered) and the lab's infinity chest (1x1), which a
-#: Literal's file refused as "prototypes the catalog lacks" (the circuit auto mall, 2026-10-30).
-_COMBINATORS = (
-    {"name": "constant-combinator", "type": "constant-combinator", "tile_width": 1,
-     "tile_height": 1, "collision_box": [-0.35, -0.35, 0.35, 0.35]},
-    {"name": "decider-combinator", "type": "decider-combinator", "tile_width": 1,
-     "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
-    {"name": "arithmetic-combinator", "type": "arithmetic-combinator", "tile_width": 1,
-     "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
-    {"name": "selector-combinator", "type": "selector-combinator", "tile_width": 1,
-     "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
-    {"name": "infinity-chest", "type": "infinity-container", "tile_width": 1,
-     "tile_height": 1, "collision_box": [-0.35, -0.35, 0.35, 0.35]},
-)
-#: How far a red or green wire reaches between two entities that are not poles (the game's
-#: default_circuit_wire_max_distance; fnet's WIRE_REACH).
-CIRCUIT_WIRE_REACH = 9.0
+#: How far a red or green wire reaches from an entity whose row has no reach of its own (the
+#: game's usual get_max_circuit_wire_distance; fnet's WIRE_REACH).
+CIRCUIT_WIRE_REACH = _facts.wire_reach()
 
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 
@@ -92,18 +86,10 @@ PipeConn = namedtuple("PipeConn", "tile dir target flow type reach categories",
 FluidBox = namedtuple("FluidBox", "box fluid production conns")
 
 #: A drill mines the tiles whose centres lie within this distance of its centre on both axes
-#: (``mining_drill_radius``, read from the game, 2.0.77): an electric drill mines 5x5.
-MINING_RADIUS = {"electric-mining-drill": 2.49, "burner-mining-drill": 0.99,
-                 "big-mining-drill": 6.49, "pumpjack": 0.49}
+#: (``mining_drill_radius``, read from the game): an electric drill mines 5x5.
+MINING_RADIUS = {n: float(r["mining_drill_radius"])
+                 for n, r in _facts.load()["entities"].items() if "mining_drill_radius" in r}
 
-# Entity types that are powered by electricity. Inserters, mining drills and furnaces hold burner
-# and electric prototypes alike, so there the burners are named: every other inserter, drill
-# (pumpjack, big drill) and furnace (electric furnace, recycler) runs on the grid.
-_ELECTRIC_TYPES = frozenset({"assembling-machine", "lab", "roboport", "beacon", "radar", "lamp",
-                             "electric-turret", "pump", "decider-combinator",
-                             "arithmetic-combinator", "selector-combinator"})
-_MIXED_TYPES = frozenset({"inserter", "mining-drill", "furnace"})
-_BURNERS = frozenset({"burner-inserter", "burner-mining-drill", "stone-furnace", "steel-furnace"})
 
 
 class Catalog:
@@ -115,14 +101,6 @@ class Catalog:
         self._recipes = recipes
         self._fluids = None
         self._fluid = fluid or {}
-        for name, row in (self._fluid.get("entities") or {}).items():
-            if name not in self._entities:      # a prototype the measured fixture lacks
-                w, h = row["size"]
-                self._entities[name] = {"name": name, "type": row["type"], "tile_width": w,
-                                        "tile_height": h,
-                                        "collision_box": row.get("collision_box")}
-        for row in _COMBINATORS:
-            self._entities.setdefault(row["name"], dict(row))
         self._items = None
 
     # -- construction ---------------------------------------------------------------------
@@ -355,13 +333,10 @@ class Catalog:
 
     # -- gameplay facts -------------------------------------------------------------------
     def is_electric(self, name) -> bool:
-        row = self.entity(name)
-        etype = row.get("type")
-        if etype in _ELECTRIC_TYPES:
-            return True
-        if etype in _MIXED_TYPES:
-            return name not in _BURNERS
-        return False
+        """The entity draws power from the grid (``fkcore.facts``: an electric energy source that
+        takes input)."""
+        self.entity(name)
+        return _facts.electric_consumer(name)
 
     def craft_rate(self, recipe, machine) -> dict[str, float]:
         """Products per second for one machine: amount * crafting_speed / energy."""
@@ -400,17 +375,20 @@ class Catalog:
         return self.entity(name)["max_wire_distance"]
 
     def circuit_reach(self, name) -> float:
-        """How far a red or green wire from ``name`` reaches: a pole's wire reach, else the
-        game's default (2.0)."""
+        """How far a red or green wire from ``name`` reaches: its row's (the game's
+        get_max_circuit_wire_distance: 32 for a big pole, 10 for a power switch), else the
+        usual 9."""
         row = self.entity(name)
-        if row.get("type") == "electric-pole" and row.get("max_wire_distance"):
-            return float(row["max_wire_distance"])
-        return float(row.get("circuit_wire_max_distance") or CIRCUIT_WIRE_REACH)
+        return float((row.get("circuit") or {}).get("wire_reach") or CIRCUIT_WIRE_REACH)
 
     def is_item(self, name) -> bool:
-        """An item: an entity's or a recipe's item (2.0, for item signals in circuit conditions)."""
+        """An item: one that places an entity, or a recipe's item (2.0, for item signals in
+        circuit conditions). 2.1.1: the item that places it, not the entity's name (a rail's
+        is ``rail``, not ``straight-rail``)."""
         if self._items is None:
-            names = set(self._entities)
+            names = set()
+            for row in self._entities.values():
+                names.update(row.get("placed_by") or (row["name"],))
             for rec in self._recipes.values():
                 for row in list(rec.get("ingredients") or ()) + list(rec.get("products") or ()):
                     if row.get("type", "item") == "item":

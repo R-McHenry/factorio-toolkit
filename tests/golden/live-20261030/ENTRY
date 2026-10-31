@@ -1,0 +1,7 @@
+# The golden check's entry points in this frozen copy of the live run's design
+# (C:\fk-player\runs\20261030-2352-opus\game, 2026-10-31 14:48, toolkit 2.0.78).
+# world.fk is the factory the build elaborates (nauvis.surface places it as module world).
+# nauvis.fk is the root design (plots), composed by the surface step, not elaborated as a
+# factory; cells.fk, kit.fk and plant.fk are modules world.fk imports. out/force.json (the
+# hands fk rates' routed section uses) and out/avail.json (inserter=any) come with it.
+world.fk

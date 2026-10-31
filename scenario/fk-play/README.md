@@ -6,6 +6,12 @@ plus two libs of the fk toolkit:
   Rory's decision 12).
 - `fk_chat.lua`: every console chat line kept in `storage.fk_chat` (the last 200), which
   `fkcore.chat` reads so a player's message reaches the agent's next command.
+- `fk_stats.lua` (2.1): the run's stats recorder. Every 5 game minutes an `on_nth_tick` handler
+  appends one line to `script-output/fk-stats/samples.jsonl`, on the server only: the cumulative
+  item, fluid and power counts, the research and the machine states (`fkcore.runstats` reads it).
+  It only reads, keeps nothing in `storage`, and runs its read in a `pcall`, so a mistake there
+  never stops the game. Its sample function is the same text as `fkcore/runstats.py`'s
+  `SAMPLE_LUA`, which reads a map made before the recorder over RCON (read-only).
 
 `tests/test_lab_scenario.py` checks the Lua's block structure and the rules below, offline.
 
@@ -17,8 +23,9 @@ In the game:
   scenario loads, and a chat line reaches `storage.fk_chat`.
 
 Rules it keeps:
-- `/lab` and the chat handler are registered in scenario code at script load (event_handler's
-  `add_commands` and `events`, from on_init and on_load), never through RCON or the console. v4
+- `/lab`, the chat handler and the stats recorder are registered in scenario code at script load
+  (event_handler's `add_commands`, `events` and `on_nth_tick`, from on_init and on_load), never
+  through RCON or the console. v4
   installed its chat handler with an RCON `script.on_event`, the pattern that made saves unjoinable
   on 2026-10-18.
 - The lab is its own surface and its own force:

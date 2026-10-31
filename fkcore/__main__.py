@@ -44,6 +44,12 @@ use the game link, and only with FK_LINK=on)
                                           fluid) on the surface; --series N adds the window's
                                           graph in N points, oldest first (a free read, never an
                                           alert)
+    stats GAME_DIR --sample [--now] | --history | --page
+                                          the run's history (2.1, fkcore.runstats): --sample
+                                          keeps the samples due (the scenario recorder's, or one
+                                          RCON read every 5 game minutes) in out/stats/ and the
+                                          capital every 10; --history the research, the latest
+                                          window and the trend; --page out/stats/index.html
     stock GAME_DIR [--force F]            what the base holds, per item: chests and roboports
                                           apart (a free read, never an alert). A robot in a chest
                                           is idle: the line says how many are where
@@ -222,6 +228,8 @@ def _free_read(a, cat):
         print(f"error: {exc}", file=sys.stderr)
         return 2
     force = a.force or force_for(sf.mode)
+    if a.cmd == "stats" and (a.sample or a.history or a.page):
+        return _run_stats(a, cat, force, sf.name)
     if a.cmd == "chart":
         return _world(a, cat, "chart", lambda r: freereads.chart_lines(
             freereads.chart(r, force, sf.name)))
@@ -237,6 +245,21 @@ def _free_read(a, cat):
         return 2
     return _world(a, cat, "stats", lambda r: freereads.stats_lines(
         freereads.stats(r, force, sf.name, items, a.window, a.fluids, a.series)))
+
+
+def _run_stats(a, cat, force, surface):
+    """``stats --sample | --history | --page``: the run's history (fkcore.runstats, 2.1). Only
+    the sample reads the game; the history and the page read out/stats."""
+    from . import runstats
+    code = 0
+    if a.sample:
+        code = _world(a, cat, "stats --sample", lambda r: runstats.sample(
+            r, a.game, cat, force, surface, now=a.now))
+    if a.history:
+        print("\n".join(runstats.history_lines(a.game)))
+    if a.page:
+        print(f"stats page: {os.path.abspath(runstats.write_page(a.game))}")
+    return code
 
 
 def _capital(a, cat):
@@ -1189,6 +1212,13 @@ def main(argv=None):
     st.add_argument("--fluids", action="store_true")
     st.add_argument("--series", type=int, default=0, choices=range(0, 301), metavar="N")
     st.add_argument("--force")
+    st.add_argument("--sample", action="store_true",
+                    help="take the run's stats sample when one is due (fkcore.runstats)")
+    st.add_argument("--now", action="store_true", help="with --sample: take it now")
+    st.add_argument("--history", action="store_true",
+                    help="the run's history: research, the latest window and the trend")
+    st.add_argument("--page", action="store_true",
+                    help="write the run's stats page, out/stats/index.html")
     ch = sub.add_parser("chart")
     ch.add_argument("game")
     ch.add_argument("--force")

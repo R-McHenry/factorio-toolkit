@@ -158,7 +158,12 @@ short-stock / needs-research per item. A ghost that stays is a blocked build, no
 marks it ghost SHORT or ghost needs-research (below), and waiting won't change that.
 
 Every command ends with the game's new alerts (grouped per kind), Rory's new chat lines and the
-research line (`RESEARCH: NONE` when nothing researches).
+research line: the research under way, its progress, the packs the labs used in the last game
+minute and the time left at that pace, as in `research military-3 34%, 41 packs/min, ~22 min
+left`. It is loud when nothing researches (`RESEARCH: NONE`), and when the labs used no pack in
+the last minute while a research is queued (`RESEARCH STALLED`), with the cause when the game
+shows it: `no lab holds military-science-pack`, `no lab holds all 4 packs (chemical-science-pack
+missing in 9 of 12 labs)`, or the labs have no power.
 
 ## How many machines and drills for a rate
 
@@ -676,6 +681,16 @@ fk stats [--items iron-plate,copper-plate] [--window 10min]
 fk stats --items iron-plate --window 1h --series 30
                                  the panel's graph too: made and used per minute in 30 points
                                  over the window, oldest first
+fk stats --history               the run's history: the research first (rate and time left),
+                                 then the latest 5-minute window (capital and how much of it
+                                 works, the top items made and used per minute, power made and
+                                 used per kind, the machines per state and the recipes that
+                                 mostly stand) and the trend (the last 30 game minutes against
+                                 the 30 before). The run keeps a sample every 5 game minutes by
+                                 itself, in game\out\stats
+fk stats --page                  the run's stats page, game\out\stats\index.html: every series
+                                 over game time (research, capital, power, machine states, each
+                                 item and fluid made and used)
 fk stock                         what the base holds, per item: chests, roboports, your pack and
                                  the robots in the air (free to read). A robot in a chest is an
                                  item and does nothing; the line says how many are flying, how

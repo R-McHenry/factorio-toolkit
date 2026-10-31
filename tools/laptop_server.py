@@ -29,6 +29,12 @@ Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py capital SAVE.zip
                                             2.0.69: the working capital on a played map, two
                                             reads 30 game seconds apart
+    python tools/laptop_server.py stats [SAVE.zip]
+                                            2.1: run stats on a small base made here: the
+                                            scenario's recorder writes a sample every 5 game
+                                            minutes, the RCON read gives the same numbers, the
+                                            research line's rate and its stall; with a save, the
+                                            RCON path and the capital on that map
 """
 from __future__ import annotations
 
@@ -790,6 +796,55 @@ rcon.print(n)
 """
 
 
+#: check_stats' base: power from an energy interface and solar panels (always day), an accumulator,
+#: two assemblers (one with plates, one without), an electric furnace with ore, two labs (one with
+#: red packs) on a queue of red techs, and a second network of its own (a panel and a lamp)
+STATS_SETUP = """
+local s, f = game.surfaces.nauvis, game.forces.player
+s.always_day = true
+s.request_to_generate_chunks({0, 0}, 3)
+s.force_generate_chunk_requests()
+local tiles = {}
+for x = -10, 45 do for y = -10, 20 do tiles[#tiles + 1] = {name = 'landfill', position = {x, y}} end end
+s.set_tiles(tiles)
+for _, e in pairs(s.find_entities_filtered{area = {{-10, -10}, {45, 20}}}) do
+  if e.valid and e.type ~= 'character' then e.destroy() end
+end
+local eei = s.create_entity{name = 'electric-energy-interface', position = {1, 1}, force = f}
+eei.power_production = 3000000 / 60
+eei.electric_buffer_size = 3000000
+s.create_entity{name = 'solar-panel', position = {4.5, 1.5}, force = f}
+s.create_entity{name = 'accumulator', position = {8, 1}, force = f}
+local a1 = s.create_entity{name = 'assembling-machine-2', position = {11.5, 1.5}, force = f}
+a1.set_recipe('iron-gear-wheel')
+a1.insert{name = 'iron-plate', count = 400}
+local a2 = s.create_entity{name = 'assembling-machine-2', position = {15.5, 1.5}, force = f}
+a2.set_recipe('iron-gear-wheel')
+local l1 = s.create_entity{name = 'lab', position = {19.5, 1.5}, force = f}
+l1.insert{name = 'automation-science-pack', count = 400}
+s.create_entity{name = 'lab', position = {23.5, 1.5}, force = f}
+local fu = s.create_entity{name = 'electric-furnace', position = {27.5, 1.5}, force = f}
+fu.insert{name = 'iron-ore', count = 20}
+for _, x in pairs{2.5, 9.5, 16.5, 23.5, 28.5} do
+  s.create_entity{name = 'medium-electric-pole', position = {x, -1.5}, force = f}
+end
+s.create_entity{name = 'solar-panel', position = {38.5, 10.5}, force = f}
+s.create_entity{name = 'small-lamp', position = {40.5, 12.5}, force = f}
+s.create_entity{name = 'medium-electric-pole', position = {40.5, 10.5}, force = f}
+for _, t in pairs{'steam-power', 'electronics', 'automation-science-pack'} do
+  f.technologies[t].researched = true
+end
+for _, t in pairs{'automation', 'logistics', 'steel-processing', 'fast-inserter', 'logistic-science-pack'} do
+  f.add_research(t)
+end
+local ids = {}
+for _, p in pairs(s.find_entities_filtered{type = 'electric-pole'}) do ids[p.electric_network_id] = true end
+local n = 0
+for _ in pairs(ids) do n = n + 1 end
+rcon.print(n)
+"""
+
+
 def check_vision():
     """2.1 vision: a small base around games/lab-sense (VISION_SETUP) looked at with --layers
     all at zoom 1, 4 and 16, as text and as a PNG; then a big base (about 60k entities on 1024
@@ -904,9 +959,123 @@ rcon.print(tostring(f.is_chunk_charted(s, {32, 0})) .. ' ' .. tostring(f.is_chun
     return 0 if ok else 1
 
 
+def _run_to(r, tick, speed=64, limit=120):
+    """Run the paused game to ``tick`` exactly (ticks_to_run), fast, and pause it there."""
+    now = int(r.lua("rcon.print(game.tick)").strip())
+    if tick > now:
+        r.lua(f"game.speed = {speed} game.tick_paused = true game.ticks_to_run = {tick - now} "
+              "rcon.print(1)")
+    t0 = time.time()
+    while int(r.lua("rcon.print(game.tick)").strip()) < tick and time.time() - t0 < limit:
+        time.sleep(0.3)
+    return int(r.lua("game.speed = 1 rcon.print(game.tick)").strip())
+
+
+def check_stats(save=None):
+    """2.1: the run stats on a laptop server (module docstring)."""
+    import json
+    import tempfile
+    from fkcore import runstats, supply
+    from fkcore.catalog import Catalog
+    save = save or (sys.argv[2] if len(sys.argv) > 2 else None)
+    if save:
+        return _check_stats_save(save)
+    cat = Catalog.load()
+    tmp = tempfile.mkdtemp(prefix="fk-stats-")
+    rec, viarcon, empty = (os.path.join(tmp, n) for n in ("rec", "rcon", "empty"))
+    os.makedirs(empty)
+    took, ok = [], True
+    with LaptopServer("stats21", scenario="fk-play") as srv:
+        out = os.path.join(srv.write, "script-output")
+        with srv.rcon() as r:
+            print("setup: electric networks", r.lua(STATS_SETUP).strip())
+            r.lua("game.tick_paused = true rcon.print(1)")
+            for k in (1, 2, 3):
+                # the RCON read at the tick the recorder writes at; the recorder's line is there
+                # once that tick has run
+                for game, where, now in ((viarcon, empty, True), (rec, out, False)):
+                    tick = _run_to(r, k * runstats.EVERY + (game == rec))
+                    t0 = time.time()
+                    lines = runstats.sample(r, game, cat, "player", "nauvis", now=now,
+                                            out_dir=where)
+                    took.append(time.time() - t0)
+                    print(f"tick {tick} {'recorder' if game == rec else 'rcon'}: "
+                          + " | ".join(lines))
+            sup = supply.read(r, "player", "nauvis")
+            busy = supply.research_line(sup.research)
+            r.lua("for _, l in pairs(game.surfaces.nauvis.find_entities_filtered{type = 'lab'}) do "
+                  "l.get_inventory(defines.inventory.lab_input).clear() end rcon.print(1)")
+            _run_to(r, 3 * runstats.EVERY + 2 * 3600 + 1)
+            stalled = supply.research_line(supply.read(r, "player", "nauvis").research)
+        recorded = open(os.path.join(out, *runstats.RECORDER.split("/")), encoding="utf-8").read()
+    print(f"recorder file: {len(recorded.splitlines())} lines, {len(recorded)} bytes")
+    print(f"research line, labs busy: {busy}")
+    print(f"research line, packs taken out, 2 game minutes on: {stalled}")
+    a, b = runstats.Store(rec), runstats.Store(viarcon)
+    worst = 0.0
+    for series in ("items", "fluids", "power"):
+        ra = {(x["from"], x["tick"]): x for x in runstats.windows(a.read(series))}
+        rb = {(x["from"], x["tick"]): x for x in runstats.windows(b.read(series))}
+        both = sorted(set(ra) & set(rb))
+        print(f"{series}: recorder windows {sorted(ra)}, rcon windows {sorted(rb)}")
+        ok = ok and len(both) == 3
+        for key in both:
+            for side in ("made", "used"):
+                da, db = ra[key].get(side) or {}, rb[key].get(side) or {}
+                for n in set(da) | set(db):
+                    va, vb = float(da.get(n, 0)), float(db.get(n, 0))
+                    worst = max(worst, abs(va - vb) / max(1.0, abs(va), abs(vb)))
+    print(f"recorder against RCON, the same windows: largest relative difference {worst:.2e}")
+    print("\n".join(runstats.history_lines(rec)))
+    path = runstats.write_page(rec, "stats21 laptop check")
+    print(f"page: {path}, {os.path.getsize(path)} bytes")
+    m = runstats.Store(rec).read("machines")[-1]
+    print("machines:", json.dumps(m["machines"], sort_keys=True), json.dumps(m["recipes"],
+                                                                             sort_keys=True))
+    p = runstats.windows(a.read("power"))[-1]
+    print("power, the last window:", json.dumps(runstats.power_classes(p)))
+    print(f"samples took {', '.join(f'{t:.2f}' for t in took)} s")
+    ok = (ok and worst < 1e-6 and max(took) < 5 and len(recorded.splitlines()) == 3
+          and busy.startswith("research ") and "packs/min" in busy
+          and stalled.startswith("RESEARCH STALLED")
+          and "no lab holds automation-science-pack" in stalled)
+    print("run stats:", "OK" if ok else "NOT as designed")
+    print(f"(the stores are in {tmp})")
+    return 0 if ok else 1
+
+
+def _check_stats_save(save):
+    """The RCON path and the capital on a played map: two samples 5 game minutes apart."""
+    import tempfile
+    from fkcore import runstats, supply
+    from fkcore.catalog import Catalog
+    cat, game = Catalog.load(), tempfile.mkdtemp(prefix="fk-stats-save-")
+    took = []
+    with LaptopServer("stats21save", save=save) as srv:
+        with srv.rcon() as r:
+            r.lua("game.tick_paused = true rcon.print(1)")
+            start = int(r.lua("rcon.print(game.tick)").strip())
+            for k in (0, 1):
+                _run_to(r, start + k * runstats.EVERY)
+                t0 = time.time()
+                lines = runstats.sample(r, game, cat, "player", "nauvis",
+                                        out_dir=os.path.join(srv.write, "script-output"))
+                took.append(time.time() - t0)
+                print(" | ".join(lines))
+            print(supply.research_line(supply.read(r, "player", "nauvis").research))
+        recorder = os.path.exists(os.path.join(srv.write, "script-output", "fk-stats"))
+    print("\n".join(runstats.history_lines(game)))
+    print("the map's own recorder:", "wrote samples" if recorder else "none (read over RCON)")
+    path = runstats.write_page(game, os.path.basename(save))
+    print(f"page: {path}, {os.path.getsize(path)} bytes; samples took "
+          + ", ".join(f"{t:.2f}" for t in took) + " s")
+    return 0 if max(took) < 5 else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
                       "turned": check_turned, "health": check_health,
                       "settings": check_settings, "lab": check_lab,
-                      "capital": check_capital, "vision": check_vision}[what]())
+                      "capital": check_capital, "vision": check_vision,
+                      "stats": check_stats}[what]())
