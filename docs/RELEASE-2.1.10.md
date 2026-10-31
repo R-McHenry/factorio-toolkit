@@ -1,4 +1,4 @@
-# Toolkit 2.1 (draft): fluid ports, and product probabilities from the game
+# Toolkit 2.1.10: fluid ports, and recipe probabilities
 
 PLAN-2.1, part F: a port may carry a fluid. A sealed cell can take its acid, water or gas from
 outside, and a Stack can run one pipe through all its cells.
