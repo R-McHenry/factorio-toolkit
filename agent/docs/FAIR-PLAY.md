@@ -20,7 +20,9 @@ how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
 
 - **Free to read any time:**
   - the alerts panel (new alerts come to you on their own, with reminders while one stays open);
-  - production statistics (`fk stats`);
+  - production statistics (`fk stats`), with the production panel's graphs;
+  - whole-base statistics: what the base holds (`fk stock`) and its working capital
+    (`fk capital`);
   - the charted map (`fk chart`);
   - research (`fk research`).
 - **Everything else you see where you look** (`fk look`, `fk sense`), like a player at the screen.

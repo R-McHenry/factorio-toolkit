@@ -29,6 +29,19 @@ class FreeReadsTest(unittest.TestCase):
         self.assertEqual(freereads.stats_lines(empty), [
             "stats lab: force lab, window 1min, tick 1: 0 items (a free read: never an alert)"])
 
+    def test_series(self):
+        # 2.0.70: the panel's graph, a 1h window in 4 points of 15 min (counts per point)
+        st = freereads.stats_from({"tick": 9, "force": "player", "surface": "nauvis",
+                                   "window": "1h", "items": [
+                                       {"name": "iron-plate", "made_per_min": 3, "used_per_min": 1,
+                                        "made": 180, "used": 60, "made_total": 900,
+                                        "used_total": 300, "made_series": [30, 45, 45, 60],
+                                        "used_series": [15, 15, 15, 15]}]})
+        lines = freereads.stats_lines(st)
+        self.assertIn("4 points of 15 min each", lines[3])
+        self.assertEqual(lines[4].split(), ["iron-plate", "made", "2", "3", "3", "4"])
+        self.assertEqual(lines[5].split(), ["iron-plate", "used", "1", "1", "1", "1"])
+
     def test_chart(self):
         ch = freereads.chart_from({"tick": 180000, "force": "lab", "surface": "lab",
                                    "charted": 193, "chunks": 576, "box": [0, 3, 32, 20]})

@@ -5,9 +5,11 @@ anywhere and at any time, when it chooses to, like a player opening the panel (C
 **No automated alert is ever derived from them**: nothing here keeps state, compares with a line
 or pushes, and ``fkcore.alerts.track`` refuses anything but an alert-panel read.
 
-- ``stats(r, force, surface, items=None, window="1min")`` -> ``StatsRead``: per item, the flow
-  counts of ``LuaForce.get_item_production_statistics(surface)`` over the window (made and used
-  per minute, and as counts) and the totals since the map began;
+- ``stats(r, force, surface, items=None, window="1min", fluids=False, series=0)`` ->
+  ``StatsRead``: per item (``fluids``: per fluid), the flow counts of
+  ``LuaForce.get_item_production_statistics(surface)`` over the window (made and used per minute,
+  and as counts) and the totals since the map began; ``series`` (2.0.70) adds the window's graph,
+  its 300 samples summed into that many points, as the production panel draws it;
 - ``chart(r, force, surface)`` -> ``ChartRead``: how many of the surface's generated chunks the
   force has charted, and their bounding box;
 - ``stock(r, force, surface)`` -> ``StockRead``: what the base holds per item, in chests and in
@@ -85,8 +87,8 @@ def chart_from(raw) -> ChartRead:
                      tuple(int(v) for v in _list(box)) if box else None)
 
 
-def stats(r, force, surface, items=None, window="1min") -> StatsRead:
-    return stats_from(link.stats(r, force, surface, items, window))
+def stats(r, force, surface, items=None, window="1min", fluids=False, series=0) -> StatsRead:
+    return stats_from(link.stats(r, force, surface, items, window, fluids=fluids, series=series))
 
 
 def chart(r, force, surface) -> ChartRead:
@@ -156,7 +158,30 @@ def stats_lines(st: StatsRead):
                    f"{_n(r.get('used')):>8} {_n(r.get('made_total')):>11} "
                    f"{_n(r.get('used_total')):>11}")
     out += [f"  {r['name']}: not an item" for r in st.items if r.get("unknown")]
+    series = [r for r in known if r.get("made_series") is not None]
+    if series:
+        n = len(_list(series[0]["made_series"]))
+        step = WINDOW_MIN[st.window] / n if n else 0
+        out.append(f"  per minute over the window, oldest first, {n} points of {_span(step)} "
+                   "each (the production panel's graph):")
+        for r in series:
+            for what, key in (("made", "made_series"), ("used", "used_series")):
+                vals = [float(v) / step for v in _list(r.get(key))] if step else []
+                out.append(f"  {r['name'] + ' ' + what:<33} " + " ".join(_n(v) for v in vals))
     return out
+
+
+#: each window's length in minutes
+WINDOW_MIN = {"5s": 5 / 60, "1min": 1, "10min": 10, "1h": 60, "10h": 600, "50h": 3000,
+              "250h": 15000, "1000h": 60000}
+
+
+def _span(minutes):
+    if minutes < 1:
+        return f"{minutes * 60:.3g} s"
+    if minutes < 60:
+        return f"{minutes:.3g} min"
+    return f"{minutes / 60:.3g} h"
 
 
 def chart_lines(ch: ChartRead):

@@ -790,27 +790,41 @@ WINDOWS = {"5s": "five_seconds", "1min": "one_minute", "10min": "ten_minutes",
            "250h": "two_hundred_fifty_hours", "1000h": "one_thousand_hours"}
 
 
-def lua_stats(force, surface, items=None, window="1min", tag="stats"):
-    """The force's item production statistics on ``surface``: per item, the flow counts of
-    ``get_item_production_statistics(surface)`` over ``window`` (per minute and as a count) and
-    the totals; every item with a total when ``items`` is None. Written to script-output."""
+def lua_stats(force, surface, items=None, window="1min", tag="stats", fluids=False, series=0):
+    """The force's item (``fluids``: fluid) production statistics on ``surface``: per item, the
+    flow counts of ``get_item_production_statistics(surface)`` over ``window`` (per minute and as a
+    count) and the totals; every item with a total when ``items`` is None. ``series`` (2.0.70):
+    also the window's 300 samples, summed into that many points, oldest first (``made_series``,
+    ``used_series``: counts per point), the production panel's graph. Written to script-output."""
     want = "nil" if not items else "{" + ", ".join(_q(i) for i in items) + "}"
+    kind, proto = ("fluid", "fluid") if fluids else ("item", "item")
     return f"""
 local f = game.forces[{_q(force)}]
 local s = game.get_surface({_q(surface)})
 if not f or not s then rcon.print('no force or surface') return end
-local st = f.get_item_production_statistics(s)
+local st = f.get_{kind}_production_statistics(s)
 local p = defines.flow_precision_index[{_q(WINDOWS[window])}]
-local names, want = {{}}, {want}
+local names, want, points = {{}}, {want}, {int(series)}
 if want then for _, n in pairs(want) do names[n] = true end else
   for n in pairs(st.input_counts) do names[n] = true end
   for n in pairs(st.output_counts) do names[n] = true end
 end
+local function graph(n, c)
+  local out = {{}}
+  for k = 1, points do out[k] = 0 end
+  for i = 1, 300 do
+    local k = points - math.floor((i - 1) * points / 300)
+    out[k] = out[k] + st.get_flow_count{{name = n, category = c, precision_index = p, sample_index = i, count = true}}
+  end
+  return out
+end
 local rows = {{}}
 for n in pairs(names) do
-  if prototypes.item[n] then
+  if prototypes.{proto}[n] then
     local function flow(c, count) return st.get_flow_count{{name = n, category = c, precision_index = p, count = count}} end
-    rows[#rows + 1] = {{name = n, made_total = st.get_input_count(n), used_total = st.get_output_count(n), made_per_min = flow('input', false), used_per_min = flow('output', false), made = flow('input', true), used = flow('output', true)}}
+    local row = {{name = n, made_total = st.get_input_count(n), used_total = st.get_output_count(n), made_per_min = flow('input', false), used_per_min = flow('output', false), made = flow('input', true), used = flow('output', true)}}
+    if points > 0 then row.made_series, row.used_series = graph(n, 'input'), graph(n, 'output') end
+    rows[#rows + 1] = row
   else
     rows[#rows + 1] = {{name = n, unknown = true}}
   end
@@ -906,13 +920,13 @@ def alerts(rcon, force, tag="alerts"):
     return read_output(rcon, lua_alerts(force, tag), tag, "alerts", keep=False)
 
 
-def stats(rcon, force, surface, items=None, window="1min", tag="stats"):
+def stats(rcon, force, surface, items=None, window="1min", tag="stats", fluids=False, series=0):
     """The raw production statistics read (``lua_stats``)."""
     if window not in WINDOWS:
         raise LinkError(f"a statistics window is one of {', '.join(WINDOWS)}, got {window!r}")
     tag = f"{tag}-{os.getpid()}"
-    return read_output(rcon, lua_stats(force, surface, items, window, tag), tag, "stats",
-                       keep=False)
+    return read_output(rcon, lua_stats(force, surface, items, window, tag, fluids, series), tag,
+                       "stats", keep=False)
 
 
 def chart(rcon, force, surface):

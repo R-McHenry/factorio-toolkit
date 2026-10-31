@@ -25,6 +25,7 @@ class LinkLuaTest(unittest.TestCase):
                     link.lua_alerts("player", "alerts-1"),
                     link.lua_stats("lab", "lab", None, "1min", "stats-1"),
                     link.lua_stats("lab", "lab", ["iron-plate", "coal"], "1h", "stats-2"),
+                    link.lua_stats("lab", "lab", ["water"], "10h", "stats-3", True, 30),
                     link.lua_chart("lab", "lab"),
                     link.lua_say("[fk lab] transport-belt at 307.5,430.5: \"quoted\""),
                     link.lua_ghosts("lab", "lab",

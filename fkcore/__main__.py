@@ -38,9 +38,12 @@ use the game link, and only with FK_LINK=on)
     alerts GAME_DIR [--force F]           the game's alert panel: new alerts, reminders (the
                                           surface file's remind), cleared ones; state in
                                           out/alerts.json; pushed to chat when notify is all
-    stats GAME_DIR [--items A,B] [--window 1min|10min|1h] [--force F]
-                                          production and consumption per item on the surface
-                                          (a free read, never an alert)
+    stats GAME_DIR [--items A,B] [--window 5s|1min|10min|1h|10h|50h|250h|1000h] [--fluids]
+          [--series N] [--force F]
+                                          production and consumption per item (--fluids: per
+                                          fluid) on the surface; --series N adds the window's
+                                          graph in N points, oldest first (a free read, never an
+                                          alert)
     stock GAME_DIR [--force F]            what the base holds, per item: chests and roboports
                                           apart (a free read, never an alert). A robot in a chest
                                           is idle: the line says how many are where
@@ -218,8 +221,11 @@ def _free_read(a, cat):
         print(f"error: --window is one of {', '.join(freereads.WINDOWS)}", file=sys.stderr)
         return 2
     items = [i for i in (a.items or "").split(",") if i] or None
+    if a.series and not items:
+        print("error: --series needs --items (the graph is per item)", file=sys.stderr)
+        return 2
     return _world(a, cat, "stats", lambda r: freereads.stats_lines(
-        freereads.stats(r, force, sf.name, items, a.window)))
+        freereads.stats(r, force, sf.name, items, a.window, a.fluids, a.series)))
 
 
 def _capital(a, cat):
@@ -1145,6 +1151,8 @@ def main(argv=None):
     st.add_argument("game")
     st.add_argument("--items")
     st.add_argument("--window", default="1min")
+    st.add_argument("--fluids", action="store_true")
+    st.add_argument("--series", type=int, default=0, choices=range(0, 301), metavar="N")
     st.add_argument("--force")
     ch = sub.add_parser("chart")
     ch.add_argument("game")

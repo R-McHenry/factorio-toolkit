@@ -574,7 +574,12 @@ fk capture design [FACTORY/]INST an instance of your laid-out design. Then
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]
-                                 production statistics (free to read)
+                                 production statistics (free to read), made and used per item;
+                                 windows 5s, 1min, 10min, 1h, 10h, 50h, 250h and 1000h, as the
+                                 production panel's. --fluids for fluids
+fk stats --items iron-plate --window 1h --series 30
+                                 the panel's graph too: made and used per minute in 30 points
+                                 over the window, oldest first
 fk stock                         what the base holds, per item: chests, roboports, your pack and
                                  the robots in the air (free to read). A robot in a chest is an
                                  item and does nothing; the line says how many are flying, how
