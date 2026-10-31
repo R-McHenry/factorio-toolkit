@@ -59,6 +59,8 @@ REACTOR_FUEL_S = {"uranium-fuel-cell": 200.0}
 #: source), with the base game's prototype sizes: a constant combinator 1x1, a decider or an
 #: arithmetic one 1x2 standing north. Not measured on the game; they need no power but the
 #: decider and the arithmetic, which ``is_electric`` leaves to the grid.
+#: 2.0.71: the selector combinator (1x2, powered) and the lab's infinity chest (1x1), which a
+#: Literal's file refused as "prototypes the catalog lacks" (the circuit auto mall, 2026-10-30).
 _COMBINATORS = (
     {"name": "constant-combinator", "type": "constant-combinator", "tile_width": 1,
      "tile_height": 1, "collision_box": [-0.35, -0.35, 0.35, 0.35]},
@@ -66,6 +68,10 @@ _COMBINATORS = (
      "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
     {"name": "arithmetic-combinator", "type": "arithmetic-combinator", "tile_width": 1,
      "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
+    {"name": "selector-combinator", "type": "selector-combinator", "tile_width": 1,
+     "tile_height": 2, "collision_box": [-0.35, -0.65, 0.35, 0.65]},
+    {"name": "infinity-chest", "type": "infinity-container", "tile_width": 1,
+     "tile_height": 1, "collision_box": [-0.35, -0.35, 0.35, 0.35]},
 )
 #: How far a red or green wire reaches between two entities that are not poles (the game's
 #: default_circuit_wire_max_distance; fnet's WIRE_REACH).
@@ -95,7 +101,7 @@ MINING_RADIUS = {"electric-mining-drill": 2.49, "burner-mining-drill": 0.99,
 # (pumpjack, big drill) and furnace (electric furnace, recycler) runs on the grid.
 _ELECTRIC_TYPES = frozenset({"assembling-machine", "lab", "roboport", "beacon", "radar", "lamp",
                              "electric-turret", "pump", "decider-combinator",
-                             "arithmetic-combinator"})
+                             "arithmetic-combinator", "selector-combinator"})
 _MIXED_TYPES = frozenset({"inserter", "mining-drill", "furnace"})
 _BURNERS = frozenset({"burner-inserter", "burner-mining-drill", "stone-furnace", "steel-furnace"})
 

@@ -151,6 +151,24 @@ class LiteralImportTest(unittest.TestCase):
                                 "wire": "2,requester-chest0,2", "net": "cell/hand0"}),
             ("cell/requester-chest0", {"config": '{"request_filters":{"sections":[{"index":1}]}}'})])
 
+    def test_the_auto_malls_combinators(self):
+        """2.0.71: a selector combinator and an infinity chest are in the catalog, so a Literal
+        with them imports (the circuit auto mall's lab copy was refused)."""
+        for name, size in (("selector-combinator", (1, 2)), ("infinity-chest", (1, 1))):
+            row = CAT.entity(name)
+            self.assertEqual((row["tile_width"], row["tile_height"]), size)
+        self.assertTrue(CAT.is_electric("selector-combinator"))
+        self.assertFalse(CAT.is_electric("infinity-chest"))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "mall.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump([{"name": "selector-combinator", "x": 0.5, "y": 1, "direction": 0,
+                            "config": '{"control_behavior":{"operation":"random"}}'},
+                           {"name": "infinity-chest", "x": 2.5, "y": 0.5}], fh)
+            rows, _wires = literal.read_entities(path)
+            self.assertEqual([r[0] for r in rows], ["selector-combinator", "infinity-chest"])
+            literal.import_entities(path, "m", CAT)
+
     def test_errors(self):
         with self.assertRaises(literal.LiteralError):
             literal.import_entities(PLANT, "r", CAT, "0,0,1,1")          # nothing inside

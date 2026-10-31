@@ -494,6 +494,21 @@ checked (`require-not-met`), and a gated net whose wire has no `cycle` is a `gat
 takes it as always open). The fuel saver above is the starter plant's: the reactor loads a cell
 only below 550 C, so its fuel slot is empty while it coasts, and that is normal.
 
+### Combinators the language doesn't write yet: a Literal
+
+Deciders, arithmetic and selector combinators, a machine's recipe set by a signal, and a
+requester's requests set by one are not in the language yet. A `Literal` whose file is a
+blueprint string keeps every one of them, with its settings and wires, as written. The circuit
+auto mall is one: one assembler, one requester, one active provider and ten combinators that keep
+a stock list full (`factorio-design\drafts\automall-20261030`, `gen_mall.py` writes it). Three
+things the game does that a hand-written blueprint can get wrong (measured 2026-10-30):
+
+- an assembler keeps no `input_networks` / `output_networks`: its recipe in and its ingredients
+  out share every wire it is on;
+- a requester takes its requests from the circuit with `"control_behavior":
+  {"circuit_mode_of_operation": 1}`; `"set_requests": true` is ignored;
+- a decider outputs `each` only when one of its conditions reads `each`.
+
 ## Checks on paper
 
 `assert INST.rate >= 10/min` (or `/s`, `/h`): checked by the rate model (`fk rates`); a failed one
