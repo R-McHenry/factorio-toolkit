@@ -1,0 +1,2 @@
+fkp 1 surface nauvis
+plot world at -1000,-1000 rot 0 size 2000x2000 module=world
