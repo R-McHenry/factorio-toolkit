@@ -153,7 +153,7 @@ class KindTest(unittest.TestCase):
         flat = flat_of("module M { a = Assembler<recipe=pipe> }\nkind N = M\nx = N<duty=0.5>")
         self.assertEqual(flat.machines["x/a/m0"].duty, 0.5)
         refused(self, "module M { a = Assembler<recipe=pipe> }\nkind N = M<recipe=pipe>\nx = N",
-                "takes only duty=")
+                "module M has no parameter recipe")
 
     def test_parse_refusals(self):
         with self.assertRaises(FkSyntaxError):

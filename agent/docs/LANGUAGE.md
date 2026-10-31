@@ -577,6 +577,64 @@ Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `Chem
 toolkit's own if the run has none). Change it, or write a kind or tiers line of the same name in a
 file, and that file uses yours. A prelude holds kind and tiers lines only.
 
+## Module parameters
+
+A module can take parameters, so one cell serves iron and copper:
+
+```
+module FurnaceCell<plate, ore> size 7x3 {
+  port ore_in  : in  $ore   @s0
+  port ore_out : out $ore   @n0
+  port pl_in   : in  $plate @n6
+  port pl_out  : out $plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=$plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+one  = FurnaceCell<plate=copper-plate, ore=copper-ore> @(0, 0)
+iron = Stack<cell=FurnaceCell, n=12, plate=iron-plate, ore=iron-ore> @(10, 0)
+kind CopperCell = FurnaceCell<plate=copper-plate, ore=copper-ore>
+cu   = Stack<cell=CopperCell, n=12> @(20, 0)
+```
+
+- **Declaring.** `module NAME<p, q=default> size WxH`. A parameter without a default is required:
+  an instance that leaves it out is refused, naming it. A default is a word, a number, a string
+  or a list.
+- **Writing one.** `$p` stands for p's value wherever a word may stand: an item in a port, a net's
+  `items` or another list, a parameter value, a signal, a `set` value, and inside a quoted
+  string (`file="$name.json"`). It never stands for an instance, net or port name, a position or
+  the `size`: a `$` there is refused.
+- **Values** are words, numbers or lists. There is no arithmetic.
+- **Lists.** `ins=iron-plate|copper-cable` is a list. `$ins` spreads it where an item list goes;
+  `$ins[0]` picks one item, so each ingredient can get a lane of its own. An index past the end is
+  refused, with the list's length.
+
+  ```
+  module AsmCell<recipe, ins, out> size 7x3 {
+    port i_in  : in  $ins[0] | $ins[1] @s0     # two ingredients, one belt, a lane each
+    port i_out : out $ins[0] | $ins[1] @n0
+    port o_in  : in  $out @n6
+    port o_out : out $out @s6
+    stack i_in -> i_out, o_out -> o_in
+    a = Assembler<recipe=$recipe> @(2, 0)
+    net i items $ins split: i_in -> a, i_out
+    net o: o_in, a -> o_out
+  }
+  ```
+- **Stacks pass them on.** A Stack gives every parameter other than `cell`, `n`, `head`, `built`,
+  `duty` and `dnp` to each cell, and to the head when the head declares it. So a module can't
+  declare a parameter of one of those six names. A Stack's `cell=` may name a kind of a module, as
+  `CopperCell` above. The cell's ports are filled in before the Stack checks that each pair
+  carries the same items.
+- **Inside a module**, a parameter can pass one on: `f = FurnaceCell<plate=$plate, ore=$ore>`.
+- **A cell names its machine.** Its size, inserters and pipes fit one machine's footprint, so it
+  takes no size, and a machine of another footprint is another cell.
+- **Rebuilds.** The values are part of each instance's line in the `.fkp`, so changing one
+  re-lays the instance as a changed recipe does. `machine=auto` and `modules=auto` inside a cell
+  are one choice for each set of values: the iron line and the copper line choose apart.
+- Every module still takes `duty=` and `dnp`; any other parameter it doesn't declare is refused.
+
 ## Power
 
 The build script's `cover power` step adds the poles every factory needs; `floorplan

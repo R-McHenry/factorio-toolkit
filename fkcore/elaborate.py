@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from dataclasses import dataclass, field
 
 from . import facts as _facts
@@ -622,13 +623,14 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
         if inst.kind in modules:
             if inst.kind in stack:
                 raise ElabError(src, inst.line, f"module {inst.kind} contains itself")
-            extra = sorted(set(inst.params) - set(META))
-            if extra:
-                raise ElabError(src, inst.line, f"{path}: a module instance takes only duty= and "
-                                                f"dnp, not {', '.join(extra)}")
+            # 2.1 (PLAN-2.1 "D. Module parameters"): the instance's parameters, the defaults
+            # under them, substituted into a copy of the module's body
+            body, values = _with_args(modules[inst.kind], inst.params, path, src, inst.line)
+            if stacked is None and values:
+                inst = dataclasses.replace(inst, params=dict(
+                    {k: v for k, v in values.items() if k not in inst.params}, **inst.params))
             before = set(flat.machines)
-            _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,),
-                    dn)
+            _expand(flat, body, path, modules, cat, d, src, stack + (inst.kind,), dn)
             keys = [k for k in flat.machines if k not in before and k not in flat.ports]
             # 2.0.43 (PLAN-GLOBAL phase B): an instance line's own `size WxH` is the frame a plot
             # gets from its placement, and it seals the instance as the module's own `size` does
@@ -811,6 +813,10 @@ def _choose(flat, mod, inst, path, params, cat, src, core=None, names=None, kdef
                             + (" (machine=auto: " + ", ".join(sorted(flat._tiers.names())) + ")"
                                if param in ("machine", "entity") else ""))
         key = f"{mod.name}.{inst.name}.{param}"
+        if getattr(mod, "args", None):
+            # 2.1: a parameterised module's line is one choice per set of values (an iron and a
+            # copper line of one cell may want other modules)
+            key = f"{mod.name}<{_args_text(mod.args)}>.{inst.name}.{param}"
         pick = flat._sizes.get(key, menu[0])
         pick = pick if pick in menu else menu[0]
         ch = flat.choices.setdefault(key, Choice(key, param, menu, pick))
@@ -995,15 +1001,28 @@ def _stack_module(flat, inst, path, modules, src):
     and a ref ``STACK.P`` names the head's port P, or with no head the first cell's NEAR port P or
     the last cell's FAR port P (``flat.stack_alias``)."""
     p = inst.params
-    extra = sorted(set(p) - {"cell", "n", "head", "built"} - set(META))
-    if extra:
-        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head=, built=, duty= "
-                                        f"and dnp, not {', '.join(extra)}")
+    # 2.1: every parameter but the Stack's own goes to each cell (and to the head, where it
+    # declares it); a cell or head may be a kind of a module, whose parameters come first
+    fwd = {k: v for k, v in p.items() if k not in lang.RESERVED}
     cname, hname = p.get("cell"), p.get("head")
+    cname, cfwd = _module_kind(flat, cname, fwd, modules, src, inst.line, path)
     if not isinstance(cname, str) or cname not in modules:
         raise ElabError(src, inst.line, f"{path} = Stack: cell= names a module, got {cname!r}")
+    hfwd = None
+    if hname is not None:
+        hname, hfwd = _module_kind(flat, hname, fwd, modules, src, inst.line, path)
     if hname is not None and (not isinstance(hname, str) or hname not in modules):
         raise ElabError(src, inst.line, f"{path} = Stack: head= names a module, got {hname!r}")
+    extra = sorted(set(cfwd) - {q.name for q in modules[cname].params})
+    if extra and (hname is None or set(extra) - {q.name for q in modules[hname].params}):
+        have = ", ".join(q.name for q in modules[cname].params)
+        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head=, built=, duty= "
+                                        f"and dnp, and passes the cell's own parameters on ("
+                                        f"{cname}: {have or 'none'}), not {', '.join(extra)}")
+    if hname is not None:
+        hdecl = {q.name for q in modules[hname].params}
+        hfwd = {k: v for k, v in hfwd.items() if k in hdecl}
+        cfwd = {k: v for k, v in cfwd.items() if k not in extra}
     n = p.get("n")
     if isinstance(n, float) and n.is_integer():
         n = int(n)
@@ -1017,7 +1036,8 @@ def _stack_module(flat, inst, path, modules, src):
     if not isinstance(built, int) or isinstance(built, bool) or not 0 <= built <= n:
         raise ElabError(src, inst.line, f"{path} = Stack: built= a whole number of cells from 0 "
                                         f"to n={n}, got {built!r}")
-    cell = modules[cname]
+    # substituted before the ports are checked, so both ends of a pair carry the same items
+    cell, _values = _with_args(modules[cname], cfwd, f"{path}/0", src, inst.line)
     if cell.size is None or not cell.stacks:
         raise ElabError(src, inst.line, f"{path} = Stack: cell {cname} needs a size and its "
                                         "`stack NEAR -> FAR` pairs")
@@ -1041,7 +1061,7 @@ def _stack_module(flat, inst, path, modules, src):
         raise ElabError(src, inst.line, f"{path} = Stack: every FAR port of {cname} stands on one "
                                         f"edge, so the cells stack one way (got {sorted(sides)})")
     grow = sides.pop()
-    head = modules[hname] if hname else None
+    head = _with_args(modules[hname], hfwd, f"{path}/head", src, inst.line)[0] if hname else None
     if head is not None:
         hports = {q.name: q for q in head.ports}
         for near, far, line in cell.stacks:
@@ -1056,11 +1076,11 @@ def _stack_module(flat, inst, path, modules, src):
     hw, hh = head.size if head is not None else (0, 0)
     at = {"n": lambda k: (0, (n - 1 - k) * h), "s": lambda k: (0, hh + k * h),
           "e": lambda k: (hw + k * w, 0), "w": lambda k: ((n - 1 - k) * w, 0)}[grow]
-    insts = [lang.Inst(str(k), cname, {"dnp": True} if k >= built else {}, {"at": (*at(k), 0)},
-                       inst.line) for k in range(n)]
+    insts = [lang.Inst(str(k), cname, dict(cfwd, dnp=True) if k >= built else dict(cfwd),
+                       {"at": (*at(k), 0)}, inst.line) for k in range(n)]
     if head is not None:
         hat = {"n": (0, n * h), "s": (0, 0), "e": (0, 0), "w": (n * w, 0)}[grow]
-        insts.insert(0, lang.Inst("head", hname, {}, {"at": (*hat, 0)}, inst.line))
+        insts.insert(0, lang.Inst("head", hname, dict(hfwd), {"at": (*hat, 0)}, inst.line))
     nets = []
     for near, far, _line in cell.stacks:
         items = list(dict.fromkeys(ports[far].all_items))
@@ -1090,6 +1110,139 @@ def _stack_module(flat, inst, path, modules, src):
     flat.stack_alias[path] = alias
     flat.stacks[path] = (cname, n, hname)
     return lang.Module(f"Stack:{path}", inst.line, insts=insts, nets=nets)
+
+
+# -- 2.1: module parameters ------------------------------------------------------------------------
+_PARAM = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)(?:\s*\[\s*(\d+)\s*\])?")
+
+
+def _args_text(values):
+    return ", ".join(f"{k}={_value_text(v)}" for k, v in values.items())
+
+
+def _value_text(v):
+    return "|".join(map(str, v)) if isinstance(v, list) else str(v)
+
+
+def _module_kind(flat, name, given, modules, src, line, path):
+    """A Stack's ``cell=`` or ``head=`` that names a kind of a module (``kind CopperCell =
+    FurnaceCell<plate=...>``) -> (the module, the kind's parameters under ``given``)."""
+    if not isinstance(name, str) or name in modules:
+        return name, dict(given)
+    core, plist, _names = flat._kinds.resolve(name, src, line)
+    if core not in modules:
+        return name, dict(given)
+    return core, _kind_merge(core, plist + [given], src, line, path)
+
+
+def _with_args(mod, given, path, src, line):
+    """(the module's body with its parameters substituted, the values) for an instance that gives
+    ``given`` (2.1, PLAN-2.1 "D. Module parameters"). A module without parameters is itself.
+    Refused: a parameter it doesn't declare, a required one left out, and a flag for a value."""
+    given = {k: v for k, v in given.items() if k not in META}
+    decl = {q.name: q for q in mod.params}
+    unknown = sorted(set(given) - set(decl))
+    if unknown:
+        have = ", ".join(decl)
+        raise ElabError(src, line, f"{path}: module {mod.name} has no parameter "
+                                   f"{', '.join(unknown)} (" + (f"its parameters: {have}; "
+                                                              if have else "it takes none; ")
+                        + "every module also takes duty= and dnp)")
+    missing = [q.name for q in mod.params if q.default is None and q.name not in given]
+    if missing:
+        raise ElabError(src, line, f"{path}: module {mod.name} needs "
+                                   + ", ".join(f"{m}=" for m in missing)
+                        + (" (a parameter with no default)" if len(missing) == 1
+                           else " (parameters with no default)"))
+    for k, v in given.items():
+        if v is True:
+            raise ElabError(src, line, f"{path}: {mod.name}'s parameter {k} takes a value, like "
+                                       f"{k}=iron-plate")
+    if not mod.params:
+        return mod, {}
+    values = {q.name: given.get(q.name, q.default) for q in mod.params}
+    return _Subst(mod, values, src).module(), values
+
+
+class _Subst:
+    """A module's body with ``$p`` and ``$p[k]`` replaced by the values (2.1): in port, net and
+    ``items`` lists (a list value spreads), parameter values, signals, ``set`` values, the text of
+    ``behave`` and ``expect`` lines, and inside strings."""
+
+    def __init__(self, mod, values, src):
+        self.mod, self.values, self.src = mod, values, src
+
+    def one(self, name, idx, line):
+        if name not in self.values:
+            raise ElabError(self.src, line, f"${name}: module {self.mod.name} has no parameter "
+                                            f"{name} (its parameters: {', '.join(self.values)})")
+        v = self.values[name]
+        if idx is None:
+            return v
+        items = v if isinstance(v, list) else [v]
+        if int(idx) >= len(items):
+            raise ElabError(self.src, line, f"${name}[{idx}]: {name} is a list of {len(items)} "
+                                            f"({_value_text(v)}) in this {self.mod.name}, so "
+                                            f"${name}[0] to ${name}[{len(items) - 1}]")
+        return items[int(idx)]
+
+    def value(self, v, line):
+        """A value as written -> its value: ``$p`` alone is p's value as given (a word, a number,
+        a list), ``$p`` inside a string is its text, and a list spreads a list."""
+        if isinstance(v, list):
+            out = []
+            for x in v:
+                y = self.value(x, line)
+                out.extend(y if isinstance(y, list) else [y])
+            return out
+        if not isinstance(v, str) or "$" not in v:
+            return v
+        m = _PARAM.fullmatch(v)
+        if m:
+            return self.one(m.group(1), m.group(2), line)
+        return self.text(v, line)
+
+    def text(self, v, line):
+        if not isinstance(v, str) or "$" not in v:
+            return v
+        return _PARAM.sub(lambda m: _value_text(self.one(m.group(1), m.group(2), line)), v)
+
+    def items(self, items, line):
+        if items is None:
+            return None
+        out = self.value(list(items), line)
+        return [_value_text(x) for x in out]
+
+    def cond(self, c):
+        if c is None:
+            return None
+        op = lambda o: o if not isinstance(o, lang.Operand) else dataclasses.replace(
+            o, signal=_value_text(self.value(o.signal, c.line)))
+        return dataclasses.replace(c, left=op(c.left), right=op(c.right))
+
+    def module(self):
+        mod, R = self.mod, dataclasses.replace
+        insts = []
+        for i in mod.insts:
+            hints = dict(i.hints)
+            if isinstance(hints.get("patch"), str):
+                hints["patch"] = self.text(hints["patch"], i.line)
+            insts.append(R(i, params={k: self.value(v, i.line) for k, v in i.params.items()},
+                           hints=hints, when=self.cond(i.when)))
+        return R(mod, params=[], args=dict(self.values), insts=insts,
+                 ports=[R(p, items=self.items(p.items, p.line), right=self.items(p.right, p.line))
+                        for p in mod.ports],
+                 nets=[R(n, items=self.items(n.items, n.line), when=self.cond(n.when))
+                       for n in mod.nets],
+                 covers=[R(c, params={k: self.value(v, c.line) for k, v in c.params.items()})
+                         for c in mod.covers],
+                 signals=[R(s, game=None if s.game is None
+                            else _value_text(self.value(s.game, s.line))) for s in mod.signals],
+                 sets=[R(s, attrs={k: self.text(v, s.line) for k, v in s.attrs.items()})
+                       for s in mod.sets],
+                 behaves=[R(b, lines=[(k, self.text(t, ln), ln) for k, t, ln in b.lines])
+                          for b in mod.behaves],
+                 expects=[R(e, text=self.text(e.text, e.line)) for e in mod.expects])
 
 
 def _conn_want(flat, bus, keys):

@@ -1,0 +1,16 @@
+# smelt.fk: one parameterised cell stacked for iron and for copper (2.1, module parameters).
+# Each line is four electric furnaces fed from a requester chest, its plates into a provider.
+import FurnaceCell from "cells.fk"
+
+kind CopperCell = FurnaceCell<plate=copper-plate, ore=copper-ore>
+
+fe_ore = Chest<requester, item=iron-ore, rate=3/s> @(2, 2)
+cu_ore = Chest<requester, item=copper-ore, rate=3/s> @(22, 2)
+iron   = Stack<cell=FurnaceCell, n=4, plate=iron-plate, ore=iron-ore> @(2, 8)
+copper = Stack<cell=CopperCell, n=4> @(22, 8)
+fe_box = Chest<provider> @(8, 30)
+cu_box = Chest<provider> @(28, 30)
+net fo: fe_ore -> iron.ore_in
+net fp: iron.pl_out -> fe_box
+net co: cu_ore -> copper.ore_in
+net cp: copper.pl_out -> cu_box
