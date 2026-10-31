@@ -357,15 +357,19 @@ class PatchPairTest(unittest.TestCase):
         self.assertRegex(r.patched[PAIR], r"^2 -> 1, \d+ carriers taken up \(no end of the net "
                                           r"needs them now\); \d+ of \d+ carriers kept$")
 
-    def test_a_pair_that_cannot_be_patched_is_routed_again(self):
+    def test_a_pair_that_cannot_be_patched_is_held(self):
+        # 2.0.74: its belts stand as they are and only the new end fails (it was laid again whole)
         text = (SMELT.replace("pipes = AsmRow", SMELT2)
                 .replace("ore -> smelt", "ore -> smelt, smelt2")
                 .replace("coal -> smelt", "coal -> smelt, smelt2"))
+        flat = flat_of(text)
+        lay, _notes = expand.expand_factory(flat, CAT)
         with mock.patch.object(route._Patch, "add_consumer", return_value=None):
-            r = self.patched(text)
-        self.assertEqual((r.routed, r.patched), ([PAIR], {}))
-        self.assertIn("patching it failed: no branch from the standing route reaches smelt2.in1",
-                      r.again[PAIR])
+            r = route.route_layout(flat, lay, CAT, patch=self.old)
+        self.assertEqual((r.routed, r.patched, r.again), ([], {}, {}))
+        self.assertIn("its standing route is kept as it is", r.failed[PAIR])
+        self.assertIn("no branch from the standing route reaches smelt2.in1", r.failed[PAIR])
+        self.assertEqual(list(self.new_carriers(r)), [])
 
 
 class WrongLaneTest(unittest.TestCase):

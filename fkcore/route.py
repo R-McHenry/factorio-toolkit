@@ -1074,6 +1074,7 @@ def _judge(flat, lay, cat, mine, js):
 
 # -- patching a committed route (2.0) -------------------------------------------------------------
 _BELTY = frozenset({"transport-belt", "splitter"})    # what a drop or a pickup patch meets
+_HELD = _BELTY | {"underground-belt"}     # a standing route with one of these is held, not re-laid
 
 
 def _placed(flat, job):
@@ -1111,6 +1112,16 @@ def _serving(g, net, drivers, consumers, keys):
     up = set().union(*fwd.values())
     down = set().union(*bwd.values())
     return {k for k in keys if k in up and k in down}
+
+
+def _trunk(g, net, ends, keys, names):
+    """The keys of ``keys`` (route carriers) the drivers still feed when no consumer of the net
+    is reached any more (each moved or went, 2.0.74: a chest moved a tile): its belts, and the
+    hands that still drop on something. The patch branches the consumers off it where they
+    stand now, instead of the net being laid again whole."""
+    fwd, _bwd = _flows(g, net, *ends)
+    reach = set().union(*fwd.values()) & set(keys)
+    return {k for k in reach if names.get(k) in _HELD or g.succ.get(k)}
 
 
 def _is_stub(e):
@@ -1278,6 +1289,9 @@ class _Patch:
         cons = set(consumers)
         sd = [d for d in drivers if self.fwd[m][d] & cons]
         sc = [c for c in consumers if any(c in self.fwd[m][d] for d in drivers)]
+        if not sd:              # every consumer moved or went: the drivers of the trunk (_trunk)
+            mine = self.route_keys()
+            sd = [d for d in drivers if self.fwd[m][d] & mine]
         return sd, sc
 
     def grid(self, target, reverse=False):
@@ -1538,12 +1552,25 @@ class _Patch:
         return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} into {', '.join(consumers)}"
 
 
+def _role_keys(flat, role):
+    """The endpoint keys a role (``inst.name``) stands for: its instance's machines, and the
+    port itself when the role is one (``mil.so_in!`` is port ``mil/so_in``). 2.0.74 (the 10-30
+    run's MIL step): a new module's port ends were none of its machines, so the patch skipped
+    them, its judge found them apart and four main nets were laid again whole."""
+    inst, name = role.rsplit(".", 1)
+    keys = set(flat.insts[inst].machines)
+    port = f"{inst}/{name.rstrip('!')}"
+    if port in (getattr(flat, "ports", None) or ()):
+        keys.add(port)
+    return keys
+
+
 def _role_ends(flat, job, machines, side):
     """[(role, belt end or None, (machine key, rect) or None)]: the ends on ``side`` of the
-    net's roles in the instances of ``machines``, one per belt end or machine."""
+    net's roles in the instances of ``machines`` (or the ports), one per belt end or machine."""
     machines, out = set(machines), []
     for role, entries in sorted(job.anchors.items()):
-        if not machines & set(flat.insts[role.rsplit(".", 1)[0]].machines):
+        if not machines & _role_keys(flat, role):
             continue
         for a in entries:
             if a[0] != side:
@@ -1558,8 +1585,9 @@ def _role_ends(flat, job, machines, side):
 def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain=(), avoid=()):
     """Patch one net's committed route ``old`` (carriers) on the layout ``ents``, whose ends all
     still stand where they stood: keep what still serves, take up what serves no end any more (a
-    dropped end's branch), and route only each new end into it. -> (carriers, report text) or
-    (None, why).
+    dropped end's branch), and route only each new end into it. -> (carriers, report text, None),
+    or (None, why, held): ``held`` is what stands of the route when only a new end could not be
+    joined (it stays as it is, the net fails), None when what stands is no route to keep.
 
     2.0 (Rory, 2026-10-21): "Pin what stands and make patch changes rather than regenerating the
     base ... routing a new section into the old one, even as a bit of spaghetti, beats ripping
@@ -1574,18 +1602,27 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     A lane pair (``A|B``, 2.0.2; the lead's merge of V2 lanes, 2026-10-22, routed a changed pair
     again whole) is patched by its two nets: a new consumer of both branches off the belt of both
     lanes (a splitter or the belt's end, which keep each item on its lane), a new driver of A
-    joins A's own belt or the left lane of the pair's, and each net's report is judged."""
+    joins A's own belt or the left lane of the pair's, and each net's report is judged.
+
+    2.0.74 (the 10-30 run's MIL step): a new end the patch can't join no longer gets the net
+    routed again whole. That paste re-laid four main nets with 549 belts short, robots tore the
+    old mains up first and the base stopped; now what stands is kept and only the new end fails."""
     members = fkpmod.net_names(job.net) or [job.net]
     sub = {m: table.get(m, ((), ())) for m in members}
     mine = {e.key for e in old}
     g = connectmod.graph(list(ents) + list(old), cat, _ports(flat))
-    serve = set()
+    serve, trunked = set(), False
     for m in members:
-        serve |= _serving(g, m, *_ends_of(flat, table, job, g, routed=False, net=m), mine)
+        ends = _ends_of(flat, table, job, g, routed=False, net=m)
+        s = _serving(g, m, *ends, mine)
+        if not s:
+            s = _trunk(g, m, ends, mine, {e.key: e.name for e in old})
+            trunked = trunked or bool(s)
+        serve |= s
     rep = connectmod.connect(g, cat, sub)
     leak = next((lk for lk in rep.leaks if lk.src in serve or lk.dst in serve), None)
     if leak is not None:
-        return None, f"what stands of its route would SPILL: {leak.text}"
+        return None, f"what stands of its route would SPILL: {leak.text}", None
     kept = [e for e in old if e.key in serve]
     kept += [e for e in old if _is_stub(e) and e.key not in serve and kept]   # a lane pin's join
     p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
@@ -1593,63 +1630,74 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     new_c, new_d = set(), set()
     for m in members:
         sd, sc = p.standing(m)
-        if not sd or not sc:
+        if not sd:
             of = f" of {m}" if len(members) > 1 else ""
-            return None, f"nothing of its committed route joins a driver{of} to a consumer now"
+            return (None, f"nothing of its committed route joins a driver{of} to a consumer now",
+                    None)
         apart = [(d, c) for d in sd for c in sc if c not in p.fwd[m][d]]
         if apart:
-            return None, f"its committed route leaves {apart[0][0]} -> {apart[0][1]} apart"
+            return None, f"its committed route leaves {apart[0][0]} -> {apart[0][1]} apart", None
         drivers, consumers = p.ends[m]
         new_c |= {c for c in consumers if c not in sc}
         new_d |= {d for d in drivers if d not in sd}
 
     def nets_of(role, machine, side):
         """The members whose ends (``side``: 0 drivers, 1 consumers) the role's machine is."""
-        keys = {machine[0]} if machine else set(flat.insts[role.rsplit(".", 1)[0]].machines)
+        keys = {machine[0]} if machine else _role_keys(flat, role)
         return [m for m in members if keys & set(p.ends[m][side])]
 
     words = []
     for role, belt, machine in _role_ends(flat, job, new_c, "in"):
         got = p.add_consumer(role, belt, machine, nets_of(role, machine, 1))
         if got is None:
-            return None, f"no branch from the standing route reaches {role}"
+            return None, f"no branch from the standing route reaches {role}", kept
         words.append(got)
     for role, belt, machine in _role_ends(flat, job, new_d, "out"):
         for m in nets_of(role, machine, 0):
             got = p.add_driver(role, belt, machine, m)
             if got is None:
-                return None, f"no branch from {role} reaches the standing route"
+                return None, f"no branch from {role} reaches the standing route", kept
             words.append(got)
     rep = connectmod.connect(p.g, cat, sub)
     keys = p.route_keys()
     leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
     if leak is not None:
-        return None, f"the patch would SPILL: {leak.text}"
+        return None, f"the patch would SPILL: {leak.text}", kept
     for m in members:
         r = rep.nets.get(m)
         drivers, consumers = p.ends[m]
         apart = [(d, c) for d, c in (r.unreached if r else ()) if d in drivers and c in consumers]
         if apart:
-            return None, f"the patch leaves {apart[0][0]} -> {apart[0][1]} apart"
+            return None, f"the patch leaves {apart[0][0]} -> {apart[0][1]} apart", kept
         alone = [k for k in (r.unpaired if r else ()) if k in keys]
         if alone:
-            return None, f"the game would pair no exit with {', '.join(alone[:4])}"
-    gone = len(old) - len(kept)
+            return None, f"the game would pair no exit with {', '.join(alone[:4])}", kept
+    tail = []
+    if trunked:         # the trunk's tail past the new branches went to where the ends stood
+        serving = set().union(*(_serving(p.g, m, *p.ends[m], p.route_keys()) for m in members))
+        tail = [e for e in p.kept if e.key not in serving and not _is_stub(e)]
+    if tail:
+        p.kept = [e for e in p.kept if e not in tail]
+        p.refresh()
+    gone = len(old) - len(kept) + len(tail)
     if gone:
         words.append(f"{gone} carrier{'s' if gone != 1 else ''} taken up (no end of the net "
                      f"needs {'them' if gone != 1 else 'it'} now)")
     text = (f"{job.drivers()} -> {job.consumers()}, " + ("; ".join(words) or "nothing new")
             + f"; {len(p.kept)} of {len(old)} carriers kept")
-    return p.kept + p.added, text
+    return p.kept + p.added, text, None
 
 
-def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
+def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net_frames=None):
     """The committed routes of ``patch`` ({net: carriers}: nets none of whose ends moved) on
     ``new``, judged against the netlist as it is now (``fkcore.connect``). A route that joins
     every driver of its net to every consumer, leaks nowhere and has no carrier that serves no
     end stands as it is; any other is patched (``_patch_net``), or routed again when it can't
-    be. What stands is added to ``new``. -> (nets kept as they were, {net: patch report},
-    {net: why it is routed again}).
+    be. A belt route that only fails to reach a new end is held: it stands as it is and the net
+    fails (2.0.74). What stands is added to ``new``. ``net_frames``: net -> (its blocked frames,
+    its box), as the router routes it (a net inside a sealed module patches inside that module's
+    frame, 2.0.74: with every frame blocked no branch of one could be laid). -> (nets kept as
+    they were, {net: patch report}, {net: why it is routed again}, {net: why it is held}).
 
     2.0: the netlist decides, not the net's name. The first lead run changed a net's sink and
     kept its name (``net packs: X -> lab`` to ``X -> px``): the route stood as it was, the build
@@ -1691,7 +1739,7 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
         for e in patch[net]:
             del new.entities[e.key]
     standing = sorted(n for n in patch if n not in faulty)
-    patched, again = {}, {}
+    patched, again, held = {}, {}, {}
     pending = {n: patch[n] for n in faulty}
     for net in sorted(faulty):
         old = pending.pop(net)
@@ -1700,18 +1748,27 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid):
             continue
         # the routes still waiting for their patch stand in the way, as their carriers may stay
         ground = list(new.entities.values()) + [e for ents in pending.values() for e in ents]
+        fnet, bnet = net_frames(net) if net_frames else (frames, box)
         try:
-            got, how = _patch_net(flat, cat, table, js[net], old, ground, frames, js, box, limit,
-                                  terrain, avoid)
+            got, how, hold = _patch_net(flat, cat, table, js[net], old, ground, fnet, js, bnet,
+                                        limit, terrain, avoid)
         except Exception as exc:         # noqa: BLE001 - the net is routed again, as before 2.0
-            got, how = None, f"{type(exc).__name__}: {exc}"
+            got, how, hold = None, f"{type(exc).__name__}: {exc}", None
+        # a route of inserters alone (direct insertion) is laid again whole: nothing to tear up
+        if got is None and hold is not None and any(e.name in _HELD for e in hold):
+            for e in hold:
+                new.add(e)
+            held[net] = (f"its standing route is kept as it is ({len(hold)} of {len(old)} "
+                         f"carriers), the new end is not joined: {how}; to lay the net again "
+                         f"whole: fk build --reroute {net}")
+            continue
         if got is None:
             again[net] = f"{faulty[net]}; patching it failed: {how}"
             continue
         for e in got:
             new.add(e)
         patched[net] = how
-    return standing, patched, again
+    return standing, patched, again, held
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
@@ -1806,11 +1863,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         x0, y0, x1, y1, _tiles = sealed[inside[-1]]
         return frozenset(blocked), (x0, y0, x1, y1)
     base = lay.copy()
-    standing, patched, again = [], {}, {}
+    standing, patched, again, held = [], {}, {}, {}
     if patch:
         claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
-        standing, patched, again = _standing(flat, base, cat, js, patch, frames, box, limit,
-                                             terrain, set().union(*claims.values()))
+        standing, patched, again, held = _standing(flat, base, cat, js, patch, frames, box, limit,
+                                                   terrain, set().union(*claims.values()),
+                                                   net_frames)
         todo += [n for n in again if js[n].skip is None and not js[n].fluid]
     kept = sorted(n for n in js if n in have or n in standing)
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
@@ -1855,6 +1913,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                          terrain)
         if guard:
             failed[net] = f"{failed[net]}; {guard}"
+    failed.update(held)
     fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and n not in kept
                         and js[n].skip is None)
     plugin = _fluid_plugin() if fluid_todo else None

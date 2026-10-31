@@ -74,7 +74,10 @@ class FrictionTest(unittest.TestCase):
         self.write("t.fk", MALL.replace("net fe: fe_in -> ga", "net fe: fe_in -> ga, gb"))
         route_txt, checks = self.build()
         self.assertNotIn("kept      m/fe", route_txt)
-        self.assertIn("its committed route does not join m/fe_in -> m/gb/m0", route_txt)
+        # 2.0.74: patched inside the sealed module's own frame (it was laid again whole: with
+        # every frame blocked, no branch could be laid inside one)
+        self.assertRegex(route_txt, r"patched   m/fe: 1 -> 2, m/gb\.in1: .*; (\d+) of \1 "
+                                    r"carriers kept")
         self.assertNotIn("partly-connected", checks)
         self.assertIn("3 nets: 3 connected", checks)
 

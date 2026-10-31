@@ -161,7 +161,7 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(code, 0, ctx.log)
         self.assertIn("labs: stale", self.read("out/place.txt"))
         route_txt = self.read("out/route.txt")
-        self.assertIn("routed    packs:", route_txt)
+        self.assertIn("patched   packs:", route_txt)              # 2.0.74: was routed again
         kept = int(re.search(r"(\d+) kept", route_txt).group(1))
         self.assertGreaterEqual(kept, 10)                     # the rest stay where they were
         self.assertIn("12 nets: 12 connected, 0 open, 0 unrouted; 0 SPILL",
@@ -460,7 +460,9 @@ class FlowTest(unittest.TestCase):
 
     def test_a_moved_chest_routes_its_net_again(self):
         # 1.2 (the 0534 run): a chest moved one tile changes no belt end, only the tiles its
-        # inserter reaches; its net's committed route was kept (pinned) and read UNROUTED
+        # inserter reaches; its net's committed route was kept (pinned) and read UNROUTED.
+        # 2.0.74: a moved end goes to the patch, which branches the chest off the trunk where it
+        # stands now and takes up the old end's tail (it was routed again whole)
         small = os.path.join(self.dir, "small")
         os.makedirs(small)
         files = {
@@ -493,9 +495,8 @@ class FlowTest(unittest.TestCase):
         with open(os.path.join(small, "t.fk"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(src)
         route_txt, checks_txt = build()
-        self.assertIn("stale     p: routed again: its ends moved since the committed .fkp "
-                      "(dst.in1)", route_txt)
-        self.assertIn("routed    p:", route_txt)
+        self.assertNotIn("stale     p:", route_txt)
+        self.assertRegex(route_txt, r"patched   p: 1 -> 1, dst\.in1: .*; \d+ carriers? taken up")
         self.assertNotIn("no-route", checks_txt)
         self.assertIn("1 nets: 1 connected", checks_txt)
 

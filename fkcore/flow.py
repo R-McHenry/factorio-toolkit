@@ -652,14 +652,17 @@ def s_place(ctx, args):
 
 def _pinned_routes(flat, new, prev, cat):
     """The committed routes the router may keep (route --only stale): -> ({net: its committed
-    carriers}, {net: why it is routed again}). A net is routed again when an end its route is
-    laid to moved (``route.NetJob.moved_ends``: a belt end, or a machine it inserts into or
-    picks from), when the new layout takes one of its tiles, or (a fluid net) when its ends
-    changed at all. Every other committed route goes to the router, which keeps it as it stands,
-    patches it for the ends added and dropped, or routes the net again (``route._standing``).
+    carriers}, {net: why it is routed again}). A fluid net is routed again when the new layout
+    takes one of its tiles, an end moved or its ends changed at all. Every other committed route
+    goes to the router, less its carriers on tiles the new layout takes, and the router keeps it
+    as it stands, patches it for the ends added, dropped and moved and the gaps, or routes the net
+    again (``route._standing``).
 
     2.0 (Rory, 2026-10-21): "Pin what stands and make patch changes rather than regenerating
-    the base": a consumer added to a net no longer re-lays the whole net."""
+    the base": a consumer added to a net no longer re-lays the whole net. 2.0.74: nor does an
+    end moved (``route.NetJob.moved_ends``, a chest moved a tile): the patch takes up its old
+    branch and lays a new one to where it stands now; nor a machine set on its belt (the 10-31
+    replay: a chest moved a tile onto fe_pl4's trunk re-laid its 137 belts)."""
     if prev is None:
         return {}, {}
     old = route.jobs(flat, prev, cat) if prev.insts else {}
@@ -675,7 +678,7 @@ def _pinned_routes(flat, new, prev, cat):
     for net, ents in sorted(by_net.items()):
         if net not in now:
             continue
-        moved = now[net].moved_ends(old[net]) if net in old else []
+        moved = now[net].moved_ends(old[net]) if net in old and now[net].fluid else []
         if moved:
             again[net] = f"its ends moved since the committed .fkp ({', '.join(moved)})"
             continue
@@ -685,10 +688,15 @@ def _pinned_routes(flat, new, prev, cat):
         tiles = set()
         for e in ents:
             tiles |= fkp.tiles_of(cat, e)
-        if tiles & taken:
+        if tiles & taken and now[net].fluid:
             again[net] = "the new layout takes some of its tiles"
             continue
-        taken |= tiles
+        ents = [e for e in ents if not fkp.tiles_of(cat, e) & taken]
+        if not ents:
+            again[net] = "the new layout takes all of its tiles"
+            continue
+        for e in ents:
+            taken |= fkp.tiles_of(cat, e)
         pinned[net] = [fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)) for e in ents]
     return pinned, again
 

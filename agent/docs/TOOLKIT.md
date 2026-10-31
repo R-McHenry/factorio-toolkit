@@ -54,9 +54,8 @@ a shared belt: 7.5/s there, and `too-thin` says so where it brings more.
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report
 to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
-in the source: unchanged rows and routes stay where they are, a net is patched when a machine is
-added to it or taken off it, and it is routed again when one of its ends moves (a chest one tile
-over, too).
+in the source: unchanged rows and routes stay where they are, and a net is patched when a machine
+or a module's port is added to it, taken off it or moved (a chest one tile over, too).
 
 Rebuilds keep what stands. The poles and roboports a build laid stay where they are wherever the
 new design leaves their spot free, and new ones go only where something new needs them, so power
@@ -71,13 +70,17 @@ Small and medium poles are both 1x1, so a switch keeps what stands; `big-electri
 Old poles and roboports the design no longer has stay up until the design's own stand there, and
 the first build after that takes them up.
 
-Routes stand too. A net with a new machine keeps its belts and gets only a branch to the new
-machine, laid into what stands: a splitter in place of a straight belt, the belt's end run on, a
+Routes stand too. A net with a new machine or port keeps its belts and gets only a branch to it,
+laid into what stands: a splitter in place of a straight belt, the belt's end run on, a
 belt side-loaded onto it (a new driver), or an inserter straight off the belt. A machine taken
-off a net takes its branch with it. A belt two nets share is patched the same way: a new
-consumer of both gets a branch of both lanes, and a new driver of one net side-loads onto that
-net's own lane. `out\route.txt` says `patched` with how many of the net's carriers it kept, or
-`routed again:` and why, when no branch fits and the net is laid anew. The route follows the
+off a net takes its branch with it; a machine moved gets a new branch where it stands, and a
+machine set on a standing belt takes up only the belts under it and what they alone fed. A
+belt two nets share is patched the same way: a new consumer of both gets a branch of both lanes,
+and a new driver of one net side-loads onto that net's own lane. `out\route.txt` says `patched`
+with how many of the net's carriers it kept. When no branch fits, a net with belts is never laid
+anew by itself: its belts stand as they are, the new end alone fails (`FAILED net: its standing
+route is kept as it is ...`, a `no-route` check), and `fk build --reroute NET` lays the net anew
+when you want that. A net of inserters alone is laid anew (`routed again:`). The route follows the
 net's ends, not its name: a net whose sink changed under the same name (`X -> lab` to `X -> px`)
 is never kept as it was. So a patch is cheap: a row beside the others, a chest one tile over, one
 more machine on a net, one more net into what stands. The design the next build keeps to is the

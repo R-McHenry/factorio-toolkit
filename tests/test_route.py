@@ -504,7 +504,9 @@ class PatchTest(unittest.TestCase):
         self.assertEqual(r.again["p"], "its committed route does not join src/c0 -> b/m0; "
                                        "patching it failed: no branch from the standing route "
                                        "reaches b.in1")
-        # a belt net whose new branch can't be laid is routed again just the same
+        # 2.0.74 (the 10-30 run's MIL step: four mains re-laid, 549 belts short, the base
+        # stopped): a BELT net whose new branch can't be laid is held, not laid again: its belts
+        # stand as they are, only the new end fails, and --reroute lays it again on purpose
         flat, lay = build(PLATES)
         old = committed(route.route_layout(flat, lay, CAT))
         flat, lay = build(PLATES.replace("a3 = Assembler", "a4 = Assembler<recipe=iron-gear-"
@@ -512,11 +514,15 @@ class PatchTest(unittest.TestCase):
                           .replace("-> a1, a2, a3", "-> a1, a2, a3, a4"))
         with mock.patch.object(route._Patch, "add_consumer", return_value=None):
             r = route.route_layout(flat, lay, CAT, patch=old)
-        connected(self, flat, r)
-        self.assertEqual((r.routed, r.patched), (["plates"], {}))
-        self.assertEqual(r.again["plates"], "its committed route does not join smelt/m0 -> a4/m0 "
-                                            "and 1 more pair; patching it failed: no branch from "
-                                            "the standing route reaches a4.in1")
+        self.assertEqual((r.routed, r.patched, r.again), ([], {}, {}))
+        self.assertRegex(r.failed["plates"], r"^its standing route is kept as it is \((\d+) of "
+                                             r"\1 carriers\), the new end is not joined: no "
+                                             r"branch from the standing route reaches a4\.in1; "
+                                             r"to lay the net again whole: fk build --reroute "
+                                             r"plates$")
+        now = {(e.name, e.x, e.y, e.dir) for e in r.layout.entities.values()
+               if e.owner == "~plates"}
+        self.assertEqual(now, {(e.name, e.x, e.y, e.dir) for e in old["plates"]})
 
 
 class RedgreenTest(unittest.TestCase):
