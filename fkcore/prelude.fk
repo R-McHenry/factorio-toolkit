@@ -1,0 +1,22 @@
+# prelude.fk: the everyday kinds every .fk file gets without an import (toolkit 2.1).
+#
+# A run's own game/prelude.fk is used in place of this one, and a file's own kind or module of
+# the same name wins over a kind here (its own tiers line too). `kind NAME = KIND<params>` names a
+# kind with some of its parameters set; an instance's own parameters override them:
+#   a = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>
+# `machine=` and `entity=` are one parameter of a Machine.
+
+kind Assembler = Machine<entity=assembling-machine-1>
+kind Furnace   = Machine<entity=stone-furnace, fuel=coal>
+kind ChemPlant = Machine<entity=chemical-plant>
+kind Refinery  = Machine<entity=oil-refinery, recipe=basic-oil-processing>
+
+# What `machine=auto` may pick (the size step chooses), by kind: one tier line is one footprint,
+# one energy and one set of fluid boxes, so a cell laid for one fits them all. A kind built on one
+# of these (kind Gears = Assembler<...>) picks from its line.
+tiers Assembler:    assembling-machine-1, assembling-machine-2, assembling-machine-3
+tiers Furnace:      stone-furnace, steel-furnace
+tiers AsmRow:       assembling-machine-1, assembling-machine-2, assembling-machine-3
+tiers CircuitStack: assembling-machine-1, assembling-machine-2, assembling-machine-3
+tiers SmelterRow:   stone-furnace, steel-furnace
+tiers SmelterArray: stone-furnace, steel-furnace

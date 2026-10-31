@@ -41,10 +41,11 @@ from dataclasses import dataclass, field
 
 from . import facts as _facts
 from . import lang
-from .templates import CONTACT, MSpec, TemplateError, literal_machines, machines as template_machines
+from .templates import (CONTACT, SINGLE, TEMPLATES, MSpec, TemplateError, literal_machines,
+                        machines as template_machines)
 
 __all__ = ["ElabError", "Machine", "FlatNet", "PortInst", "Check", "Flat", "load", "elaborate",
-           "elaborate_file", "AUTO_KINDS"]
+           "elaborate_file", "AUTO_KINDS", "PRELUDE", "prelude_path", "core_of", "params_of"]
 
 #: the templates whose count may be ``n=auto``: the rows
 AUTO_KINDS = ("MinerRow", "SmelterRow", "SmelterArray", "AsmRow", "LabRow")
@@ -124,6 +125,22 @@ class Inst:
     when: tuple | None = None      # its machines' own enable condition (2.0): (lang.Cond, scope)
     size: tuple | None = None      # a module's declared frame (2.0.28): (W, H)
     conns: list | None = None      # a Bus's connection list (2.0.32): [(name, lang.Ref)]
+    #: 2.1, a kind's instance (``a = Assembler<...>``): the core kind it resolves to (``Machine``)
+    #: and its parameters with the kinds' defaults under the written ones. ``kind`` and
+    #: ``params`` stay as written. None for an instance of a core kind or a module
+    core: str | None = None
+    kparams: dict | None = None
+
+
+def core_of(inst):
+    """The core kind an instance is built as (2.1): ``Machine`` for an ``Assembler``."""
+    return getattr(inst, "core", None) or inst.kind
+
+
+def params_of(inst):
+    """An instance's parameters with its kinds' defaults (2.1): what its core kind is given."""
+    kp = getattr(inst, "kparams", None)
+    return inst.params if kp is None else kp
 
 
 @dataclass
@@ -210,15 +227,20 @@ class Flat:
 
 # -- loading --------------------------------------------------------------------------------------
 def load(path):
-    """Parse ``path`` and the modules it imports (relative to its folder). -> (File, modules)."""
+    """Parse ``path`` and the modules it imports (relative to its folder). -> (File, modules).
+    2.1: the kinds and tiers of every file it loads come with them (``f.kinds``, ``f.tiers``, its
+    own first), so a module from another file finds the kinds it was written with."""
     with open(path, encoding="utf-8") as fh:
         f = lang.parse(fh.read(), path)
     modules = dict(f.modules)
-    _imports(f, os.path.dirname(os.path.abspath(path)), modules, {os.path.abspath(path)})
+    _imports(f, os.path.dirname(os.path.abspath(path)), modules, {os.path.abspath(path)},
+             f.kinds, f.tiers)
     return f, modules
 
 
-def _imports(f, folder, modules, seen):
+def _imports(f, folder, modules, seen, kinds=None, tiers=None):
+    kinds = f.kinds if kinds is None else kinds
+    tiers = f.tiers if tiers is None else tiers
     for names, rel, line in f.imports:
         target = os.path.abspath(os.path.join(folder, rel))
         if not os.path.exists(target):
@@ -227,9 +249,15 @@ def _imports(f, folder, modules, seen):
             g = lang.parse(fh.read(), target)
         if target not in seen:
             seen.add(target)
-            _imports(g, os.path.dirname(target), modules, seen)
+            _imports(g, os.path.dirname(target), modules, seen, kinds, tiers)
+        for name, k in g.kinds.items():     # 2.1: an imported file's kinds come with it
+            kinds.setdefault(name, k)
+        for name, t in g.tiers.items():     # and its tiers
+            tiers.setdefault(name, t)
         for name in names:
             mod = g.modules.get(name)
+            if mod is None and name in g.kinds:
+                continue                    # a kind: in ``kinds`` now
             if mod is None:
                 body = g.body
                 if g.modules and not _body_written(body):
@@ -244,6 +272,10 @@ def _imports(f, folder, modules, seen):
                                   wires=body.wires, behaves=body.behaves, expects=body.expects,
                                   lanes=body.lanes, sets=body.sets, ports=body.ports,
                                   size=body.size, stacks=body.stacks)
+                # 2.1: the body uses its own file's modules, so they come with it (a world.fk
+                # body placed by nauvis.fk finds the Mall module world.fk defines)
+                for other, m in g.modules.items():
+                    modules.setdefault(other, m)
             if name in modules and modules[name] is not mod:
                 raise ElabError(f.path, line, f"import: module {name} is defined twice")
             modules[name] = mod
@@ -266,6 +298,164 @@ def _body_written(body):
     ``module`` definitions only)."""
     return any(getattr(body, k) for k in ("insts", "nets", "asserts", "covers", "signals",
                                           "wires", "behaves", "expects", "lanes", "sets"))
+
+
+# -- 2.1: the prelude and kinds -------------------------------------------------------------------
+#: the toolkit's prelude: the everyday kinds every file gets without an import
+PRELUDE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prelude.fk")
+_PRELUDES = {}                   # path -> (mtime, lang.File)
+#: core kinds a kind may not name: each is written as itself
+_NOT_KINDABLE = ("Literal", "Bus")
+
+
+def prelude_path(src):
+    """The prelude a file at ``src`` gets: the nearest ``prelude.fk`` or ``game/prelude.fk`` in its
+    folder or above it (a run's own), else the toolkit's ``fkcore/prelude.fk``."""
+    if src and not str(src).startswith("<"):
+        d = os.path.dirname(os.path.abspath(src))
+        while True:
+            for cand in (os.path.join(d, "prelude.fk"), os.path.join(d, "game", "prelude.fk")):
+                if os.path.isfile(cand):
+                    return cand
+            up = os.path.dirname(d)
+            if up == d:
+                break
+            d = up
+    return PRELUDE
+
+
+def load_prelude(path=PRELUDE):
+    """The prelude at ``path``, parsed (read again when the file changes). It holds kind lines
+    only: a module belongs in a file that is imported."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        raise ElabError(path, 0, "the prelude is missing") from None
+    hit = _PRELUDES.get(path)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    with open(path, encoding="utf-8") as fh:
+        f = lang.parse(fh.read(), path)
+    if f.modules or f.imports or _body_written(f.body):
+        raise ElabError(path, 1, "a prelude holds kind and tiers lines only: put modules and "
+                                 "instances in a file of their own")
+    _PRELUDES[path] = (mtime, f)
+    return f
+
+
+class _Kinds:
+    """Kind lookup (2.1, PLAN-2.1 "B. kind"): ``layers`` are {name: lang.Kind}, the file's own (with
+    its imports') first and the prelude's last. A module of the name wins over any kind; a kind
+    whose target is its own name (``kind Furnace = Furnace<fuel=wood>``) builds on the layer
+    below."""
+
+    def __init__(self, layers, modules):
+        self.layers, self.modules = layers, modules
+
+    def find(self, name, start=0):
+        for i in range(start, len(self.layers)):
+            k = self.layers[i].get(name)
+            if k is not None:
+                return i, k
+        return None, None
+
+    def resolve(self, name, src, line):
+        """-> (core, [params of each kind, innermost first], [names walked, the written first]).
+        ``core`` is a module's name, a core kind, or (not found) the name itself, which the caller
+        reports as before (``unknown template``)."""
+        names, plist, seen, layer, cur = [name], [], set(), 0, name
+        while cur not in self.modules:
+            i, k = self.find(cur, layer)
+            if k is None:
+                if len(names) > 1 and cur not in TEMPLATES and cur != "Stack":
+                    last = names[-2]
+                    raise ElabError(src, line, f"{name}: kind {last} names {cur}, which is no "
+                                               "kind, module or core kind")
+                break
+            if (i, cur) in seen:
+                raise ElabError(k.path, k.line, f"kind {k.name}: a cycle ("
+                                + " -> ".join(names) + ")")
+            seen.add((i, cur))
+            if k.target in _NOT_KINDABLE:
+                raise ElabError(k.path, k.line, f"kind {k.name}: a {k.target} is written as "
+                                                "itself, not through a kind")
+            plist.insert(0, k.params)
+            layer = i + 1 if k.target == k.name else i
+            cur = k.target
+            names.append(cur)
+        return cur, plist, names
+
+
+class _Tiers:
+    """``tiers`` lines (2.1, PLAN-2.1 "C. tiers"): ``layers`` are {kind name: lang.Tiers}, the
+    file's own (with its imports') first and the prelude's last."""
+
+    def __init__(self, layers):
+        self.layers = layers
+
+    def find(self, name):
+        return next((layer[name] for layer in self.layers if name in layer), None)
+
+    def names(self):
+        return {n for layer in self.layers for n in layer}
+
+
+def _box_sig(cat, name):
+    """An entity's fluid boxes as positions and flows (every facing), and whether the game opens
+    them only for a fluid recipe (an assembling-machine-2's)."""
+    row = ((getattr(cat, "_fluid", None) or {}).get("entities") or {}).get(name) or {}
+    boxes = tuple(sorted(
+        (b.get("production"), tuple(sorted((c.get("flow"), c.get("type"), c.get("dir"),
+                                            tuple(tuple(a) for a in c.get("at") or ()))
+                                           for c in b.get("connections") or ())))
+        for b in row.get("boxes") or ()))
+    return boxes, bool(row.get("boxes_need_fluid_recipe"))
+
+
+def _tier_checks(tiers, cat):
+    """Every entity on a ``tiers`` line has the same size, the same energy and the same fluid boxes
+    at the same positions, since a cell's belts and pipes are laid for one machine (2.1). An entity
+    without boxes goes with ones the game opens only for a fluid recipe: on any other recipe
+    neither has a box, and a fluid recipe leaves the boxless one out of the menu."""
+    for layer in tiers.layers:
+        for t in layer.values():
+            for e in t.entities:
+                if not cat.has_entity(e):
+                    raise ElabError(t.path, t.line, f"tiers {t.name}: unknown entity {e}")
+            first = t.entities[0]
+            for e in t.entities[1:]:
+                why = None
+                if cat.size(e) != cat.size(first):
+                    why = (f"{first} is {'x'.join(map(str, cat.size(first)))} and {e} "
+                           f"{'x'.join(map(str, cat.size(e)))}")
+                elif (cat.entity(e).get("energy") or {}).get("source") != \
+                        (cat.entity(first).get("energy") or {}).get("source"):
+                    why = (f"{first} runs on {(cat.entity(first).get('energy') or {}).get('source')}"
+                           f" and {e} on {(cat.entity(e).get('energy') or {}).get('source')}")
+                else:
+                    (a, a_opt), (b, b_opt) = _box_sig(cat, first), _box_sig(cat, e)
+                    if a != b and not ((not a and b_opt) or (not b and a_opt)):
+                        why = f"{first} and {e} have different fluid boxes"
+                if why:
+                    raise ElabError(t.path, t.line, f"tiers {t.name}: {why}: one tier line is one "
+                                                    "footprint, one energy and one set of fluid "
+                                                    "boxes")
+
+
+def _kind_merge(core, plist, src, line, path):
+    """The kinds' parameters and the instance's, later ones over earlier. ``machine=`` is
+    ``entity=`` on a Machine, so an instance's ``machine=`` overrides its kind's ``entity=``."""
+    out = {}
+    for p in plist:
+        p = dict(p)
+        if core == "Machine":
+            if "machine" in p and "entity" in p:
+                raise ElabError(src, line, f"{path}: entity= and machine= are one parameter: "
+                                           "give one")
+            if "machine" in p:
+                p["entity"] = p.pop("machine")
+        out.update(p)
+    return out
 
 
 def elaborate_file(path, cat, name=None, layout=None, sizes=None):
@@ -306,8 +496,13 @@ def _duty(params, path, line, src):
 def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     """``layout`` (the factory's .fkp) is needed by Literal instances, and gives an ``n=auto``
     row the count it laid out; it also carries the committed port tiles (2.0.41), which a rebuild
-    keeps. ``sizes`` ({instance path: n}, the size step's) overrides it."""
+    keeps. ``sizes`` ({instance path: n}, the size step's) overrides it. 2.1: the kinds are the
+    file's own (and its imports') over the prelude's (``prelude_path``)."""
     flat = Flat(name, f.path)
+    prelude = load_prelude(prelude_path(f.path))
+    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}, prelude.kinds], modules)
+    flat._tiers = _Tiers([getattr(f, "tiers", {}) or {}, prelude.tiers])
+    _tier_checks(flat._tiers, cat)
     flat._layout = layout
     flat._sizes = dict(sizes or {})
     flat._lanes = []
@@ -322,6 +517,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _split_nets(flat, cat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
+    _port_pairs(flat, cat)
     _width_checks(flat, cat)
     _recorded_ports(flat, layout)
     _port_checks(flat)
@@ -391,10 +587,20 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                                             "instance otherwise")
         if inst.name in scope:
             raise ElabError(src, inst.line, f"{inst.name} is defined twice")
-        d = min(duty, _duty(inst.params, path, inst.line, src))
+        # 2.1: a kind is its target with some parameters set. A module's or a Stack's instance
+        # becomes one (its own name kept); a core kind's keeps its kind and parameters as written,
+        # with the core kind and the merged parameters beside them (``core``, ``kparams``)
+        core, kdefaults, knames = flat._kinds.resolve(inst.kind, src, inst.line)
+        if kdefaults and (core in modules or core == "Stack"):
+            inst = dataclasses.replace(inst, kind=core, params=_kind_merge(
+                core, kdefaults + [inst.params], src, inst.line, path))
+            kdefaults = []
+        allp = _kind_merge(core, kdefaults + [inst.params], src, inst.line, path) \
+            if kdefaults else inst.params
+        d = min(duty, _duty(allp, path, inst.line, src))
         # 2.0.63 (Rory, 2026-10-29), do not populate: laid out and routed as ever, nothing of it
         # in the model (duty 0: it makes, takes and asks for nothing), and never pasted
-        dn = dnp or _dnp(inst.params, path, inst.line, src) or path in flat._dnp_named
+        dn = dnp or _dnp(allp, path, inst.line, src) or path in flat._dnp_named
         if dn:
             d = 0.0
             flat.dnp.add(path)
@@ -441,10 +647,12 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                     node.auto = stack_auto[:2]
         else:
             params = {k: v for k, v in inst.params.items() if k not in META}
-            auto = _auto(flat, path, inst, src)
+            auto = _auto(flat, path, inst, src, core)
             if auto is not None:
                 params["n"] = auto[2]
-            picked = _choose(flat, mod, inst, path, params, cat, src)
+            picked = _choose(flat, mod, inst, path, params, cat, src, core, knames, kdefaults)
+            kp = _kind_merge(core, kdefaults + [params], src, inst.line, path) \
+                if kdefaults else params
             imported = None
             try:
                 if inst.kind == "Literal":
@@ -456,7 +664,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                     # its connection list builds the ports and their positions (_bus_conns, 2.0.32)
                     specs = []
                 else:
-                    specs = template_machines(inst.kind, params, cat)
+                    specs = template_machines(core, kp, cat)
             except TemplateError as exc:
                 raise ElabError(src, inst.line, f"{path} = {inst.kind}: {exc}") from None
             keys = []
@@ -474,6 +682,9 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             if picked:
                 node.params = dict(node.params, **picked)
                 node.params = {k: v for k, v in node.params.items() if v is not None}
+            if kdefaults or core != inst.kind:
+                node.core = core
+                node.kparams = _kind_merge(core, kdefaults + [node.params], src, inst.line, path)
         if getattr(inst, "when", None) is not None:
             node.when = (inst.when, prefix)
         scope[inst.name] = node
@@ -498,7 +709,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
         flat._lanes.append((ln, prefix, src))
 
 
-def _auto(flat, path, inst, src):
+def _auto(flat, path, inst, src, core=None):
     """(lo, hi, n, param) of an ``n=auto`` row, None for any other instance: n is the size step's
     (``sizes``), else what the factory's .fkp laid out last, else the low bound. 2.0.63: a Stack's
     ``built=auto`` (``param`` "built") is the count of built cells among its fixed ``n``, bounded
@@ -514,7 +725,7 @@ def _auto(flat, path, inst, src):
         a = inst.params["built"]
         lo, top = min(a.lo, int(n)), min(a.top, int(n))
         key = "built"
-    elif autos != ["n"] or inst.kind not in AUTO_KINDS + ("Stack",):
+    elif autos != ["n"] or (core or inst.kind) not in AUTO_KINDS + ("Stack",):
         raise ElabError(src, inst.line, f"{path}: {autos[0]}=auto: auto is the count of a row "
                                         f"or a Stack, n=auto on {', '.join(AUTO_KINDS)} or Stack "
                                         "(or built=auto on a Stack)")
@@ -533,17 +744,11 @@ def _auto(flat, path, inst, src):
 
 
 # -- 2.0.60: modules=auto and machine=auto, the size step's choices -------------------------------
-#: the parameters a choice can be made for
-CHOICES = ("modules", "machine")
-#: the machines one source line may be built of, by kind: the same size and the same energy, so a
-#: cell's geometry never changes (an electric furnace is 3x3, a stone one 2x2)
-TIERS = {"Assembler": ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3"),
-         "AsmRow": ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3"),
-         "CircuitStack": ("assembling-machine-1", "assembling-machine-2",
-                          "assembling-machine-3"),
-         "Furnace": ("stone-furnace", "steel-furnace"),
-         "SmelterRow": ("stone-furnace", "steel-furnace"),
-         "SmelterArray": ("stone-furnace", "steel-furnace")}
+#: the parameters a choice can be made for (``entity`` is a Machine's ``machine``, 2.1)
+CHOICES = ("modules", "machine", "entity")
+#: 2.1: the machines one source line may be built of are a ``tiers`` line's (the prelude's, or the
+#: file's own): the same size, energy and fluid boxes, so a cell's geometry never changes (an
+#: electric furnace is 3x3, a stone one 2x2). ``_tier_checks`` holds every line to that.
 #: recipes productivity modules go into: the game's (``allowed_effects``, facts.json)
 PRODUCTIVE = _facts.productive()
 
@@ -559,11 +764,22 @@ class Choice:
     paths: list = field(default_factory=list)
 
 
-def _menu(kind, param, params, cat):
-    if param == "machine":
-        return TIERS.get(kind, ())
+def _menu(names, param, params, cat, tiers=None, merged=None, core=None):
+    """The menu of one choice. ``names``: the kinds an instance's kind resolves through, its own
+    first (2.1): the first with a ``tiers`` line gives ``machine=auto`` its menu. A Machine's menu
+    leaves out the tiers whose fluid boxes its recipe doesn't fit (``no-fluidbox``)."""
+    if param in ("machine", "entity"):
+        line = next((tiers.find(n) for n in names if tiers is not None and tiers.find(n)), None)
+        if line is None:
+            return ()
+        menu = tuple(line.entities)
+        recipe = (merged or {}).get("recipe")
+        if core == "Machine" and isinstance(recipe, str):
+            from .templates import fluid_misfit
+            menu = tuple(e for e in menu if not fluid_misfit(cat, e, recipe)) or menu
+        return menu
     from .templates import MODULE_SLOTS
-    machine = params.get("machine")
+    machine = params.get("machine", params.get("entity"))
     if isinstance(machine, str) and not MODULE_SLOTS.get(machine):
         return (None,)                                   # a machine with no module slots
     recipe = params.get("recipe")
@@ -578,20 +794,22 @@ def _menu(kind, param, params, cat):
     return tuple(out)
 
 
-def _choose(flat, mod, inst, path, params, cat, src):
+def _choose(flat, mod, inst, path, params, cat, src, core=None, names=None, kdefaults=()):
     """``params`` with each ``modules=auto`` / ``machine=auto`` made: the size step's pick for the
     line (``sizes``, keyed by the Choice's key), else the first of its menu (no modules, the lowest
     tier). Modules a machine has no slots for are left out. -> {param: pick} or {}."""
     from .templates import MODULE_SLOTS
+    core = core or inst.kind
     picked = {}
     for param in CHOICES:
         if not isinstance(params.get(param), lang.Auto):
             continue
-        menu = _menu(inst.kind, param, params, cat)
+        merged = _kind_merge(core, list(kdefaults) + [params], src, inst.line, path)
+        menu = _menu(names or [inst.kind], param, params, cat, flat._tiers, merged, core)
         if not menu:
             raise ElabError(src, inst.line, f"{path}: {param}=auto: no choice for a {inst.kind}"
-                            + (" (machine=auto: " + ", ".join(sorted(TIERS)) + ")"
-                               if param == "machine" else ""))
+                            + (" (machine=auto: " + ", ".join(sorted(flat._tiers.names())) + ")"
+                               if param in ("machine", "entity") else ""))
         key = f"{mod.name}.{inst.name}.{param}"
         pick = flat._sizes.get(key, menu[0])
         pick = pick if pick in menu else menu[0]
@@ -599,10 +817,13 @@ def _choose(flat, mod, inst, path, params, cat, src):
         ch.paths.append(path)
         picked[param] = pick
     if "modules" in picked:
-        machine = picked.get("machine", params.get("machine"))
+        machine = picked.get("machine", picked.get("entity",
+                                                   params.get("machine", params.get("entity"))))
+        default = _kind_merge(core, list(kdefaults), src, inst.line, path).get("entity") \
+            if kdefaults else None
         if picked["modules"] is not None and not MODULE_SLOTS.get(
-                machine or {"Furnace": "stone-furnace", "SmelterRow": "stone-furnace"}.get(
-                    inst.kind, "assembling-machine-1")):
+                machine or default or {"SmelterRow": "stone-furnace"}.get(
+                    core, "assembling-machine-1")):
             picked["modules"] = None                  # this machine has no slots for them
             flat.choices[f"{mod.name}.{inst.name}.modules"].pick = None
     for param, pick in picked.items():
@@ -1273,6 +1494,32 @@ def _resolve_lanes(flat, cat):
         flat.lane_of[a] = flat.lane_of[b] = key
 
 
+def _port_pairs(flat, cat):
+    """Two nets that meet at a cell's paired port (``port f_in : in iron-ore | coal``), one on each
+    item, share a belt as the port's lanes say: an implied ``lanes A | B`` (2.1.3: the module's
+    own ``lanes`` line is enough; the runs needed a top-level one too). A net that already shares
+    a belt, or that carries more than its lane's item, is left as written."""
+    for key in sorted(flat.ports):
+        port = flat.ports[key]
+        if port.right is None or port.both or len(port.items) != 1 or len(port.right) != 1:
+            continue
+        hold = flat._in_hold if port.dir == "in" else flat._out_hold
+        nets = []
+        for item in (port.items[0], port.right[0]):
+            outer = [n for n in hold.get((key, item), []) if not n.startswith(port.scope + "/")]
+            nets.append(outer[0] if len(outer) == 1 else None)
+        a, b = nets
+        if a is None or b is None or a == b:
+            continue
+        if any(n in flat.lane_of or n not in flat.nets or n in flat.insts or
+               flat.nets[n].width > 1 or len(flat.nets[n].items) != 1 or
+               any(cat.is_fluid(i) for i in flat.nets[n].items) for n in (a, b)):
+            continue
+        pk = f"{a}|{b}"
+        flat.pairs[pk] = (a, b)
+        flat.lane_of[a] = flat.lane_of[b] = pk
+
+
 def _width_checks(flat, cat):
     """``width 2`` (2.0.54) where it can't give a second lane: a fluid's net (pipes have no
     lanes), and a net with one driver whose belt carries one lane (anything but a two-sided
@@ -1296,7 +1543,7 @@ def _width_checks(flat, cat):
         insts = list(dict.fromkeys(flat.machines[k].inst for k, _i in net.drivers))
         if len(insts) == 1:
             inst = flat.insts.get(insts[0])
-            two_sided = inst is not None and inst.kind == "MinerRow" and len(inst.machines) > 1
+            two_sided = inst is not None and core_of(inst) == "MinerRow" and len(inst.machines) > 1
             if not two_sided:
                 flat.checks.append(Check(
                     "width", f"net {name}",
@@ -1607,13 +1854,6 @@ def _port_checks(flat):
                 "drop the port line"))
 
 
-#: the kinds that are one machine each, placed where written (``expand._SINGLE``): every net of
-#: such a machine gets a role of its own
-_SINGLE_KINDS = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack",
-                 "OffshorePump", "Boiler", "SteamEngine", "InfinityPipe", "Lab", "Reactor",
-                 "HeatExchanger", "SteamTurbine", "Roboport")
-
-
 def _endpoint_checks(flat, cat):
     out_hold, in_hold = flat._out_hold, flat._in_hold
     for side, hold in (("out", out_hold), ("in", in_hold)):
@@ -1622,7 +1862,10 @@ def _endpoint_checks(flat, cat):
             # assembler handed cable by two cable assemblers): fine while each of those nets
             # carries that item alone. One product on two nets is still a line: where it goes is
             # the question
-            if side == "in" and len(nets) > 1 and flat.machines[key].kind in _SINGLE_KINDS and \
+            # 2.1: a single machine is one whose kind resolves to a core single (templates.SINGLE)
+            single = core_of(flat.insts.get(flat.machines[key].inst)
+                             or flat.machines[key]) in SINGLE
+            if side == "in" and len(nets) > 1 and single and \
                     all(flat.nets[n].items == [item] for n in nets if n in flat.nets):
                 continue
             if len(nets) > 1:

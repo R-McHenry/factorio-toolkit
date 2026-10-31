@@ -18,7 +18,8 @@ corpus root (``<ROOT>``), so trees at different places snapshot alike; the versi
 ``<VERSION>``. ``DIR/_meta.txt`` holds the version, commit, corpus size and run time (not compared).
 
 The corpus: every ``.fk`` under ``agent/docs/examples``, ``games``, ``tests/data`` and
-``kickoff/template`` of PATH, plus the frozen designs under ``tests/golden/<name>/`` of the tree
+``kickoff/template`` of PATH but a ``prelude.fk`` (2.1: the kinds every design uses, not a
+design), plus the frozen designs under ``tests/golden/<name>/`` of the tree
 this script is in (``--frozen`` to change), so the corpus is the same whichever tree is checked.
 A frozen folder's ``ENTRY`` file names its entry points (default: every ``.fk`` in it).
 
@@ -195,7 +196,7 @@ def corpus(tree, frozen=FROZEN):
         for dirpath, dirnames, names in os.walk(base):
             dirnames[:] = sorted(d for d in dirnames if d not in ("out", "__pycache__"))
             for n in names:
-                if n.endswith(".fk"):
+                if n.endswith(".fk") and n != "prelude.fk":   # 2.1: a library, not a design
                     rel = os.path.relpath(os.path.join(dirpath, n), tree).replace("\\", "/")
                     files.append((rel, tree, rel))
     if frozen and os.path.isdir(frozen):

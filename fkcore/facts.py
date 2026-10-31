@@ -2,8 +2,8 @@
 
 ``tools/read_facts.py`` reads them over RCON from a laptop server (Factorio 2.0.77, base + Space
 Age) and writes the file; see its ``source`` and ``notes``. Nothing here is a choice: which
-machines a row may use (``TIERS``), the default furnace or inserter, stay in Python until the
-prelude takes them.
+machines a row may use (the prelude's ``tiers`` lines, 2.1) and the default furnace are in
+``fkcore/prelude.fk``; the default inserter stays in Python.
 
 What the file holds:
 - ``entities``: every placeable entity's energy (source, W, drain, burner fuel categories), mining

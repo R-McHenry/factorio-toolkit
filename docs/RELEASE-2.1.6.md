@@ -1,8 +1,7 @@
-# Toolkit 2.1.x: settings changed in place
+# Toolkit 2.1.6: settings changed in place
 
-Draft for the 2.1 settings release (the integrator gives the number). Plan:
-`assessment-20261031\PLAN-2.1.md`, "Settings changed in place (Rory, 2026-10-31)", and phase 4 of
-"Order".
+Plan: `assessment-20261031\PLAN-2.1.md`, "Settings changed in place (Rory, 2026-10-31)", and
+phase 4 of "Order".
 
 Until now a changed setting (a condition, a filter, a chest bar, a request) meant the entity was
 ordered out and robots laid it fresh. Now the paste writes most settings onto what stands, a tier

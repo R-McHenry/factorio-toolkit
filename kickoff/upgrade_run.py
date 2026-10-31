@@ -30,7 +30,8 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
   `.claude\\agents\\worker.md` (the old one kept in `.upgrade-<old sha>\\`).
 - 2.0.12: the build script gets the template's `stop_on no-route no-destination` (the stops it lacks),
   and a Claude player's `.toolkit` the loop's watchdog (watchdog.py), which the loop starts.
-- 2.1 (run stats): a Claude player's `.toolkit` gets stats_sample.py and the loop that runs it every
+- 2.1.3: and `cannot-carry`: no paste with a machine on a net whose items it takes none of.
+- 2.1.0 (run stats): a Claude player's `.toolkit` gets stats_sample.py and the loop that runs it every
   5 game minutes. The run's map keeps the script it was made with, so a map made before the fk-play
   recorder is read over RCON, read-only; its save is not changed and nothing is registered in it.
   A run without the loop (one driven from a conversation) gets its samples from
@@ -118,8 +119,9 @@ def _write_last(text):
 
 
 #: the template's second stop_on line (2.0.12): no paste with a net unrouted, or a maker whose
-#: product reaches no sink
-STOPS = ("no-route", "no-destination")
+#: product reaches no sink; and (2.1.3) none with a machine on a net it takes nothing from (the
+#: 10-29 run's pole maker, dropped from its route, starved for an hour)
+STOPS = ("no-route", "no-destination", "cannot-carry")
 #: what an older run's script may still say for a stop (2.0.52's rename): read either way, so an
 #: upgrade adds only the stops the run really lacks
 OLD_STOPS = {"unrouted": "no-route", "no_sink": "no-destination", "no sink": "no-destination",
@@ -139,8 +141,9 @@ def _stops(text):
     at = max([i for i, s in enumerate(steps) if s[:1] == ["stop_on"]] or [len(lines) - 1])
     if lines and not lines[at].endswith("\n"):
         lines[at] += "\n"
-    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need):<26}# and no paste with a net unrouted, "
-                         "or a maker whose product reaches no sink\n")
+    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need) + ' ':<26}# and no paste with a net unrouted, "
+                         "a maker whose product reaches no sink, or a machine on a net it takes "
+                         "nothing from\n")
     return "".join(lines)
 
 
@@ -230,7 +233,8 @@ def upgrade(run, sha, dry=False):
         stops = _stops(new_script or text)
         if stops:
             new_script = stops
-            changes.append("stop_on no-route no-destination (no paste with a net unrouted)")
+            changes.append(f"stop_on {' '.join(STOPS)}, the ones it lacked (no paste with a net "
+                           "unrouted)")
         hand = _hand(new_script or text)
         if hand:
             new_script = hand
@@ -255,6 +259,10 @@ def upgrade(run, sha, dry=False):
     cells = not os.path.exists(os.path.join(run, "game", "cells.fk"))
     if cells:
         plan.append("  game/cells.fk: the template's starter cells (the run has none)")
+    # 2.1: the prelude (the everyday kinds, Assembler and the rest), only where the run has none
+    prelude = not os.path.exists(os.path.join(run, "game", "prelude.fk"))
+    if prelude:
+        plan.append("  game/prelude.fk: the template's prelude (the run has none)")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:
         return plan
@@ -263,7 +271,8 @@ def upgrade(run, sha, dry=False):
     _archive(sha, src, ("agent", "fkcore")
              + (tuple(f"kickoff/{name}" for name in LOOP) if claude else ())
              + (("kickoff/template/helpers",) if helpers else ())
-             + (("kickoff/template/game/cells.fk",) if cells else ()))
+             + (("kickoff/template/game/cells.fk",) if cells else ())
+             + (("kickoff/template/game/prelude.fk",) if prelude else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
     for p in REPLACED:
@@ -294,6 +303,9 @@ def upgrade(run, sha, dry=False):
     if cells:
         shutil.copy(os.path.join(src, "kickoff", "template", "game", "cells.fk"),
                     os.path.join(run, "game", "cells.fk"))
+    if prelude:
+        shutil.copy(os.path.join(src, "kickoff", "template", "game", "prelude.fk"),
+                    os.path.join(run, "game", "prelude.fk"))
     shutil.copy(os.path.join(agent, "prompts", f"{cfg.get('prompt', 'core-v1')}.md"),
                 os.path.join(run, "AGENTS.md"))
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:

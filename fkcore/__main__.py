@@ -103,6 +103,9 @@ use the game link, and only with FK_LINK=on)
     dnp FILE.fk NAME[,NAME] [--off]       do not populate: laid out and routed, not built
     decon GAME_DIR --area X0,Y0,X1,Y1 [--name ENTITY[,...]] [--cancel]
                                           the deconstruction planner: robots take it up
+    request GAME_DIR X,Y|KEY ITEM N [--name ENTITY] [--inventory NAME]
+                                          an item request: robots bring N of ITEM from the
+                                          network to the entity that stands there (a proxy)
     capture GAME_DIR lab NAME | world X0,Y0,X1,Y1 | design [FACTORY/]INST [--to FILE]
                                           something built (a lab slot, an area of the game or
                                           the planner, a laid-out instance) as a Literal file:
@@ -118,7 +121,7 @@ use the game link, and only with FK_LINK=on)
     recipes GAME_DIR [NAME...] [--enabled]
                                           the locked recipes (or the enabled ones) and what
                                           unlocks each (a free read)
-    read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map]
+    read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map] [--replace]
                                           a free read of the bare world (ore, water, cliffs;
                                           trees and rocks counted) into GAME_DIR/<name>.terrain.json
 """
@@ -582,6 +585,70 @@ def _dnp(a, cat):
           + (" (fk build --confirm also takes up what stands built there)" if not a.off
              and changed else ""))
     return 0
+
+
+def _request_at(a, cat):
+    """``fk request``'s ENTITY: ``X,Y`` (map position), or a design key (``world/ab``, as the
+    .fkp and ``fk look --design`` name it) found in the composed design. -> (x, y, name or None)."""
+    m = re.fullmatch(r"\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*", a.entity)
+    if m:
+        return float(m.group(1)), float(m.group(2)), a.name or None
+    from . import look
+    _sf, _lay, _path, s = look.composed(a.game, cat)
+    hits = [e for k, e in s.entities.items() if k == a.entity or k.split(":", 1)[-1] == a.entity]
+    if len(hits) != 1:
+        raise SystemExit(f"error: request: {a.entity} is no X,Y and names "
+                         f"{'no' if not hits else len(hits)} entities of the design")
+    e = hits[0]
+    return float(e.x), float(e.y), a.name or e.name
+
+
+def _request(a, cat):
+    """fk request ENTITY ITEM N (2.1.3): an item-request proxy, the game's own way to have robots
+    bring items to an entity that stands (robots into a roboport, ammo into a turret, barrels into
+    a machine). It only asks, and says what the network doesn't hold."""
+    from . import link
+    if a.count < 1:
+        print("error: request: N is at least 1", file=sys.stderr)
+        return 2
+    if not cat.is_item(a.item):
+        print(f"error: request: no item {a.item}", file=sys.stderr)
+        return 2
+    x, y, name = _request_at(a, cat)
+    force, surface = _force_surface(a.game)
+
+    def body(r):
+        got = r.lua(link.lua_request(surface, force, (x, y), a.item, a.count, name,
+                                     a.inventory)).strip()
+        try:
+            d = json.loads(got)
+        except ValueError:
+            raise link.LinkError(got[:300]) from None
+        if not d.get("ok"):
+            raise link.LinkError(d.get("why") or got[:300])
+        where = f"{d['name']} at {_fmt_xy(d['x'], d['y'])}"
+        asked, stock = int(d["asked"]), int(d["stock"])
+        if not asked:
+            return [f"request: nothing asked: {where} has no room for {a.item} "
+                    f"(inventory {d['inventory']})"]
+        out = [f"request: robots bring {asked} {a.item} to {where} (inventory {d['inventory']})"
+               + (f", with the {d['had']} request(s) it had" if d.get("had") else "")]
+        if asked < a.count:
+            out.append(f"  only {asked} of {a.count} fit (room for {d['room']})")
+        if stock < asked:
+            out.append(f"  SHORT: the network holds {stock} {a.item}; the request waits for the "
+                       f"other {asked - stock} (make them, or bring them into the network)")
+        else:
+            out.append(f"  the network holds {stock} {a.item}")
+        if not d.get("reach"):
+            out.append(f"  UNREACHED: no powered roboport's construction area reaches {where}: "
+                       "no robot comes until one does")
+        return out
+    return _world(a, cat, "request", body)
+
+
+def _fmt_xy(x, y):
+    return ",".join(str(int(v)) if float(v).is_integer() else f"{float(v):g}" for v in (x, y))
 
 
 def _decon(a, cat):
@@ -1084,8 +1151,23 @@ def _read_terrain(a):
         return 2
     os.makedirs(a.game, exist_ok=True)
     path = os.path.join(a.game, f"{a.name}.terrain.json")
-    terrain.save(data, path)
-    print("\n".join(terrain.summary(terrain.from_dict(data), a.name)))
+    got, note = terrain.from_dict(data), None
+    # 2.1.3: an area is read into the file, never over it (the 10-29 run's north read dropped the
+    # whole base's terrain); --replace writes the one area alone, as before
+    if os.path.exists(path) and not a.replace:
+        try:
+            had = terrain.load(path)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            had, note = None, f"the old {a.name}.terrain.json did not load ({exc}): replaced"
+        if had is not None and had.surface != got.surface:
+            had, note = None, f"the old file is of surface {had.surface}: replaced"
+        if had is not None:
+            got = terrain.combine(had, got)
+            note = f"merged into the old {','.join(str(v) for v in had.area)}"
+    terrain.save(got, path)
+    print("\n".join(terrain.summary(got, a.name)))
+    if note:
+        print(note)
     print(f"wrote {path}")
     return 0
 
@@ -1113,6 +1195,20 @@ def _render(lay, cat):
 def _glue(argv):
     """argparse reads ``--area -320,-288,256,288`` as two options: glue a coordinate list that
     starts with a minus to its flag (``--area=-320,...``)."""
+    if argv and argv[0] == "request":
+        # ``request GAME -30,74 ITEM N``: a position that starts with a minus is no option
+        opts, pos, i = [], [], 1
+        while i < len(argv):
+            if argv[i] in ("--name", "--inventory") and i + 1 < len(argv):
+                opts += argv[i:i + 2]
+                i += 2
+            elif argv[i].startswith(("--name=", "--inventory=")) or argv[i] in ("-h", "--help"):
+                opts.append(argv[i])
+                i += 1
+            else:
+                pos.append(argv[i])
+                i += 1
+        return ["request"] + opts + (["--"] + pos if pos else [])
     out, i = [], 0
     while i < len(argv):
         if argv[i] in ("--area", "--at") and i + 1 < len(argv) \
@@ -1325,6 +1421,15 @@ def main(argv=None):
     dc.add_argument("--area", required=True)
     dc.add_argument("--name", default="", metavar="ENTITY[,...]", help="only these")
     dc.add_argument("--cancel", action="store_true")
+    rq = sub.add_parser("request", description="an item request: robots bring N of ITEM from "
+                        "the network to the entity that stands at X,Y (or the design's KEY)")
+    rq.add_argument("game")
+    rq.add_argument("entity", metavar="X,Y|KEY")
+    rq.add_argument("item")
+    rq.add_argument("count", type=int, metavar="N")
+    rq.add_argument("--name", default="", metavar="ENTITY", help="the entity's prototype there")
+    rq.add_argument("--inventory", default="", metavar="NAME",
+                    help="a defines.inventory name (default: the one its kind takes ITEM in)")
     cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
                         "anywhere (fkcore.capture)")
     cp.add_argument("game")
@@ -1358,6 +1463,7 @@ def main(argv=None):
     rt.add_argument("--surface", required=True)
     rt.add_argument("--area", required=True)
     rt.add_argument("--name", default="map")
+    rt.add_argument("--replace", action="store_true")
     sg = sub.add_parser("stage", add_help=False)
     sg.add_argument("game")
     sg.add_argument("rest", nargs=argparse.REMAINDER)
@@ -1390,6 +1496,8 @@ def main(argv=None):
         return _capture(a, cat)
     if a.cmd == "decon":
         return _decon(a, cat)
+    if a.cmd == "request":
+        return _request(a, cat)
     if a.cmd == "dnp":
         return _dnp(a, cat)
     if a.cmd == "adopt":

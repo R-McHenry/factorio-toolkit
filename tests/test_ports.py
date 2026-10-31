@@ -290,8 +290,10 @@ net c: burn.out_ -> box
         self.assertEqual(flat.nets["burn/ore_"].items, ["iron-ore"])
         self.assertEqual(flat.nets["burn/coal_"].items, ["coal"])
         self.assertEqual(flat.lane_of["burn/ore_"], "burn/ore_|burn/coal_")
-        # 2.0.50: the two nets into the pair port are named as a pair (they arrive together anyway)
-        self.assertEqual(codes(flat), ["could-pair"])
+        # 2.1.3: the two nets into the pair port share a belt as the port's lanes say (2.0.50
+        # named them in a could-pair check, and route left b unrouted)
+        self.assertEqual(flat.lane_of["a"], "a|b")
+        self.assertEqual(codes(flat), [])
 
     def test_a_lane_feeds_the_one_item_it_carries(self):
         flat = flat_of(self.BURNER)

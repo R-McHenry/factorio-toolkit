@@ -13,6 +13,10 @@ how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
   manage the base or keep everything stocked through one-off crafters.
 - **Pressing a button a player could press is fine**, such as launching a rocket from its silo
   with `fk lua`.
+- **Moving items by script is never a player's button.** No `fk lua` that inserts, removes or
+  transfers items: not to unjam a belt, not to fill a machine, not to empty a chest. Robots move
+  them: ask with `fk request ENTITY ITEM N` (an item request, the game's own: robots bring the
+  items from the network), or build the inserters, requests and belts that do it.
 - **Big combinator signal tables may be filled by script after the paste.** That is an exception,
   for speed.
 - **Wires may be added and cut by script.** The build does it itself, so the red, green and
