@@ -187,9 +187,13 @@ share, below): the drivers put items on it, the consumers take them.
   can't clog: it takes only what its sink accepts. A mall's products belt into one chest: the
   chest goes best without `limit=`, since a full chest stops the whole belt (`SUSHI_LIMIT`), and
   the limit belongs at each maker.
-- `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
-  on the net. It only quiets `CLOG` and `no-limit` for it: it limits nothing itself. The limits
-  are `set` properties on the makers' hands (Properties on objects, below).
+- `net NAME limited "WHY": ...` (also after `items a, b`) says your design limits what each maker
+  puts on the net, and the string says how (2.1: `limited "each source loads while the loop holds
+  less than its amount"`). It only quiets `CLOG` and `no-limit` for it: it limits nothing itself.
+  The limits are `set` properties on the makers' hands (Properties on objects, below), or gates on
+  a wire. `fk explain FILE NET` and `fk check` show the string; a bare `limited` still works, and
+  `fk check` asks for the string on a sushi net (an `advice limited-why` line). `CLOG` stays the
+  one warning a sushi net gets, and only `limited` clears it.
 - `net NAME split: ...` (2.0.76, also after `items a, b`) gives each item of a mixed net a lane of
   its own: the net becomes one net per item, `NAME_<item>` (`blue_engine_unit`), paired two to a
   belt as `lanes` pairs in item order, and an odd last item gets a belt to itself. Each lane is
@@ -243,6 +247,45 @@ lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on th
   empty. The build's `could-pair` check names the pair when you leave it on two belts, whoever drives
   them; `SmelterArray` and `CircuitStack` are the exception, since they side-load two nets onto
   their own feed belts and want them apart.
+
+## Buffers
+
+2.1. A buffer is a role: one net fills it and another drains it. The rate model treats it as an
+unlimited supply to the nets it drives and an unlimited sink to the nets that feed it, and gives
+what it gains or loses a minute as a `BUFFER` line (TOOLKIT.md).
+
+```
+b = Buffer                          # a steel chest; Buffer<chest=iron-chest, bar=20>
+net ore_: drills -> b               # BUFFER b: +60.0/min iron-ore (filling: in 60.0, out 0.0)
+net feed: b -> smelt                # draining when smelt takes more than the drills bring
+
+module LoopEnd buffer size 3x3 {    # a module whose ports are a buffer's ends
+  port i : in iron-plate @w1
+  port o : out iron-plate @e1
+  net t limited "a belt through": i -> o
+}
+```
+
+- `Buffer` is a chest: `Buffer<chest=, bar=, item=>` (the chest, how many of its slots it may
+  fill, and what it holds when no net says). Its items are what the nets into it carry.
+- `module NAME buffer { ... }` (also after `size`): its ports are its ends on the outside nets.
+  Its inside is yours, and the model doesn't join it to the outside. A buffer module needs ports.
+- A buffer fed by an unbounded source (a requester with no rate) fills without end on paper,
+  unless that net is gated (`when`): then the gate tops up what goes out, and the line is steady.
+- A buffer never gets `no-taker` or `no-rate`, and a buffer whose nets are all `limited` gets no
+  `SUSHI_LIMIT`. A sushi net with a buffer on it gets no `SUSHI_SINK`: what no machine takes ends
+  in the buffer, or goes round by it. `CLOG` stays.
+
+**Sushi patterns.** A mixed belt runs while no item piles up. Three ways that work, each written
+`limited "..."`:
+
+- one inserter from a buffer straight into each machine: it takes only what the machine uses;
+- sources gated on what the buffer holds of their item: `wire bw red: b` and
+  `net s_fe: fe -> b when bw.iron-plate < 40`;
+- a loop: the machines take from one belt, its end goes into an end buffer that feeds its head,
+  and each source loads only while the loop (the belt read `hold-all` plus the end buffer, on one
+  wire) holds less than its amount. The belt never stops. A circuit wire reaches 9 tiles, so
+  chain the wire from the reader belt by the end buffer to the sources.
 
 ## A bus
 
@@ -418,6 +461,8 @@ set pipe.out            : logistic=pipe<100             # a row, all its output 
 - Properties: `logistic=ITEM<N` (the logistic network's count, no wire), `if=ITEM<N` (a circuit
   condition; name the chest with `-> CHEST` so it reads that chest), `filter=`, `read=`, `signal=`,
   `signals=`.
+- `set NET: read=hold-all` (2.1; a net's name as the selector): the belt a wire reads on that net
+  reads its whole belt, not one tile (`hold`, the default, and `pulse` too).
 - Every `set` reports the hands it hit (`on 2 hands (~out/i0, ~out/i1)`), and one that matches
   nothing is a `no-match` line, never a silent no-op.
 - A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
@@ -518,6 +563,15 @@ things the game does that a hand-written blueprint can get wrong (measured 2026-
 - a requester takes its requests from the circuit with `"control_behavior":
   {"circuit_mode_of_operation": 1}`; `"set_requests": true` is ignored;
 - a decider outputs `each` only when one of its conditions reads `each`.
+
+**Names inside a Literal** (2.1). A JSON Literal file may name its machines: `"names": {"asm10":
+37}`, a name (no dashes) to the index of an entity in the file (from 0; the blueprint's entity
+order when the file holds only `"bp"`). `automall.asm10` is then a net end like any machine's:
+`net out: automall.asm10 -> box`, and the router reaches it from outside the Literal. `fk explain`
+lists the names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order). A
+name of an entity that is no machine is refused when a net uses it. A blueprint Literal keeps its
+circuit settings (`if=`, `read=`, ...) and its wires; a wire longer than the game's 9 tiles is
+dropped by the game.
 
 ## Checks on paper
 
