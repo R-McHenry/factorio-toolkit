@@ -96,6 +96,8 @@ class Model:
     buffers: dict = field(default_factory=dict)
     #: 2.1: (buffer endpoint key, item) -> what it gives its nets /s
     buffer_out: dict = field(default_factory=dict)
+    #: 2.1: {(buffer path, item)} that unbounded sources fill through gated nets (``when``)
+    buffer_gated: set = field(default_factory=set)
 
     def rate(self, key, item):
         """Items/s machine ``key`` makes of ``item``; for a bus port, what passes through it; for a
@@ -452,8 +454,8 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                                      sink_share, potential, name in unbounded, machines)
     model = Model(flat, util, binding, nets, done, residual, sink_share=sink_share,
                   pools=pools, ends=ends)
-    model.buffers, model.buffer_out = _buffer_flows(flat, machines, ends, stats, util, outs,
-                                                    feeds, sink_share)
+    model.buffers, model.buffer_out, model.buffer_gated = _buffer_flows(
+        flat, machines, ends, stats, util, outs, feeds, sink_share)
     model.asserts = _asserts(model)
     return model
 
@@ -473,11 +475,13 @@ def _buffer_flows(flat, machines, ends, stats, util, outs, feeds, sink_share):
     aren't sources cover it first, and the unbounded ones (buffers, requesters without a rate)
     share what is left of it evenly. What the consumers leave of the drivers' make goes to the
     sinks with a rate first, then evenly to the unlimited ones, a buffer among them; one an
-    unbounded driver other than itself feeds fills without end. A buffer inside a buffer module
-    is the module's inside, and gets no line."""
+    unbounded driver other than itself feeds fills without end, unless that net is gated
+    (``when``): then the gate tops up what goes out, and it is steady. A buffer inside a buffer
+    module is the module's inside, and gets no line."""
     keys = {k: b for k in machines if (b := _buffer_of(flat, k)) is not None}
     if not keys:
-        return {}, {}
+        return {}, {}, set()
+    gated = set()
     modules = {p for p, how in getattr(flat, "buffers", {}).items() if how == "module"}
     flows, given = {}, {}
     for ni, e in ends.items():
@@ -511,13 +515,21 @@ def _buffer_flows(flat, machines, ends, stats, util, outs, feeds, sink_share):
                 given[(k, item)] = given.get((k, item), 0.0) + out
             if k in open_:
                 if any(u != k for u in unb):
-                    got[0] = INF
+                    net = flat.nets.get(ni[0])
+                    if net is not None and getattr(net, "when", None):
+                        gated.add((keys[k], item))
+                    else:
+                        got[0] = INF
                 elif got[0] != INF:
                     got[0] += rest / len(open_)
     inner = {b for b in flows if any(b.startswith(p + "/") for p in modules)}
+    for b, item in gated:
+        got = flows[b][item]
+        if got[0] != INF:
+            got[0] = max(got[0], got[1])
     out = {b: {i: tuple(v) for i, v in items.items()} for b, items in flows.items()
            if b not in inner}
-    return out, given
+    return out, given, {g for g in gated if g[0] in out and out[g[0]][g[1]][0] != INF}
 
 
 def underfed(model, margin=0.05):
@@ -800,6 +812,8 @@ def buffer_lines(model):
                 continue
             d = (got - gave) * 60
             how = "filling" if d > 0.05 else "draining" if d < -0.05 else "steady"
+            if (path, item) in model.buffer_gated:
+                how += ", its gated sources top up what goes out"
             out.append(f"BUFFER {path}: {'+' if d >= 0 else '-'}{abs(d):.1f}/min {item} ({how}: in "
                        f"{got * 60:.1f}, out {gave * 60:.1f})")
     return out

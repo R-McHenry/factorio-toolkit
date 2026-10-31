@@ -1799,6 +1799,8 @@ def _endpoint_checks(flat, cat):
     for name, net in flat.nets.items():
         if not net.sushi:
             continue
+        if any(flat.machines[k].extra.get("buffer") for k, _i in net.drivers + net.consumers):
+            continue        # 2.1: what no machine takes ends in (or goes round by) the buffer
         rows = []
         for key, _item in net.consumers:
             m = flat.machines[key]

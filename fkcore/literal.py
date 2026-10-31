@@ -139,7 +139,9 @@ def _own_settings(e):
 
 
 def _settings(attrs):
-    return {k: attrs[k] for k in _SETTINGS if k in attrs}
+    """A blueprint row's game settings: ``recipe``/``ug``/``config``, and its circuit settings,
+    which the codec reads back typed (``if``, ``read``, ...; 2.1: they were dropped before)."""
+    return {k: attrs[k] for k in _SETTINGS + codec.CIRCUIT_ATTRS if k in attrs}
 
 
 def _box(text):

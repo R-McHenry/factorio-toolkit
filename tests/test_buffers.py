@@ -168,6 +168,17 @@ net g2: b1 -> b2
                                     "net p: r -> b\n"))
         self.assertIn("+unbounded/min iron-plate", rates.buffer_lines(model)[0])
 
+    def test_a_gated_source_tops_up_what_goes_out(self):
+        model = rates.solve(flat_of(
+            "r = Chest<requester, item=iron-plate>\nb = Buffer\n"
+            "a = Assembler<recipe=iron-gear-wheel>\no = Chest<provider>\n"
+            "wire bw red: b\nnet p: r -> b when bw.iron-plate < 40\n"
+            "net f: b -> a\nnet g: a -> o\n"))
+        self.assertEqual(model.buffers["b"]["iron-plate"], (2.0, 2.0))
+        self.assertEqual(rates.buffer_lines(model),
+                         ["BUFFER b: +0.0/min iron-plate (steady, its gated sources top up what "
+                          "goes out: in 120.0, out 120.0)"])
+
     def test_no_buffer_no_line(self):
         model = rates.solve(flat_of("a = Assembler<recipe=iron-gear-wheel>\n"
                                     "i = Chest<requester, item=iron-plate, rate=1/s>\n"
@@ -252,6 +263,33 @@ net mix{lim}: a, b -> box
         flat = flat_of(self.SUSHI.format(lim=' limited "one slot each"') + "\n")
         lay, _notes = expand.expand_factory(flat, CAT)
         self.assertIn("limited   net mix: one slot each", expand.explain(flat, lay, "box", CAT))
+
+    LOOP = """
+fe = Chest<requester, item=iron-plate>
+cu = Chest<requester, item=copper-plate>
+e  = Buffer
+g  = Assembler<recipe=iron-gear-wheel>
+c  = Assembler<recipe=copper-cable>
+box = Chest<provider>
+net s: fe, cu -> e
+net loop{lim}: e -> g, c
+net out: g, c -> box
+"""
+
+    def test_a_sushi_loop_from_a_buffer_gets_clog_only(self):
+        flat = flat_of(self.LOOP.format(lim=""))
+        self.assertNotIn("SUSHI_SINK", codes(flat))
+        self.assertIn(("CLOG", "net loop"),
+                      [(c.code, c.where) for c in flat.checks if c.code == "CLOG"])
+        flat = flat_of(self.LOOP.format(lim=' limited "the end buffer takes what passed"'))
+        self.assertNotIn("SUSHI_SINK", codes(flat))
+        self.assertNotIn(("CLOG", "net loop"),
+                         [(c.code, c.where) for c in flat.checks if c.code == "CLOG"])
+
+    def test_sushi_sink_without_a_buffer(self):
+        flat = flat_of(self.LOOP.replace("e  = Buffer\n", "").replace("net s: fe, cu -> e\n", "")
+                       .replace("e -> g", "fe, cu -> g").format(lim=""))
+        self.assertIn("SUSHI_SINK", codes(flat))
 
 
 class HoldAllTest(unittest.TestCase):
@@ -381,6 +419,17 @@ net out: lit.asm2 -> gb
                 for k, n in enumerate(names[:3])]
         self.assertEqual(capture.names_of_bp(codec.blueprint(rows), CAT),
                          {"asm1": 1, "furnace1": 2})
+
+    def test_a_blueprint_keeps_its_circuit_settings(self):
+        rows = [{"name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 4,
+                 "attrs": {"read": "hold-all"}},
+                {"name": "inserter", "x": 0.5, "y": 1.5, "direction": 8,
+                 "attrs": {"if": "iron-plate<40"}}]
+        red = codec.connector("red")
+        self.write({"bp": codec.blueprint(rows, links=[(0, red, 1, red)])})
+        got, wires = literal.read_entities(os.path.join(self.dir, "lit.json"))
+        self.assertEqual([r[4] for r in got], [{"read": "hold-all"}, {"if": "iron-plate<40"}])
+        self.assertEqual(wires, [(0, red, 1, red)])
 
 
 if __name__ == "__main__":
