@@ -925,7 +925,16 @@ class _P:
         text = "=" if op.text == "==" else op.text
         if text not in COMPARATORS:
             self.err(f"expected a comparison ({', '.join(COMPARATORS)}), got {op.text!r}", op)
-        right = self.number() if self.peek().kind == "num" else self.operand()
+        nxt = self.peek()
+        if nxt.kind == "num":
+            right = self.number()
+        elif nxt.kind == "word" and nxt.text == "auto" and self.peek(1).text != ".":
+            self.next()                 # the library (2.1): the amount the loop's recipes need
+            right = "auto"
+        elif nxt.kind == "param" and self.peek(1).text != ".":
+            right = self.pword("a number")      # a module parameter's number (2.1): `< $amount`
+        else:
+            right = self.operand()
         return Cond(left, text, right, line)
 
     def behave(self):

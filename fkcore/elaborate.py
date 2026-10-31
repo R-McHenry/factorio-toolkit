@@ -36,6 +36,7 @@ Pure, stdlib only.
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -273,7 +274,20 @@ def _imports(f, folder, modules, seen, kinds=None, tiers=None):
         for name in names:
             mod = g.modules.get(name)
             if mod is None and name in g.kinds:
-                continue                    # a kind: in ``kinds`` now
+                # a kind: in ``kinds`` now. 2.1, the library: a kind of a module brings that
+                # module and what it is built of (GearCell its AsmCell1), unless the importer
+                # has its own of that name
+                n, kseen = name, set()
+                while n in g.kinds and n not in kseen:
+                    kseen.add(n)
+                    n = getattr(g.kinds[n], "target", n)
+                if n in g.modules:
+                    for other in [n] + _uses(g, n):
+                        if other not in modules:
+                            dep = g.modules[other]
+                            dep._brought = True
+                            modules[other] = dep
+                continue
             if mod is None:
                 body = g.body
                 if g.modules and not _body_written(body):
@@ -580,6 +594,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _recorded_ports(flat, layout)
     _port_checks(flat)
     _endpoint_checks(flat, cat)
+    _auto_gates(flat, cat)
     from . import circuits
     flat.circuit = circuits.resolve(flat, cat)
     if flat.dnp:
@@ -587,6 +602,97 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
         flat.checks = [c for c in flat.checks
                        if not any(flat.is_dnp(w) for w in str(c.where).split())]
     return flat
+
+
+#: the library's gate (2.1): `when W.ITEM < auto` on a net holds its loop to this many seconds of
+#: what the loop's machines take of ITEM at full speed, and at least GATE_CRAFTS crafts' worth of
+#: it for each machine. Measured on the lab: a loop of four AM1s held 91-100% of the model at 80
+#: iron, 40 copper and 40 gears (2.1.8), and 40 s of their take is 160, 40 and 40.
+GATE_SECONDS = 40
+GATE_CRAFTS = 2
+
+
+def _by_key(flat):
+    """{machine key: the nets it is an end of}."""
+    out = {}
+    for n, net in flat.nets.items():
+        for k, _i in net.drivers + net.consumers:
+            out.setdefault(k, set()).add(n)
+    return out
+
+
+def loop_nets(flat, start, by_key=None):
+    """The nets of ``start``'s loop (2.1, the library): the nets joined to it through ports
+    (a cell's belt runs on into the next cell's), and through buffers, a chest's every net and a
+    buffer module's other ports (a loop's end buffer feeds its head)."""
+    by_key = _by_key(flat) if by_key is None else by_key
+    ports_of = {}
+    for k, m in flat.machines.items():
+        if m.extra.get("port") and m.extra.get("buffer"):
+            ports_of.setdefault(m.inst, []).append(k)
+    seen, todo = {start}, [start]
+    while todo:
+        net = flat.nets[todo.pop()]
+        for k, _i in net.drivers + net.consumers:
+            m = flat.machines[k]
+            hop = set()
+            if m.extra.get("port"):
+                hop |= by_key.get(k, set())
+                if m.extra.get("buffer"):
+                    for k2 in ports_of.get(m.inst, ()):
+                        hop |= by_key.get(k2, set())
+            elif m.extra.get("buffer"):
+                hop |= by_key.get(k, set())
+            for n in sorted(hop - seen):
+                seen.add(n)
+                todo.append(n)
+    return seen
+
+
+def _auto_gates(flat, cat):
+    """``when W.ITEM < auto`` (2.1, the library): the amount a loop's machines need of ITEM,
+    worked out from their recipes into a constant (``GATE_SECONDS``, ``GATE_CRAFTS``). The
+    machines are those on the gated net's loop (``loop_nets``) that take ITEM by a recipe. The
+    condition gets the number, and ``flat.gates`` keeps how: {net: (item, amount, take/s,
+    [machine instances])}. A loop where no machine takes it by a recipe (an auto mall's recipes
+    change by circuit, so the netlist fixes none) is a ``gate-auto`` line, and its gate is 0."""
+    flat.gates = {}
+    for path, inst in flat.insts.items():
+        if inst.when is not None and inst.when[0].right == "auto":
+            cond = inst.when[0]
+            raise ElabError(flat.path, cond.line, f"{path} when {cond}: auto is the amount a "
+                            "loop's recipes need, for a gated net; a machine's own condition "
+                            "takes a number")
+    for name, net in flat.nets.items():
+        if net.when is None or net.when[0].right != "auto":
+            continue
+        cond, scope = net.when
+        item = cond.left.signal
+        rows, total, amount = [], 0.0, 0
+        if cat.is_item(item):
+            for n in sorted(loop_nets(flat, name)):
+                for k, i in flat.nets[n].consumers:
+                    m = flat.machines[k]
+                    if i != item or m.extra.get("port") or not m.recipe or \
+                            any(r[0] == k for r in rows):
+                        continue
+                    rate = m.needs.get(item, 0.0)
+                    if rate <= 0:
+                        continue
+                    rec = cat.recipe(m.recipe)
+                    per = sum(g["amount"] for g in rec.get("ingredients", ())
+                              if g["name"] == item)
+                    rows.append((k, m.inst))
+                    total += rate
+                    amount += max(math.ceil(GATE_SECONDS * rate - 1e-9), GATE_CRAFTS * per)
+        if not rows:
+            flat.checks.append(Check("gate-auto", f"net {name}",
+                                     f"when {cond}: no machine on its loop takes {item} by a "
+                                     "recipe, so auto has nothing to work out: write the amount "
+                                     "(the gate holds at 0 until then)", cond.line))
+        net.when = (dataclasses.replace(cond, right=int(amount)), scope)
+        flat.gates[name] = (item, int(amount), total,
+                            list(dict.fromkeys(inst for _k, inst in rows)))
 
 
 def _recorded_ports(flat, layout):
@@ -1525,7 +1631,19 @@ class _Subst:
             return None
         op = lambda o: o if not isinstance(o, lang.Operand) else dataclasses.replace(
             o, signal=_value_text(self.value(o.signal, c.line)))
-        return dataclasses.replace(c, left=op(c.left), right=op(c.right))
+        right = c.right
+        if isinstance(right, str) and right.startswith("$"):
+            # `when W.S < $amount` (the library, 2.1): a number, or auto (the loop's recipes)
+            v = self.value(right, c.line)
+            if isinstance(v, lang.Auto) or v == "auto":
+                right = "auto"
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                right = int(v) if float(v).is_integer() else v
+            else:
+                raise ElabError(self.src, c.line, f"when {c.left} {c.op} {right}: a condition "
+                                f"compares with a number or auto, and {right} is "
+                                f"{_value_text(v)}")
+        return dataclasses.replace(c, left=op(c.left), right=op(right))
 
     def module(self):
         mod, R = self.mod, dataclasses.replace
@@ -2081,7 +2199,11 @@ def advice(flat):
     netlist's own check lines as they were: a bare ``limited`` on a sushi net is asked what
     limits it (``limited-why``)."""
     out = []
+    chain = getattr(flat, "chain", set())
     for name, net in flat.nets.items():
+        ends = net.drivers + net.consumers
+        if ends and all(k in chain for k, _i in ends):
+            continue            # a Stack's own net from one cell to the next: no source line
         if net.sushi and net.limited and not getattr(net, "why", None) \
                 and net.drivers and net.consumers:
             out.append(Check("limited-why", f"net {name}",
@@ -2089,6 +2211,62 @@ def advice(flat):
                              "reader sees it where CLOG would be (`net "
                              f"{name.rsplit('/', 1)[-1]} limited \"the end buffer gates the "
                              "sources\":`)", net.line))
+    out += _row_cells(flat)
+    for name, (item, amount, rate, insts) in sorted(getattr(flat, "gates", {}).items()):
+        if insts:
+            out.append(Check("gate-auto", f"net {name}",
+                             f"auto holds {item} below {amount}: {GATE_SECONDS} s of the "
+                             f"{rate:g}/s its loop's machines take ({', '.join(insts)}), and at "
+                             f"least {GATE_CRAFTS} crafts each", flat.nets[name].line))
+    return out
+
+
+#: the library cell that replaces each row kind (2.1, PLAN-2.1 "Rows in 2.1"), and how to write it
+ROW_CELLS = {
+    "SmelterArray": ("SmelterPair", "Stack<cell=SmelterPair, n={half}, plate={plate}, ore={ore}>"
+                                    " (two furnaces a cell)"),
+    "SmelterRow": ("StoneFurnaceCell", "Stack<cell=StoneFurnaceCell, n={n}, plate={plate}, "
+                                       "ore={ore}>"),
+    "AsmRow": ("AsmCell", "Stack<cell=AsmCell, n={n}, recipe={recipe}, ins=A|B, out={out}> (two "
+                          "ingredients; AsmCell1 for one)"),
+    "LabRow": ("LabCell", "Stack<cell=LabCell, n={n}, packs=A|B>, or a Stack of LabColumns for a "
+                          "field"),
+    "CircuitStack": ("CircuitCell", "Stack<cell=CircuitCell, n={quarter}> (four circuit "
+                                    "assemblers a cell)"),
+}
+
+
+def _row_cells(flat):
+    """``row-cell`` (2.1, the library): a row the committed layout hasn't laid yet could be a Stack
+    of a library cell from the kickoff template's cells.fk. A row already built stays (rows are
+    frozen, and a cell's footprint differs), so it gets no line."""
+    lay = getattr(flat, "_layout", None)
+    built = set(getattr(lay, "insts", {}) or {}) if lay is not None else set()
+    out = []
+    for path, inst in sorted(flat.insts.items()):
+        kind = getattr(inst, "core", None) or inst.kind
+        if kind not in ROW_CELLS or path in built:
+            continue
+        p = params_of(inst)
+        ms = [flat.machines[k] for k in inst.machines if k in flat.machines]
+        n = len(ms) or int(p.get("n") or 1)
+        recipe = next((m.recipe for m in ms if m.recipe), p.get("recipe"))
+        ore = plate = out_item = None
+        if recipe:
+            plate = recipe
+            ore = next(iter(ms[0].needs), None) if ms and ms[0].needs else p.get("ore")
+            out_item = next(iter(ms[0].makes), recipe) if ms else recipe
+        machine = ms[0].prototype if ms else None
+        cell, how = ROW_CELLS[kind]
+        if kind == "SmelterRow" and machine == "electric-furnace":
+            cell, how = "FurnaceCell", "Stack<cell=FurnaceCell, n={n}, plate={plate}, ore={ore}> " \
+                                       "(or FurnacePair, two a cell)"
+        text = how.format(n=n, half=(n + 1) // 2, quarter=(n + 3) // 4, plate=plate, ore=ore,
+                          recipe=recipe, out=out_item)
+        out.append(Check("row-cell", path,
+                         f"a new {kind} could be {text}, a Stack of the library's {cell} "
+                         "(import it from the kickoff template's game\\cells.fk). Rows still "
+                         "build, and new lines are Stacks of cells", inst.line))
     return out
 #: chests that take any item that reaches them
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
@@ -2422,11 +2600,19 @@ def _endpoint_checks(flat, cat):
     for inst, item, n in _group(unconsumed):
         flat.checks.append(Check("no-taker", inst, f"{item} goes on no net"
                                  + (f" ({n} machines)" if n > 1 else "")))
+    by_key = None
     for name, net in flat.nets.items():
         if not net.sushi:
             continue
         if any(flat.machines[k].extra.get("buffer") for k, _i in net.drivers + net.consumers):
             continue        # 2.1: what no machine takes ends in (or goes round by) the buffer
+        if any(flat.machines[k].extra.get("port") for k, _i in net.consumers):
+            # 2.1, the library: a cell's belt that runs on into a loop with a buffer on it (a
+            # MallCell's): what its machine doesn't take goes round
+            by_key = by_key if by_key is not None else _by_key(flat)
+            if any(flat.machines[k].extra.get("buffer") for n in loop_nets(flat, name, by_key)
+                   for k, _i in flat.nets[n].drivers + flat.nets[n].consumers):
+                continue
         rows = []
         for key, _item in net.consumers:
             m = flat.machines[key]

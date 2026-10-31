@@ -588,6 +588,17 @@ def _buffer_of(flat, key):
     return b if isinstance(b, str) and m.extra.get("port") else None
 
 
+def _all_gated(flat, keys, item):
+    """Whether every one of ``keys`` puts ``item`` only on gated nets (``when``): a loop's sources
+    in the library's GateCells (2.1), each gated inside its cell on what the loop holds."""
+    hold = getattr(flat, "_out_hold", {})
+    for k in keys:
+        nets = hold.get((k, item)) or []
+        if not nets or not all(getattr(flat.nets[n], "when", None) for n in nets):
+            return False
+    return bool(keys)
+
+
 def _buffer_flows(flat, machines, ends, stats, util, outs, feeds, sink_share):
     """({buffer: {item: (in, out)}}, {(key, item): out}) per item of each buffer (2.1), over the
     nets as solved (a bus pool once). On each: the consumers take what they take; the drivers that
@@ -635,7 +646,8 @@ def _buffer_flows(flat, machines, ends, stats, util, outs, feeds, sink_share):
             if k in open_:
                 if any(u != k for u in unb):
                     net = flat.nets.get(ni[0])
-                    if net is not None and getattr(net, "when", None):
+                    if net is not None and getattr(net, "when", None) or \
+                            _all_gated(flat, [u for u in unb if keys.get(u) != keys[k]], item):
                         gated.add((keys[k], item))
                     else:
                         got[0] = INF
