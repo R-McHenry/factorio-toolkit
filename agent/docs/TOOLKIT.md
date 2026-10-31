@@ -98,6 +98,23 @@ When a route you have stops pleasing you (spaghetti from patches, a branch you'd
 (`out\route.txt`: `routed again: asked`). A route that doesn't reach a machine of its net is laid
 again by itself; `report_checks` says `partly-connected` if one ever still doesn't.
 
+Room for routes. Most routes that failed in the 10-30 run had no room, not a router fault:
+- A belt fed into a machine by an inserter takes 2 tiles beside it: one for the inserter, one
+  for the belt. Two machines that share a belt between them need 3 tiles apart. A 1-tile gap
+  holds only a direct inserter from one machine into the next, and a belt laid through that gap
+  blocks it.
+- A maker with two consumers fits between them, with a direct inserter on each side (A4b: ci5
+  between ac5 and ac6 routed; with ci5 at the row's end it could not get past cb5).
+- Keep a module's ports and new machines off the path of a main belt that stands. A port on the
+  main's path lays the main anew (`routed again` in `out\route.txt`): look for it there after a
+  dry run.
+- For one far consumer of a main (coal at the brick furnaces), a requester at the hub costs
+  less than another branch: a new end far down the main can lay all of it anew.
+- A row takes 2 input belts (SmelterRow), and a LabRow's third can't branch in from beside the
+  other two. `--reroute` on the three nets together lays them side by side.
+- A patch that won't fit fails alone and leaves the rest standing. Move the new machine a few
+  tiles, or `--reroute` the net it joins, before you redesign the whole block.
+
 Any step takes options for one build without editing the script: `fk build --with 'cover robots
 --fresh'`, `fk build --with 'route --effort high' --with 'tier --allow yellow,red'` (repeat
 `--with` as often as you like; the step's own options stay, the ones you add win).

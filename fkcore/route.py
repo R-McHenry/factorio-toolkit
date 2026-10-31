@@ -1237,7 +1237,8 @@ def _new_branch(grid, starts, sink, net, reverse, limit):
         t.succ[a] = ("jump", b) if b[3] else ("step", b)
     t.sink_at[path[-1]] = 0
     if isinstance(sink, TapSink):
-        t.taps = sink.pick(path, probe)          # the choice the search's goal test made
+        taken = next((s[3] for s in starts if s[0] == path[0] and len(s) > 3), ())
+        t.taps = sink.pick(path, probe, taken)   # the choice the search's goal test made
     t.touch()
     return t.entities([sink], net=net, reverse=reverse), how, path
 
@@ -1365,7 +1366,7 @@ class _Patch:
                         or o2 in self.blocked:
                     continue
                 out.append(((o2[0], o2[1], h, 0), COSTS["split"] - COSTS["belt"],
-                            ("split", key, side)))
+                            ("split", key, side), ((tx, ty), m)))
         return out
 
     def add_consumer(self, role, belt, machine, nets):

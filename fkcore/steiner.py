@@ -13,6 +13,11 @@ carriers. Changes since the copy:
   the merged items, a SPILL); ``Grid.drop_taps``: a tap's inserter drops onto its belt, and an
   underground exit takes no drop (fkcore.connect, v4 B-120), so a tapped belt never starts a
   tunnel (which, reversed, is an exit).
+- A start state may name the tiles its move takes (a splitter's two, 2.0.77): the goal test picks
+  no tap on them. The 10-30 run's Sci0 copper split one tile short of red2, the search planned
+  red2's inserter on the splitter's second tile, the attach found it taken and laid no tap, and
+  the tree still counted red2 reached ("partly-connected" on every build). ``problems`` now names
+  a tap sink with fewer taps than it takes (UNTAPPED).
 
 The original docstring follows.
 
@@ -160,8 +165,9 @@ class TapSink:
                     out.append((q, name, _fdir((h + 2) % 4)))
         return out
 
-    def pick(self, path, tree):
-        """Taps off the last tiles of ``path`` (one per belt tile, newest first), up to k."""
+    def pick(self, path, tree, taken=()):
+        """Taps off the last tiles of ``path`` (one per belt tile, newest first), up to k; none on
+        ``taken`` (the tiles the path's start move lays, a splitter's)."""
         on = {(s[0], s[1]) for s in path}
         tunnels = {path[i] for i in range(len(path) - 1) if path[i + 1][3]} \
             if tree.grid.drop_taps else ()
@@ -171,15 +177,15 @@ class TapSink:
                 continue     # reversed this is an underground exit, which takes no drop
             used = {g[0] for g in got}
             for q, name, direction in self.taps_at((s[0], s[1]), lambda q: tree.free(q) and q not in on
-                                                   and q not in used):
+                                                   and q not in used and q not in taken):
                 got.append((q, name, direction, self.name))
                 break
             if len(got) >= self.k:
                 break
         return got
 
-    def goal(self, state, tree, path=None):
-        return len(self.pick(path or [state], tree)) >= self.k
+    def goal(self, state, tree, path=None, taken=()):
+        return len(self.pick(path or [state], tree, taken)) >= self.k
 
     def h(self, x, y):
         x0, y0, x1, y1 = self.rect
@@ -350,6 +356,10 @@ class Tree:
         for i, s in enumerate(sinks):
             if i not in reached:
                 out.append(f"UNREACHED {s.name}")
+            elif isinstance(s, TapSink):
+                got = sum(t[3] == s.name for t in self.taps)
+                if got < s.k:
+                    out.append(f"UNTAPPED {s.name}: {got} of {s.k} inserters")
         mine = self.spans()
         for ax in (0, 1):
             if mine[ax] & self.grid.spans[ax]:
@@ -455,8 +465,8 @@ def audit(cat, others, ents, root, sinks, max_ug=5):
 
 # -- forward: grow the tree towards all sinks ---------------------------------------------------
 def _starts(tree):
-    """(state, g0, how) the next branch may leave the tree from: a dead-end leaf for free, or a
-    splitter cut into a straight belt."""
+    """(state, g0, how[, taken]) the next branch may leave the tree from: a dead-end leaf for
+    free, or a splitter cut into a straight belt (``taken``: its two tiles)."""
     k = tree.costs
     out = []
     for s in tree.states():
@@ -481,12 +491,13 @@ def _starts(tree):
             if (s[0] + DX[sh], s[1] + DY[sh]) in tree.grid.keep_clear:
                 continue     # laid reversed, this merge's spare output would feed what is there
             if tree.free(m) and tree.free((o2[0], o2[1])):
-                out.append((o2, k["split"] - k["belt"], ("split", s, side, c)))
+                out.append((o2, k["split"] - k["belt"], ("split", s, side, c), (n, m)))
     return out
 
 
 def _astar(tree, starts, sinks, targets, limit=60000):
-    """One A* from every start state to the nearest target sink; (path, how, sink, cost) or None."""
+    """One A* from every start state to the nearest target sink; (path, how, sink, cost) or None.
+    A start is (state, g0, how) or (state, g0, how, taken): a tap is never planned on ``taken``."""
     k = tree.costs
     grid, tiles, res = tree.grid, tree.tiles(), tree.reserved
     sink_tiles = {s.tile for i, s in enumerate(sinks) if isinstance(s, FixedSink)}
@@ -504,12 +515,13 @@ def _astar(tree, starts, sinks, targets, limit=60000):
             r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
             tapped.add((q[0] + DX[g0] * r, q[1] + DY[g0] * r))
 
-    heap, g, parent, how_of = [], {}, {}, {}
-    for st, g0, how in starts:
+    heap, g, parent, how_of, taken_of = [], {}, {}, {}, {}
+    for st, g0, how, *taken in starts:
         if g0 < g.get(st, INF):
             g[st] = g0
             parent[st] = None
             how_of[st] = how
+            taken_of[st] = frozenset(taken[0]) if taken else frozenset()
             heapq.heappush(heap, (g0 + hh(st[0], st[1]), -g0, st))
     done = set()
     jumps = range(2, int(k["max_ug"]) + 1)
@@ -529,7 +541,7 @@ def _astar(tree, starts, sinks, targets, limit=60000):
                 hit = False          # too far for any tap: skip the path trace
             else:
                 path = path or _trace(parent, st)
-                hit = sinks[i].goal(st, tree, path)
+                hit = sinks[i].goal(st, tree, path, taken_of[path[0]])
             if hit:
                 path = path or _trace(parent, st)
                 if len({(p[0], p[1]) for p in path}) == len(path):
