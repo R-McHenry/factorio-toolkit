@@ -15,9 +15,18 @@ for the entities that stand where the design has them (a diff's ok and settings-
 (recipe, control behaviour, filters, requests, a chest's limit) and the circuit wires between
 them. Before comparing, what the game exports by default is dropped. Each difference is a line
 for the hand edits (``sense.hand_edits``): who changed what, and what the paste does about it.
-What a paste does, as measured on that server:
-- where the design sets a field, the paste writes it;
-- where the design has none, a request is cleared, while a condition and a wire stay.
+What a paste does, as measured on that server (2.0.77, again for 2.1 on 2026-10-31):
+- where the design sets a field, the paste writes it, and a control behaviour whole;
+- where the design has none, a request, the trash and buffer flags, a chest's limit, a storage
+  chest's filter, an inserter's filters and a combinator's settings are cleared. A control
+  behaviour is not: one at the game's defaults is ignored, and with none at all a wired machine
+  keeps its own. So since 2.1 the codec writes ``codec.RESET_CB`` (off, a condition with no
+  signal) on a machine whose design sets none, and the paste clears it too;
+- a mining drill, a pumpjack or an offshore pump takes nothing from a paste
+  (``codec.PASTE_SKIPS``): the apply lays one fresh;
+- a wire stays: the apply's wire pass (``fkcore.wires``) cuts it.
+So the design's explicit defaults (``RESET_CB``, a false flag, an empty list, a whitelist) and an
+absent field compare equal here: ``_clean`` drops both.
 Pure but for ``read``; stdlib only.
 """
 from __future__ import annotations
@@ -33,9 +42,20 @@ __all__ = ["KEYS", "Drift", "lua_read", "read", "design", "live", "drifts", "des
 #: edit with who made it)
 KEYS = ("recipe", "control_behavior", "use_filters", "filters", "filter_mode", "request_filters",
         "bar")
-#: control_behavior fields the game exports when nobody set them (2.0.77: every inserter on a wire
-#: reads stack size from signal-S)
-_DEFAULTS = {"stack_control_input_signal": {"type": "virtual", "name": "signal-S"}}
+#: fields at the game's defaults: what the game exports when nobody set them (2.0.77: every
+#: inserter on a wire reads stack size from signal-S; 2.1: a belt's read mode, a lamp's colour
+#: signals, a drill's resource read, on any of them with a control behaviour), and the codec's
+#: explicit defaults (2.1)
+_V = "virtual"
+_DEFAULTS = {"stack_control_input_signal": {"type": _V, "name": "signal-S"},
+             "filter_mode": "whitelist", "is_on": True, "circuit_contents_read_mode": 0,
+             "red_signal": {"type": _V, "name": "signal-red"},
+             "green_signal": {"type": _V, "name": "signal-green"},
+             "blue_signal": {"type": _V, "name": "signal-blue"},
+             "rgb_signal": {"type": _V, "name": "signal-white"},
+             "circuit_read_resources": True, "circuit_resource_read_mode": 0}
+#: conditions: one with no first signal never holds (``codec.RESET_CB``), as good as none
+_CONDITIONS = ("circuit_condition", "logistic_condition")
 #: the source's comparators, back from the game's
 _COMPARATOR = {"<": "<", ">": ">", "=": "=", "≤": "<=", "≥": ">=", "≠": "!="}
 _COLOUR = {1: "red", 3: "red", 2: "green", 4: "green"}
@@ -51,12 +71,16 @@ class Drift:
     have: str                     # what stands, as describe() says it
     want: str                     # what the design has ("" for none)
     clears: bool = False          # the design has none, and a paste clears it (a request)
+    wires: bool = False           # a difference in circuit wires (the wire pass sets them)
 
     def line(self):
         who = (f"{self.user} changed" if self.user else
                "Someone changed (the game names no one: a script, or the map editor)")
         where = f"{_fmt(self.x)},{_fmt(self.y)}"
-        if self.want:
+        if self.wires:
+            then = (f"the build wires it as designed: {self.want}" if self.want else
+                    "the design has none: the build cuts them")
+        elif self.want:
             then = f"the paste sets {self.want}"
         elif self.clears:
             then = "the design has none: the paste clears it"
@@ -116,6 +140,8 @@ def _clean(v):
         out = {}
         for k, x in v.items():
             if k in _DEFAULTS and codec._normal(x, "first_signal") == _DEFAULTS[k]:
+                continue
+            if k in _CONDITIONS and isinstance(x, dict) and not x.get("first_signal"):
                 continue
             if k == "quality" and x == "normal":
                 continue
@@ -192,14 +218,17 @@ def drifts(want, have, verdicts, users):
         v = judged[k]
         if keys:
             w = describe({f: wf[f] for f in keys if f in wf})
-            clears = not w and "request_filters" in keys and "request_filters" in hf
+            # 2.1: the codec writes every setting (codec.RESET_CB), so a paste clears what the
+            # design has none of, but on a drill or an offshore pump (laid fresh instead)
+            clears = not w
             out.append(Drift(v.key, v.name, v.x, v.y, users.get(k),
                              describe({f: hf[f] for f in keys if f in hf}) or "nothing set", w,
                              clears))
         if ww != hw:
-            # a wire the design lacks stays after a paste (the laptop server, 2026-10-24)
+            # a wire the design lacks stays after a paste (the laptop server, 2026-10-24): the
+            # apply's wire pass cuts it (2.1)
             out.append(Drift(v.key, v.name, v.x, v.y, users.get(k), describe({}, hw),
-                             describe({}, ww) if ww else ""))
+                             describe({}, ww) if ww else "", True, True))
     return out
 
 

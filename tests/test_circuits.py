@@ -405,8 +405,9 @@ e ~o/i0 fast-inserter 1.5,9.5 E net=o filter=circuit logistic=iron-gear-wheel>=1
 
 class RelayTest(unittest.TestCase):
     """A paste over a standing entity didn't take its new settings in the 2039 run ("a limit
-    change is not re-pasted"): the record's signature says what was pasted, and an entity whose
-    circuit settings changed is ordered up so the paste lays it fresh."""
+    change is not re-pasted"): the record's signature says what was pasted. 2.0 ordered such an
+    entity up so the paste laid it fresh; since 2.1 the codec writes every setting, and the paste
+    writes them in place (laid fresh only as a ghost, or a drill)."""
 
     def setUp(self):
         from tests.test_sense import surface, live_as_designed
@@ -440,7 +441,7 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(own.resettled(old, s, sense.sense(s, self.live, CAT, AREA, WATCH,
                                                            own=old).verdicts), [])
 
-    def test_the_apply_orders_it_up_before_the_paste(self):
+    def test_the_apply_writes_it_in_place(self):
         from tests.test_own import FakeRcon, snapshot_of
         from tests.test_sense import NETS, WATCH
         r = FakeRcon()
@@ -450,9 +451,11 @@ class RelayTest(unittest.TestCase):
             rep = applymod.apply(r, s, CAT, None, mode="play", policy=WATCH, net_items=NETS,
                                  own=self.rec)
         e = s.entities[self.key]
-        self.assertEqual(r.ordered, [(e.name, e.x, e.y)])
-        self.assertEqual(len(rep.resettled), 1)
-        self.assertIn("1 with new circuit settings", "\n".join(rep.lines()))
+        self.assertEqual(r.ordered, [])
+        self.assertEqual((rep.resettled, rep.written),
+                         ([], [(self.key, "the design changed its settings")]))
+        self.assertIn("written in place 1 (the paste sets them on what stands): ",
+                      "\n".join(rep.lines()))
         self.assertIsNotNone(rep.own[own.at(e.name, e.x, e.y)].sig)
 
     def test_the_record_keeps_signatures_on_disk(self):
