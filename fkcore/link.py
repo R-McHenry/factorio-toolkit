@@ -88,6 +88,32 @@ def assert_safe(lua):
     return lua
 
 
+def _drop_comment(line):
+    """``line`` without its trailing ``--`` comment, quotes respected (2.0.73: the one-line join
+    let ``ok = e.f(x)  -- note`` comment out the rest of fk decon's script)."""
+    q = None
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if q:
+            if c == "\\":
+                i += 1
+            elif c == q:
+                q = None
+        elif c in "'\"":
+            q = c
+        elif line.startswith("--", i):
+            return line[:i]
+        i += 1
+    return line
+
+
+def lua_one_line(body):
+    """Lua as one RCON line: each line trimmed, comments and blank lines dropped."""
+    lines = (_drop_comment(line).strip() for line in body.splitlines())
+    return " ".join(line for line in lines if line)
+
+
 class Rcon:
     """One RCON connection; ``call(cmd)`` -> the reply text."""
 
@@ -133,8 +159,7 @@ class Rcon:
 
     def lua(self, body):
         """Run Lua silently; its rcon.print output is the reply."""
-        return self.call("/sc " + " ".join(line.strip() for line in body.splitlines()
-                                            if line.strip() and not line.strip().startswith("--")))
+        return self.call("/sc " + lua_one_line(body))
 
     def close(self):
         self.sock.close()

@@ -82,7 +82,9 @@ net's ends, not its name: a net whose sink changed under the same name (`X -> la
 is never kept as it was. So a patch is cheap: a row beside the others, a chest one tile over, one
 more machine on a net, one more net into what stands. The design the next build keeps to is the
 one the last full build wrote (`write_layout`, just before the paste); `fk build --to diff` and
-`--to report_checks` write nothing, so try changes with them freely.
+`--to report_checks` write nothing, so try changes with them freely. Before `write_layout`
+replaces a `.fkp`, it keeps the one before in `out\fkp-history\` (`world.<date>-<time>.fkp`, the
+last 8 of each): copy one back over `world.fkp` to build to the layout before.
 
 When a route you have stops pleasing you (spaghetti from patches, a branch you'd lay otherwise),
 `fk build --reroute mall1/fe` lays that net anew, and `--reroute mall1` every net inside mall1
@@ -462,7 +464,9 @@ answer is the next build. Nothing here is broken by itself.
 - `taken-up`: the build takes up a lot, and the robots need minutes for it (the structures, the items
   in them, and how long: `out\diff.txt`). It goes faster if you stop what feeds it first and let
   it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a
-  factory moved: `fk merge` joins factories where they stand
+  factory moved: `fk merge` joins factories where they stand. `report_bom --stock live` says it
+  too when the paste takes up machines, or belts and pipes that carry now, while what it lays is
+  SHORT: those stop until the new ones are built (`stop_on short-stock` holds such a paste)
 - `two-nets`: one machine input or output on two nets
 - `rate-not-met` / `target-not-met`: a rate you asserted, or the surface's target, is not met on paper (or,
   after a build, as routed)

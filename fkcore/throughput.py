@@ -34,9 +34,16 @@ from everything at full speed until both hold; it runs at the lower of the two. 
 in full tries a margin more the next round, and margins and steps halve where an endpoint swings,
 so one that swings between two machines settles where they meet; ``Result.settled`` says whether
 the coupling did within ``outer`` rounds. Pure, stdlib only.
+
+A belt ring (a net's belts that loop back on themselves) is entered where it is fed, and the
+required flows don't go round it: with no capacity, what goes round came back as more every round
+(2.0.73, live 10-30: a coal ring made each coal solve take all 400 rounds, and ``fk build`` sat 10+
+minutes in report_rates). The coupling also stops after ``BUDGET`` seconds, unsettled, which the
+report says (``settled``).
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from .lanes import INF
@@ -51,6 +58,8 @@ BIG = 1e6
 #: turns); a served endpoint's margin grows by this while it stays served (halves when that changes)
 STEP_GROW = 1.2
 MARGIN_GROW = 2.0
+#: seconds the machine coupling may take before it stops, unsettled
+BUDGET = 60.0
 
 
 @dataclass
@@ -176,23 +185,75 @@ def _share(avail, others):
 
 
 def _topo(lg):
+    """The nodes in topological order. A ring is entered where flow comes into it (2.0.73): its
+    first node is one fed from outside it, so only the edge that closes it runs backward."""
     indeg = {v: 0 for v in lg.nodes}
     for e in lg.edges():
         indeg[e.dst] += 1
     todo = sorted((v for v, d in indeg.items() if d == 0), key=str)
-    order, seen = [], set()
-    while todo:
-        v = todo.pop(0)
-        if v in seen:
-            continue
-        seen.add(v)
-        order.append(v)
-        for e in lg.out.get(v, ()):
-            indeg[e.dst] -= 1
-            if indeg[e.dst] == 0:
-                todo.append(e.dst)
-    order += sorted((v for v in lg.nodes if v not in seen), key=str)    # a ring: as it comes
+    order, seen, ringed = [], set(), None
+    while True:
+        while todo:
+            v = todo.pop(0)
+            if v in seen:
+                continue
+            seen.add(v)
+            order.append(v)
+            for e in lg.out.get(v, ()):
+                indeg[e.dst] -= 1
+                if indeg[e.dst] == 0:
+                    todo.append(e.dst)
+        if len(seen) == len(lg.nodes):
+            break
+        if ringed is None:
+            ringed = _on_rings(lg)
+        rest = [v for v in ringed if v not in seen]
+        fed = [v for v in rest if any(e.src in seen for e in lg.inn.get(v, ()))]
+        todo = [min(fed or rest, key=str)]                  # a ring: in where it is fed
     return order
+
+
+def _on_rings(lg):
+    """The nodes that lie on a ring (a strongly connected part of more than one node, or one that
+    feeds itself): Tarjan's, without recursion."""
+    index, low, stack, on, out = {}, {}, [], set(), set()
+    n = 0
+    for root in lg.nodes:
+        if root in index:
+            continue
+        work = [(root, iter(lg.out.get(root, ())))]
+        index[root] = low[root] = n
+        n += 1
+        stack.append(root)
+        on.add(root)
+        while work:
+            v, it = work[-1]
+            for e in it:
+                w = e.dst
+                if w not in index:
+                    index[w] = low[w] = n
+                    n += 1
+                    stack.append(w)
+                    on.add(w)
+                    work.append((w, iter(lg.out.get(w, ()))))
+                    break
+                if w in on:
+                    low[v] = min(low[v], index[w])
+            else:
+                work.pop()
+                if work:
+                    low[work[-1][0]] = min(low[work[-1][0]], low[v])
+                if low[v] == index[v]:
+                    part = []
+                    while True:
+                        w = stack.pop()
+                        on.discard(w)
+                        part.append(w)
+                        if w == v:
+                            break
+                    if len(part) > 1 or any(e.dst == v for e in lg.out.get(v, ())):
+                        out.update(part)
+    return out
 
 
 # -- one item -------------------------------------------------------------------------------------
@@ -235,7 +296,10 @@ def _prepare(lg, order, item, takes, gives, sources, sinks):
         taps = [e for e in rows if e.via == "pickup" and lg.nodes[v].kind != "machine"]
         first = [e for e in rows if e.first and e not in taps]
         split[v] = (taps, first, [e for e in rows if e not in taps and e not in first])
-    return [v for v in order if v in keep], ins, outs, split
+    mine = [v for v in order if v in keep]
+    pos = {v: i for i, v in enumerate(mine)}
+    back = {(e.src, e.dst) for rows in outs.values() for e in rows if pos[e.dst] <= pos[e.src]}
+    return mine, ins, outs, split, back
 
 
 def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True):
@@ -243,10 +307,18 @@ def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True):
     rounds, residual). Without ``prio`` a splitter's preferred output is one of its two again:
     the required flows (no capacities) spread evenly, since a priority only decides where items
     go when the preferred side is full (Rory's bus staircases would heap a whole load on its far
-    belt, and that belt would read as binding while the others stand empty)."""
-    order, ins, outs, split = prep
+    belt, and that belt would read as binding while the others stand empty). Nor do the required
+    flows go round a ring (``back``: the edges that close one): with no capacity, what goes round
+    would come back as more every round and never settle (2.0.73, live 10-30)."""
+    order, ins, outs, split, back = prep
     if not prio:
         split = {v: (g[0], list(g[1]) + list(g[2])) for v, g in split.items()}
+        if back:
+            ins = {v: [e for e in rows if (e.src, e.dst) not in back] for v, rows in ins.items()}
+            outs = {v: [e for e in rows if (e.src, e.dst) not in back]
+                    for v, rows in outs.items()}
+            split = {v: tuple([e for e in g if (e.src, e.dst) not in back] for g in groups)
+                     for v, groups in split.items()}
     acc, accept = {}, {}
     offer = {}
     residual, done = INF, 0
@@ -361,7 +433,7 @@ def _solve_all(lg, preps, supply, demand, caps_on, shares, rounds, tol, memo=Non
 
 
 def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, outer=80,
-          outer_tol=1e-4):
+          outer_tol=1e-4, budget=None):
     """Flows over ``lg`` (``fkcore.lanes.LaneGraph``). ``supply`` / ``demand``: {node id: {item:
     items/s}} (a demand of INF takes everything); ``machines``: {node id: Machine}, whose needs
     and products join the demand and supply at their utilization. -> Result."""
@@ -409,6 +481,7 @@ def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, out
         return v
 
     done, settled, moved, most, memo = 0, not machines, 0.0, 0, {}
+    until = time.monotonic() + (BUDGET if budget is None else budget)
     for done in range(1, outer + 1):
         sup = {v: dict(t) for v, t in supply.items()}
         dem = {v: dict(t) for v, t in demand.items()}
@@ -461,6 +534,8 @@ def solve(lg, supply=None, demand=None, machines=None, rounds=400, tol=1e-9, out
                     moved = max(moved, abs(d * step[g]))
         if moved < outer_tol:
             settled = True
+            break
+        if time.monotonic() > until:
             break
     util = {m: max(0.0, min([1.0] + [grant[(m, s, i)] for s, rows in
                                      (("in", mach.needs), ("out", mach.makes)) for i in rows]))

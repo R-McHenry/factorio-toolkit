@@ -54,6 +54,7 @@ import json
 import os
 import re
 import shlex
+import time
 from dataclasses import dataclass, field
 
 from . import avail as availmod
@@ -1356,7 +1357,41 @@ def _bom_live(ctx):
                 "`stop_on short-stock` in the build script holds the paste until the network has them")
         lines.append(f"  {warn}")
         checks.append(Check("taken-up", ctx.surface.name, warn))
+    # 2.0.73 (live 10-30): a net laid again pasted 549 belts SHORT, and the robots took the old
+    # mains up before the new ones could be built, which stopped the base
+    carrying = _carriers_taken_up(ctx) if short else 0
+    if carrying and any(s in _CARRIER_KINDS_SHORT for s in short):
+        kinds = [s for s in short if s in _CARRIER_KINDS_SHORT]
+        warn = (f"the paste takes up {carrying} belts and pipes that carry now while "
+                f"{', '.join(kinds)} for their new route are SHORT: those nets stop until the "
+                "new route is built; `stop_on short-stock` in the build script holds the paste, "
+                "and out/fkp-history/ keeps the layout before this one")
+        lines.append(f"  {warn}")
+        checks.append(Check("taken-up", ctx.surface.name, warn))
     return lines, checks
+
+
+#: the carriers whose shortage leaves a re-laid net cut (inserters stay with their machine)
+_CARRIER_KINDS_SHORT = ("transport-belt", "fast-transport-belt", "express-transport-belt",
+                        "underground-belt", "fast-underground-belt", "express-underground-belt",
+                        "splitter", "fast-splitter", "express-splitter", "pipe",
+                        "pipe-to-ground")
+
+
+def _carriers_taken_up(ctx):
+    """How many built belts and pipes the last diff says the paste takes up (the toolkit's own
+    dropped from the design, or under a other-entity verdict)."""
+    if ctx.last_diff is None:
+        return 0
+    n = 0
+    for v in ctx.last_diff.verdicts:
+        head = v.verdict.split()[0]
+        if head == "unowned" and not v.ghost and v.name in _CARRIER_KINDS_SHORT:
+            n += 1
+        elif head == "other-entity":
+            n += sum(1 for u in v.under if len(u) > 4 and not u[4]
+                     and u[0] in _CARRIER_KINDS_SHORT)
+    return n
 
 
 #: what a paste that takes it up stops (2.0, report_bom's warning)
@@ -1414,6 +1449,35 @@ def s_report_bom(ctx, args):
     return lines, checks
 
 
+#: how many earlier copies of each .fkp out/fkp-history keeps
+KEEP_PRIOR = 8
+
+
+def _keep_prior(ctx, path, text):
+    """Before ``path`` is written with ``text``: its current content, when different, copied to
+    out/fkp-history/<name>.<stamp>.fkp, the newest KEEP_PRIOR kept (2.0.73, live 10-30: a paste
+    that tore the mains up had overwritten world.fkp, with no way back)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            old = fh.read()
+    except OSError:
+        return
+    if old == text:
+        return
+    folder = os.path.join(ctx.out, "fkp-history")
+    os.makedirs(folder, exist_ok=True)
+    base = os.path.basename(path)[:-len(".fkp")]
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(os.path.getmtime(path)))
+    with open(os.path.join(folder, f"{base}.{stamp}.fkp"), "w", encoding="utf-8",
+              newline="\n") as fh:
+        fh.write(old)
+    mine = sorted(f for f in os.listdir(folder)
+                  if f.startswith(base + ".") and f.endswith(".fkp")
+                  and re.fullmatch(r"\d{8}-\d{6}", f[len(base) + 1:-4]))
+    for f in mine[:-KEEP_PRIOR]:
+        os.remove(os.path.join(folder, f))
+
+
 def s_write_layout(ctx, args):
     lines, checks = [], []
     if ctx.surface is not None and ownmod.load(ctx.root, ctx.surface.name) is None:
@@ -1429,6 +1493,7 @@ def s_write_layout(ctx, args):
             continue
         path = os.path.join(ctx.root, f"{p.module}.fkp")
         try:
+            _keep_prior(ctx, path, fkp.dumps(lay, ctx.cat))
             fkp.save(lay, path, ctx.cat)
             lines.append(f"wrote {os.path.basename(path)}: {len(lay.entities)} entities")
         except fkp.InvariantError as exc:
@@ -1436,6 +1501,7 @@ def s_write_layout(ctx, args):
     if ctx.surface_lay is not None:
         path = os.path.join(ctx.root, f"{ctx.surface.name}.fkp")
         try:
+            _keep_prior(ctx, path, fkp.dumps(ctx.surface_lay, ctx.cat))
             fkp.save(ctx.surface_lay, path, ctx.cat)
             lines.append(f"wrote {os.path.basename(path)}: {len(ctx.surface_lay.plots)} plots")
         except fkp.InvariantError as exc:
