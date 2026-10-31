@@ -1,4 +1,4 @@
-# Toolkit 2.1.x: cells within cells
+# Toolkit 2.1.12: cells within cells, and the last cell of a line
 
 Draft for the "cells within cells" phase of `assessment-20261031\PLAN-2.1.md` ("E. Cells within
 cells"); the integrator gives the number.
