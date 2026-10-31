@@ -17,6 +17,8 @@ use the game link, and only with FK_LINK=on)
     layout FILE.fk [--render]             expand placed instances into FILE.fkp (the writer
                                           refuses a layout that breaks an invariant)
     explain FILE.fk INST                  one instance as a template and as entities and nets
+    explain FILE.fk NET                   one net: its items, its ends, its buffers, and what
+                                          limits it (limited "...")
     unfold FILE.fk INST                   INST becomes a Literal; .fk and .fkp rewritten, keys kept
     render FILE.fkp                       ASCII of a factory layout
     build SCRIPT.fkb [--from STEP] [--to STEP]   (STEP:K for the K-th time a step runs)
@@ -641,7 +643,11 @@ def _capture(a, cat):
                 raise capture.CaptureError(f"no layout {fkp_path} (run a build to write_layout "
                                            "first, or name one with --fkp)")
             rows = capture.from_design(fkp.load(fkp_path), cat, path)
-            capture.write(dest, {"entities": rows, "from": f"design {path} of {fkp_path}"})
+            data = {"entities": rows, "from": f"design {path} of {fkp_path}"}
+            named = capture.names([row["name"] for row in rows], cat)
+            if named:
+                data["names"] = named
+            capture.write(dest, data)
             names = {}
             for row in rows:
                 names[row["name"]] = names.get(row["name"], 0) + 1
@@ -664,12 +670,19 @@ def _capture(a, cat):
                     force, surface = _force_surface(a.game)
                 got = capture.from_game(r, surface, force, area)
             n, names = got["n"], got.get("names") or {}
-            capture.write(dest, {"bp": got["bp"], "from": f"{a.source} {a.what} on {surface}"})
+            data = {"bp": got["bp"], "from": f"{a.source} {a.what} on {surface}"}
+            named = capture.names_of_bp(got["bp"], cat)
+            if named:
+                data["names"] = named
+            capture.write(dest, data)
     except (capture.CaptureError, link.LinkError, surfacemod.SurfaceError, OSError) as exc:
         print(f"error: capture: {exc}", file=sys.stderr)
         return 2
     rel = os.path.relpath(dest, a.game).replace(os.sep, "/")
     print(f"capture: {n} entities into {rel}: {capture.summary(names)}")
+    if named:
+        print(f"  names: {capture.name_span(named)}: a net ends on one as X.asm1 when the Literal "
+              "is X")
     print(f'  use it anywhere, a module included:  X = Literal<file="{rel}"> @(x, y)'
           f"   (or fk sim place game\\{rel.replace('/', chr(92))} @X,Y)")
     return 0
@@ -1450,6 +1463,10 @@ def main(argv=None):
             if a.render:
                 print(_render(lay, cat))
             return 0
+        net = a.inst.replace(".", "/")
+        if a.cmd == "explain" and a.inst not in flat.insts and net in flat.nets:
+            print(expand.explain_net(flat, net))      # 2.1: a net, and what limits it
+            return 0
         if a.inst not in flat.insts:
             print(f"error: no instance {a.inst}", file=sys.stderr)
             return 2
@@ -1470,6 +1487,9 @@ def main(argv=None):
               f"{len(flat.checks)} check lines")
         for line in flat.checks:
             print(f"  {line}")
+        from .elaborate import advice
+        for line in advice(flat):
+            print(f"  advice {line}")
         return 0
     if a.cmd == "contract":
         from . import contract as contractmod

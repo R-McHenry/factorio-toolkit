@@ -411,12 +411,28 @@ def chest(params, cat):
     2.0: ``max`` (a requester) is the request's upper bound, as the starter plant's requester asks
     for 20 cells and takes at most 50; ``plain`` is a chest off the logistic network (an iron
     chest unless ``chest=`` says otherwise): robots neither fill nor empty it.
+
+    2.1, ``hold`` (the buffer role, PLAN-2.1 G): a chest one net fills and another drains. The
+    model takes it as an unlimited supply of what it holds downstream and an unlimited sink
+    upstream (``source`` and ``sink`` both, ``extra["buffer"]``), and reports its derivative.
+    What it holds is ``item=`` (``a|b`` for several), else what the nets into it carry
+    (``elaborate`` fills ``makes`` in). Off the logistic network: ``plain`` is its only role.
+    ``bar=`` is the game's word for ``limit=``. ``Buffer<chest=steel-chest, bar=N>`` is this
+    chest (``elaborate.CORE_KINDS``).
     """
     roles = [r for r in _CHEST if params.get(r) is True]
     if len(roles) > 1:
         raise TemplateError("one role only: " + ", ".join(roles))
     role = roles[0] if roles else "provider"
-    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "max", "limit", "trash"))
+    _only(params, tuple(_CHEST) + ("item", "rate", "chest", "request", "max", "limit", "trash",
+                                   "hold", "bar"))
+    if params.get("bar") is not None:
+        if params.get("limit") is not None:
+            raise TemplateError("bar= and limit= are one setting (the chest's inventory bar): "
+                                "write one")
+        params = dict(params, limit=params["bar"])
+    if params.get("hold") not in (None, False):
+        return [_hold_chest(params, roles)]
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
     limit = _int(params, "limit") if params.get("limit") is not None else None
@@ -440,6 +456,31 @@ def chest(params, cat):
     if limit is not None:
         extra["limit"] = limit
     return [MSpec("c0", proto, None, {}, {}, takes, sink=True, drain=rate, extra=extra)]
+
+
+def _hold_chest(params, roles):
+    """``Chest<plain, hold, ...>`` (2.1): a buffer, off the logistic network."""
+    if params.get("hold") is not True:
+        raise TemplateError(f"hold is a flag (<hold>), got hold={params['hold']!r}")
+    if roles not in ([], ["plain"]):
+        raise TemplateError(f"hold: a buffer is a plain chest, off the logistic network, not "
+                            f"{roles[0]} (robots would fill or empty it)")
+    for bad in ("rate", "request", "max", "trash"):
+        if params.get(bad) is not None:
+            raise TemplateError(f"hold: a buffer takes chest=, item= and bar=, not {bad}=")
+    proto = _word(params, "chest", _CHEST["plain"])
+    items = params.get("item")
+    if items is None:
+        items = []
+    elif isinstance(items, list):
+        items = [str(i) for i in items]
+    else:
+        items = [i.strip() for i in str(items).split(",") if i.strip()]
+    extra = {"role": "plain", "buffer": True}
+    if params.get("limit") is not None:
+        extra["limit"] = _int(params, "limit")
+    return MSpec("c0", proto, None, {}, {i: INF for i in items},
+                 frozenset(items) if items else None, sink=True, source=True, extra=extra)
 
 
 def turret_row(params, cat):

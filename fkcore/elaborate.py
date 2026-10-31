@@ -89,6 +89,7 @@ class FlatNet:
     scope: str = ""            # the path of the body it is written in (2.0.28)
     width: int = 1             # 2.0.54, `net NAME width 2:` both lanes of one belt
     lane: str | None = None    # 2.0.54, `net NAME lane L:` its lane where it ends on a belt
+    why: str | None = None     # 2.1, `net NAME limited "...":` what limits it, as written
 
     @property
     def sushi(self):
@@ -197,6 +198,11 @@ class Flat:
     stack_ends: set = field(default_factory=set)    # port keys a stack leaves open: dead ends
     #: 2.0.63, do not populate: the instance paths that are DNP (each with all it holds)
     dnp: set = field(default_factory=set)
+    #: 2.1, the buffers: instance path -> "chest" (a Buffer, a Chest<hold>) or "module" (an
+    #: instance of a `module NAME buffer`)
+    buffers: dict = field(default_factory=dict)
+    #: 2.1, a Literal's names (its file's "names"): instance path -> {name: machine key}
+    literal_names: dict = field(default_factory=dict)
 
     def is_dnp(self, key):
         """A machine key or instance path inside a DNP instance (2.0.63)."""
@@ -282,6 +288,24 @@ def _join(*parts):
 #: what every instance takes besides its kind's own parameters: its share of full speed, and
 #: 2.0.63's do-not-populate flag
 META = ("duty", "dnp")
+
+#: 2.1, core kinds that are another kind with some parameters set: NAME -> (kind, its defaults,
+#: the parameters NAME takes). An instance's own parameters win. This is what the prelude's
+#: ``kind Buffer = Chest<plain, hold, chest=steel-chest>`` will say (PLAN-2.1 B and I); until
+#: ``kind`` lands, the table says it, and the instance is that kind (``Chest``) from here on.
+CORE_KINDS = {"Buffer": ("Chest", {"plain": True, "hold": True, "chest": "steel-chest"},
+                         ("chest", "bar", "item"))}
+
+
+def _core_kind(inst, path, src):
+    """``inst`` as the kind a CORE_KINDS name stands for (2.1)."""
+    base, defaults, takes = CORE_KINDS[inst.kind]
+    extra = sorted(set(inst.params) - set(takes) - set(META))
+    if extra:
+        raise ElabError(src, inst.line, f"{path} = {inst.kind}: takes "
+                        f"{', '.join(k + '=' for k in takes)} duty= and dnp, not "
+                        f"{', '.join(extra)}")
+    return dataclasses.replace(inst, kind=base, params=dict(defaults, **inst.params))
 
 
 def _dnp(params, path, line, src):
@@ -399,6 +423,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             d = 0.0
             flat.dnp.add(path)
         stacked, stack_auto = None, None
+        if inst.kind in CORE_KINDS and inst.kind not in modules:
+            inst = _core_kind(inst, path, src)
         if inst.kind == "Stack":
             # 2.0.48: a line of cells, built as a module of its own (its head, its cells, the nets
             # between them) and expanded like any module instance
@@ -424,6 +450,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,),
                     dn)
             keys = [k for k in flat.machines if k not in before and k not in flat.ports]
+            if getattr(modules[inst.kind], "buffer", False):
+                _buffer_module(flat, modules[inst.kind], path, inst, src)
             # 2.0.43 (PLAN-GLOBAL phase B): an instance line's own `size WxH` is the frame a plot
             # gets from its placement, and it seals the instance as the module's own `size` does
             size = getattr(inst, "size", None) or modules[inst.kind].size
@@ -466,6 +494,10 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                     m.extra["dnp"] = True
                 flat.machines[m.key] = m
                 keys.append(m.key)
+            if inst.kind == "Chest" and any(flat.machines[k].extra.get("buffer") for k in keys):
+                flat.buffers[path] = "chest"
+            if imported is not None and path in getattr(flat, "_lit_names", {}):
+                _literal_names(flat, path, imported, keys, inst, src)
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
                         inst.line, imported, conns=inst.conns)
             if auto is not None:
@@ -613,8 +645,40 @@ def _choose(flat, mod, inst, path, params, cat, src):
     return picked
 
 
+def _buffer_module(flat, mod, path, inst, src):
+    """An instance of ``module NAME buffer`` (2.1): its ports are the buffer's ends. The model
+    takes each in port as an unlimited sink and each out port as an unlimited supply of its items
+    (``fkcore.rates``), on the nets outside; inside, it is what the designer chose."""
+    ports = [k for k, p in flat.ports.items() if p.scope == path]
+    if not ports:
+        raise ElabError(src, inst.line, f"{path} = {inst.kind}: module {inst.kind} is a buffer, "
+                                        "and a buffer's ends are its ports: declare them (`port "
+                                        "NAME : in ITEM @SIDE`, and one out)")
+    for key in ports:
+        flat.machines[key].extra["buffer"] = path
+    flat.buffers[path] = "module"
+
+
+def _literal_names(flat, path, imported, keys, inst, src):
+    """A Literal's ``names`` (2.1, PLAN-2.1 H): ``{name: entity key}`` from its file, each name of
+    a machine a net end like any machine's (``automall.asm10``). A name of an entity that is no
+    machine of the netlist (a belt, a pole, a crafter without a recipe, a chest without a role) is
+    kept apart, so a ref to it is refused with what it names."""
+    names, other = {}, {}
+    for name, ekey in flat._lit_names[path].items():
+        if ekey in keys:
+            names[name] = ekey
+        else:
+            other[name] = next((e.name for e in imported[0] if e.key == ekey), "?")
+    flat.literal_names[path] = names
+    if other:
+        flat._lit_other = getattr(flat, "_lit_other", {})
+        flat._lit_other[path] = other
+
+
 def _literal_entities(flat, path, params, cat, src):
-    """A Literal's entities: imported from ``file=`` (-> the import tuple), else pinned in the .fkp."""
+    """A Literal's entities: imported from ``file=`` (-> the import tuple), else pinned in the .fkp.
+    2.1: the file's ``names`` ({name: entity key}) go to ``flat._lit_names[path]``."""
     from . import literal
     extra = sorted(set(params) - {"file", "box"})
     if extra:
@@ -623,8 +687,13 @@ def _literal_entities(flat, path, params, cat, src):
         try:
             ents, size, origin = literal.import_entities(literal.resolve(src, params["file"]),
                                                          path, cat, params.get("box"))
+            names = literal.names_of(literal.resolve(src, params["file"]), ents,
+                                     params.get("box"))
         except (literal.LiteralError, OSError) as exc:
             raise TemplateError(str(exc)) from None
+        if names:
+            flat._lit_names = getattr(flat, "_lit_names", {})
+            flat._lit_names[path] = names
         return ents, size, origin, literal.signature(ents, size)
     if flat._layout is None:
         raise TemplateError("a Literal without file= needs the factory's .fkp")
@@ -729,6 +798,14 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
         key = _join(node.path, part)
         if node.scope is None and key in flat.machines:
             return None, [key]
+        named = flat.literal_names.get(node.path) if node.scope is None else None
+        if named and part in named and used == len(ref.parts) - 1 and not ref.star:
+            return None, [named[part]]      # 2.1: a Literal's name for one of its machines
+        other = getattr(flat, "_lit_other", {}).get(node.path, {})
+        if node.scope is None and part in other:
+            raise ElabError(src, ref.line, f"{ref}: {part} names a {other[part]} of Literal "
+                            f"{node.path}, which is no machine of the netlist (a crafter with a "
+                            "recipe, a drill, a lab, a chest with a role)")
         return None, []
     if node.path in flat.sealed:
         return _sealed_ref(flat, node, ref, used, items, side, src)
@@ -1090,6 +1167,7 @@ def _resolve_nets(flat, cat):
     for name, p in pending:
         work[name] = {"items": list(p.net.items) if p.net.items else _fluids_taken(flat, p, cat),
                       "drivers": [], "consumers": []}
+    _buffer_items(flat, pending, cat)
 
     def add_drivers(name, p, ref, free_only):
         w = work[name]
@@ -1174,8 +1252,50 @@ def _resolve_nets(flat, cat):
                                   p.net.items is not None, p.net.line,
                                   getattr(p.net, "limited", False),
                                   None if when is None else (when, p.scope), p.scope,
-                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None))
+                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None),
+                                  getattr(p.net, "why", None))
     flat._out_hold, flat._in_hold = out_hold, in_hold
+
+
+def _buffer_items(flat, pending, cat):
+    """What each buffer chest without ``item=`` holds (2.1): the items of the nets into it, their
+    declared items or what their drivers make (another buffer's, once it is known), so a buffer
+    drives what it is filled with ("driver gbuf makes no electronic-circuit" was a plain chest in
+    the middle, 20261030-2352). Explicit refs only; a fluid stays out (a chest holds none)."""
+    bufs = {k for k, m in flat.machines.items()
+            if m.extra.get("buffer") is True and m.source and not m.makes}
+    if not bufs:
+        return
+
+    def keys_of(p, refs, side):
+        out = []
+        for ref in refs:
+            if ref.star:
+                continue
+            try:
+                out += _resolve(flat, ref, p.scope, items=p.net.items, side=side, src=p.src)[1]
+            except ElabError:
+                continue                # the main pass reports it
+        return out
+    for _round in range(len(bufs) + 1):
+        changed = False
+        for _name, p in pending:
+            into = [k for k in keys_of(p, p.net.consumers, "consumer") if k in bufs]
+            if not into:
+                continue
+            if p.net.items:
+                items = list(p.net.items)
+            else:
+                items = [i for k in keys_of(p, p.net.drivers, "driver")
+                         for i in flat.machines[k].makes if k in flat.machines]
+            for k in into:
+                m = flat.machines[k]
+                for item in dict.fromkeys(items):
+                    if item not in m.makes and not cat.is_fluid(item):
+                        m.makes[item] = float("inf")
+                        changed = True
+        if not changed:
+            break
 
 
 def _bus_nets(flat):
@@ -1239,7 +1359,7 @@ def _split_nets(flat, cat):
                 for end in ends:
                     hold[end] = [sub if n == name else n for n in hold.get(end, [])]
             flat.nets[sub] = FlatNet(sub, [item], drivers, consumers, True, net.line, net.limited,
-                                     net.when, net.scope)
+                                     net.when, net.scope, why=net.why)
             subs.append(sub)
         del flat.nets[name]
         flat.split[name] = subs
@@ -1322,7 +1442,24 @@ def _group(rows):
 _STORES = ("provider", "storage")
 #: the 1.1 check lines about limited production, and 2.0.1's UNDERFED (a rate fact about the
 #: design): advice that tests of other things, and fk stage check's list, leave out
-ADVICE = ("CLOG", "no-limit", "SHARED_SINK", "SUSHI_LIMIT", "short-feed", "could-pair")
+ADVICE = ("CLOG", "no-limit", "SHARED_SINK", "SUSHI_LIMIT", "short-feed", "could-pair",
+          "limited")
+
+
+def advice(flat):
+    """``fk check``'s advice voice (2.1), lines that are not checks of the design and leave the
+    netlist's own check lines as they were: a bare ``limited`` on a sushi net is asked what
+    limits it (``limited-why``)."""
+    out = []
+    for name, net in flat.nets.items():
+        if net.sushi and net.limited and not getattr(net, "why", None) \
+                and net.drivers and net.consumers:
+            out.append(Check("limited-why", f"net {name}",
+                             "limited says something limits what goes on it: say what, so a "
+                             "reader sees it where CLOG would be (`net "
+                             f"{name.rsplit('/', 1)[-1]} limited \"the end buffer gates the "
+                             "sources\":`)", net.line))
+    return out
 #: chests that take any item that reaches them
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
 
@@ -1372,11 +1509,19 @@ def _clog_checks(flat, in_hold, fed):
 
     A net written ``limited`` (1.7) says the source limits each of its makers: no ``CLOG`` and
     no ``no-limit`` for it. It only silences them; no tool can tell whether a source is limited.
+
+    2.1 (Rory, 2026-10-31: no sushi clog model): ``limited "..."`` says what limits it, and that
+    string is the ``limited`` line where ``CLOG`` would have been, so a reader sees the mechanism.
+    A bare ``limited`` builds as before, with no line of its own (old files check unchanged);
+    ``fk check``'s advice (``advice``) asks for the string.
+    A buffer chest a limited sushi net fills draws no ``SUSHI_LIMIT``: the limit is the design's.
     """
     sushi_in = {}                          # chest key -> the mixed nets of makers it takes
     for name, net in flat.nets.items():
         made = any(not flat.machines[k].extra.get("port")
                    and flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
+        if net.limited and getattr(net, "why", None):
+            flat.checks.append(Check("limited", f"net {name}", net.why, net.line))
         if net.sushi and net.drivers and net.consumers and not net.limited:
             flat.checks.append(Check(
                 "CLOG", f"net {name}",
@@ -1394,6 +1539,8 @@ def _clog_checks(flat, in_hold, fed):
                 sushi_in.setdefault(k, set()).add(name)
     for key in sorted(sushi_in, key=lambda k: flat.machines[k].inst):
         m = flat.machines[key]
+        if m.extra.get("buffer") and all(flat.nets[n].limited for n in sushi_in[key]):
+            continue
         if m.extra.get("limit") is not None:
             nets = sorted(sushi_in[key])
             flat.checks.append(Check(
@@ -1641,8 +1788,8 @@ def _endpoint_checks(flat, cat):
         if m.sink and key not in fed and cat.kind(m.prototype) != "roboport":
             unfed.append((m.inst, "anything", key))
         for item in m.makes:
-            if (key, item) not in out_hold:
-                unconsumed.append((m.inst, item, key))
+            if (key, item) not in out_hold and not m.extra.get("buffer"):
+                unconsumed.append((m.inst, item, key))     # 2.1: a buffer may only fill
     for inst, item, n in _group(unfed):
         flat.checks.append(Check("no-feed", inst, f"{item} has no net"
                                  + (f" ({n} machines)" if n > 1 else "")))
@@ -1669,7 +1816,7 @@ def _endpoint_checks(flat, cat):
     seen = set()
     driving = {key for key, _item in out_hold}
     for key, m in flat.machines.items():
-        if m.source and m.inst not in seen and key in driving:
+        if m.source and m.inst not in seen and key in driving and not m.extra.get("buffer"):
             seen.add(m.inst)
             item = next(iter(m.makes))
             nets = out_hold.get((key, item)) or []
