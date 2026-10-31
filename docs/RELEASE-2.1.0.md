@@ -1,4 +1,4 @@
-# Toolkit 2.1 (run stats, planned as 2.1.1): every run records its own history
+# Toolkit 2.1.0: every run records its own history (run stats)
 
 Rory, 2026-10-31: every new run records its own history from the first minute, whatever the
 player does. Capital and reinvestment, items and fluids made and used, power made per generator
