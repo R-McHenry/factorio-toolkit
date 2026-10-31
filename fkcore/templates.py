@@ -21,7 +21,7 @@ from .catalog import FUEL_USE_W, FUEL_VALUE_J, HEAT_W, MINING_TIME, REACTOR_FUEL
 from .fragments import FragmentError, bus_check, bus_ports
 
 __all__ = ["MSpec", "TemplateError", "TEMPLATES", "COMMON_PARAMS", "CIRCUIT_PARAMS", "CONTACT",
-           "machines", "science_packs", "literal_machines"]
+           "SINGLE", "CRAFTERS", "machines", "science_packs", "literal_machines", "fluid_misfit"]
 
 INF = float("inf")
 
@@ -133,11 +133,100 @@ def asm_row(params, cat):
     return [_crafter(cat, f"m{k}", machine, recipe) for k in range(n)]
 
 
-def assembler(params, cat):
-    """``Assembler<recipe, machine=assembling-machine-1>``: one machine."""
-    _only(params, ("recipe", "machine"))
-    return [_crafter(cat, "m0", _word(params, "machine", "assembling-machine-1"),
-                     _word(params, "recipe"))]
+#: 2.1, the entity types ``Machine`` takes: everything that crafts a recipe
+CRAFTERS = ("assembling-machine", "furnace")
+
+
+def machine(params, cat):
+    """``Machine<entity, recipe, ore=, fuel=coal>`` (2.1, PLAN-2.1 "A. Machine"): one machine of any
+    crafting entity in the catalog (assemblers, furnaces, the chemical plant, the refinery, the
+    centrifuge). ``machine=`` is ``entity=`` by another name. ``recipe`` is required, except that a
+    furnace may take ``ore=`` (the recipe that smelts it). A burner takes ``fuel=`` (default
+    coal); an electric machine ignores it. A recipe with a fluid the entity has no fluid box for
+    is refused (``no-fluidbox``): the machine would never run. ``Assembler``, ``Furnace``,
+    ``ChemPlant`` and ``Refinery`` are kinds of it, in the prelude."""
+    _only(params, ("entity", "machine", "recipe", "ore", "fuel"))
+    if "entity" in params and "machine" in params:
+        raise TemplateError("entity= and machine= are one parameter: give one")
+    entity = _word(params, "entity" if "entity" in params else "machine") \
+        if ("entity" in params or "machine" in params) else None
+    if entity is None:
+        raise TemplateError("needs entity= (the machine: assembling-machine-2, centrifuge, ...)")
+    if not cat.has_entity(entity):
+        raise TemplateError(f"unknown entity {entity}: the catalog has no such building")
+    if cat.kind(entity) not in CRAFTERS:
+        raise TemplateError(f"{entity} is a {cat.kind(entity)}, not a crafting machine: a Machine "
+                            f"is an assembling-machine or a furnace (Entity<name={entity}> places "
+                            "any other building)")
+    if "recipe" in params:
+        recipe = _word(params, "recipe")
+    elif "ore" in params:
+        if cat.kind(entity) != "furnace":
+            raise TemplateError(f"ore= picks a smelting recipe, and {entity} is not a furnace: "
+                                "give recipe=")
+        recipe = _smelt_recipe(params, cat)
+    else:
+        raise TemplateError("needs recipe=" + (" (or ore=)" if cat.kind(entity) == "furnace"
+                                               else ""))
+    fuel = _word(params, "fuel", "coal") if entity in FUEL_USE_W else None
+    spec = _crafter(cat, "m0", entity, recipe, fuel)
+    no_fluidbox(cat, entity, recipe)
+    return [spec]
+
+
+def fluid_box_counts(cat, entity):
+    """(input boxes, output boxes) of ``entity`` as the game reads them (``fluidboxes.json``)."""
+    boxes = cat.fluid_boxes(entity)
+    ins = sum(1 for b in boxes if b.get("production") == "input")
+    outs = sum(1 for b in boxes if b.get("production") == "output")
+    return ins, outs
+
+
+def fluid_misfit(cat, entity, recipe):
+    """Why ``entity`` can't run ``recipe`` for want of fluid boxes, or None (2.1)."""
+    if not cat.has_recipe(recipe) or not (getattr(cat, "_fluid", None) or {}).get("entities"):
+        return None                     # a catalog without the game's fluid boxes can't tell
+    r = cat.recipe(recipe)
+    fin = sorted({i["name"] for i in r.get("ingredients") or () if i.get("type") == "fluid"})
+    fout = sorted({p["name"] for p in r.get("products") or () if p.get("type") == "fluid"})
+    if not fin and not fout:
+        return None
+    ins, outs = fluid_box_counts(cat, entity)
+    if len(fin) > ins or len(fout) > outs:
+        what = ", ".join(fin + fout)
+        has = ("no fluid box" if not ins + outs else
+               f"{ins} input and {outs} output fluid box{'es' if ins + outs > 1 else ''}")
+        return (f"no-fluidbox: {recipe} takes or makes {what}, and {entity} has {has} for it, so "
+                "it would never run. Pick a machine with the boxes (assembling-machine-2, "
+                "chemical-plant, ...)")
+    return None
+
+
+def no_fluidbox(cat, entity, recipe):
+    msg = fluid_misfit(cat, entity, recipe)
+    if msg:
+        raise TemplateError(msg)
+
+
+#: 2.1: the types ``Entity`` leaves to their own kinds: what crafts, and what carries items or
+#: fluids (the router lays those)
+_NOT_ENTITY = {"assembling-machine": "Machine<entity={0}, recipe=...>",
+               "furnace": "Machine<entity={0}, recipe=...>"}
+
+
+def entity_(params, cat):
+    """``Entity<name=...>`` (2.1, PLAN-2.1 "Circuits that reach any building"): one building that
+    isn't a crafter (a lamp, a speaker, a display panel, a pump, a train stop, a beacon): placed,
+    powered and wireable, and in no item flow. Its size, circuit connectors and power use come
+    from the catalog."""
+    _only(params, ("name",))
+    name = _word(params, "name")
+    if not cat.has_entity(name):
+        raise TemplateError(f"unknown entity {name}: the catalog has no such building")
+    use = _NOT_ENTITY.get(cat.kind(name))
+    if use:
+        raise TemplateError(f"{name} crafts: write {use.format(name)}")
+    return [MSpec("m0", name, None, {}, {}, frozenset(), extra={"entity": True})]
 
 
 def _smelt_recipe(params, cat):
@@ -200,14 +289,6 @@ def circuit_stack(params, cat):
     return out
 
 
-def furnace(params, cat):
-    """``Furnace<recipe | ore, fuel=coal, machine=stone-furnace>``: one furnace."""
-    _only(params, ("recipe", "ore", "fuel", "machine"))
-    machine = _word(params, "machine", "stone-furnace")
-    fuel = _word(params, "fuel", "coal") if machine in FUEL_USE_W else None
-    return [_crafter(cat, "m0", machine, _smelt_recipe(params, cat), fuel)]
-
-
 def miner_row(params, cat):
     """``MinerRow<n, resource, drill=electric-mining-drill, fuel=coal>``: n drills on a patch."""
     _only(params, ("n", "resource", "drill", "fuel"))
@@ -246,19 +327,6 @@ def offshore_pump(params, cat):
     _only(params, ("rate",))
     return [MSpec("m0", "offshore-pump", None, {}, {"water": _rate(params, "rate", 1200.0)},
                   frozenset())]
-
-
-def refinery(params, cat):
-    """``Refinery<recipe=basic-oil-processing>``."""
-    _only(params, ("recipe",))
-    return [_crafter(cat, "m0", "oil-refinery", _word(params, "recipe", "basic-oil-processing"))]
-
-
-def chem_plant(params, cat):
-    """``ChemPlant<recipe, n=1>``."""
-    _only(params, ("recipe", "n"))
-    recipe = _word(params, "recipe")
-    return [_crafter(cat, f"m{k}", "chemical-plant", recipe) for k in range(_int(params, "n", 1))]
 
 
 def boiler(params, cat):
@@ -418,7 +486,7 @@ def chest(params, cat):
     What it holds is ``item=`` (``a|b`` for several), else what the nets into it carry
     (``elaborate`` fills ``makes`` in). Off the logistic network: ``plain`` is its only role.
     ``bar=`` is the game's word for ``limit=``. ``Buffer<chest=steel-chest, bar=N>`` is this
-    chest (``elaborate.CORE_KINDS``).
+    chest (the prelude's ``kind Buffer = Chest<plain, hold, chest=steel-chest>``).
     """
     roles = [r for r in _CHEST if params.get(r) is True]
     if len(roles) > 1:
@@ -542,17 +610,17 @@ def bus(params, cat):
     return out
 
 
+#: the core kinds (2.1). ``Assembler``, ``Furnace``, ``ChemPlant`` and ``Refinery`` are kinds of
+#: ``Machine`` in the prelude (``fkcore/prelude.fk``)
 TEMPLATES = {
+    "Machine": machine,
+    "Entity": entity_,
     "AsmRow": asm_row,
-    "Assembler": assembler,
     "SmelterRow": smelter_row,
     "SmelterArray": smelter_array,
-    "Furnace": furnace,
     "MinerRow": miner_row,
     "Pumpjack": pumpjack,
     "OffshorePump": offshore_pump,
-    "Refinery": refinery,
-    "ChemPlant": chem_plant,
     "Boiler": boiler,
     "SteamEngine": steam_engine,
     "SteamTurbine": steam_turbine,
@@ -569,6 +637,12 @@ TEMPLATES = {
     "Bus": bus,
     "CircuitStack": circuit_stack,
 }
+#: the core kinds that are one machine each, placed where written: the router lays their belts,
+#: pipes and inserters, and every net of the machine gets a role of its own (2.1: one list for
+#: ``expand`` and ``elaborate``; a kind resolves to one of these or not)
+SINGLE = ("Machine", "Entity", "Chest", "Pumpjack", "OffshorePump", "Pole", "Boiler",
+          "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger", "SteamTurbine",
+          "Constant", "Roboport")
 
 
 def literal_machines(entities, cat):

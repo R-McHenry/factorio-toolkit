@@ -308,12 +308,14 @@ class _Resolver:
             if inst.module is not None or not inst.machines:
                 continue
             scope = path.rsplit("/", 1)[0] if "/" in path else ""
-            p = inst.params
-            if inst.kind == "Reactor" and p.get("read") == "temperature":
+            # 2.1: a kind's instance reads as its core kind, with the kinds' defaults
+            p = getattr(inst, "kparams", None) or inst.params
+            core = getattr(inst, "core", None) or inst.kind
+            if core == "Reactor" and p.get("read") == "temperature":
                 sig = self.game(str(p.get("signal", "signal-T")), scope, path, inst.line)
                 for key in inst.machines:
                     self.c.settings.setdefault(key, {}).update(read="temperature", signal=sig)
-            if inst.kind == "Constant" and p.get("signals") is not None:
+            if core == "Constant" and p.get("signals") is not None:
                 rows = self.constant(str(p["signals"]), scope, path, inst.line)
                 for key in inst.machines:
                     self.c.settings.setdefault(key, {})["signals"] = "|".join(

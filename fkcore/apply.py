@@ -50,6 +50,24 @@ south iron array (2026-10-22) stood on the burner iron block it replaced: 25 of 
 and one inserter were on the array's tiles under the same names, and every build left them
 facing the old block's ways, so ore and coal stopped at them.
 
+Settings changed in place (2.1, Rory 2026-10-31): a change to a standing entity costs no robot
+trip where the game allows it. Each change is one of:
+
+- written in place: the codec writes every setting a paste would otherwise leave (``codec``:
+  measured on a laptop server), so new settings, or a hand edit set back, are just the paste;
+- upgraded: an entity of another name on a design entity's position, in the same fast-replace
+  group and of the same size (inserter tiers but not the long-handed one, assembler 1-2-3, belt,
+  underground and splitter tiers, every chest to every chest, stone to steel furnace, small to
+  medium pole), is ordered up to the design's (``_upgrade``, before the paste) and robots swap
+  it: its settings (the paste writes the design's on it), wires and contents stay;
+- laid fresh: what the game can't change in place (another size or group, a turned one, a
+  carrier under another net, a ghost, a drill's or an offshore pump's settings) is ordered out
+  and the paste lays it new.
+
+The report names each change and why (``changes``). Then the wire pass (``fkcore.wires``) adds the
+design's missing wires and cuts the ones between design entities that the design doesn't have:
+one count line. It runs after every paste (and ``fk wait built`` runs it once robots are done).
+
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
 (or a lab revive) it is all ``ok``, which is 1:1. Nothing here registers anything; every game
 call is one RCON command with the link's 5 s timeout.
@@ -72,6 +90,7 @@ from dataclasses import dataclass, field
 from . import codec, link, scene, sense
 from . import own as ownmod
 from . import settings as settingsmod
+from . import wires as wiresmod
 from .fkp import natural_key
 
 __all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
@@ -105,10 +124,15 @@ class ApplyReport:
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
+    released: dict = field(default_factory=dict)  # roboports not held, and why (2.1.3)
     hand: list = field(default_factory=list)   # placed by hand, replaced or removed (2.0)
     turned: list = field(default_factory=list)  # keys found turned, ordered out, laid fresh (2.0.5)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
-    resettled: list = field(default_factory=list)  # laid fresh for new circuit settings (2.0)
+    resettled: list = field(default_factory=list)  # laid fresh for new settings a paste can't write
+    written: list = field(default_factory=list)    # (key, why): settings the paste writes in place
+    upgraded: list = field(default_factory=list)   # (key, old name, new name): robots swap it
+    fresh: list = field(default_factory=list)      # (key, why): laid fresh, and why (2.1)
+    wires: object = None               # the wire pass (``fkcore.wires.Pass``)
     own: dict | None = None            # the record of what the applies pasted, after this one
     dnp_kept: int = 0                  # built on DNP entities, kept standing (2.0.63)
     dnp_taken: int = 0                 # on DNP entities, ordered out: ghosts, and --confirm
@@ -142,6 +166,9 @@ class ApplyReport:
                 out.append(f"  scaffold: {self.held} old poles and roboports stay up until the "
                            "design's own stand here, so power and robots keep running; the "
                            "first apply after that takes them up")
+            for why, n in sorted(self.released.items()):
+                out.append(f"  scaffold: {n} old roboport{'s' if n != 1 else ''} ordered out "
+                           f"now, {why}")
             if self.hand:
                 out.append(f"  by-hand: {len(self.hand)} placed by hand, replaced or removed by "
                            "this build (adopt into the design, leave out, or come back to it):")
@@ -151,8 +178,10 @@ class ApplyReport:
             out.append(f"  {len(self.relaid)} carriers laid under another net held "
                        f"{', '.join(items)}: ordered up, and the paste lays them fresh")
         if self.resettled:
-            out.append(f"  {len(self.resettled)} with new circuit settings (a limit, a condition, a "
-                       "wire): ordered up, and the paste lays them fresh with the new ones")
+            out.append(f"  {len(self.resettled)} with new settings a paste can't write (a ghost, "
+                       "a drill, an offshore pump): ordered out, and the paste lays them fresh "
+                       "with the new ones")
+        out += self.change_lines()
         if self.turned:
             shown = ", ".join(k.split(":", 1)[-1] for k in self.turned[:6])
             out.append(f"  re-laid {len(self.turned)} stood on their design tiles facing another way "
@@ -168,9 +197,34 @@ class ApplyReport:
                        + ", ".join(f"{k} x{n}" for k, n in sorted(self.alone_missed.items())))
         if self.misplaced:
             out.append(f"  not-where-designed {self.misplaced} ghosts are not where the design says")
+        line = self.wires.line() if self.wires is not None else None
+        if line:
+            out.append(f"  {line}")
         out += [f"  {n}" for n in self.notes]
         out.append(f"  {self.seconds:.1f} s")
         return out
+
+    def change_lines(self, most=8):
+        """How each change to a standing entity goes (2.1): written in place, upgraded, or laid
+        fresh, and why; at most ``most`` named a kind."""
+        out = []
+        for word, rows, say in (
+                ("written in place", self.written, lambda c: f"{_local(c[0])} ({c[1]})"),
+                ("upgraded", self.upgraded, lambda c: f"{_local(c[0])} {c[1]} -> {c[2]}"),
+                ("laid fresh", self.fresh, lambda c: f"{_local(c[0])} ({c[1]})")):
+            if not rows:
+                continue
+            shown = "; ".join(say(c) for c in rows[:most])
+            more = f" and {len(rows) - most} more" if len(rows) > most else ""
+            tail = {"written in place": "the paste sets them on what stands",
+                    "upgraded": "robots swap them; settings, wires and contents stay",
+                    "laid fresh": "ordered out, and robots lay them new"}[word]
+            out.append(f"  {word} {len(rows)} ({tail}): {shown}{more}")
+        return out
+
+
+def _local(key):
+    return (key or "").split(":", 1)[-1]
 
 
 def force_for(mode):
@@ -220,12 +274,39 @@ def scope_area(rows, cat, margin=2):
     return (min(xs) - margin, min(ys) - margin, max(xs) + 1 + margin, max(ys) + 1 + margin)
 
 
-def paste_blueprint(rows, s, cat, description=None, label=None):
+def paste_blueprint(rows, s, cat, description=None, label=None, poles=None):
     """The blueprint an apply pastes: ``rows`` with their poles' copper wires (derived) and the
-    surface's circuit wires (2.0, its ``w`` records) whose ends are both among them."""
+    surface's circuit wires (2.0, its ``w`` records) whose ends are both among them. ``poles``:
+    the whole design's copper wires (:func:`design_poles`); without them, the rows' own."""
     return codec.blueprint(rows, description=description, label=label,
-                           wires=codec.pole_wires(rows, cat),
+                           wires=pole_wires(rows, s, cat, poles),
                            links=codec.links_of(rows, getattr(s, "wires", ())))
+
+
+def design_poles(s, cat):
+    """(the whole design's codec rows, the copper wires between their poles as row index pairs):
+    one spanning forest for the surface, so an apply of one plot lays the wires an apply of the
+    whole lays, and the wire pass never cuts one of them (2.1)."""
+    rows = scope_rows(s)
+    return rows, codec.pole_wires(rows, cat)
+
+
+def pole_wires(rows, s, cat, poles=None):
+    """[(i, j)] indices of ``rows``: the whole design's copper wires (``poles``, from
+    :func:`design_poles`) with both ends among them; with no ``poles``, ``codec.pole_wires`` over
+    the rows alone."""
+    if poles is None:
+        return codec.pole_wires(rows, cat)
+    full, edges = poles
+    index = {(r["name"], float(r["x"]), float(r["y"])): i for i, r in enumerate(rows)}
+    out = []
+    for i, j in edges:
+        a, b = full[i], full[j]
+        ka = index.get((a["name"], float(a["x"]), float(a["y"])))
+        kb = index.get((b["name"], float(b["x"]), float(b["y"])))
+        if ka is not None and kb is not None:
+            out.append((ka, kb))
+    return out
 
 
 def _anchor(rows, cat):
@@ -276,12 +357,12 @@ def turned_rows(rows, cap, cat):
     return out
 
 
-def single_ghosts(rows, s, cat, refused):
+def single_ghosts(rows, s, cat, refused, poles=None):
     """What :func:`link.ghosts` places for the rows at indices ``refused``: their blueprint
     entities, and the paste's wires with an end among them, each end as [name, x, y]."""
     alone = set(refused)
     entities = [codec.entity_json(rows[i], k + 1) for k, i in enumerate(refused)]
-    wires = codec.wire_list(rows, codec.pole_wires(rows, cat),
+    wires = codec.wire_list(rows, pole_wires(rows, s, cat, poles),
                             codec.links_of(rows, getattr(s, "wires", ())))
 
     def end(n):
@@ -327,17 +408,35 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.notes.append("nothing designed in this scope")
         return rep
     standing = []
+    poles = design_poles(s, cat)
+    upped = {}
     if mode != "lab" and policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own,
                       force=force, confirm=confirm)
         rep.dnp_kept = sum(1 for v in before.verdicts if v.verdict == "dnp-standing")
         rep.dnp_taken = sum(1 for v in before.verdicts if v.verdict == "unowned"
                             and v.key and v.detail.startswith(("DNP", "a ghost of a DNP")))
-        held = scaffold(before, s, cat, area)
+        stock = _scaffold_stock(r, s.name, force, before, cat)
+        held = scaffold(before, s, cat, area, stock)
+        rep.released = _released(before, s, cat, area, held)
         rep.hand = sense.hand_edits(before, held)
-        gone = [v for v in before.verdicts
-                if v.verdict == "unowned" and (v.name, v.x, v.y) not in held]
-        # the toolkit's own that still stand stay in the record: ordered out, or held up
+        # 2.1: another entity on a design entity's position goes up to it where the game allows
+        cands = upgrade_candidates(before, s)
+        why = _upgrade(r, s.name, force, cands)
+        for c in cands:
+            got = why.get((c["old"], c["x"], c["y"]))
+            if got == "up":
+                upped[(c["old"], c["x"], c["y"])] = c
+                rep.upgraded.append((c["key"], c["old"], c["new"]))
+            elif got in UPGRADE_WHY:
+                rep.fresh.append((c["key"], f"{c['old']} stood there, {UPGRADE_WHY[got]}"))
+        asked = {c["key"] for c in cands}
+        rep.fresh += [(v.key, f"{v.detail.replace(' stands there', '')} stood on its tiles")
+                      for v in before.verdicts if v.verdict == "other-entity"
+                      and v.key not in asked and any(not u[4] for u in v.under)]
+        gone = [v for v in before.verdicts if v.verdict == "unowned"
+                and (v.name, v.x, v.y) not in held and (v.name, v.x, v.y) not in upped]
+        # the toolkit's own that still stand stay in the record: ordered out, held up or upgrading
         standing = [ownmod.at(v.name, v.x, v.y) for v in before.verdicts
                     if v.verdict == "unowned" and v.action == "own"]
         rep.dropped = sum(1 for v in gone if v.action == "own")
@@ -348,10 +447,30 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.relaid = [v for v in before.verdicts if v.renet and v.wrong_items
                       and v.verdict in ("ok", "settings-changed")]
         _decon(r, s.name, force, [(v.name, v.x, v.y) for v in rep.relaid])
-        # 2.0: settings the design changed (the record shows what was pasted) are laid fresh
-        rep.resettled = [v for v in ownmod.resettled(own, s, before.verdicts)
-                         if v not in rep.relaid]
+        rep.fresh += [(v.key, f"held {', '.join(v.wrong_items)} under net {v.renet} before")
+                      for v in rep.relaid]
+        # 2.0: settings the design changed (the record shows what was pasted); 2.1: the paste
+        # writes them in place, but on a ghost (replaced at once) and where the game takes none
+        changed = [v for v in ownmod.resettled(own, s, before.verdicts) if v not in rep.relaid]
+        rep.resettled = [v for v in changed if v.verdict == "ghost" or _skips(v.name)]
         _decon(r, s.name, force, [(v.name, v.x, v.y) for v in rep.resettled])
+        rep.fresh += [(v.key, "a ghost with old settings" if v.verdict == "ghost" else
+                       "new settings, and a paste writes none on a " + str(codec.entity_type(v.name)))
+                      for v in rep.resettled]
+        rep.written = [(v.key, "the design changed its settings") for v in changed
+                       if v not in rep.resettled]
+        done = {k for k, _w in rep.written}
+        for d in getattr(before, "settings", None) or ():
+            if d.key in done or d.wires:
+                continue
+            done.add(d.key)
+            if _skips(d.name):
+                rep.fresh.append((d.key, "set otherwise by hand, and a paste writes none on a "
+                                  + str(codec.entity_type(d.name))))
+                rep.resettled.append(d)
+                _decon(r, s.name, force, [(d.name, d.x, d.y)])
+            else:
+                rep.written.append((d.key, "set back from a hand edit"))
         rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
     if not rows:
         rep.notes.append("nothing designed in this scope")
@@ -369,13 +488,17 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         elif ore:
             rep.notes.append("no ore seeded: the drills stand on the terrain's ore")
     desc = f"fk apply {s.name} area {','.join(str(int(v)) for v in area)} ({len(rows)} entities)"
-    bp = paste_blueprint(rows, s, cat, desc, label or f"apply {s.name}")
+    bp = paste_blueprint(rows, s, cat, desc, label or f"apply {s.name}", poles=poles)
     at = _anchor(rows, cat)
     rep.pasted = _int(link.paste(r, s.name, force, bp, at))
     want = {(row["name"], float(row["x"]), float(row["y"])) for row in rows}
     cap = link.snapshot(r, s.name, area, f"{tag}-ghosts")
+    # an entity ordered up stands for its design entity until robots swap it
+    up_now = {(c["new"], float(c["x"]), float(c["y"])) for (o, x, y), c in upped.items()
+              if any(t["n"] == o and float(t["x"]) == float(x) and float(t["y"]) == float(y)
+                     and not t.get("g") and not t.get("dc") for t in cap["things"])}
     seen = _things(cap)
-    rep.present = len(want & set(seen))
+    rep.present = len(want & (set(seen) | up_now))
     ghosts = {k for k, gs in seen.items() if any(gs)}
     stray = ghosts - want
     if stray and mode == "lab" and rep.present < len(want):
@@ -390,7 +513,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             stray = {k for k, gs in seen.items() if any(gs)} - want
     if mode != "lab":
         rep.misplaced = len(stray)
-    placed = _placed(cap)
+    placed = _placed(cap) | up_now
     if mode != "lab" and not rep.misplaced:
         # what the paste left turned goes, and its single ghost takes its place (2.0.5)
         bad = turned_rows(rows, cap, cat)
@@ -398,11 +521,13 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             out = [(rows[i]["name"], float(rows[i]["x"]), float(rows[i]["y"])) for i in bad]
             _decon(r, s.name, force, out)
             rep.turned = [rows[i]["src"] for i in bad]
+            rep.fresh += [(k, "stood turned, or as the other underground end")
+                          for k in rep.turned]
             placed -= set(out)
     refused = [i for i, row in enumerate(rows)
                if (row["name"], float(row["x"]), float(row["y"])) not in placed]
     if refused and not rep.misplaced:
-        entities, wires = single_ghosts(rows, s, cat, refused)
+        entities, wires = single_ghosts(rows, s, cat, refused, poles)
         try:
             got = link.ghosts(r, s.name, force, entities, wires)
             rep.placed_alone, rep.alone_missed = got["n"], got["missed"]
@@ -410,32 +535,193 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             rep.notes.append(str(exc))
         if rep.placed_alone:
             seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
-            rep.present = len(want & set(seen))
+            rep.present = len(want & (set(seen) | up_now))
     if mode == "lab":
         got = r.lua(link.lua_revive(s.name, area)).split()
         rep.revived = int(got[0]) if got else 0
         rep.revive_failed = int(got[1]) if len(got) > 1 else 0
+    # 2.1: the wires as the design has them, quietly (the hand edits above named any made by hand)
+    rep.wires = wiresmod.run(r, s, cat, area, poles, tag=f"{tag}-wires")
     rep.seconds = time.time() - t0
     return rep
 
 
-def scaffold(before, s, cat, area):
+#: why the game won't swap an entity in place (``_upgrade``)
+UPGRADE_WHY = {"group": "not in the design entity's fast-replace group",
+               "size": "another size", "turned": "facing another way",
+               "refused": "and the game refused the upgrade"}
+
+
+def _skips(name):
+    """True for an entity a paste writes no settings on (``codec.PASTE_SKIPS``)."""
+    return codec.entity_type(name) in codec.PASTE_SKIPS
+
+
+def upgrade_candidates(before, s):
+    """What could go up to its design entity (2.1): a built entity of another name standing on a
+    design entity's position (``other-entity`` in the diff ``before``), not ordered out. ->
+    [{old, x, y, new, key, dir, ug}]."""
+    out = []
+    for v in before.verdicts:
+        if v.verdict != "other-entity":
+            continue
+        e = s.entities.get(v.key)
+        for name, x, y, _user, ghost, _mine in v.under:
+            if ghost or name == v.name or (float(x), float(y)) != (float(v.x), float(v.y)):
+                continue
+            out.append({"old": name, "x": float(x), "y": float(y), "new": v.name, "key": v.key,
+                        "dir": e.dir if e is not None else None,
+                        "ug": (e.attrs.get("ug") if e is not None else None)})
+    return out
+
+
+def lua_upgrade(surface, force, cands):
+    """Lua that orders each candidate up to its design entity where the game allows a swap in
+    place: the same fast-replace group and the same collision box (measured on a laptop server,
+    2.1: then a paste orders the same upgrade itself; otherwise it lays a ghost and orders the old
+    one out), facing the design's way. Replies JSON, per candidate: up, group, size, turned,
+    refused or gone."""
+    data = json.dumps([[c["old"], c["x"], c["y"], c["new"], c["dir"],
+                        {"in": "input", "out": "output"}.get(c["ug"])] for c in cands],
+                      separators=(",", ":"))
+    return f"""
+local s = game.get_surface({link._q(surface)})
+local F = {link._q(force)}
+local function box(p) local c = p.collision_box
+  return string.format('%.3f,%.3f,%.3f,%.3f', c.left_top.x, c.left_top.y, c.right_bottom.x, c.right_bottom.y) end
+local out = {{}}
+for i, t in ipairs(helpers.json_to_table({link._q(data)})) do
+  local e = s.find_entity(t[1], {{t[2], t[3]}})
+  local pa, pb = prototypes.entity[t[1]], prototypes.entity[t[4]]
+  local why
+  if not e or not pa or not pb or e.to_be_deconstructed() then why = 'gone'
+  elseif not pa.fast_replaceable_group or pa.fast_replaceable_group ~= pb.fast_replaceable_group then why = 'group'
+  elseif box(pa) ~= box(pb) then why = 'size'
+  elseif (t[5] and t[5] ~= e.direction) or (t[6] and t[6] ~= e.belt_to_ground_type) then why = 'turned'
+  elseif e.to_be_upgraded() and e.get_upgrade_target() and e.get_upgrade_target().name == t[4] then why = 'up'
+  elseif e.order_upgrade{{target = t[4], force = F}} then why = 'up'
+  else why = 'refused' end
+  out[i] = why
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
+#: why an old roboport is not held up (2.1.3)
+MOVED_OUT = "the toolkit's own, moved or dropped in the design"
+STOCK_OUT = "since the network holds too few roboports to build the design's: theirs build them"
+
+
+def _kind(cat, name):
+    try:
+        return cat.kind(name)
+    except KeyError:
+        return None
+
+
+def _waiting(before, cat):
+    """[(name, x, y)] of the design's roboports the paste lays (not built yet)."""
+    return [(v.name, v.x, v.y) for v in before.verdicts
+            if v.verdict in ("ghost", "not-placed", "other-entity") and _kind(cat, v.name) == "roboport"]
+
+
+def _waiting_roboports(before, cat):
+    """{name: count} of the design's roboports the paste lays (not built yet)."""
+    out = {}
+    for name, _x, _y in _waiting(before, cat):
+        out[name] = out.get(name, 0) + 1
+    return out
+
+
+def _scaffold_stock(r, surface, force, before, cat):
+    """{roboport name: items of it in the networks whose construction areas reach the design's
+    roboports waiting to be built}, or None when none waits or the read fails (2.1.3)."""
+    waiting = _waiting(before, cat)
+    if not waiting:
+        return None
+    try:
+        got = json.loads(r.lua(_lua_build_stock(surface, force, waiting)).strip())
+        return {n: int(got.get(n, 0)) for n, _x, _y in waiting} if isinstance(got, dict) else \
+            {n: 0 for n, _x, _y in waiting}
+    except (link.LinkError, OSError, ValueError, KeyError, TypeError, IndexError):
+        return None
+
+
+def _lua_build_stock(surface, force, things):
+    """{name: items of it} in the logistic networks whose construction areas reach ``things``
+    [(name, x, y)], each network counted once (a free read)."""
+    data = json.dumps([[n, float(x), float(y)] for n, x, y in things])
+    q = link._q
+    return f"""
+local s, f = game.get_surface({q(surface)}), game.forces[{q(force)}]
+local out, seen = {{}}, {{}}
+for _, t in pairs(helpers.json_to_table({q(data)})) do
+  out[t[1]] = out[t[1]] or 0
+  for _, net in pairs(s.find_logistic_networks_by_construction_area({{t[2], t[3]}}, f)) do
+    local k = t[1] .. '/' .. net.network_id
+    if not seen[k] then
+      seen[k] = true
+      out[t[1]] = out[t[1]] + net.get_item_count(t[1])
+    end
+  end
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
+def _upgrade(r, surface, force, cands, batch=40):
+    """``lua_upgrade`` in batches: -> {(old, x, y): why}; {} when the game can't be asked."""
+    out = {}
+    for i in range(0, len(cands), batch):
+        part = cands[i:i + batch]
+        try:
+            got = json.loads(r.lua(lua_upgrade(surface, force, part)).strip() or "[]")
+        except (ValueError, link.LinkError):
+            return out
+        if not isinstance(got, list):
+            return out
+        for c, why in zip(part, got):
+            out[(c["old"], c["x"], c["y"])] = why
+    return out
+
+
+def _released(before, s, cat, area, held):
+    """{why: how many} of the built unowned roboports :func:`scaffold` would have held before
+    2.1.3 and orders out now."""
+    old = scaffold(before, s, cat, area, moved=False)
+    out = {}
+    for v in before.verdicts:
+        if (v.name, v.x, v.y) in old and (v.name, v.x, v.y) not in held:
+            why = MOVED_OUT if v.action == "own" else STOCK_OUT
+            out[why] = out.get(why, 0) + 1
+    return out
+
+
+def scaffold(before, s, cat, area, stock=None, moved=True):
     """What an apply leaves standing for now (1.7, Rory 2026-10-21: old poles and roboports stay
     up until the new grid stands, so a rebuild doesn't cut power or the robot network; both
     overnight players lost power to a re-laid grid): the built ``unowned`` poles and roboports on
     no tile of the design, while a pole (or roboport) the design has in ``area`` is not built
     yet (a ghost, missing, or under something else). One under a design tile goes as before (the
-    paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}."""
+    paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}.
+
+    2.1.3: a roboport the design moved or dropped (the toolkit's own) is never held: it goes as
+    any unowned entity does (the 10-31 run's moved roboports stood after two applies; ``moved``
+    False keeps the 1.7 rule). ``stock``: {roboport name: items in the network} for the design's
+    roboports waiting; no old roboport is held while the network holds fewer than they need: the
+    old ones are taken up first and their items build the new (10-29: the replacements waited as
+    ghosts for the scaffold's own items, a deadlock)."""
     def kind(name):
-        try:
-            return cat.kind(name)
-        except KeyError:
-            return None
+        return _kind(cat, name)
 
     waiting = {kind(v.name) for v in before.verdicts
                if v.verdict in ("ghost", "not-placed", "other-entity") and kind(v.name) in SCAFFOLD_KINDS}
     if not waiting:
         return set()
+    if stock is not None:
+        need = _waiting_roboports(before, cat)
+        if any(stock.get(n, 0) < k for n, k in need.items()):
+            waiting.discard("roboport")
     taken = set()
     for e in s.entities.values():
         if _touches(e.tiles, area):
@@ -443,6 +729,8 @@ def scaffold(before, s, cat, area):
     out = set()
     for v in before.verdicts:
         if v.verdict != "unowned" or v.ghost or kind(v.name) not in waiting:
+            continue
+        if moved and kind(v.name) == "roboport" and v.action == "own":
             continue
         tiles = {tuple(t) for t in cat.tiles(v.name, float(v.x), float(v.y), 0)}
         if not tiles & taken:

@@ -53,13 +53,14 @@ The built-in kinds:
 | `Pole`, `Pole<pole=small-electric-pole>` | one pole, pinned: for a cell packed so tight that its pole's tile is part of its design (the power step keeps it and adds only what is missing) | none |
 | `Lab`, `Lab<rate=2/min>` | one lab, its inserters laid like an Assembler's: several Labs around one multi-item requester chest each take their packs by one inserter, no belt | by inserters next to it |
 | `Roboport` | one roboport, 4x4: it takes construction and logistic robots into its robot inventory from a net, so the loader is a `Chest<requester, item="logistic-robot", request=50>` beside it and `net load: chest -> roboport`: the router lays the inserter (2.0.16). The kit's robots come out of a storage chest only into a roboport, so a build that takes up a roboport strands its robots until one of these stands again. `cover robots` counts it as coverage | by an inserter next to it |
-| `Assembler<recipe>` | one assembler | by inserters next to it |
-| `Furnace<recipe>` | one furnace | |
+| `Machine<entity, recipe>` | one machine of any crafting building: an assembler, a furnace, a chemical plant, a refinery, a centrifuge (`Machine<entity=centrifuge, recipe=uranium-processing>`). `machine=` is the same as `entity=`. A furnace may take `ore=` in place of `recipe=`; a burner takes `fuel=` (coal if not given). A recipe with a fluid the building has no fluid box for is refused (`no-fluidbox`): an assembling-machine-1 never runs lubricant | inserters, and pipes for fluids |
+| `Assembler<recipe>`, `Furnace<recipe>` (or `ore=`), `ChemPlant<recipe>`, `Refinery` | kinds of `Machine` from the prelude (below): an assembling-machine-1, a stone furnace on coal, a chemical plant, an oil refinery on basic oil processing. `machine=` changes the building: `Assembler<recipe=gear, machine=assembling-machine-2>` | as `Machine` |
+| `Entity<name=small-lamp>` | any other building that moves no items: a lamp, a speaker, a display panel, a beacon. It is placed, powered and wireable; its size, power and circuit connectors come from the game | wires |
 | `Chest<provider, limit=4>`, `Chest<requester, item=iron-plate, rate=2/s>`, `Chest<storage>`, `Chest<plain>` | a logistic chest: the robots' end of a net (`plain`: an iron chest off the network; `max=` on a requester caps its request: the request's count is never above it, and a changed request on a standing chest is laid again by the next `fk build`). `limit=` is how many slots it fills (its bar in the game): what feeds a full chest stops. A requester takes several items too: `item="iron-plate,copper-plate"`; `trash` on a requester sends back what it no longer asks for. A requester can drive a net (it feeds what's on the net); a provider or storage chest is only a net's end (the first lead run's `net packs: px -> lab` with a provider `px` said cannot-carry). A product's chest is best a provider: robots put leftovers of any item into the nearest storage chest, and those fill its slots | |
 | `OffshorePump<rate=1200/s>` | water from the lake: it stands on the shore, open to the water (rot 3 faces west, water west of it) | pipes |
 | `Boiler<fuel=coal>` | one boiler, 3x2: water in and out at its short ends, steam out of its long north side (rot 0), coal by an inserter beside it; 60 steam/s on 0.45 coal/s | pipes |
 | `SteamEngine` | one steam engine, 3x5 standing (rot 0): steam at both short ends, so engines join end to end; 900 kW on 30 steam/s, two per boiler | pipes |
-| `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines. A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
+| `Pumpjack<n>`, `ChemPlant<recipe>`, `Refinery<recipe>` | fluid machines (`ChemPlant` and `Refinery` are `Machine`s). A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
 | `Reactor<read=temperature, signal=S>`, `HeatExchanger`, `SteamTurbine` | nuclear power: a reactor heats the exchangers it touches (`net heat items heat: reactor -> hx`, no route), 10 MW each, 103 steam/s for 1.7 turbines | pipes, an inserter for the cells |
 | `Constant<signals="S=N, T=M">` | a constant combinator (Circuits, below) | wires |
 | `Literal<file="x.json">` | entities exactly as given (the plant is one). The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. A listed entity sets itself too: `"request": {"logistic-robot": 50}` (a requester's request), `"recipe"`, or `"config"` (the game's fields as JSON). Its frame is its entities' box, so a lone roboport needs a pole of its own beside it. `fk capture` writes such a file from anything built: a lab slot, an area of the game or the planner, or an instance of your design. So a build made in the lab or by hand goes anywhere, inside a module too | |
@@ -109,9 +110,11 @@ each Stack gives back the cells it can spare. A cell can be any machines, so not
 from a recipe: `col = Stack<cell=FurnaceCell, n=auto>` feeding a gear assembler that takes 3
 plates/s gets five cells. `out\size.txt` says what each count serves.
 
-`machine=auto` and `modules=auto` leave a choice to the same step. `machine=auto` picks the tier,
-of the machines the same size so a cell's layout holds: assembling-machine-1, -2 or -3 for an
-assembler, stone or steel for a burner furnace. `modules=auto` picks no modules, speed modules, or
+`machine=auto` and `modules=auto` leave a choice to the same step. `machine=auto` picks from the
+kind's `tiers` line in the prelude (Kinds and the prelude, below): machines of one size, energy and
+fluid boxes, so a cell's layout holds. That is assembling-machine-1, -2 or -3 for an assembler, and
+stone or steel for a burner furnace. On a fluid recipe it picks only machines with the fluid boxes.
+`modules=auto` picks no modules, speed modules, or
 productivity modules where the recipe takes them. One line's choice holds for every copy of it, so
 a choice inside a cell is one for the whole Stack. Of the picks that meet every target, assert and
 ask (each with its counts sized), the cheapest wins. Cheapest means what the machines and modules
@@ -266,9 +269,11 @@ module LoopEnd buffer size 3x3 {    # a module whose ports are a buffer's ends
 }
 ```
 
-- `Buffer` is a chest: `Buffer<chest=, bar=, item=>` (the chest, how many of its slots it may
-  fill, and what it holds when no net says). Its items are what the nets into it carry.
-- `module NAME buffer { ... }` (also after `size`): its ports are its ends on the outside nets.
+- `Buffer` is a chest, the prelude's `kind Buffer = Chest<plain, hold, chest=steel-chest>`:
+  `Buffer<chest=, bar=, item=>` (the chest, how many of its slots it may fill, and what it holds
+  when no net says). Its items are what the nets into it carry.
+- `module NAME<p> buffer size WxH { ... }` (parameters first, `buffer` before or after `size`): its
+  ports are its ends on the outside nets.
   Its inside is yours, and the model doesn't join it to the outside. A buffer module needs ports.
 - A buffer fed by an unbounded source (a requester with no rate) fills without end on paper,
   unless that net is gated (`when`): then the gate tops up what goes out, and the line is steady.
@@ -336,7 +341,9 @@ module GearRib size 16x10 {
 
 - `port NAME : in|out|inout ITEM [| ITEM2] [@side[pos][L|R]]`. A port is a **lane** of one belt end:
   `Belt[… ]` is retired (a belt end is two lanes). `item | item2` is the two lanes of the pair; the
-  same item twice is one item on both. A fluid port is refused ("pipes have no lanes"), and a net may
+  same item twice is one item on both. Two nets may feed the two lanes of a paired port, one item
+  each (2.1.3): they share one belt to it as if you had written `lanes A | B`, and the module's own
+  `lanes` line inside is enough. A fluid port is refused ("pipes have no lanes"), and a net may
   name a port only in the module that declares it: naming one from outside the module is an error
   that says which `port` line to add.
 - `size WxH` is the module's frame, and a port is a place on that frame's **edge**: it takes no
@@ -592,6 +599,97 @@ import Mall from "mall.fk"
 ```
 
 A module instance's machines are named with a dot: `left.smelt`.
+
+## Kinds and the prelude
+
+`kind NAME = KIND<params>` gives a kind, a module or another kind a name with some of its
+parameters set. It goes at the top of a file, outside any module:
+
+```
+kind Asm2  = Assembler<machine=assembling-machine-2>
+kind Gears = Asm2<recipe=iron-gear-wheel>
+g = Gears @(4, 2)                    # an assembling-machine-2 on gears, named g
+h = Gears<machine=assembling-machine-3> @(8, 2)   # the instance's own parameters win
+```
+
+The instance keeps its own name, so a net still names `g`. A kind can name a kind; a loop of
+kinds is refused. `import Gears from "lib.fk"` brings in a kind, and a module from another file
+brings the kinds of its file with it.
+
+`tiers KIND: E1, E2, ...` lists what `machine=auto` may pick for that kind and the kinds built on
+it, the first being the default:
+
+```
+tiers Assembler: assembling-machine-1, assembling-machine-2, assembling-machine-3
+tiers Spin: centrifuge                # for kind Spin = Machine<entity=centrifuge>
+```
+
+Every entity on a line must have the same size, the same energy (electric or burner) and the same
+fluid boxes at the same places, or the line is refused. An assembling-machine-1 goes with the -2
+and -3: their boxes open only for a fluid recipe.
+
+Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `ChemPlant` and
+`Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run (the
+toolkit's own if the run has none). Change it, or write a kind or tiers line of the same name in a
+file, and that file uses yours. A prelude holds kind and tiers lines only.
+
+## Module parameters
+
+A module can take parameters, so one cell serves iron and copper:
+
+```
+module FurnaceCell<plate, ore> size 7x3 {
+  port ore_in  : in  $ore   @s0
+  port ore_out : out $ore   @n0
+  port pl_in   : in  $plate @n6
+  port pl_out  : out $plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=$plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+one  = FurnaceCell<plate=copper-plate, ore=copper-ore> @(0, 0)
+iron = Stack<cell=FurnaceCell, n=12, plate=iron-plate, ore=iron-ore> @(10, 0)
+kind CopperCell = FurnaceCell<plate=copper-plate, ore=copper-ore>
+cu   = Stack<cell=CopperCell, n=12> @(20, 0)
+```
+
+- **Declaring.** `module NAME<p, q=default> size WxH`. A parameter without a default is required:
+  an instance that leaves it out is refused, naming it. A default is a word, a number, a string
+  or a list.
+- **Writing one.** `$p` stands for p's value wherever a word may stand: an item in a port, a net's
+  `items` or another list, a parameter value, a signal, a `set` value, and inside a quoted
+  string (`file="$name.json"`). It never stands for an instance, net or port name, a position or
+  the `size`: a `$` there is refused.
+- **Values** are words, numbers or lists. There is no arithmetic.
+- **Lists.** `ins=iron-plate|copper-cable` is a list. `$ins` spreads it where an item list goes;
+  `$ins[0]` picks one item, so each ingredient can get a lane of its own. An index past the end is
+  refused, with the list's length.
+
+  ```
+  module AsmCell<recipe, ins, out> size 7x3 {
+    port i_in  : in  $ins[0] | $ins[1] @s0     # two ingredients, one belt, a lane each
+    port i_out : out $ins[0] | $ins[1] @n0
+    port o_in  : in  $out @n6
+    port o_out : out $out @s6
+    stack i_in -> i_out, o_out -> o_in
+    a = Assembler<recipe=$recipe> @(2, 0)
+    net i items $ins split: i_in -> a, i_out
+    net o: o_in, a -> o_out
+  }
+  ```
+- **Stacks pass them on.** A Stack gives every parameter other than `cell`, `n`, `head`, `built`,
+  `duty` and `dnp` to each cell, and to the head when the head declares it. So a module can't
+  declare a parameter of one of those six names. A Stack's `cell=` may name a kind of a module, as
+  `CopperCell` above. The cell's ports are filled in before the Stack checks that each pair
+  carries the same items.
+- **Inside a module**, a parameter can pass one on: `f = FurnaceCell<plate=$plate, ore=$ore>`.
+- **A cell names its machine.** Its size, inserters and pipes fit one machine's footprint, so it
+  takes no size, and a machine of another footprint is another cell.
+- **Rebuilds.** The values are part of each instance's line in the `.fkp`, so changing one
+  re-lays the instance as a changed recipe does. `machine=auto` and `modules=auto` inside a cell
+  are one choice for each set of values: the iron line and the copper line choose apart.
+- Every module still takes `duty=` and `dnp`; any other parameter it doesn't declare is refused.
 
 ## Power
 

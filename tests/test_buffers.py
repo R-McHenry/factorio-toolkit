@@ -47,6 +47,15 @@ class LanguageTest(unittest.TestCase):
                          {"E": True, "F": True, "G": True, "H": False})
         self.assertEqual(f.modules["G"].size, (2, 2))
 
+    def test_a_module_with_parameters_marked_buffer(self):
+        # 2.1.8: module parameters (2.1.7) come first, then buffer, before or after the size
+        f = lang.parse("module E<p> buffer size 3x3 { }\nmodule F<p, q=1> size 3x3 buffer { }\n"
+                       "module G<p> { }\n")
+        self.assertEqual({n: (m.buffer, [x.name for x in m.params], m.size)
+                          for n, m in f.modules.items()},
+                         {"E": (True, ["p"], (3, 3)), "F": (True, ["p", "q"], (3, 3)),
+                          "G": (False, ["p"], None)})
+
     def test_buffer_twice_is_refused(self):
         with self.assertRaises(lang.FkSyntaxError):
             lang.parse("module E buffer size 3x3 buffer { }\n")
@@ -67,9 +76,11 @@ class BufferChestTest(unittest.TestCase):
     def test_buffer_is_a_steel_chest_off_the_network(self):
         flat = flat_of(LINE)
         inst = flat.insts["b"]
-        self.assertEqual(inst.kind, "Chest")
-        self.assertEqual(inst.params, {"plain": True, "hold": True, "chest": "steel-chest",
-                                       "bar": 10})
+        # 2.1.8: the prelude's kind Buffer = Chest<plain, hold, chest=steel-chest>
+        self.assertEqual((inst.kind, inst.core), ("Buffer", "Chest"))
+        self.assertEqual(inst.params, {"bar": 10})
+        self.assertEqual(inst.kparams, {"plain": True, "hold": True, "chest": "steel-chest",
+                                        "bar": 10})
         m = flat.machines["b/c0"]
         self.assertEqual((m.prototype, m.sink, m.source, m.drain), ("steel-chest", True, True, None))
         self.assertEqual(m.extra, {"role": "plain", "buffer": True, "limit": 10})
@@ -117,8 +128,8 @@ net g2: b1 -> b2
 
     def test_refusals(self):
         for src, want in (
-                ("b = Buffer<rate=1/s>\n", "takes chest=, bar=, item="),
-                ("b = Buffer<provider>\n", "takes chest=, bar=, item="),
+                ("b = Buffer<rate=1/s>\n", "a buffer takes chest=, item= and bar=, not rate="),
+                ("b = Buffer<provider>\n", "one role only: provider, plain"),
                 ("b = Chest<hold, provider>\n", "a buffer is a plain chest"),
                 ("b = Chest<hold, rate=1/s>\n", "not rate="),
                 ("b = Chest<plain, bar=5, limit=5>\n", "bar= and limit= are one setting"),
@@ -214,6 +225,18 @@ class BufferModuleTest(unittest.TestCase):
         self.assertEqual(model.buffers, {"e": {"iron-plate": (1.0, 1.0),
                                                "copper-cable": (2.0, 3.0)}})
         self.assertEqual(rates.buffer_lines(model), [
+            "BUFFER e: -60.0/min copper-cable (draining: in 120.0, out 180.0)",
+            "BUFFER e: +0.0/min iron-plate (steady: in 60.0, out 60.0)"])
+
+    def test_a_parameterised_buffer_module(self):
+        src = (MODULE.replace("module LoopEnd buffer size 3x3 {",
+                              "module LoopEnd<a, b> buffer size 3x3 {")
+               .replace("port i : in iron-plate, copper-cable", "port i : in $a, $b")
+               .replace("port o : out iron-plate, copper-cable", "port o : out $a, $b")
+               .replace("e = LoopEnd\n", "e = LoopEnd<a=iron-plate, b=copper-cable>\n"))
+        flat = flat_of(src)
+        self.assertEqual(flat.buffers, {"e": "module"})
+        self.assertEqual(rates.buffer_lines(rates.solve(flat)), [
             "BUFFER e: -60.0/min copper-cable (draining: in 120.0, out 180.0)",
             "BUFFER e: +0.0/min iron-plate (steady: in 60.0, out 60.0)"])
 

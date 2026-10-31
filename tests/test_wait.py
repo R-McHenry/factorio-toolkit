@@ -197,9 +197,17 @@ class WaitCliTest(unittest.TestCase):
             seen.update(r=r, surface=surface, area=tuple(area), names=list(names),
                         max_s=max_s, poll_s=poll_s)
             return result
-        with mock.patch.object(wait, "run", fake):
-            with contextlib.redirect_stdout(io.StringIO()):
+        from fkcore import wires
+        got = wires.Pass(added=2, cut=1, hand=["a red wire between a and b, which the design "
+                                                "doesn't have: cut"])
+
+        def pass_(r, s, cat, area, poles=None, tag="wires"):
+            seen.update(wires=tuple(area))
+            return got
+        with mock.patch.object(wait, "run", fake), mock.patch.object(wires, "run", pass_):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
                 code = mainmod.main(["wait", GAME, "built"] + args)
+        seen["out"] = out.getvalue()
         return code, seen
 
     def test_without_an_area_the_designs_and_five_minutes(self):
@@ -210,6 +218,13 @@ class WaitCliTest(unittest.TestCase):
         self.assertEqual((seen["max_s"], seen["poll_s"]), (300.0, 10.0))
         self.assertEqual(seen["names"], [])
         self.assertIs(seen["r"], self.r)
+
+    def test_then_the_wire_pass_runs_over_the_same_area(self):
+        # 2.1: robots built the poles, and a pole joins itself to its neighbours
+        code, seen = self.run_main(["--area", "305,415,353,449"])
+        self.assertEqual((code, seen["wires"]), (0, AREA))
+        self.assertIn("wires: 2 added, 1 cut", seen["out"])
+        self.assertIn("by-hand: a red wire between a and b", seen["out"])
 
     def test_area_names_and_bounds_are_passed(self):
         code, seen = self.run_main(["--area", "305,415,353,449", "--name",

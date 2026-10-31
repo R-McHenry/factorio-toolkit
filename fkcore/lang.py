@@ -1,8 +1,12 @@
 """fkcore.lang: tokenizer and parser for V1 factory source (.fk). Grammar: CORE.md "`.fk`".
 
-    file    := (import | module | 'size' WxH | stmt)*   # the file's top level is the factory body
-    import  := 'import' Name (',' Name)* 'from' STRING
-    module  := 'module' Name ('size' WxH)? 'buffer'? '{' stmt* '}'
+    file    := (import | module | kind | 'size' WxH | stmt)*   # the top level is the factory body
+    import  := 'import' Name (',' Name)* 'from' STRING     # a module or a kind of that file
+    kind    := 'kind' Name '=' Kind ('<' param (',' param)* '>')?   # a name with defaults (2.1)
+    tiers   := 'tiers' Name ':' word (',' word)*        # what machine=auto may pick (2.1)
+    module  := 'module' Name ('<' mparam (',' mparam)* '>')? 'buffer'? ('size' WxH)? 'buffer'?
+               '{' stmt* '}'                            # buffer: before or after size, once
+    mparam  := name ('=' value)?                          # no default: required (2.1)
     stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
@@ -16,6 +20,7 @@
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
     param   := name '=' value | name                    # a bare name is a flag (Chest<provider>)
     value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
+    word    := WORD | '$' name ('[' num ']')?               # $p: a module parameter (2.1)
     signal  := 'signal' name ('=' word)?                # pinned to a game signal, or auto
     wire    := 'wire' name ('red' | 'green') ':' refs ('->' refs)?
     cond    := operand op (operand | number)       op := '<' | '>' | '<=' | '>=' | '=' | '==' | '!='
@@ -52,6 +57,25 @@ itself at the port. ``@SIDE`` is ``n``, ``e``, ``s`` or ``w`` of the module's fr
 tile along that edge and ``@w4L`` its lane (without them the build chooses, facing the port's
 partner).
 
+Kinds (2.1, PLAN-2.1 "B. kind"): ``kind NAME = KIND<params>`` at a file's top level names an
+existing kind (a core kind such as ``Machine``, a module, or another kind) with some parameters
+set. An instance's own parameters override the kind's, and the instance keeps its own name. The
+everyday kinds (``Assembler``, ``Furnace``, ``ChemPlant``, ``Refinery``) are declared this way in
+the prelude (``fkcore/prelude.fk``, or a run's ``game/prelude.fk``), which every file gets without
+an import (``fkcore.elaborate``); a file's own kind or module of the same name wins over it.
+``tiers NAME: E1, E2, ...`` (2.1, "C. tiers") lists the entities ``machine=auto`` may pick for an
+instance of kind NAME (or of a kind built on it): one footprint, one energy, one set of fluid boxes,
+which elaboration checks.
+
+Module parameters (2.1, PLAN-2.1 "D. Module parameters"): ``module NAME<p, q=default> size WxH``
+declares parameters, and ``$p`` in the body stands for p's value wherever a word may stand: an item
+in a port, net or ``items`` list, a parameter value, a signal, and inside a quoted string. ``$p[k]``
+picks item k of a list value (``a|b|c``); ``$p`` alone spreads a list where an item list goes. The
+parser keeps ``$p`` and ``$p[k]`` as the strings ``"$p"`` and ``"$p[k]"`` (no word holds a ``$``),
+and elaboration substitutes them per instance. A ``$`` where a name, a position or a size belongs
+is refused here, as is a ``$`` outside a module that declares it. A module may not declare a
+parameter a Stack takes itself (``RESERVED``).
+
 The world design (2.0.43, PLAN-GLOBAL phase B): **a file's body is a module**, so
 ``import Outpost from "outpost.fk"`` needs no wrapping when ``outpost.fk`` declares no ``Outpost``
 module; a top-level ``size WxH`` line is that body's frame. An instance line carries its placement
@@ -76,7 +100,7 @@ from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
            "Module", "Port", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand",
-           "Behave", "Expect", "Props", "COMPARATORS"]
+           "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers", "MParam", "RESERVED"]
 
 
 class FkSyntaxError(Exception):
@@ -90,6 +114,7 @@ _TOKEN = re.compile(r"""
   | (?P<string>"[^"\n]*")
   | (?P<dim>\d+x\d+)(?![A-Za-z0-9_])
   | (?P<num>-?\d+(?:\.\d+)?(?![A-Za-z_\-]))
+  | (?P<param>\$[A-Za-z_][A-Za-z0-9_]*)
   | (?P<op>->|>=|<=|==|!=|[{}()\[\]<>,:=|@./*])
   | (?P<word>[A-Za-z_](?:[A-Za-z0-9_]|-(?!>))*)
 """, re.X)
@@ -103,6 +128,11 @@ COMPARATORS = ("<", ">", "<=", ">=", "=", "!=")
 _BEHAVE = ("state", "require", "expect", "cycle", "fails")
 #: the top of a plain ``n=auto``: a bound that never stops a real design, only a runaway one
 AUTO_TOP = 100
+#: 2.1: the parameters a Stack takes itself (and every instance's duty and dnp), so no module may
+#: declare one: a Stack passes every other parameter on to its cells
+RESERVED = ("cell", "n", "head", "built", "duty", "dnp")
+_WHERE = ("a parameter stands for an item, a value or a signal, never a name, a position or a "
+          "size")
 
 
 @dataclass
@@ -278,6 +308,16 @@ class Module:
     stacks: list = field(default_factory=list)     # [(near, far, line)]: stack pairs (2.0.48)
     dnps: list = field(default_factory=list)       # [Ref]: `dnp A, B.c` (2.0.63), do not populate
     buffer: bool = False                           # 2.1: `module NAME buffer { ... }`
+    params: list = field(default_factory=list)     # [MParam]: `module NAME<p, q=v>` (2.1)
+    args: dict | None = None                       # the values a substituted copy was made with
+
+
+@dataclass
+class MParam:
+    """A module parameter (2.1): ``p`` (required, ``default`` None) or ``p=value``."""
+    name: str
+    default: object
+    line: int
 
 
 @dataclass
@@ -316,17 +356,42 @@ class Props:
 
 
 @dataclass
+class Kind:
+    """``kind NAME = TARGET<params>`` (2.1): TARGET with ``params`` set. ``path`` is the file it
+    is declared in (its errors name it)."""
+    name: str
+    target: str
+    params: dict
+    line: int
+    path: str = "<fk>"
+
+
+@dataclass
+class Tiers:
+    """``tiers NAME: E1, E2, ...`` (2.1): the entities ``machine=auto`` picks from for kind NAME,
+    in order (the first is the default pick)."""
+    name: str
+    entities: list
+    line: int
+    path: str = "<fk>"
+
+
+@dataclass
 class File:
     path: str
     body: Module
     modules: dict = field(default_factory=dict)    # Name -> Module
     imports: list = field(default_factory=list)    # [(names, file, line)]
+    kinds: dict = field(default_factory=dict)      # Name -> Kind (2.1)
+    tiers: dict = field(default_factory=dict)      # Name -> Tiers (2.1)
 
 
 # -- parser ---------------------------------------------------------------------------------------
 class _P:
     def __init__(self, toks, path):
         self.t, self.i, self.path = toks, 0, path
+        self.mparams = None          # the parameters of the module being read, None outside one
+        self.modname = None
 
     def peek(self, k=0):
         return self.t[min(self.i + k, len(self.t) - 1)]
@@ -353,6 +418,8 @@ class _P:
 
     def word(self, what="name"):
         tok = self.next()
+        if tok.kind == "param":
+            self.err(f"expected {what}, got the parameter {tok.text}: {_WHERE}", tok)
         if tok.kind != "word":
             self.err(f"expected {what}, got {tok.text or tok.kind!r}", tok)
         return tok
@@ -363,8 +430,35 @@ class _P:
             self.err(f"{what} {tok.text!r} may not contain dashes", tok)
         return tok
 
+    def pword(self, what="a word"):
+        """A word, or a module parameter where a word may stand (2.1): ``$p`` or ``$p[k]``, kept
+        as that text for elaboration to substitute."""
+        tok = self.peek()
+        if tok.kind != "param":
+            return self.word(what).text
+        self.next()
+        name = tok.text[1:]
+        if self.mparams is None:
+            self.err(f"{tok.text}: a parameter is written inside a module that declares it, like "
+                     f"module NAME<{name}> size WxH {{ ... }}", tok)
+        if name not in self.mparams:
+            have = ", ".join(self.mparams) or "none"
+            self.err(f"{tok.text}: module {self.modname} has no parameter {name} (its "
+                     f"parameters: {have})", tok)
+        if self.peek().text == "[" and self.peek().kind == "op":
+            self.next()
+            k = self.next()
+            if k.kind != "num" or not k.text.isdigit():
+                self.err(f"{tok.text}[{k.text}]: an index is a whole number from 0, like "
+                         f"{tok.text}[0]", k)
+            self.expect("]")
+            return f"{tok.text}[{int(k.text)}]"
+        return tok.text
+
     def number(self):
         tok = self.next()
+        if tok.kind == "param":
+            self.err(f"expected a number, got the parameter {tok.text}: {_WHERE}", tok)
         if tok.kind != "num":
             self.err(f"expected a number, got {tok.text or tok.kind!r}", tok)
         v = float(tok.text)
@@ -391,7 +485,21 @@ class _P:
                 mod = self.module()
                 if mod.name in f.modules:
                     self.err(f"module {mod.name} defined twice", tok)
+                if mod.name in f.kinds:
+                    self.err(f"{mod.name} is both a kind and a module: name one otherwise", tok)
                 f.modules[mod.name] = mod
+            elif self.at_kind():
+                k = self.kind_decl()
+                if k.name in f.kinds:
+                    self.err(f"kind {k.name} defined twice", tok)
+                if k.name in f.modules:
+                    self.err(f"{k.name} is both a kind and a module: name one otherwise", tok)
+                f.kinds[k.name] = k
+            elif self.at_tiers():
+                t = self.tiers_decl()
+                if t.name in f.tiers:
+                    self.err(f"tiers {t.name} written twice", tok)
+                f.tiers[t.name] = t
             elif tok.text == "size" and tok.kind == "word" and self.peek(1).kind == "dim":
                 # 2.0.43 (PLAN-GLOBAL phase B): a factory file's own frame, so a file body can be
                 # imported as a module as it is; the root's placement may give one instead
@@ -410,6 +518,51 @@ class _P:
                                 "`module NAME { ... }`")
         return f
 
+    def at_kind(self):
+        """``kind NAME = ...`` (an instance named ``kind`` is ``kind = ...``)."""
+        return (self.peek().text == "kind" and self.peek().kind == "word"
+                and self.peek(1).kind == "word" and self.peek(2).text == "=")
+
+    def kind_decl(self):
+        """``kind NAME = TARGET<params>`` (2.1, PLAN-2.1 "B. kind")."""
+        line = self.expect("kind").line
+        name = self.name("kind name").text
+        self.expect("=")
+        target = self.name("a kind or module").text
+        params = {}
+        if self.accept("<"):
+            if not self.accept(">"):
+                while True:
+                    k, v = self.param()
+                    if k in params:
+                        self.err(f"parameter {k} given twice")
+                    params[k] = v
+                    if self.accept(">"):
+                        break
+                    self.expect(",")
+        if self.peek().kind != "eof" and self.peek().line == line:
+            self.err(f"kind {name}: a kind line is `kind NAME = KIND<params>` and nothing more")
+        return Kind(name, target, params, line, self.path)
+
+    def at_tiers(self):
+        """``tiers NAME: ...`` (an instance named ``tiers`` is ``tiers = ...``)."""
+        return (self.peek().text == "tiers" and self.peek().kind == "word"
+                and self.peek(1).kind == "word" and self.peek(2).text == ":")
+
+    def tiers_decl(self):
+        """``tiers NAME: E1, E2, ...`` (2.1, PLAN-2.1 "C. tiers")."""
+        line = self.expect("tiers").line
+        name = self.name("kind name").text
+        self.expect(":")
+        ents = [self.word("an entity").text]
+        while self.accept(","):
+            ents.append(self.word("an entity").text)
+        if len(set(ents)) != len(ents):
+            self.err(f"tiers {name}: an entity is listed twice")
+        if self.peek().kind != "eof" and self.peek().line == line:
+            self.err(f"tiers {name}: a tiers line is `tiers KIND: ENTITY, ENTITY, ...`")
+        return Tiers(name, ents, line, self.path)
+
     def import_(self):
         line = self.expect("import").line
         names = [self.name("module name").text]
@@ -424,10 +577,14 @@ class _P:
     def module(self):
         line = self.expect("module").line
         mod = Module(self.name("module name").text, line)
+        if self.accept("<"):
+            mod.params = self.module_params(mod.name)
         if self.accept("buffer"):
             mod.buffer = True
         if self.accept("size"):
             tok = self.peek()
+            if tok.kind == "param":
+                self.err(f"size {tok.text}: {_WHERE}; a module's frame is written `size WxH`", tok)
             if tok.kind != "dim":
                 self.err("a module's frame is written `size WxH`, like size 24x10", tok)
             self.next()
@@ -440,11 +597,36 @@ class _P:
                 self.err(f"module {mod.name}: buffer is written twice")
             mod.buffer = True
         self.expect("{")
-        while not self.accept("}"):
-            if self.peek().kind == "eof":
-                self.err(f"module {mod.name} is not closed")
-            self.stmt(mod)
+        self.mparams, self.modname = [p.name for p in mod.params], mod.name
+        try:
+            while not self.accept("}"):
+                if self.peek().kind == "eof":
+                    self.err(f"module {mod.name} is not closed")
+                self.stmt(mod)
+        finally:
+            self.mparams = self.modname = None
         return mod
+
+    def module_params(self, modname):
+        """``<p, q=default, ...>`` after a module's name (2.1): a parameter without a default is
+        required. A default is a value as an instance gives one, and names no parameter."""
+        out = []
+        if self.accept(">"):
+            return out
+        while True:
+            tok = self.peek()
+            name = self.name("parameter").text
+            if name in RESERVED:
+                self.err(f"module {modname}<{name}>: {name} is a parameter every Stack or "
+                         f"instance takes itself ({', '.join(RESERVED)}), so a module can't "
+                         "declare it: name it otherwise", tok)
+            if any(p.name == name for p in out):
+                self.err(f"module {modname}: parameter {name} is declared twice", tok)
+            default = self.value() if self.accept("=") else None
+            out.append(MParam(name, default, tok.line))
+            if self.accept(">"):
+                return out
+            self.expect(",")
 
     def port(self):
         """``port NAME : in|out|inout ITEM[, ITEM][ | ITEM[, ITEM]] @SIDE[POS][L|R]`` (2.0.29,
@@ -456,14 +638,14 @@ class _P:
         direction = self.word("in, out or inout").text
         if direction not in ("in", "out", "inout"):
             self.err(f"a port carries items in, out or inout, got {direction!r}")
-        left = [self.word("item").text]
+        left = [self.pword("item")]
         while self.accept(","):
-            left.append(self.word("item").text)
+            left.append(self.pword("item"))
         right = None
         if self.accept("|"):                 # the pair: what comes before it is the left lane
-            right = [self.word("item").text]
+            right = [self.pword("item")]
             while self.accept(","):
-                right.append(self.word("item").text)
+                right.append(self.pword("item"))
         self.expect("@")
         tok = self.word("a side: n, e, s or w, with a tile along it like w4, and L or R")
         text, rest = tok.text, tok.text[1:]
@@ -496,6 +678,12 @@ class _P:
 
     def stmt(self, mod):
         tok = self.peek()
+        if tok.kind == "param":
+            self.word("a statement (an instance's name)")     # refused: $p names nothing
+        if tok.kind == "word" and self.peek(1).kind == "param" and tok.text in (
+                "net", "lanes", "signal", "wire", "behave", "set", "port", "stack", "dnp"):
+            self.next()
+            self.word(f"the name after {tok.text}")             # refused: $p names nothing
         if tok.kind != "word":
             self.err(f"expected a statement, got {tok.text or tok.kind!r}")
         if tok.text == "net" and self.peek(1).kind == "word":
@@ -525,6 +713,10 @@ class _P:
             mod.dnps += self.refs()
         elif tok.text == "expect" and self.peek(1).text != "=":
             mod.expects.append(self.expect_line())
+        elif self.at_kind():
+            self.err("a kind is declared at a file's top level, not inside a module")
+        elif self.at_tiers():
+            self.err("tiers are declared at a file's top level, not inside a module")
         elif self.peek(1).text == "=":
             mod.insts.append(self.inst())
         else:
@@ -569,7 +761,7 @@ class _P:
         (``inserter < 1000`` -> ``inserter<1000``)."""
         out = []
         while self.peek().kind != "eof" and self.peek().line == line and self.peek().text != ",":
-            out.append(self.next().text)
+            out.append(self.pword() if self.peek().kind == "param" else self.next().text)
         return re.sub(r" ?([<>=]) ?", r"\1", " ".join(out)).strip()
 
     def signal(self):
@@ -577,7 +769,7 @@ class _P:
         name = self.name("signal name").text
         game = None
         if self.accept("="):
-            game = self.word("a game signal (signal-T, iron-plate)").text
+            game = self.pword("a game signal (signal-T, iron-plate)")
         return Signal(name, game, line)
 
     def wire(self):
@@ -596,7 +788,9 @@ class _P:
             self.err(f"a condition reads W.no-signal, network.ITEM or INSTANCE.no-signal, got "
                      f"{tok.text!r}", tok)
         while self.accept("."):
-            parts.append(self.word("a signal").text)
+            if self.peek().kind == "param" and self.peek(1).text == ".":
+                self.word("a wire, network or instance")      # refused: a name
+            parts.append(self.pword("a signal"))
         return Operand(parts[:-1], parts[-1])
 
     def cond(self):
@@ -652,9 +846,9 @@ class _P:
         name = self.name("net name").text
         items = None
         if self.accept("items"):
-            items = [self.word("item").text]
+            items = [self.pword("item")]
             while self.accept(","):
-                items.append(self.word("item").text)
+                items.append(self.pword("item"))
         width = 1
         if self.accept("width"):
             tok = self.peek()
@@ -793,6 +987,8 @@ class _P:
             word = self.peek().text
             if word == "@":
                 self.hint(hints)
+            elif word == "size" and self.peek(1).kind == "param":
+                self.err(f"size {self.peek(1).text}: {_WHERE}", self.peek(1))
             elif word == "size" and self.peek(1).kind == "dim":
                 self.next()
                 dim = self.next()
@@ -820,18 +1016,23 @@ class _P:
         key = self.name("parameter").text
         if not self.accept("="):
             return key, True
+        return key, self.value()
+
+    def value(self):
+        """A parameter's value: a number (a rate), a string, ``auto``, a word or a list ``a|b``;
+        inside a module, a word may be ``$p`` (2.1)."""
         tok = self.peek()
         if tok.kind == "num":
-            return key, self.rate()
+            return self.rate()
         if tok.kind == "string":
             self.next()
-            return key, tok.text[1:-1]
-        words = [self.word("value").text]
+            return tok.text[1:-1]
+        words = [self.pword("value")]
         if words[0] == "auto" and self.peek().text != "|":
-            return key, self.auto()
+            return self.auto()
         while self.accept("|"):
-            words.append(self.word("value").text)
-        return key, words[0] if len(words) == 1 else words
+            words.append(self.pword("value"))
+        return words[0] if len(words) == 1 else words
 
     def auto(self):
         """What follows ``auto``: nothing, or the bounds ``LO..HI``."""

@@ -53,22 +53,26 @@ class StopsTest(unittest.TestCase):
         with open(TEMPLATE, encoding="utf-8") as fh:
             lines = flow.parse(fh.read(), TEMPLATE)
         codes = {a.lower() for ln in lines if ln.cmd == "stop_on" for a in ln.args}
-        self.assertEqual(codes, {"malformed", "no-route", "no-destination"})
+        self.assertEqual(codes, {"malformed", "no-route", "no-destination", "cannot-carry"})
         with open(TEMPLATE, encoding="utf-8") as fh:
             self.assertIsNone(upgrade_run._stops(fh.read()))
 
     def test_an_old_script_gets_the_stops_it_lacks(self):
         new = upgrade_run._stops(OLD)
-        self.assertEqual(new.splitlines()[-1], "stop_on         no-route no-destination   # and no "
-                         "paste with a net unrouted, or a maker whose product reaches no sink")
+        self.assertEqual(new.splitlines()[-1], "stop_on         no-route no-destination cannot-carry "
+                         "# and no paste with a net unrouted, a maker whose product reaches no "
+                         "sink, or a machine on a net it takes nothing from")
         self.assertIsNone(upgrade_run._stops(new))
         # the solo player's own line (23:15): only NO_SINK comes, after its last stop_on
         solo = OLD.replace("apply ", "stop_on         no-route\napply ")
         new = upgrade_run._stops(solo)
         self.assertEqual(steps(new)[-2:], ["stop_on", "stop_on"])
-        self.assertIn("stop_on         no-destination ", new)
+        self.assertIn("stop_on         no-destination cannot-carry ", new)
         self.assertNotIn("no-route no-destination", new)
         self.assertIn("stop_on         invariant\nstop_on         no-destination", new)
+        # 2.1.3: a 2.0.12 script gets cannot-carry alone
+        new = upgrade_run._stops(OLD + "stop_on         no-route no-destination\n")
+        self.assertEqual(new.splitlines()[-1].split("#")[0].split(), ["stop_on", "cannot-carry"])
 
 
 class PolesTest(unittest.TestCase):

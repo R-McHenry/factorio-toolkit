@@ -26,9 +26,21 @@ Checks it can run on its own (each starts a server, checks, stops it):
     python tools/laptop_server.py health    2.0.12: the loop's world-line read on a small base:
                                             reactor fuel (with its feeding chest), robots and
                                             items in chests, stalled makers, plates made
+    python tools/laptop_server.py settings  2.1: settings set by hand on what the toolkit placed are
+                                            named, and the next apply writes them back in place
+                                            (nothing ordered out) and cuts the hand's wire
+    python tools/laptop_server.py defaults  2.1: the measurement: a design that sets nothing,
+                                            pasted over entities set by hand (wired and not), as
+                                            2.0.78's codec wrote it and as 2.1's does
+    python tools/laptop_server.py robots    2.1 with robots: a robot-built pole's own wires cut by
+                                            the wire pass, upgrades in place, a fresh lay, new
+                                            settings written, a hand wire cut
     python tools/laptop_server.py capital SAVE.zip
                                             2.0.69: the working capital on a played map, two
                                             reads 30 game seconds apart
+    python tools/laptop_server.py fixes     2.1.3: capture takes its own slot, the REACH read,
+                                            fk request (robots bring the ammo), and the scaffold
+                                            order (a moved roboport goes; none held without stock)
     python tools/laptop_server.py stats [SAVE.zip]
                                             2.1: run stats on a small base made here: the
                                             scenario's recorder writes a sample every 5 game
@@ -544,8 +556,8 @@ rcon.print(string.format('drop %.1f,%.1f pickup %.1f,%.1f', i.drop_position.x, i
     return 0 if ok else 1
 
 
-#: check_settings' design: a condition, a filter, a reading on a wire, a request, a slot limit
-#: and a constant combinator
+#: check_settings' design: a condition, a filter, a reading on a wire, a request, a slot limit,
+#: a storage chest's filter and a constant combinator
 SET = """\
 fkp 1 factory set
 size 12x6
@@ -557,17 +569,19 @@ e m/i2 inserter 4.5,2.5 E if=iron-gear-wheel<100
 e m/i3 inserter 6.5,0.5 E
 e m/c0 requester-chest 8.5,0.5
 e m/c1 wooden-chest 8.5,2.5
+e m/c2 storage-chest 10.5,2.5
 e m/k0 constant-combinator 10.5,0.5 signals=signal-A:5
 w w red m/m0 m/i2
 """
 
 
 def check_settings():
-    """2.0.12: a diff sees settings changed by hand on entities the toolkit placed. The design
-    SET is pasted under play rules and built (revived); a diff then finds nothing. Then, by Lua:
-    i0's logistic condition, a red wire from i3 to i1, c0's request, m0's recipe and c1's limit
-    change. The diff names each, the apply's hand edits too, and after the paste i0's condition and
-    c0's request are the design's again; the wire from i3 stays (the design has none)."""
+    """2.0.12, and settings changed in place (2.1): the design SET is pasted under play rules and
+    built (revived); a diff then finds nothing. Then, by Lua, as a player would: i0's logistic
+    condition, a red wire from i3 to i1 and a condition on i3 (which the design leaves unset), c0's
+    request, m0's recipe, c1's limit, a filter on the storage chest c2 and k0's signal. The diff
+    names each, so do the apply's hand edits. The apply orders nothing out: the paste writes every
+    setting back in place and the wire pass cuts the hand's wire; a diff after it finds nothing."""
     from fkcore import apply as applymod, codec, compose, fkp
     from fkcore.catalog import Catalog
     cat, s, f = Catalog.load(), "lab", "lab"
@@ -585,46 +599,384 @@ local s = game.get_surface('lab')
 local function at(n, x, y) return s.find_entity(n, {x, y}) end
 local cb = at('inserter', 14.5, 0.5).get_or_create_control_behavior()
 cb.logistic_condition = {first_signal = {type = 'item', name = 'copper-plate'}, comparator = '>', constant = 7}
-at('inserter', 16.5, 0.5).get_wire_connector(defines.wire_connector_id.circuit_red, true).connect_to(
+local i3 = at('inserter', 16.5, 0.5)
+i3.get_wire_connector(defines.wire_connector_id.circuit_red, true).connect_to(
   at('inserter', 14.5, 1.5).get_wire_connector(defines.wire_connector_id.circuit_red, true))
+local c3 = i3.get_or_create_control_behavior()
+c3.circuit_enable_disable = true
+c3.circuit_condition = {first_signal = {type = 'item', name = 'coal'}, comparator = '>', constant = 1}
 at('requester-chest', 18.5, 0.5).get_logistic_sections().get_section(1).set_slot(1, {value = 'copper-plate', min = 5})
 at('assembling-machine-2', 11.5, 1.5).set_recipe('copper-cable')
 at('wooden-chest', 18.5, 2.5).get_inventory(defines.inventory.chest).set_bar(6)
+at('storage-chest', 20.5, 2.5).storage_filter = {name = 'coal', quality = 'normal'}
+at('constant-combinator', 20.5, 0.5).get_control_behavior().get_section(1).set_slot(1, {value = {type = 'virtual', name = 'signal-B', quality = 'normal'}, min = 9})
 rcon.print('ok')"""
     after = """
 local s = game.get_surface('lab')
-local c = s.find_entity('inserter', {14.5, 0.5}).get_control_behavior().logistic_condition
-local sl = s.find_entity('requester-chest', {18.5, 0.5}).get_logistic_sections().get_section(1).get_slot(1)
-local w = s.find_entity('inserter', {16.5, 0.5}).get_wire_connector(defines.wire_connector_id.circuit_red, true).connection_count
-local bar = s.find_entity('wooden-chest', {18.5, 2.5}).get_inventory(defines.inventory.chest).get_bar()
-local rc = s.find_entity('assembling-machine-2', {11.5, 1.5}).get_recipe()
-rcon.print(c.first_signal.name .. c.comparator .. c.constant .. ' ' .. tostring(sl.value and sl.value.name) .. ' ' .. w
-           .. ' ' .. bar .. ' ' .. tostring(rc and rc.name))"""
+local function at(n, x, y) return s.find_entity(n, {x, y}) end
+local c = at('inserter', 14.5, 0.5).get_control_behavior().logistic_condition
+local sl = at('requester-chest', 18.5, 0.5).get_logistic_sections().get_section(1).get_slot(1)
+local i3 = at('inserter', 16.5, 0.5)
+local w = i3.get_wire_connector(defines.wire_connector_id.circuit_red, true).connection_count
+local c3 = i3.get_control_behavior()
+local bar = at('wooden-chest', 18.5, 2.5).get_inventory(defines.inventory.chest).get_bar()
+local rc = at('assembling-machine-2', 11.5, 1.5).get_recipe()
+local sf = at('storage-chest', 20.5, 2.5).storage_filter
+local k = at('constant-combinator', 20.5, 0.5).get_control_behavior().get_section(1).get_slot(1)
+local n = s.count_entities_filtered{area = {{8, -2}, {24, 8}}, type = 'entity-ghost'}
+local dc = s.count_entities_filtered{area = {{8, -2}, {24, 8}}, to_be_deconstructed = true}
+rcon.print(c.first_signal.name .. c.comparator .. c.constant .. ' ' .. tostring(sl.value and sl.value.name)
+  .. ' ' .. w .. ' ' .. tostring(c3 and c3.circuit_enable_disable) .. ' ' .. bar .. ' '
+  .. tostring(rc and rc.name) .. ' ' .. tostring(sf and sf.name and sf.name.name) .. ' '
+  .. tostring(k.value and k.value.name) .. ':' .. tostring(k.min) .. ' ghosts=' .. n .. ' decon=' .. dc)"""
     with LaptopServer("settings", scenario="fk-play") as srv:
         with srv.rcon() as r:
             r.lua(link.lua_generate_area(s, f, (-32, -32, 64, 64)))
             rep = applymod.apply(r, composed, cat, area=area, mode="play", force=f, policy=watch)
             r.lua(link.lua_revive(s, area))
             clean = applymod.diff(r, composed, cat, area, watch, force=f)
-            r.lua(tweak)
+            print("tweaks:", r.lua(tweak).strip())
             seen = applymod.diff(r, composed, cat, area, watch, force=f)
             rep = applymod.apply(r, composed, cat, area=area, mode="play", force=f, policy=watch,
                                  own=rep.own)
             back = r.lua(after).strip()
+            again = applymod.diff(r, composed, cat, area, watch, force=f)
     print(f"untouched: {len(clean.settings)} differences {clean.settings_error or ''}")
     for d in clean.settings:
         print("   ", d.line())
     print("after the tweaks:")
     for d in seen.settings:
         print("   ", d.line())
-    print("the apply's hand edits:", len(rep.hand))
-    print("after the paste (i0's condition, c0's request, red wires on i3, c1's bar, m0's recipe):",
-          back)
-    keys = sorted(d.key.split("/")[-1] for d in seen.settings)
+    print("\n".join(rep.lines()))
+    print("after the paste (i0's condition, c0's request, red wires on i3, i3's condition on, c1's "
+          "bar, m0's recipe, c2's filter, k0's signal, ghosts, ordered out):", back)
+    print(f"a diff after it: {len(again.settings)} differences "
+          f"{[d.line() for d in again.settings]}")
+    keys = sorted({d.key.split("/")[-1] for d in seen.settings})
     ok = (not clean.settings and not clean.settings_error
-          and keys == ["c0", "c1", "i0", "i1", "i3", "m0"]
-          and len(rep.hand) >= 6 and back.startswith("iron-plate<50 iron-plate 1 "))
-    print("settings changed by hand:", "OK" if ok else "NOT as designed")
+          and keys == ["c0", "c1", "c2", "i0", "i1", "i3", "k0", "m0"]
+          and len(rep.hand) >= 8 and not rep.resettled and rep.decon == 0
+          and back == "iron-plate<50 iron-plate 0 false 3 iron-gear-wheel nil signal-A:5 ghosts=0 "
+                      "decon=0"
+          and rep.wires is not None and rep.wires.cut == 1 and not again.settings)
+    print("settings changed in place:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
+#: check_defaults: entities with settings set by hand: (name, direction, Lua on ``e``, recipe)
+_HAND = [
+    ("inserter", 4, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}
+cb.connect_to_logistic_network = true
+cb.logistic_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}
+cb.circuit_read_hand_contents = true""", None),
+    ("fast-inserter", 4, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}
+e.use_filters = true
+e.set_filter(1, {name = 'iron-plate'})
+e.inserter_filter_mode = 'blacklist'""", None),
+    ("assembling-machine-2", None, """e.set_recipe('iron-gear-wheel')
+local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}
+cb.circuit_read_contents = true""", "iron-gear-wheel"),
+    ("transport-belt", 4, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}
+cb.read_contents = true""", None),
+    ("electric-furnace", None, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}""", None),
+    ("pump", 0, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}""", None),
+    ("small-lamp", None, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}""", None),
+    ("requester-chest", None, """local sec = e.get_logistic_sections().get_section(1)
+sec.set_slot(1, {value = 'iron-plate', min = 10})
+e.get_requester_point().trash_not_requested = true
+e.request_from_buffers = true
+e.get_inventory(defines.inventory.chest).set_bar(5)""", None),
+    ("storage-chest", None, """e.storage_filter = {name = 'iron-plate', quality = 'normal'}
+e.get_inventory(defines.inventory.chest).set_bar(5)""", None),
+    ("wooden-chest", None, "e.get_inventory(defines.inventory.chest).set_bar(3)", None),
+    ("constant-combinator", 0, """local cb = e.get_or_create_control_behavior()
+cb.enabled = false
+cb.get_section(1).set_slot(1, {value = {type = 'virtual', name = 'signal-A', quality = 'normal'}, min = 5})""", None),
+    ("decider-combinator", 0, """e.get_or_create_control_behavior().parameters = {
+  conditions = {{first_signal = {type = 'virtual', name = 'signal-A'}, comparator = '>', constant = 3}},
+  outputs = {{signal = {type = 'virtual', name = 'signal-B'}, copy_count_from_input = false}}}""", None),
+    ("electric-mining-drill", 0, """local cb = e.get_or_create_control_behavior()
+cb.circuit_enable_disable = true
+cb.circuit_condition = {first_signal = {type = 'item', name = 'iron-plate'}, comparator = '<', constant = 5}""", None),
+]
+
+
+def check_defaults():
+    """2.1, the measurement behind settings changed in place: each entity of ``_HAND`` stands with
+    settings set by hand, once unwired and once with a red wire to a pole; then a design that sets
+    nothing on it (but an assembler's recipe) is pasted over it as the codec writes it, once as
+    2.0.78 wrote it (no control behaviour) and once as 2.1 does (``codec.RESET_CB`` on a
+    machine), and the game's own export is read back (``fkcore.settings``). The design's own
+    fields back (nothing set, but the recipe) mean the paste set the whole state; a drill takes
+    nothing from a paste, so the apply lays it fresh."""
+    import json
+    from fkcore import apply as applymod, codec, settings
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    place = """
+local s = game.get_surface('lab')
+local e = s.create_entity{name = __N__, position = {__X__, __Y__}, force = 'lab', direction = __D__}
+__LUA__
+if __WIRED__ then
+  local p = s.create_entity{name = 'medium-electric-pole', position = {e.position.x, e.position.y + 4.5}, force = 'lab'}
+  e.get_wire_connector(defines.wire_connector_id.circuit_red, true).connect_to(p.get_wire_connector(defines.wire_connector_id.circuit_red, true))
+end
+rcon.print('ok')"""
+    rows = {"2.0.78": [], "2.1": []}
+    spots = []
+    for k, (name, d, lua, recipe) in enumerate(_HAND):
+        for v, version in enumerate(("2.0.78", "2.1")):
+            for wired in (False, True):
+                x, y = 2.5 + 10 * k, 2.5 + 12 * (2 * v + wired)
+                if name in ("pump", "decider-combinator"):        # 1x2: centred on a tile edge
+                    y += 0.5
+                spots.append((name, d, lua, wired, version, x, y))
+                rows[version].append({"src": f"d/{name}-{int(wired)}", "name": name, "x": x, "y": y,
+                                      "direction": d,
+                                      "attrs": {"recipe": recipe} if recipe else {}})
+    bad = 0
+    with LaptopServer("settings-defaults", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area(s, f, (-32, -32, 160, 64)))
+            for name, d, lua, wired, _version, x, y in spots:
+                got = r.lua(place.replace("__N__", json.dumps(name)).replace("__X__", str(x))
+                            .replace("__Y__", str(y)).replace("__D__", "nil" if d is None else str(d))
+                            .replace("__LUA__", lua).replace("__WIRED__", str(wired).lower()))
+                if got.strip() != "ok":
+                    print(f"  {name}: not set up: {got.strip()}")
+            before = settings.read(r, s, f, (0, 0, 140, 48), "defaults-before")
+            for version, part in rows.items():
+                bp = codec.blueprint(part)
+                if version == "2.0.78":     # the codec as it was: no reset control behaviour
+                    bp = _strip_reset(bp)
+                link.paste(r, s, f, bp, applymod._anchor(part, cat))
+            after = settings.read(r, s, f, (0, 0, 140, 48), "defaults-after")
+    print(f"{'entity':<22} {'wired':<6} {'set by hand':<52} {'2.0.78 paste':<22} 2.1 paste")
+    by = {}
+    design = {settings._at(row["name"], row["x"], row["y"]): settings._fields(codec.entity_json(row, 1))
+              for part in rows.values() for row in part}
+    for name, _d, _lua, wired, version, x, y in spots:
+        at = settings._at(name, x, y)
+        by.setdefault((name, wired), {})[version] = (before.get(at, ({}, set()))[0],
+                                                     after.get(at, ({}, set()))[0], design[at])
+    for (name, wired), got in by.items():
+        hand = settings.describe(got["2.1"][0]) or "?"
+        old = settings.describe(got["2.0.78"][1]) or "nothing set"
+        new = settings.describe(got["2.1"][1]) or "nothing set"
+        skip = codec.entity_type(name) in codec.PASTE_SKIPS
+        ok = (got["2.1"][1] == got["2.1"][2]) != skip
+        bad += not ok
+        print(f"{name:<22} {str(wired):<6} {hand[:52]:<52} {old[:22]:<22} {new}"
+              f"{'' if ok else '  NOT as designed'}{'  (laid fresh by the apply)' if skip else ''}")
+    if os.environ.get("FK_RAW"):
+        for name, _d, _lua, wired, version, x, y in spots:
+            print("RAW", version, name, wired, after.get(settings._at(name, x, y)))
+    print("a paste of the design's defaults sets the whole state:", "OK" if not bad else "NOT")
+    return 0 if not bad else 1
+
+
+def _strip_reset(bp):
+    """The blueprint ``bp`` without ``codec.RESET_CB``: what 2.0.78's codec pasted."""
+    import base64
+    import json
+    import zlib
+    from fkcore import codec
+    doc = json.loads(zlib.decompress(base64.b64decode(bp[1:])))
+    for e in doc["blueprint"]["entities"]:
+        if codec.is_reset(e.get("control_behavior")):
+            del e["control_behavior"]
+    return "0" + base64.b64encode(zlib.compress(json.dumps(doc).encode(), 9)).decode()
+
+
+#: check_robots: the design before (v1) and after (v2): v2 upgrades i0, c0, m0, b0 and b1 in
+#: place, lays i2 fresh (a long-handed inserter is in no inserter's fast-replace group), and sets
+#: a condition on i1; three poles stand in each other's reach (two wires in the design)
+ROBOTS_V1 = """\
+fkp 1 factory rb
+size 20x12
+wire w red
+w w red box/c0 ~n/i0
+e power/p0 small-electric-pole 2.5,2.5
+e power/p1 small-electric-pole 7.5,2.5
+e power/p2 small-electric-pole 5.5,6.5
+e box/c0 wooden-chest 10.5,2.5
+e ~n/i0 inserter 11.5,2.5 E net=n if=iron-plate<5
+e ~n/i1 inserter 11.5,4.5 E net=n
+e m/m0 assembling-machine-1 14.5,3.5 recipe=iron-gear-wheel
+e ~b/b0 transport-belt 10.5,7.5 E net=b
+e ~b/b1 transport-belt 11.5,7.5 E net=b
+e ~n/i2 inserter 13.5,7.5 E net=n
+"""
+ROBOTS_V2 = (ROBOTS_V1.replace("box/c0 wooden-chest", "box/c0 iron-chest")
+             .replace("~n/i0 inserter", "~n/i0 fast-inserter")
+             .replace("~n/i1 inserter 11.5,4.5 E net=n", "~n/i1 inserter 11.5,4.5 E net=n if=copper-plate>3")
+             .replace("assembling-machine-1", "assembling-machine-2")
+             .replace("transport-belt", "fast-transport-belt")
+             .replace("~n/i2 inserter", "~n/i2 long-handed-inserter"))
+_ROBOT_BASE = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local eei = s.create_entity{name = 'electric-energy-interface', position = {-20, -20}, force = f}
+eei.electric_buffer_size = 1e12
+eei.power_production = 1e9
+eei.energy = 1e12
+s.create_entity{name = 'substation', position = {-17, -20}, force = f}
+s.create_entity{name = 'substation', position = {-17, -4}, force = f}
+local rp = s.create_entity{name = 'roboport', position = {-12, -10}, force = f}
+rp.insert{name = 'construction-robot', count = 30}
+local st = s.create_entity{name = 'storage-chest', position = {-8.5, -12.5}, force = f}
+for _, n in pairs({'small-electric-pole', 'wooden-chest', 'iron-chest', 'inserter', 'fast-inserter',
+    'long-handed-inserter', 'assembling-machine-1', 'assembling-machine-2', 'transport-belt',
+    'fast-transport-belt'}) do st.insert{name = n, count = 20} end
+-- a pole of the world's own, not the design's, in reach of p0 and p2
+s.create_entity{name = 'small-electric-pole', position = {1.5, 8.5}, force = f}
+rcon.print('ok')"""
+
+
+def _robots_wait(r, area, limit=120):
+    """Run the game fast until no ghost, no upgrade and no decon order is left in ``area``."""
+    a = f"{{{{{area[0]}, {area[1]}}}, {{{area[2]}, {area[3]}}}}}"
+    left = (f"local s = game.get_surface('lab') rcon.print("
+            f"s.count_entities_filtered{{area = {a}, type = 'entity-ghost'}} + "
+            f"s.count_entities_filtered{{area = {a}, to_be_upgraded = true}} + "
+            f"s.count_entities_filtered{{area = {a}, to_be_deconstructed = true}})")
+    t0, tick0 = time.time(), int(r.lua("game.speed = 16 rcon.print(game.tick)").strip())
+    n = int(r.lua(left).strip())
+    while n and time.time() - t0 < limit:
+        time.sleep(1)
+        n = int(r.lua(left).strip())
+    tick = int(r.lua("game.speed = 1 rcon.print(game.tick)").strip())
+    return n, (tick - tick0) / 60
+
+
+def check_robots():
+    """2.1 in play mode with robots. A roboport on the lab surface builds plot rb (v1), then plot
+    pb, applied on its own: its blueprint holds only pb's two poles, and a robot-built pole joins
+    itself to the standing poles in its reach, rb's among them, while the design wires the two
+    plots once. The wire pass after the build cuts what the design doesn't have (keeping two
+    power domains apart will rest on this) and leaves the world's own pole alone. Then 30 plates
+    go in the chest and a hand wire joins i1 to pole p1, and v2 is applied: robots swap five
+    entities in place (settings, wires and contents stay), lay the long-handed inserter fresh,
+    and the paste writes i1's new condition; the wire pass cuts the hand wire. A diff after the
+    robots finds everything as designed."""
+    import json
+    from fkcore import apply as applymod, compose, fkp, wires as wiresmod
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    watch = {"plots": "keep", "sanctioned": "mark 2h", "notify": "off"}
+    plots = ("fkp 1 surface lab\nplot rb at 0,0 rot 0 size 20x12\n"
+             "plot pb at 0,12 rot 0 size 20x4\n")
+    pb = ("fkp 1 factory pb\nsize 20x4\ne power/q0 small-electric-pole 4.5,0.5\n"
+          "e power/q1 small-electric-pole 8.5,0.5\n")
+
+    def composed(text):
+        return compose.compose(fkp.loads(plots), {"rb": fkp.loads(text), "pb": fkp.loads(pb)}, cat)
+    v1, v2 = composed(ROBOTS_V1), composed(ROBOTS_V2)
+    area = (-2, -2, 22, 18)
+    poles = """
+local s = game.get_surface('lab')
+local p = {}
+for _, e in pairs(s.find_entities_filtered{area = {{0, 0}, {12, 16}}, name = 'small-electric-pole'}) do
+  local w = {}
+  for _, c in pairs(e.get_wire_connector(defines.wire_connector_id.pole_copper, true).connections) do
+    local o = c.target.owner.position
+    w[#w + 1] = o.x .. ',' .. o.y
+  end
+  table.sort(w)
+  p[#p + 1] = e.position.x .. ',' .. e.position.y .. '-' .. table.concat(w, '/')
+end
+table.sort(p)
+rcon.print(table.concat(p, ' '))"""
+    read = """
+local s = game.get_surface('lab')
+local function one(x, y)
+  for _, e in pairs(s.find_entities_filtered{position = {x, y}, radius = 0.3}) do
+    if e.type ~= 'entity-ghost' and e.type ~= 'electric-pole' then return e end
+  end
+end
+local o = {}
+local i0 = one(11.5, 2.5)
+local c = i0.get_control_behavior().circuit_condition
+o.i0 = i0.name .. ' ' .. c.first_signal.name .. c.comparator .. c.constant .. ' red=' ..
+  i0.get_wire_connector(defines.wire_connector_id.circuit_red, true).connection_count
+local c0 = one(10.5, 2.5)
+o.c0 = c0.name .. ' ' .. c0.get_item_count('iron-plate')
+local m0 = one(14.5, 3.5)
+o.m0 = m0.name .. ' ' .. tostring(m0.get_recipe() and m0.get_recipe().name)
+o.b = one(10.5, 7.5).name .. ',' .. one(11.5, 7.5).name
+local i1 = one(11.5, 4.5)
+local c1 = i1.get_control_behavior()
+o.i1 = i1.name .. ' ' .. (c1 and c1.circuit_enable_disable and c1.circuit_condition.first_signal.name or 'off')
+  .. ' red=' .. i1.get_wire_connector(defines.wire_connector_id.circuit_red, true).connection_count
+o.i2 = one(13.5, 7.5).name
+rcon.print(helpers.table_to_json(o))"""
+    with LaptopServer("robots", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area(s, f, (-64, -64, 64, 64)))
+            print("base:", r.lua(_ROBOT_BASE).strip())
+            rep1 = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch,
+                                  keys=["lab:rb/"])
+            print("\n".join(rep1.lines()))
+            left, secs = _robots_wait(r, area)
+            print(f"robots built rb: {left} left after {secs:.0f} game s")
+            print("poles (x,y-wired to), the world's own at 1.5,8.5:", r.lua(poles).strip())
+            pass0 = wiresmod.run(r, v1, cat, rep1.area)
+            print("the wire pass after rb's build:", pass0.line())
+            rep1b = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch,
+                                   keys=["lab:pb/"], own=rep1.own)
+            print("\n".join(rep1b.lines()))
+            left1, secs1 = _robots_wait(r, area)
+            print(f"robots built pb: {left1} left after {secs1:.0f} game s")
+            joined = r.lua(poles).strip()
+            print("poles as robots built pb:", joined)
+            pass1 = wiresmod.run(r, v1, cat, rep1b.area)
+            print("the wire pass after pb's build (as fk wait built runs it):", pass1.line())
+            cut1 = r.lua(poles).strip()
+            print("poles after it:", cut1)
+            r.lua("local s = game.get_surface('lab') "
+                  "s.find_entity('wooden-chest', {10.5, 2.5}).insert{name = 'iron-plate', count = 30} "
+                  "s.find_entity('inserter', {11.5, 4.5}).get_wire_connector(defines.wire_connector_id.circuit_red, true)"
+                  ".connect_to(s.find_entity('small-electric-pole', {7.5, 2.5}).get_wire_connector(defines.wire_connector_id.circuit_red, true)) "
+                  "rcon.print('ok')")
+            rep2 = applymod.apply(r, v2, cat, mode="play", force=f, policy=watch, own=rep1b.own)
+            print("\n".join(rep2.lines()))
+            left2, secs2 = _robots_wait(r, area)
+            print(f"robots did v2: {left2} left after {secs2:.0f} game s")
+            got = json.loads(r.lua(read).strip())
+            print("after v2:", json.dumps(got, sort_keys=True))
+            pass2 = wiresmod.run(r, v2, cat, area)
+            print("the wire pass after it:", pass2.line(), "; poles:", r.lua(poles).strip())
+            final = applymod.diff(r, v2, cat, area, watch, force=f, own=rep2.own)
+            verdicts = {}
+            for v in final.verdicts:
+                verdicts[v.verdict] = verdicts.get(v.verdict, 0) + 1
+            print("a diff after it:", verdicts, [d.line() for d in final.settings])
+    ups = sorted(k.split("/")[-1] for k, _o, _n in rep2.upgraded)
+    ok = (left == 0 and left1 == 0 and left2 == 0 and pass0.line() is None
+          and pass1.cut >= 1 and pass1.error is None and "1.5,8.5" in cut1
+          and ups == ["b0", "b1", "c0", "i0", "m0"]
+          and [k.split("/")[-1] for k, _w in rep2.written] == ["i1"]
+          and any(k.endswith("/i2") for k, _w in rep2.fresh)
+          and rep2.wires.cut == 1 and pass2.line() is None
+          and got["i0"] == "fast-inserter iron-plate<5 red=1"
+          and got["c0"] == "iron-chest 30" and got["m0"] == "assembling-machine-2 iron-gear-wheel"
+          and got["b"] == "fast-transport-belt,fast-transport-belt"
+          and got["i1"] == "inserter copper-plate red=0" and got["i2"] == "long-handed-inserter"
+          and not final.settings and verdicts.get("ok") == len(v2.entities))
+    print("settings, upgrades and wires with robots:", "OK" if ok else "NOT as designed")
     return 0 if ok else 1
 
 
@@ -698,6 +1050,139 @@ def check_capital(save=None):
     print(f"reads took {', '.join(f'{t:.2f}' for t in took)} s")
     shutil.rmtree(game, True)
     return 0 if max(took) < 5 and out[0].startswith("capital nauvis") else 1
+
+
+def check_fixes():
+    """2.1.3, the fixes from the runs, in the game:
+
+    - capture: a slot's blueprint takes only what stands in it (a drill of the next slot whose box
+      reaches over the edge stays out);
+    - REACH: the read of the roboports that stand with power, and what it leaves out of reach;
+    - fk request: an item-request proxy, and robots bring the ammo into the turret; what the
+      network doesn't hold is said;
+    - scaffold: a roboport the design moved is ordered out, and so is an old one when the
+      network holds no roboport for the design's; with stock, an old one is held as before."""
+    import json as jsonmod
+    from fkcore import apply as applymod, capture, compose, fkp, link as linkmod, robots
+    from fkcore.catalog import Catalog
+    cat, s, f = Catalog.load(), "lab", "lab"
+    watch = {"plots": "revert", "sanctioned": "revert", "notify": "off"}
+    results = {}
+
+    def make(r, name, x, y, **kw):
+        extra = "".join(f", {k} = {v}" for k, v in kw.items())
+        return r.lua(f"local e = game.get_surface('{s}').create_entity{{name = '{name}', "
+                     f"position = {{{x}, {y}}}, force = '{f}'{extra}}} "
+                     "rcon.print(e and 'ok' or 'no')").strip()
+
+    def at(r, name, x, y):
+        return r.lua(f"local o = {{}} for _, e in pairs(game.get_surface('{s}').find_entities_filtered"
+                     f"{{position = {{{x}, {y}}}, radius = 0.3}}) do if e.name == '{name}' or "
+                     f"(e.type == 'entity-ghost' and e.ghost_name == '{name}') then o[#o + 1] = "
+                     "(e.type == 'entity-ghost' and 'ghost' or 'built') .. "
+                     "(e.to_be_deconstructed() and '(decon)' or '') end end "
+                     "rcon.print(table.concat(o, ' '))").strip()
+
+    def design(plot, x, y, w, h, text):
+        return compose.compose(fkp.loads(f"fkp 1 surface lab\nplot {plot} at {x},{y} rot 0 size "
+                                         f"{w}x{h}\n"),
+                               {plot: fkp.loads(f"fkp 1 factory {plot}\nsize {w}x{h}\n"
+                                                "cover robots robots roboport=roboport\n" + text)},
+                               cat)
+
+    with LaptopServer("fixes", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(linkmod.lua_generate_area(s, f, (-32, -32, 400, 64)))
+            # -- capture: slot (0,0)-(20,20); a drill of the next slot at 20.5 reaches over the edge
+            make(r, "wooden-chest", 5.5, 5.5)
+            make(r, "electric-mining-drill", 20.5, 10.5)
+            got = capture.from_game(r, s, f, (0, 0, 20, 20))
+            results["capture takes its own slot only"] = (got.get("names"), {"wooden-chest": 1})
+
+            # -- a network with stock, power and robots (setup only), x 300..330
+            make(r, "roboport", 318, 10)
+            make(r, "small-electric-pole", 321.5, 12.5)
+            r.lua(f"local e = game.get_surface('{s}').create_entity{{name = 'electric-energy-"
+                  f"interface', position = {{323, 12}}, force = '{f}'}} e.power_production = "
+                  "2000000 e.electric_buffer_size = 2000000 rcon.print(1)")
+            make(r, "storage-chest", 325.5, 10.5)
+            r.lua(f"local s = game.get_surface('{s}') "
+                  "local c = s.find_entity('storage-chest', {325.5, 10.5}) "
+                  "c.insert{name = 'piercing-rounds-magazine', count = 20} "
+                  "c.insert{name = 'roboport', count = 5} "
+                  "s.find_entity('roboport', {318, 10}).insert{name = 'construction-robot', "
+                  "count = 10} rcon.print(1)")
+            make(r, "gun-turret", 331, 17)
+            time.sleep(2)
+            # -- REACH: the read of what stands with power
+            tag = f"fixes-ports-{os.getpid()}"
+            ports = linkmod.read_output(r, robots.lua_roboports(s, f, tag), tag, "roboports")
+            ports = [tuple(p) for p in (ports if isinstance(ports, list) else [])]
+            results["roboports read"] = (ports, [(318, 10, 25, 55)])
+            rows = [("in", "wooden-chest", 360.5, 10.5), ("out", "wooden-chest", 380.5, 10.5),
+                    ("far", "wooden-chest", 410.5, 10.5)]
+            results["REACH alone"] = (sorted(row[0] for row in robots.reach(rows, ports, cat)),
+                                      ["far", "out"])
+            rows.append(("hop", "roboport", 362, 10))
+            results["REACH with the paste's roboport"] = (
+                [row[0] for row in robots.reach(rows, ports, cat)], [])
+
+            # -- fk request
+            def request(pos, item, n, **kw):
+                return jsonmod.loads(r.lua(linkmod.lua_request(s, f, pos, item, n, **kw)).strip())
+            got = request((331, 17), "piercing-rounds-magazine", 10)
+            results["request asks"] = ((got.get("ok"), got.get("asked"), got.get("stock"),
+                                       got.get("reach")), (True, 10, 20, True))
+            short = request((331, 17), "firearm-magazine", 5)
+            results["request says the network is short"] = ((short.get("asked"),
+                                                            short.get("stock")), (5, 0))
+            proxy = r.lua(f"local p = game.get_surface('{s}').find_entities_filtered{{type = "
+                          "'item-request-proxy', position = {331, 17}}[1] rcon.print(p and "
+                          "#p.insert_plan or 0)").strip()
+            results["one proxy, both requests"] = (proxy, "2")
+            t0, ammo = time.time(), "0"
+            while time.time() - t0 < 40:
+                ammo = r.lua(f"rcon.print(game.get_surface('{s}').find_entity('gun-turret', "
+                             "{331, 17}).get_inventory(defines.inventory.turret_ammo)"
+                             ".get_item_count('piercing-rounds-magazine'))").strip()
+                if ammo == "10":
+                    break
+                time.sleep(1)
+            results["robots bring the ammo"] = (ammo, "10")
+            nothing = r.lua(linkmod.lua_request(s, f, (200.5, 40.5), "coal", 5)).strip()
+            results["request on empty ground"] = (jsonmod.loads(nothing).get("ok"), False)
+
+            # -- scaffold, no stock: plot sa at 200,0 (40x20)
+            v1 = "e robots/r0 roboport 6,6\n"
+            area = (200, 0, 240, 20)
+            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v1), cat, area, mode="play",
+                                 force=f, policy=watch)
+            r.lua(linkmod.lua_revive(s, area))
+            make(r, "roboport", 230, 14)              # an old roboport, not the toolkit's
+            v2 = "e robots/r0 roboport 18,6\n"
+            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v2), cat, area, mode="play",
+                                 force=f, policy=watch, own=rep.own)
+            results["moved roboport ordered out"] = (at(r, "roboport", 206, 6), "built(decon)")
+            results["old roboport, no stock: ordered out"] = (at(r, "roboport", 230, 14),
+                                                              "built(decon)")
+            results["the new one laid"] = (at(r, "roboport", 218, 6), "ghost")
+            results["report says why"] = (sorted(rep.released), sorted([applymod.MOVED_OUT,
+                                                                        applymod.STOCK_OUT]))
+            sa_lines = rep.lines()
+
+            # -- scaffold with stock: plot sb at 300,0 (20x20); the network holds 5 roboports
+            area = (300, 0, 320, 20)
+            rep = applymod.apply(r, design("sb", 300, 0, 20, 20, "e robots/r0 roboport 6,6\n"),
+                                 cat, area, mode="play", force=f, policy=watch)
+            results["with stock, the old one is held"] = (at(r, "roboport", 318, 10), "built")
+            results["held"] = (rep.held, 1)
+    bad = 0
+    print("\n".join(sa_lines))
+    for k, (got, want) in results.items():
+        ok = got == want
+        bad += not ok
+        print(f"{k:<40} {got!s:<50} {'OK' if ok else 'NOT ' + repr(want)}")
+    return 1 if bad else 0
 
 
 #: check_vision's base around games/lab-sense (iron 310,420 20x24, gears 332,420 16x16): power
@@ -1076,6 +1561,7 @@ if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
                       "turned": check_turned, "health": check_health,
-                      "settings": check_settings, "lab": check_lab,
-                      "capital": check_capital, "vision": check_vision,
-                      "stats": check_stats}[what]())
+                      "settings": check_settings, "defaults": check_defaults,
+                      "robots": check_robots, "lab": check_lab,
+                      "capital": check_capital, "fixes": check_fixes,
+                      "vision": check_vision, "stats": check_stats}[what]())
