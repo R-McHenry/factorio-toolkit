@@ -1847,7 +1847,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         so a crossing can only be a port (PLAN-MODULES phase 3). Only the frames of the modules
         the net is inside are free: a template's frame or a sealed child's inside them stays
         blocked, as it is for a net outside (2.0.40: the child's frame was freed with its
-        parent's, and a parent net ran straight across a sealed child)."""
+        parent's, and a parent net ran straight across a sealed child).
+
+        Two sealed frames that overlap (neither inside the other) share the tiles they both
+        cover (2.0.75): a net of either may use them, and what the other has laid there is in
+        its way as an entity; the rest of the other's frame, and every template frame in it,
+        stays blocked."""
         parts = net.split("/")[:-1]
         inside = []
         for i in range(1, len(parts) + 1):
@@ -1856,11 +1861,16 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 inside.append(pre)
         if not inside:
             return frames, box
+        inner = inside[-1]
+        x0, y0, x1, y1, mine = sealed[inner]
         blocked = set()
         for path, tiles in owned.items():
-            if path not in inside:
-                blocked |= tiles
-        x0, y0, x1, y1, _tiles = sealed[inside[-1]]
+            if path in inside:
+                continue
+            if path in sealed and not path.startswith(inner + "/") \
+                    and not inner.startswith(path + "/"):
+                tiles = tiles - mine                  # a foreign sealed frame: the overlap is shared
+            blocked |= tiles
         return frozenset(blocked), (x0, y0, x1, y1)
     base = lay.copy()
     standing, patched, again, held = [], {}, {}, {}
@@ -1955,15 +1965,33 @@ def seal_checks(flat, lay, cat):
     """crosses-frame (PLAN-MODULES phase 3): a net's carrier inside a sealed module's frame that the net does
     not belong to -- a crossing that is not at a port -- or one of the module's own nets' carriers
     outside its frame. One line per carrier at fault; none when every sealed module is sealed.
-    FRAME (2.0.40): an entity of the module's own (a machine, a template's belt) outside its frame."""
+    FRAME (2.0.40): an entity of the module's own (a machine, a template's belt) outside its frame.
+    A carrier of another sealed module's net on the tiles the two frames share is not a crossing
+    (2.0.75: overlapping frames share those tiles)."""
     out = []
+    boxes = {}
+    for path in lay.insts:
+        if path in flat.insts and path in flat.sealed:
+            try:
+                x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
+            except Exception:
+                continue
+            boxes[path] = (x0, y0, x1, y1)
+
+    def shared(path, net, tiles):
+        """True when ``net`` is a net of a sealed module foreign to ``path`` (neither inside the
+        other) whose frame holds ``tiles`` too."""
+        scopes = [p for p in boxes if net.startswith(p + "/")]
+        if not scopes:
+            return False
+        q = max(scopes, key=len)
+        return not q.startswith(path + "/") and not path.startswith(q + "/") \
+            and all(_in_box(t, boxes[q]) for t in tiles)
+
     for path, rec in sorted(lay.insts.items()):
-        if path not in flat.insts or path not in flat.sealed:
+        if path not in boxes:
             continue
-        try:
-            x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
-        except Exception:
-            continue
+        x0, y0, x1, y1 = boxes[path]
         frame = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
         for key, e in lay.entities.items():
             net = e.attrs.get("net")
@@ -1979,13 +2007,17 @@ def seal_checks(flat, lay, cat):
             if not net:
                 continue
             mine = net == path or net.startswith(path + "/")
-            if inside and not mine:
+            if inside and not mine and not shared(path, net, tiles):
                 out.append(f"crosses-frame      {key} ({net}) stands inside sealed module {path}: a net "
                            "crosses a sealed frame only at a port's edge")
             elif mine and not inside:
                 out.append(f"crosses-frame      {key} ({net}) belongs to sealed module {path} but stands "
                            "outside its frame")
     return out
+
+
+def _in_box(t, box):
+    return box[0] <= t[0] < box[2] and box[1] <= t[1] < box[3]
 
 
 def port_checks(flat, lay, cat):

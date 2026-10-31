@@ -479,6 +479,9 @@ answer is the next build. Nothing here is broken by itself.
   than its belts or inserters carry
 - `does-not-fit`: a sized row runs past its plot or into another instance's frame at the count it got;
   the build stops at `place` when their entities would overlap
+- `overlap`: two sealed modules' frames share tiles. Both modules' routes may use them, and each
+  is in the way of the other's; a port that opens inside the other module's frame is named, since
+  a net from outside both can't reach it. Only two entities on one tile stop the build
 - `too-thin`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
   and some of the net's belt lanes or inserters run full: the line says what is required there,
   what they carry, and who runs short. Lanes count one at a time (7.5/s yellow); on a belt two

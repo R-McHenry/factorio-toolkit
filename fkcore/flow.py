@@ -646,8 +646,36 @@ def s_place(ctx, args):
         lines += [f"  {path}: {c}" for path, c in sorted(cls.items()) if c != "unchanged"]
         lines += [f"  placed {line}" for line in placed]
         checks += [Check("no-position", p.factory, n) for n in notes]
+        checks += _overlap_checks(p.factory, flat, lay, ctx.cat)
         checks += _invariant_checks(p.factory, fkp.invariants(lay, ctx.cat))
     return lines, checks
+
+
+def _overlap_checks(factory, flat, lay, cat):
+    """``overlap`` (2.0.75, warn): two sealed modules whose frames share tiles. Both route there,
+    the first laid in the way of the next; only two entities on one tile stop the build."""
+    out = []
+    pairs = expand.frame_overlaps(flat, lay, cat)
+    if not pairs:
+        return out
+    try:
+        edges = expand.port_edges(flat, lay, cat)
+    except Exception:                           # the router reports a port it can't place
+        edges = {}
+    for a, b, (x0, y0, x1, y1) in pairs:
+        out.append(Check("overlap", f"{factory} {a}",
+                         f"its frame and {b}'s share {x1 - x0}x{y1 - y0} tiles at "
+                         f"{x0},{y0}..{x1 - 1},{y1 - 1}: both modules' routes may use them, and "
+                         "each is in the way of the other's"))
+        for mine, other in ((a, b), (b, a)):
+            ob = expand.frame_of(flat, lay, other, cat)
+            for key, pe in sorted(edges.items()):
+                tx, ty = pe.outside
+                if key.rsplit("/", 1)[0] == mine and ob[0] <= tx < ob[2] and ob[1] <= ty < ob[3]:
+                    out.append(Check("overlap", f"{factory} {mine}",
+                                     f"port {key.rsplit('/', 1)[-1]} opens at {tx},{ty}, inside "
+                                     f"{other}'s frame: a net from outside both can't reach it"))
+    return out
 
 
 def _pinned_routes(flat, new, prev, cat):

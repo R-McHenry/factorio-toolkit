@@ -47,7 +47,7 @@ from .templates import CONTACT
 from .terrain import fmt_amount
 
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
-           "frame_of", "planned_frame"]
+           "frame_of", "planned_frame", "frame_overlaps"]
 
 _SINGLE = ("Assembler", "Furnace", "ChemPlant", "Refinery", "Chest", "Pumpjack", "OffshorePump", "Pole",
            "Boiler", "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger",
@@ -949,6 +949,29 @@ def frame_of(flat, lay, path, cat):
     frag, _binding = fragment_of(flat, path, cat)
     w, h = frag.size if rec.rot % 2 == 0 else frag.size[::-1]
     return (int(rec.x), int(rec.y), int(rec.x) + w, int(rec.y) + h)
+
+
+def frame_overlaps(flat, lay, cat):
+    """[(a, b, (x0, y0, x1, y1))]: every two placed sealed modules whose frames overlap, neither
+    inside the other, with the box they share (2.0.75: a warning, never a stop; the router lets
+    either module's nets use the shared tiles, each in the way of the other's)."""
+    boxes = {}
+    for path in sorted(lay.insts, key=fkpmod.natural_key):
+        if path in flat.insts and path in flat.sealed:
+            try:
+                boxes[path] = frame_of(flat, lay, path, cat)
+            except FragmentError:
+                continue
+    names, out = list(boxes), []
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            if b.startswith(a + "/") or a.startswith(b + "/"):
+                continue
+            p, q = boxes[a], boxes[b]
+            x0, y0, x1, y1 = max(p[0], q[0]), max(p[1], q[1]), min(p[2], q[2]), min(p[3], q[3])
+            if x0 < x1 and y0 < y1:
+                out.append((a, b, (x0, y0, x1, y1)))
+    return out
 
 
 def _span(keys):

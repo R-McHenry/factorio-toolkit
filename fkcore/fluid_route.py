@@ -509,7 +509,8 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
     # 2.0.62 (the opus run's Oil module: "every connection tile of its box is taken"): every
     # frame was blocked for every net, a sealed module's own included, so no pipe could stand
     # inside a module. Now, as for belts (route.net_frames), a net inside a sealed module routes in
-    # that module's frame and keeps off every other frame
+    # that module's frame and keeps off every other frame. 2.0.75: two sealed frames that overlap
+    # share the tiles they both cover, as for belts
     frames = {}
     for path, rec in lay.insts.items():
         if rec.kind != "Literal" and path in flat.insts:
@@ -523,10 +524,15 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
         inside = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
         inside = [p for p in inside if p in sealed and p in frames]
         blocked = set()
+        inner = inside[-1] if inside else None
         for p, tiles in tiles_of.items():
-            if p not in inside:
-                blocked |= tiles
-        return blocked, (frames[inside[-1]] if inside else box)
+            if p in inside:
+                continue
+            if inner is not None and p in sealed and not p.startswith(inner + "/") \
+                    and not inner.startswith(p + "/"):
+                tiles = tiles - tiles_of[inner]
+            blocked |= tiles
+        return blocked, (frames[inner] if inside else box)
     fluid_all = sorted(routemod.fluid_nets(flat, cat))
     reach = int(cat.entity(PTG).get("max_distance") or 10)
     base = list(lay.entities.values())

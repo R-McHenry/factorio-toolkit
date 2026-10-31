@@ -299,7 +299,9 @@ module GearRib size 16x10 {
 - Inside a sealed module the internal nets route **inside the frame**, every tile of it theirs;
   outside, a parent's route meets the port from the other side of the edge. Two ports that meet on
   one edge (one module's `out` port against the next one's `in` port) need nothing laid between
-  them. A crossing anywhere but a port is a `crosses-frame` line. The module's
+  them. A crossing anywhere but a port is a `crosses-frame` line. Two sealed modules may overlap:
+  an `overlap` line says where, and the tiles both frames cover are both modules' to route on,
+  each in the way of what the other laid first. The module's
   internals are the module's own: a parent change never re-routes them (the same carriers, key for
   key, just moved), and `fk explain rib` shows both the template line and its plain entities.
 - Width: a port is as wide as the belt just inside it carries its item: both lanes there make it
