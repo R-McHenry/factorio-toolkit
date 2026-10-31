@@ -39,7 +39,7 @@ from . import facts as _facts
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
            "MINING_RADIUS", "STEAM_PER_S", "HEAT_W", "REACTOR_FUEL_S", "CIRCUIT_WIRE_REACH",
-           "FluidBox", "PipeConn"]
+           "FluidBox", "PipeConn", "expected"]
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
@@ -277,7 +277,8 @@ class Catalog:
     def recipe_rates(self, recipe, speed) -> tuple[dict, dict]:
         """``(needs, makes)`` per second for one machine crafting ``recipe`` at ``speed``.
 
-        Items and fluids alike; a product with a probability or an amount range counts its mean.
+        Items and fluids alike; a product with a probability or an amount range counts its mean
+        (``expected``).
         """
         rec = self.recipe(recipe)
         crafts = float(speed) / float(rec["energy"])
@@ -285,12 +286,7 @@ class Catalog:
         for ing in rec.get("ingredients", ()):
             needs[ing["name"]] = needs.get(ing["name"], 0.0) + ing["amount"] * crafts
         for prod in rec.get("products", ()):
-            if "amount" in prod:
-                amount = float(prod["amount"])
-            else:
-                amount = (float(prod.get("amount_min", 0)) + float(prod.get("amount_max", 0))) / 2
-            amount *= float(prod.get("probability", 1.0))
-            makes[prod["name"]] = makes.get(prod["name"], 0.0) + amount * crafts
+            makes[prod["name"]] = makes.get(prod["name"], 0.0) + expected(prod) * crafts
         return needs, makes
 
     def smelting_recipe(self, ingredient) -> str:
@@ -350,7 +346,8 @@ class Catalog:
         energy = rec["energy"]
         rates = {}
         for product in rec.get("products", []):
-            rates[product["name"]] = product["amount"] * speed / energy
+            rates[product["name"]] = rates.get(product["name"], 0.0) \
+                + expected(product) * speed / energy
         return rates
 
     def belt_throughput(self, name="transport-belt") -> float:
@@ -395,6 +392,18 @@ class Catalog:
                         names.add(row["name"])
             self._items = frozenset(names)
         return name in self._items and not self.is_fluid(name)
+
+
+def expected(prod) -> float:
+    """What one craft gives of a recipe product on average: its amount (the middle of a range),
+    plus a recycler's ``extra_count_fraction``, times its ``probability`` (2.1, read from the
+    game: ``uranium-processing`` gives U-235 at 0.007, so 0.007 a craft, not 1)."""
+    if "amount" in prod:
+        amount = float(prod["amount"])
+    else:
+        amount = (float(prod.get("amount_min", 0)) + float(prod.get("amount_max", 0))) / 2
+    amount += float(prod.get("extra_count_fraction") or 0.0)
+    return amount * float(prod.get("probability", 1.0))
 
 
 def _is_integer(value) -> bool:

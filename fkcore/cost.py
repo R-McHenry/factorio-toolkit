@@ -10,6 +10,8 @@ power step's, not yet known when the size step chooses. Pure, stdlib only.
 """
 from __future__ import annotations
 
+from .catalog import expected
+
 __all__ = ["item_cost", "design_cost"]
 
 #: what one unit of a fluid costs: a pump moves 1200/s of water, so a fluid is nearly free
@@ -32,7 +34,8 @@ def item_cost(cat, item, memo=None, open_=None):
         memo[item] = 1.0
         return 1.0
     r = cat.recipe(recipe)
-    made = sum(p.get("amount", 1) for p in r.get("products", ()) if p.get("name") == item) or 1
+    made = sum(expected(p) if "amount" in p or "amount_min" in p else p.get("probability", 1)
+               for p in r.get("products", ()) if p.get("name") == item) or 1
     open_.add(item)
     total = sum(i.get("amount", 1) * item_cost(cat, i["name"], memo, open_)
                 for i in r.get("ingredients", ()))

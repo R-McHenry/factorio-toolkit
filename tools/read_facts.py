@@ -3,6 +3,8 @@
     python tools/read_facts.py            reads, writes fkcore/data/facts.json and widens
                                           fkcore/data/catalog.json, and prints what it found
     python tools/read_facts.py --dry      reads and prints, writes nothing
+    python tools/read_facts.py --products reads only the recipes' products and writes their
+                                          probabilities into catalog.json (2.1, fluid ports)
 
 It starts its own laptop server (``tools/laptop_server.py``, name ``facts``: its own ports and
 write-data, never the live game) on the fk-play scenario, base + Space Age as the laptop's
@@ -21,6 +23,11 @@ What it reads (2.1.1, "facts into data"):
 - every signal that can go on a wire: one constant combinator is given every item, fluid,
   virtual signal, recipe, entity, quality, space location and asteroid chunk; what it takes is a
   signal, and what it takes but never puts on its wire (read a few ticks later) never transmits.
+
+- every recipe's products, for their ``probability`` (2.1: the catalog had none, so
+  ``uranium-processing`` made a whole U-235 a craft, about 140 times too much). A product the
+  game gives with a probability below 1 gets it in its catalog row (and a recycler's
+  ``extra_count_fraction``), and ``Catalog.recipe_rates`` counts the expected amount.
 
 ``facts.json`` holds the machine facts and the signals. ``catalog.json`` keeps every row it has
 (the measured fixture's values stay as they are; a value the game disagrees on is printed, not
@@ -138,6 +145,22 @@ local wire_ids = {}
 for k, v in pairs(defines.wire_connector_id) do wire_ids[k] = v end
 save('things', {resources = res, fuels = fuels, modules = mods, fluids = fluids, recipes = recipes,
   mods = script.active_mods, wire_ids = wire_ids})
+rcon.print('ok')
+"""
+
+#: every recipe's products as the game gives them: amount (or a range), probability
+_PRODUCTS = _PRELUDE + """
+local out = {}
+for name, p in pairs(prototypes.recipe) do
+  local rows = {}
+  for _, pr in pairs(p.products or {}) do
+    rows[#rows + 1] = {name = pr.name, type = pr.type, amount = pr.amount, amount_min = pr.amount_min,
+      amount_max = pr.amount_max, probability = pr.probability,
+      extra_count_fraction = pr.extra_count_fraction}
+  end
+  out[name] = rows
+end
+save('products', out)
 rcon.print('ok')
 """
 
@@ -261,6 +284,47 @@ def watts(per_tick):
 def _list(v):
     """table_to_json writes an empty Lua table as {}; a list it is."""
     return [] if v == {} or v is None else list(v)
+
+
+def read_products(name="facts-products"):
+    """-> {recipe: [product]} as the game gives them (one short call on a laptop server)."""
+    with LaptopServer(name, scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            _call(r, _PRODUCTS)
+            return _read(srv, "products")
+
+
+def apply_probabilities(cat, products):
+    """-> (the catalog dict, [changes]): each catalog recipe's products get the game's
+    ``probability`` where it is below 1 and its ``extra_count_fraction`` (a recycler's chance of
+    one more) where it has one (matched by name and type, in order); every other field is kept.
+    A product the game gives as certain loses a ``probability`` it had."""
+    changes, rows = [], []
+    for rec in cat.get("recipes", []):
+        game = _list(products.get(rec["name"]))
+        prods = []
+        for k, prod in enumerate(rec.get("products") or ()):
+            prod = dict(prod)
+            same = [g for g in game if g.get("name") == prod["name"]
+                    and (g.get("type") or "item") == (prod.get("type") or "item")]
+            g = same[0] if len(same) == 1 else (game[k] if k < len(game) else None)
+            p = clean(g.get("probability")) if g else None
+            old = prod.get("probability")
+            x = clean(g.get("extra_count_fraction")) if g else None
+            if x and prod.get("extra_count_fraction") != x:
+                prod["extra_count_fraction"] = x
+                changes.append(f"{rec['name']}: {prod['name']} extra_count_fraction {x}")
+            if p is not None and p < 1:
+                if old != p:
+                    prod["probability"] = p
+                    changes.append(f"{rec['name']}: {prod['name']} probability {p}"
+                                   + (f" (was {old})" if old is not None else ""))
+            elif old is not None and p == 1:
+                del prod["probability"]
+                changes.append(f"{rec['name']}: {prod['name']} certain (was {old})")
+            prods.append(prod)
+        rows.append(dict(rec, products=prods) if "products" in rec else dict(rec))
+    return dict(cat, recipes=rows), changes
 
 
 def read_game():
@@ -513,7 +577,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dry", action="store_true", help="read and print; write nothing")
     ap.add_argument("--raw", help="also save the game's raw answers to this JSON file")
+    ap.add_argument("--products", action="store_true",
+                    help="read only the recipes' products; write their probabilities")
     a = ap.parse_args(argv)
+    if a.products:
+        return main_products(a.dry)
     ents, things, conns, sset, sread = read_game()
     if a.raw:
         with open(a.raw, "w", encoding="utf-8") as fh:
@@ -524,6 +592,9 @@ def main(argv=None):
         cat = json.load(fh)
     old_n = len(cat["entities"])
     wide, diffs = widen_catalog(cat, ents, conns)
+    wide, changes = apply_probabilities(wide, read_products())
+    for c in changes:
+        print("  product:", c)
     print(f"facts: {len(facts['entities'])} entities, {len(facts['resources'])} resources, "
           f"{len(facts['fuels'])} fuels, {len(facts['modules'])} modules, "
           f"{len(facts['recipes'])} recipes, signals "
@@ -540,6 +611,25 @@ def main(argv=None):
     with open(CATALOG, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(wide, fh)
     print(f"wrote {FACTS} and {CATALOG}")
+    return 0
+
+
+def main_products(dry=False):
+    """``--products``: the probabilities alone, into catalog.json."""
+    products = read_products()
+    with open(CATALOG, encoding="utf-8") as fh:
+        cat = json.load(fh)
+    new, changes = apply_probabilities(cat, products)
+    missing = sorted(r["name"] for r in cat.get("recipes", []) if r["name"] not in products)
+    print(f"recipes: {len(products)} in the game, {len(cat.get('recipes', []))} in the catalog "
+          f"({len(missing)} of them not in the game)")
+    for c in changes:
+        print("  product:", c)
+    if dry or not changes:
+        return 0
+    with open(CATALOG, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(new, fh)
+    print(f"wrote {CATALOG}")
     return 0
 
 
