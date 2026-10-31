@@ -1,4 +1,4 @@
-"""2.1 (PLAN-2.1 A, B and I): ``Machine``, ``Entity``, ``kind`` and the prelude."""
+"""2.1 (PLAN-2.1 A, B, C and I): ``Machine``, ``Entity``, ``kind``, ``tiers`` and the prelude."""
 import os
 import tempfile
 import unittest
@@ -216,7 +216,80 @@ class PreludeTest(unittest.TestCase):
             top = write(d, "x.fk", "b = Machine<entity=assembling-machine-1, recipe=pipe>\n")
             with self.assertRaises(ElabError) as cm:
                 elaborate_file(top, CAT)
-        self.assertIn("kind lines only", str(cm.exception))
+        self.assertIn("kind and tiers lines only", str(cm.exception))
+
+
+class TiersTest(unittest.TestCase):
+    def choice(self, text):
+        flat = flat_of(text)
+        (ch,) = flat.choices.values()
+        return ch, flat
+
+    def test_the_prelude_tiers(self):
+        ch, _ = self.choice("a = Assembler<recipe=iron-gear-wheel, machine=auto>")
+        self.assertEqual(ch.menu, ("assembling-machine-1", "assembling-machine-2",
+                                   "assembling-machine-3"))
+        ch, _ = self.choice("f = Furnace<ore=iron-ore, machine=auto>")
+        self.assertEqual(ch.menu, ("stone-furnace", "steel-furnace"))
+        for row in ("AsmRow<n=1, recipe=pipe", "CircuitStack<n=1", "SmelterRow<n=1, ore=iron-ore",
+                    "SmelterArray<n=2, ore=iron-ore"):
+            ch, _ = self.choice(f"r = {row}, machine=auto>")
+            self.assertEqual(len(ch.menu), 3 if "Smelter" not in row else 2, row)
+
+    def test_a_kind_built_on_one_picks_from_its_line(self):
+        ch, flat = self.choice("kind Gears = Assembler<recipe=iron-gear-wheel>\n"
+                               "g = Gears<machine=auto>")
+        self.assertEqual(ch.menu[0], "assembling-machine-1")
+        self.assertEqual(flat.machines["g/m0"].prototype, "assembling-machine-1")
+
+    def test_a_files_own_line_wins_and_entity_auto(self):
+        ch, flat = self.choice("tiers Assembler: assembling-machine-2, assembling-machine-3\n"
+                               "a = Assembler<recipe=pipe, entity=auto>")
+        self.assertEqual((ch.param, ch.menu), ("entity", ("assembling-machine-2",
+                                                          "assembling-machine-3")))
+        self.assertEqual(flat.machines["a/m0"].prototype, "assembling-machine-2")
+
+    def test_a_tier_of_my_own(self):
+        ch, flat = self.choice("kind Spin = Machine<entity=centrifuge>\ntiers Spin: centrifuge\n"
+                               "s = Spin<recipe=uranium-processing, machine=auto>")
+        self.assertEqual(ch.menu, ("centrifuge",))
+
+    def test_a_fluid_recipe_picks_only_machines_with_the_boxes(self):
+        ch, flat = self.choice("a = Assembler<recipe=lubricant, machine=auto>")
+        self.assertEqual(ch.menu, ("assembling-machine-2", "assembling-machine-3"))
+        self.assertEqual(flat.machines["a/m0"].prototype, "assembling-machine-2")
+
+    def test_no_tier(self):
+        refused(self, "a = Machine<entity=auto, recipe=pipe>", "no choice", "Assembler")
+
+    def test_mismatched_tiers_are_refused(self):
+        refused(self, "tiers Furnace: stone-furnace, electric-furnace\nf = Furnace<ore=iron-ore>",
+                "tiers Furnace", "2x2", "3x3")
+        refused(self, "tiers Furnace: steel-furnace, electric-furnace", "tiers Furnace")
+        refused(self, "tiers Assembler: assembling-machine-3, stone-furnace", "2x2")
+        refused(self, "tiers Assembler: assembling-machine-1, chemical-plant",
+                "different fluid boxes")
+        refused(self, "tiers Big: chemical-plant, assembling-machine-2", "different fluid boxes")
+        refused(self, "tiers Odd: stone-furnace, accumulator", "runs on burner", "on electric")
+        refused(self, "tiers Assembler: assembling-machine-1, nope", "unknown entity nope")
+
+    def test_parse_refusals(self):
+        with self.assertRaises(FkSyntaxError):
+            lang.parse("module M { tiers A: assembling-machine-1 }")
+        with self.assertRaises(FkSyntaxError):
+            lang.parse("tiers A: assembling-machine-1, assembling-machine-1")
+        with self.assertRaises(FkSyntaxError):
+            lang.parse("tiers A: assembling-machine-1\ntiers A: assembling-machine-2")
+        f = lang.parse("tiers = Assembler<recipe=pipe>")    # an instance named tiers
+        self.assertEqual(f.body.insts[0].name, "tiers")
+
+    def test_tiers_come_with_their_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "lib.fk", "tiers Gears: assembling-machine-2, assembling-machine-3\n"
+                               "kind Gears = Assembler<recipe=iron-gear-wheel>\n")
+            top = write(d, "top.fk", 'import Gears from "lib.fk"\ng = Gears<machine=auto>\n')
+            flat = elaborate_file(top, CAT)
+        self.assertEqual(flat.machines["g/m0"].prototype, "assembling-machine-2")
 
 
 if __name__ == "__main__":

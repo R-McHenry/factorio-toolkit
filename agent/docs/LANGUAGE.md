@@ -110,9 +110,11 @@ each Stack gives back the cells it can spare. A cell can be any machines, so not
 from a recipe: `col = Stack<cell=FurnaceCell, n=auto>` feeding a gear assembler that takes 3
 plates/s gets five cells. `out\size.txt` says what each count serves.
 
-`machine=auto` and `modules=auto` leave a choice to the same step. `machine=auto` picks the tier,
-of the machines the same size so a cell's layout holds: assembling-machine-1, -2 or -3 for an
-assembler, stone or steel for a burner furnace. `modules=auto` picks no modules, speed modules, or
+`machine=auto` and `modules=auto` leave a choice to the same step. `machine=auto` picks from the
+kind's `tiers` line in the prelude (Kinds and the prelude, below): machines of one size, energy and
+fluid boxes, so a cell's layout holds. That is assembling-machine-1, -2 or -3 for an assembler, and
+stone or steel for a burner furnace. On a fluid recipe it picks only machines with the fluid boxes.
+`modules=auto` picks no modules, speed modules, or
 productivity modules where the recipe takes them. One line's choice holds for every copy of it, so
 a choice inside a cell is one for the whole Stack. Of the picks that meet every target, assert and
 ask (each with its counts sized), the cheapest wins. Cheapest means what the machines and modules
@@ -556,10 +558,22 @@ The instance keeps its own name, so a net still names `g`. A kind can name a kin
 kinds is refused. `import Gears from "lib.fk"` brings in a kind, and a module from another file
 brings the kinds of its file with it.
 
+`tiers KIND: E1, E2, ...` lists what `machine=auto` may pick for that kind and the kinds built on
+it, the first being the default:
+
+```
+tiers Assembler: assembling-machine-1, assembling-machine-2, assembling-machine-3
+tiers Spin: centrifuge                # for kind Spin = Machine<entity=centrifuge>
+```
+
+Every entity on a line must have the same size, the same energy (electric or burner) and the same
+fluid boxes at the same places, or the line is refused. An assembling-machine-1 goes with the -2
+and -3: their boxes open only for a fluid recipe.
+
 Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `ChemPlant` and
-`Refinery` are kind lines in it. It is `game\prelude.fk` in your run (the toolkit's own if the run
-has none). Change it, or write a kind of the same name in a file, and that file uses yours. A
-prelude holds kind lines only.
+`Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run (the
+toolkit's own if the run has none). Change it, or write a kind or tiers line of the same name in a
+file, and that file uses yours. A prelude holds kind and tiers lines only.
 
 ## Power
 

@@ -3,6 +3,7 @@
     file    := (import | module | kind | 'size' WxH | stmt)*   # the top level is the factory body
     import  := 'import' Name (',' Name)* 'from' STRING     # a module or a kind of that file
     kind    := 'kind' Name '=' Kind ('<' param (',' param)* '>')?   # a name with defaults (2.1)
+    tiers   := 'tiers' Name ':' word (',' word)*        # what machine=auto may pick (2.1)
     module  := 'module' Name ('size' WxH)? '{' stmt* '}'
     stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
@@ -55,6 +56,9 @@ set. An instance's own parameters override the kind's, and the instance keeps it
 everyday kinds (``Assembler``, ``Furnace``, ``ChemPlant``, ``Refinery``) are declared this way in
 the prelude (``fkcore/prelude.fk``, or a run's ``game/prelude.fk``), which every file gets without
 an import (``fkcore.elaborate``); a file's own kind or module of the same name wins over it.
+``tiers NAME: E1, E2, ...`` (2.1, "C. tiers") lists the entities ``machine=auto`` may pick for an
+instance of kind NAME (or of a kind built on it): one footprint, one energy, one set of fluid boxes,
+which elaboration checks.
 
 The world design (2.0.43, PLAN-GLOBAL phase B): **a file's body is a module**, so
 ``import Outpost from "outpost.fk"`` needs no wrapping when ``outpost.fk`` declares no ``Outpost``
@@ -80,7 +84,7 @@ from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
            "Module", "Port", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand",
-           "Behave", "Expect", "Props", "COMPARATORS", "Kind"]
+           "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers"]
 
 
 class FkSyntaxError(Exception):
@@ -329,12 +333,23 @@ class Kind:
 
 
 @dataclass
+class Tiers:
+    """``tiers NAME: E1, E2, ...`` (2.1): the entities ``machine=auto`` picks from for kind NAME,
+    in order (the first is the default pick)."""
+    name: str
+    entities: list
+    line: int
+    path: str = "<fk>"
+
+
+@dataclass
 class File:
     path: str
     body: Module
     modules: dict = field(default_factory=dict)    # Name -> Module
     imports: list = field(default_factory=list)    # [(names, file, line)]
     kinds: dict = field(default_factory=dict)      # Name -> Kind (2.1)
+    tiers: dict = field(default_factory=dict)      # Name -> Tiers (2.1)
 
 
 # -- parser ---------------------------------------------------------------------------------------
@@ -415,6 +430,11 @@ class _P:
                 if k.name in f.modules:
                     self.err(f"{k.name} is both a kind and a module: name one otherwise", tok)
                 f.kinds[k.name] = k
+            elif self.at_tiers():
+                t = self.tiers_decl()
+                if t.name in f.tiers:
+                    self.err(f"tiers {t.name} written twice", tok)
+                f.tiers[t.name] = t
             elif tok.text == "size" and tok.kind == "word" and self.peek(1).kind == "dim":
                 # 2.0.43 (PLAN-GLOBAL phase B): a factory file's own frame, so a file body can be
                 # imported as a module as it is; the root's placement may give one instead
@@ -458,6 +478,25 @@ class _P:
         if self.peek().kind != "eof" and self.peek().line == line:
             self.err(f"kind {name}: a kind line is `kind NAME = KIND<params>` and nothing more")
         return Kind(name, target, params, line, self.path)
+
+    def at_tiers(self):
+        """``tiers NAME: ...`` (an instance named ``tiers`` is ``tiers = ...``)."""
+        return (self.peek().text == "tiers" and self.peek().kind == "word"
+                and self.peek(1).kind == "word" and self.peek(2).text == ":")
+
+    def tiers_decl(self):
+        """``tiers NAME: E1, E2, ...`` (2.1, PLAN-2.1 "C. tiers")."""
+        line = self.expect("tiers").line
+        name = self.name("kind name").text
+        self.expect(":")
+        ents = [self.word("an entity").text]
+        while self.accept(","):
+            ents.append(self.word("an entity").text)
+        if len(set(ents)) != len(ents):
+            self.err(f"tiers {name}: an entity is listed twice")
+        if self.peek().kind != "eof" and self.peek().line == line:
+            self.err(f"tiers {name}: a tiers line is `tiers KIND: ENTITY, ENTITY, ...`")
+        return Tiers(name, ents, line, self.path)
 
     def import_(self):
         line = self.expect("import").line
@@ -570,6 +609,8 @@ class _P:
             mod.expects.append(self.expect_line())
         elif self.at_kind():
             self.err("a kind is declared at a file's top level, not inside a module")
+        elif self.at_tiers():
+            self.err("tiers are declared at a file's top level, not inside a module")
         elif self.peek(1).text == "=":
             mod.insts.append(self.inst())
         else:

@@ -228,18 +228,19 @@ class Flat:
 # -- loading --------------------------------------------------------------------------------------
 def load(path):
     """Parse ``path`` and the modules it imports (relative to its folder). -> (File, modules).
-    2.1: the kinds of every file it loads come with them (``f.kinds``, its own first), so a module
-    from another file finds the kinds it was written with."""
+    2.1: the kinds and tiers of every file it loads come with them (``f.kinds``, ``f.tiers``, its
+    own first), so a module from another file finds the kinds it was written with."""
     with open(path, encoding="utf-8") as fh:
         f = lang.parse(fh.read(), path)
     modules = dict(f.modules)
     _imports(f, os.path.dirname(os.path.abspath(path)), modules, {os.path.abspath(path)},
-             f.kinds)
+             f.kinds, f.tiers)
     return f, modules
 
 
-def _imports(f, folder, modules, seen, kinds=None):
+def _imports(f, folder, modules, seen, kinds=None, tiers=None):
     kinds = f.kinds if kinds is None else kinds
+    tiers = f.tiers if tiers is None else tiers
     for names, rel, line in f.imports:
         target = os.path.abspath(os.path.join(folder, rel))
         if not os.path.exists(target):
@@ -248,9 +249,11 @@ def _imports(f, folder, modules, seen, kinds=None):
             g = lang.parse(fh.read(), target)
         if target not in seen:
             seen.add(target)
-            _imports(g, os.path.dirname(target), modules, seen, kinds)
+            _imports(g, os.path.dirname(target), modules, seen, kinds, tiers)
         for name, k in g.kinds.items():     # 2.1: an imported file's kinds come with it
             kinds.setdefault(name, k)
+        for name, t in g.tiers.items():     # and its tiers
+            tiers.setdefault(name, t)
         for name in names:
             mod = g.modules.get(name)
             if mod is None and name in g.kinds:
@@ -334,8 +337,8 @@ def load_prelude(path=PRELUDE):
     with open(path, encoding="utf-8") as fh:
         f = lang.parse(fh.read(), path)
     if f.modules or f.imports or _body_written(f.body):
-        raise ElabError(path, 1, "a prelude holds kind lines only: put modules and instances in a "
-                                 "file of their own")
+        raise ElabError(path, 1, "a prelude holds kind and tiers lines only: put modules and "
+                                 "instances in a file of their own")
     _PRELUDES[path] = (mtime, f)
     return f
 
@@ -381,6 +384,62 @@ class _Kinds:
             cur = k.target
             names.append(cur)
         return cur, plist, names
+
+
+class _Tiers:
+    """``tiers`` lines (2.1, PLAN-2.1 "C. tiers"): ``layers`` are {kind name: lang.Tiers}, the
+    file's own (with its imports') first and the prelude's last."""
+
+    def __init__(self, layers):
+        self.layers = layers
+
+    def find(self, name):
+        return next((layer[name] for layer in self.layers if name in layer), None)
+
+    def names(self):
+        return {n for layer in self.layers for n in layer}
+
+
+def _box_sig(cat, name):
+    """An entity's fluid boxes as positions and flows (every facing), and whether the game opens
+    them only for a fluid recipe (an assembling-machine-2's)."""
+    row = ((getattr(cat, "_fluid", None) or {}).get("entities") or {}).get(name) or {}
+    boxes = tuple(sorted(
+        (b.get("production"), tuple(sorted((c.get("flow"), c.get("type"), c.get("dir"),
+                                            tuple(tuple(a) for a in c.get("at") or ()))
+                                           for c in b.get("connections") or ())))
+        for b in row.get("boxes") or ()))
+    return boxes, bool(row.get("boxes_need_fluid_recipe"))
+
+
+def _tier_checks(tiers, cat):
+    """Every entity on a ``tiers`` line has the same size, the same energy and the same fluid boxes
+    at the same positions, since a cell's belts and pipes are laid for one machine (2.1). An entity
+    without boxes goes with ones the game opens only for a fluid recipe: on any other recipe
+    neither has a box, and a fluid recipe leaves the boxless one out of the menu."""
+    for layer in tiers.layers:
+        for t in layer.values():
+            for e in t.entities:
+                if not cat.has_entity(e):
+                    raise ElabError(t.path, t.line, f"tiers {t.name}: unknown entity {e}")
+            first = t.entities[0]
+            for e in t.entities[1:]:
+                why = None
+                if cat.size(e) != cat.size(first):
+                    why = (f"{first} is {'x'.join(map(str, cat.size(first)))} and {e} "
+                           f"{'x'.join(map(str, cat.size(e)))}")
+                elif (cat.entity(e).get("energy") or {}).get("source") != \
+                        (cat.entity(first).get("energy") or {}).get("source"):
+                    why = (f"{first} runs on {(cat.entity(first).get('energy') or {}).get('source')}"
+                           f" and {e} on {(cat.entity(e).get('energy') or {}).get('source')}")
+                else:
+                    (a, a_opt), (b, b_opt) = _box_sig(cat, first), _box_sig(cat, e)
+                    if a != b and not ((not a and b_opt) or (not b and a_opt)):
+                        why = f"{first} and {e} have different fluid boxes"
+                if why:
+                    raise ElabError(t.path, t.line, f"tiers {t.name}: {why}: one tier line is one "
+                                                    "footprint, one energy and one set of fluid "
+                                                    "boxes")
 
 
 def _kind_merge(core, plist, src, line, path):
@@ -440,8 +499,10 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     keeps. ``sizes`` ({instance path: n}, the size step's) overrides it. 2.1: the kinds are the
     file's own (and its imports') over the prelude's (``prelude_path``)."""
     flat = Flat(name, f.path)
-    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}, load_prelude(prelude_path(f.path)).kinds],
-                         modules)
+    prelude = load_prelude(prelude_path(f.path))
+    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}, prelude.kinds], modules)
+    flat._tiers = _Tiers([getattr(f, "tiers", {}) or {}, prelude.tiers])
+    _tier_checks(flat._tiers, cat)
     flat._layout = layout
     flat._sizes = dict(sizes or {})
     flat._lanes = []
@@ -682,17 +743,11 @@ def _auto(flat, path, inst, src, core=None):
 
 
 # -- 2.0.60: modules=auto and machine=auto, the size step's choices -------------------------------
-#: the parameters a choice can be made for
-CHOICES = ("modules", "machine")
-#: the machines one source line may be built of, by kind: the same size and the same energy, so a
-#: cell's geometry never changes (an electric furnace is 3x3, a stone one 2x2)
-TIERS = {"Assembler": ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3"),
-         "AsmRow": ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3"),
-         "CircuitStack": ("assembling-machine-1", "assembling-machine-2",
-                          "assembling-machine-3"),
-         "Furnace": ("stone-furnace", "steel-furnace"),
-         "SmelterRow": ("stone-furnace", "steel-furnace"),
-         "SmelterArray": ("stone-furnace", "steel-furnace")}
+#: the parameters a choice can be made for (``entity`` is a Machine's ``machine``, 2.1)
+CHOICES = ("modules", "machine", "entity")
+#: 2.1: the machines one source line may be built of are a ``tiers`` line's (the prelude's, or the
+#: file's own): the same size, energy and fluid boxes, so a cell's geometry never changes (an
+#: electric furnace is 3x3, a stone one 2x2). ``_tier_checks`` holds every line to that.
 #: recipes productivity modules go into: the game's (``allowed_effects``, facts.json)
 PRODUCTIVE = _facts.productive()
 
@@ -708,11 +763,20 @@ class Choice:
     paths: list = field(default_factory=list)
 
 
-def _menu(names, param, params, cat):
+def _menu(names, param, params, cat, tiers=None, merged=None, core=None):
     """The menu of one choice. ``names``: the kinds an instance's kind resolves through, its own
-    first (2.1): the first with a tier gives ``machine=auto`` its menu."""
-    if param == "machine":
-        return next((TIERS[n] for n in names if n in TIERS), ())
+    first (2.1): the first with a ``tiers`` line gives ``machine=auto`` its menu. A Machine's menu
+    leaves out the tiers whose fluid boxes its recipe doesn't fit (``no-fluidbox``)."""
+    if param in ("machine", "entity"):
+        line = next((tiers.find(n) for n in names if tiers is not None and tiers.find(n)), None)
+        if line is None:
+            return ()
+        menu = tuple(line.entities)
+        recipe = (merged or {}).get("recipe")
+        if core == "Machine" and isinstance(recipe, str):
+            from .templates import fluid_misfit
+            menu = tuple(e for e in menu if not fluid_misfit(cat, e, recipe)) or menu
+        return menu
     from .templates import MODULE_SLOTS
     machine = params.get("machine", params.get("entity"))
     if isinstance(machine, str) and not MODULE_SLOTS.get(machine):
@@ -739,11 +803,12 @@ def _choose(flat, mod, inst, path, params, cat, src, core=None, names=None, kdef
     for param in CHOICES:
         if not isinstance(params.get(param), lang.Auto):
             continue
-        menu = _menu(names or [inst.kind], param, params, cat)
+        merged = _kind_merge(core, list(kdefaults) + [params], src, inst.line, path)
+        menu = _menu(names or [inst.kind], param, params, cat, flat._tiers, merged, core)
         if not menu:
             raise ElabError(src, inst.line, f"{path}: {param}=auto: no choice for a {inst.kind}"
-                            + (" (machine=auto: " + ", ".join(sorted(TIERS)) + ")"
-                               if param == "machine" else ""))
+                            + (" (machine=auto: " + ", ".join(sorted(flat._tiers.names())) + ")"
+                               if param in ("machine", "entity") else ""))
         key = f"{mod.name}.{inst.name}.{param}"
         pick = flat._sizes.get(key, menu[0])
         pick = pick if pick in menu else menu[0]
@@ -751,7 +816,8 @@ def _choose(flat, mod, inst, path, params, cat, src, core=None, names=None, kdef
         ch.paths.append(path)
         picked[param] = pick
     if "modules" in picked:
-        machine = picked.get("machine", params.get("machine", params.get("entity")))
+        machine = picked.get("machine", picked.get("entity",
+                                                   params.get("machine", params.get("entity"))))
         default = _kind_merge(core, list(kdefaults), src, inst.line, path).get("entity") \
             if kdefaults else None
         if picked["modules"] is not None and not MODULE_SLOTS.get(
