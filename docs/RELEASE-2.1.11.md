@@ -1,4 +1,4 @@
-# Toolkit 2.1 (draft): open circuits
+# Toolkit 2.1.11: open circuits
 
 Plan: `assessment-20261031\PLAN-2.1.md`, "Circuits that reach any building (Rory, 2026-10-31)",
 and the open-circuits phase of "Order". The integrator gives the number.
