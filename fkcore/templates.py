@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import facts as _facts
 from .catalog import FUEL_USE_W, FUEL_VALUE_J, HEAT_W, MINING_TIME, REACTOR_FUEL_S, STEAM_PER_S
 from .fragments import FragmentError, bus_check, bus_ports
 
@@ -30,17 +31,18 @@ INF = float("inf")
 CIRCUIT_PARAMS = ("keep", "fill", "guard")
 #: Parameters every instance may carry; the elaborator reads them, the templates ignore them.
 COMMON_PARAMS = ("duty", "dnp", "inserter", "modules") + CIRCUIT_PARAMS
-#: 2.0.53, ``modules=``: the module slots of the machines that take them (Factorio 2.0), and each
-#: module's effect on speed and productivity (normal quality; efficiency changes no rate).
-MODULE_SLOTS = {"assembling-machine-2": 2, "assembling-machine-3": 4, "electric-furnace": 2,
-                "chemical-plant": 3, "oil-refinery": 3, "centrifuge": 2,
-                "electric-mining-drill": 3, "pumpjack": 2}
-MODULE_EFFECTS = {"speed-module": (0.2, 0.0), "speed-module-2": (0.3, 0.0),
-                  "speed-module-3": (0.5, 0.0),
-                  "productivity-module": (-0.05, 0.04), "productivity-module-2": (-0.10, 0.06),
-                  "productivity-module-3": (-0.15, 0.10),
-                  "efficiency-module": (0.0, 0.0), "efficiency-module-2": (0.0, 0.0),
-                  "efficiency-module-3": (0.0, 0.0)}
+#: 2.0.53, ``modules=``: the module slots of the machines that take them, and each module's
+#: effect on speed and productivity (normal quality; efficiency changes no rate). 2.1.1: read
+#: from facts.json (``fkcore.facts``), keeping the old names: the game also gives slots to the
+#: beacon, lab, biolab, big drill, biochamber, crusher, cryogenic plant, electromagnetic plant,
+#: foundry, recycler and rocket silo, and has the three quality modules.
+MODULE_SLOTS = {n: _facts.module_slots()[n] for n in (
+    "assembling-machine-2", "assembling-machine-3", "electric-furnace", "chemical-plant",
+    "oil-refinery", "centrifuge", "electric-mining-drill", "pumpjack")}
+MODULE_EFFECTS = {n: _facts.module_effects()[n] for n in (
+    "speed-module", "speed-module-2", "speed-module-3", "productivity-module",
+    "productivity-module-2", "productivity-module-3", "efficiency-module", "efficiency-module-2",
+    "efficiency-module-3")}
 #: Items that pass by contact, with no carrier (2.0): a reactor heats the exchanger it touches.
 #: A net of only these has no route; it is connected when its machines touch.
 CONTACT = frozenset({"heat"})
