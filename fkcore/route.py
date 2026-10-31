@@ -412,11 +412,23 @@ def _clean(v):
     return int(v) if float(v).is_integer() else v
 
 
-def _grow(grid, root, fixed, machines, limit):
+#: 2.0.76: driver machines that hold items besides their nets' (a requester of several items): the
+#: inserter that loads from one needs a filter, which a long-handed one can't take, so they get
+#: fast inserters first (``_route_layout`` sets it)
+_FILTERED = frozenset()
+
+
+def _grow(grid, root, fixed, machines, limit, sources=False):
     """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
-    inserters, or long-handed ones where only those reach. -> (result, sinks)."""
-    for hands in _HANDS:
-        sinks = fixed + [TapSink(key, rect, 1, hands) for key, rect in machines]
+    inserters, or long-handed ones where only those reach. ``sources``: the machines are drivers,
+    and one in ``_FILTERED`` is tried with fast inserters alone before a long-handed one may load
+    it (2.0.76). -> (result, sinks)."""
+    passes = list(_HANDS)
+    if sources and any(key in _FILTERED for key, _r in machines):
+        passes = [_HANDS[0], None] + passes[1:]
+    for hands in passes:
+        sinks = fixed + [TapSink(key, rect, 1, _HANDS[0] if hands is None and key in _FILTERED
+                                 else hands or _HANDS[-1]) for key, rect in machines]
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
             break
@@ -439,7 +451,7 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
         machines = job.taps
     if grid.blocked((root[0], root[1])):
         return None, f"its {'end' if reverse else 'start'} tile {root[0]},{root[1]} is taken"
-    res, sinks = _grow(grid, root, fixed, machines, limit)
+    res, sinks = _grow(grid, root, fixed, machines, limit, sources=reverse)
     if res["problems"]:
         return None, "; ".join(res["problems"][:3])
     c = res["counts"]
@@ -520,7 +532,8 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f):
     fx, fy = hub[0] + _DX[f], hub[1] + _DY[f]
     rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
     fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
-    rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit)
+    rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit,
+                         sources=True)
     if rres["problems"]:
         return "drivers: " + "; ".join(rres["problems"][:2])
     rtree = rres["tree"]
@@ -1771,6 +1784,44 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
     return standing, patched, again, held
 
 
+#: inserters that take a filter (2.0: the fast inserter took the filter inserter's place)
+_FILTERS = {"fast-inserter": 5, "bulk-inserter": 5, "stack-inserter": 5}
+
+
+def _filter_loads(flat, lay, cat):
+    """2.0.76 (Rory, 2026-10-31: shared belts kept jamming): every route inserter that picks from
+    a machine making items its net doesn't carry (a requester of four items, two of them for this
+    belt) is filtered to its net's items, ``filter=a|b``. Unfiltered, it put whatever the chest
+    held on the belt: the 10-29 run's blue belt filled with plastic no sink on it took, and the two
+    lanes of a ``lanes`` pair from one chest each got both items. One that already has a filter (a
+    gated net's ``filter=circuit``) is left as it is. -> report lines for the ones that can't take
+    a filter (a long-handed inserter)."""
+    g = connectmod.graph(lay, cat)
+    out = []
+    for key, e in lay.entities.items():
+        if "inserter" not in e.name or not e.owner.startswith("~") or "filter" in e.attrs:
+            continue
+        net = flat.nets.get(e.attrs.get("net"))
+        if net is None:
+            continue
+        for src, via in g.pred.get(key, ()):
+            m = flat.machines.get(src)
+            if via != "pickup" or m is None:
+                continue
+            mine = [i for i in net.items if i in m.makes]
+            if not mine or set(m.makes) <= set(mine):
+                continue
+            if len(mine) > _FILTERS.get(e.name, 0):
+                out.append(f"  unfiltered {net.name}: {key} is a {e.name}, which "
+                           + (f"takes {_FILTERS[e.name]} filters, and the net has {len(mine)}"
+                              if e.name in _FILTERS else "can't filter")
+                           + f", so it loads everything {m.inst} holds onto the belt and can "
+                           "clog it: give the chest a free side a fast inserter can load from")
+                continue
+            e.attrs["filter"] = "|".join(mine)
+    return out
+
+
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                  blocked=(), hand=None, patch=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
@@ -1797,6 +1848,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     in the factory frame (terrain: water, cliffs). ``patch``: {net: its committed carriers} for
     nets none of whose ends moved (``route --only stale``): each stands as it is, is patched,
     or is routed again (``_standing``), before the nets with nothing laid are routed."""
+    global _FILTERED
+    _FILTERED = frozenset(k for net in flat.nets.values() for k, _i in net.drivers
+                          if k in flat.machines
+                          and not set(flat.machines[k].makes) <= set(net.items))
     js = jobs(flat, lay, cat)
     flat._port_edges = port_edges(flat, lay, cat)   # 2.0.48: a port is an edge of its frame
     for name, job in js.items():                      # 2.0.49: a stack cell's nets go straight first
@@ -1958,6 +2013,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(f"FAILED    {net}: {failed.get(net)}")
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
+    lines += _filter_loads(flat, new, cat)
     return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again)
 
 

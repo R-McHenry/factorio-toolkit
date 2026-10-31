@@ -318,6 +318,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
             raise ElabError(src, line, f"dnp {path.replace('/', '.')}: no such instance")
     _bus_conns(flat, cat)
     _resolve_nets(flat, cat)
+    _split_nets(flat, cat)
     _bus_nets(flat)
     _resolve_lanes(flat, cat)
     _width_checks(flat, cat)
@@ -1172,6 +1173,8 @@ def _resolve_nets(flat, cat):
                 if ref.star == star:
                     add_consumers(name, p, ref, star)
 
+    flat._split_src = {name: (p.src, p.net.line) for name, p in pending
+                       if getattr(p.net, "split", False)}
     for name, p in pending:
         w = work[name]
         when = getattr(p.net, "when", None)
@@ -1202,6 +1205,55 @@ def _bus_nets(flat):
                 flat._in_hold.setdefault((key, item), []).append(path)
         flat.nets[path] = FlatNet(path, [item], drivers, consumers, True, inst.line,
                                   False, None, path.rsplit("/", 1)[0] if "/" in path else "")
+
+
+def _split_name(name, item):
+    """A split net's per-item net: ``blue`` + ``engine-unit`` -> ``blue_engine_unit`` (net names
+    have no dashes)."""
+    return f"{name}_{item.replace('-', '_')}"
+
+
+def _split_nets(flat, cat):
+    """``net NAME split:`` (2.0.76, Rory 2026-10-31: shared belts kept jamming; load each item onto
+    a lane of its own by its own filtered inserter, and merge the lanes): the net becomes one net
+    per item, ``NAME_<item>``, paired two to a belt as ``lanes`` pairs in item order (an odd last
+    item has a belt to itself). A full lane then holds only its own item, so it never stops the
+    others; ``route`` filters each loading inserter to its item (``route._filter_loads``), and
+    ``fkcore.pairs`` side-loads the two lanes together. ``flat.split`` maps NAME to its nets."""
+    flat.split = {}
+    for name, net in list(flat.nets.items()):
+        src_net = flat._split_src.get(name)
+        if src_net is None:
+            continue
+        src, line = src_net
+        if len(net.items) < 2:
+            flat.checks.append(Check("split", f"net {name}", f"carries {_items_text(net.items)}: "
+                                     "one item has nothing to split from", line))
+            continue
+        if any(cat.is_fluid(i) for i in net.items):
+            raise ElabError(src, line, f"net {name} split: a fluid's net has no lanes")
+        if net.width > 1 or net.lane is not None:
+            raise ElabError(src, line, f"net {name} split: split gives each item a lane, so it "
+                            "takes no width or lane of its own")
+        subs = []
+        for item in net.items:
+            sub = _split_name(name, item)
+            if sub in flat.nets:
+                raise ElabError(src, line, f"net {name} split: its {item} net would be {sub}, "
+                                "and a net of that name exists")
+            drivers = [(k, i) for k, i in net.drivers if i == item]
+            consumers = [(k, i) for k, i in net.consumers if i == item]
+            for hold, ends in ((flat._out_hold, drivers), (flat._in_hold, consumers)):
+                for end in ends:
+                    hold[end] = [sub if n == name else n for n in hold.get(end, [])]
+            flat.nets[sub] = FlatNet(sub, [item], drivers, consumers, True, net.line, net.limited,
+                                     net.when, net.scope)
+            subs.append(sub)
+        del flat.nets[name]
+        flat.split[name] = subs
+        for a, b in zip(subs[0::2], subs[1::2]):
+            flat.pairs[f"{a}|{b}"] = (a, b)
+            flat.lane_of[a] = flat.lane_of[b] = f"{a}|{b}"
 
 
 def _resolve_lanes(flat, cat):
@@ -1339,7 +1391,9 @@ def _clog_checks(flat, in_hold, fed):
                 f"{', '.join(net.items)} share one belt: one that comes faster than it is used can "
                 "fill it and stop the others. Not where one inserter takes from the source "
                 "straight into each sink (the route step says so when it lays that), or where "
-                "your design limits what goes on it (`net NAME limited:`)", net.line))
+                "your design limits what goes on it (`net NAME limited:`). `net "
+                f"{name.rsplit('/', 1)[-1]} split:` gives each item a lane of its own, loaded by "
+                "its own filtered inserter", net.line))
         if not (net.sushi and made):
             continue
         for k, _i in net.consumers:

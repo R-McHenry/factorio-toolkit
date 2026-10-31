@@ -94,7 +94,7 @@
    "checks": 3,
    "machines": 5,
    "nets": 1,
-   "sha256": "602c9c9a74d556a27be720c9d19dc0d554fff99874b3a01700689c2da0a319eb"
+   "sha256": "dd78cad5e4ce40067bc61265974ea2e1303e7a151da7528429891469a93d9bdc"
   },
   "games/lab-merge/gears.fk": {
    "checks": 1,
@@ -124,7 +124,7 @@
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
+   "sha256": "3eeae50380903e20bbe8c02d7b7a62e5ae93107103103eebd520060741fc393e"
   },
   "games/lab-sense/gears.fk": {
    "checks": 1,
@@ -184,7 +184,7 @@
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
+   "sha256": "3eeae50380903e20bbe8c02d7b7a62e5ae93107103103eebd520060741fc393e"
   },
   "games/nauvis/plant.fk": {
    "checks": 0,
@@ -202,13 +202,13 @@
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
+   "sha256": "3eeae50380903e20bbe8c02d7b7a62e5ae93107103103eebd520060741fc393e"
   },
   "games/spm10/main.fk": {
    "checks": 12,
    "machines": 142,
    "nets": 38,
-   "sha256": "55b0dce0251dd1fa2b533e8ff916733f69de151e618239c0a20e00a74dc96961"
+   "sha256": "80cf8d7c5fa03129f0c9da9b05993a575cee33ff0febf81bb119ba36ad0f5087"
   },
   "games/spm10/mall.fk": {
    "checks": 0,
@@ -220,7 +220,7 @@
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "7f5db53db05b0e576dba08d29ab6b39c6a574b524b5eaad81444a7e605886dd0"
+   "sha256": "3eeae50380903e20bbe8c02d7b7a62e5ae93107103103eebd520060741fc393e"
   },
   "games/v2-bench/join-big.fk": {
    "checks": 4,
@@ -244,13 +244,13 @@
    "checks": 5,
    "machines": 13,
    "nets": 5,
-   "sha256": "da74b21250bd2ee759274e440093f533c08ea04f97aebe82970bb26a906c38fc"
+   "sha256": "8dbbb63a5efbc7c7f5aa6d3fc5a6c400a99f05e5551bae3fd65429d9aafb46b8"
   },
   "tests/data/red_green.fk": {
    "checks": 4,
    "machines": 71,
    "nets": 12,
-   "sha256": "4b281ddbea1708f70e652ac3b7b497ba91af7f361518be89b4472fdb13b5bec3"
+   "sha256": "731794f6718e768058f9fd4ad3f533eafc9872c0a6d91e13c15db7f97ca0654c"
   }
  },
  "note": "what 2.0.27's elaboration produces for every existing .fk: the ports release (2.0.28) must reproduce it exactly",

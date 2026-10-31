@@ -48,7 +48,11 @@ and has two or more makers goes on both lanes: the router puts half its makers o
 LANGUAGE.md "Nets"). Two nets can share a belt, one on each lane (`lanes ore_ | fuel`): one belt
 to lay instead of two, and the two never stop each other, since a full lane holds only its own
 items. A net on both lanes (a two-sided MinerRow's ore) gets one lane when it is side-loaded onto
-a shared belt: 7.5/s there, and `too-thin` says so where it brings more.
+a shared belt: 7.5/s there, and `too-thin` says so where it brings more. A mixed net from a
+requester of several items is the jam to avoid: write it `split` (one lane per item) or feed each
+maker by one inserter straight from the requester. An inserter that loads a belt from a chest of
+several items is filtered to its net's items (2.0.76; the route report's `unfiltered` line names
+one that can't be, a long-handed one where no fast inserter fits).
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report
@@ -408,7 +412,10 @@ A belt that fills, machines that starve, a build that never happens. Read these 
   the route is one inserter from the source straight into each sink, which takes only what that
   sink accepts (a requester beside a one-off crafter, `Lab`s around a requester of packs); the route
   step says so. A belt in between, or a second inserter, and it can clog again. Two: your design
-  says it limits what goes on the net (`net NAME limited:`), which limits nothing itself
+  says it limits what goes on the net (`net NAME limited:`), which limits nothing itself. The
+  fix that holds is `net NAME split:` (2.0.76): each item on a lane of its own, loaded by its own
+  filtered inserter, the lanes side-loaded together; a full lane then stops only itself.
+  `fk stage check` prints these lines (2.0.76), not just their count
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it

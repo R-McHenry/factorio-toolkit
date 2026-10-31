@@ -190,6 +190,14 @@ share, below): the drivers put items on it, the consumers take them.
 - `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
   on the net. It only quiets `CLOG` and `no-limit` for it: it limits nothing itself. The limits
   are `set` properties on the makers' hands (Properties on objects, below).
+- `net NAME split: ...` (2.0.76, also after `items a, b`) gives each item of a mixed net a lane of
+  its own: the net becomes one net per item, `NAME_<item>` (`blue_engine_unit`), paired two to a
+  belt as `lanes` pairs in item order, and an odd last item gets a belt to itself. Each lane is
+  loaded by its own inserter filtered to its item, and the router side-loads the two lanes
+  together. A full lane holds only its own item, so it never stops the other: use it where `CLOG`
+  says a mixed belt can fill, typically a requester of several items feeding makers by belt.
+  Every inserter that loads a belt from a chest of several items is filtered to its net's items
+  anyway (2.0.76), so nothing the net doesn't carry gets on the belt.
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction, with one exception: a single machine
   (`Assembler`, `Furnace`, a chest...) may take one item from several nets, each carrying only that

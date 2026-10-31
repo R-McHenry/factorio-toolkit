@@ -1179,7 +1179,9 @@ def cmd_check(p, a, out):
         + (f", {stopped}" if stopped else "") + "; check lines: "
         + (", ".join(f"{k} {v}" for k, v in sorted(codes.items())) or "none")
         + f" (stages\\{st.n}\\out\\report_checks.txt)")
-    shown = [(s, c) for s, c in ctx.checks if c.code not in ADVICE]
+    # 2.0.76: the loud advice (CLOG, SHARED_SINK, SUSHI_LIMIT) is shown too; hidden, the runs
+    # built shared belts that jammed with the warning only in report_checks.txt
+    shown = [(s, c) for s, c in ctx.checks if c.code not in ADVICE or c.code.isupper()]
     for s, c in shown[:12]:
         out(f"    {s:<13} {c}")
     if len(shown) > 12:

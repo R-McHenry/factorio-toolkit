@@ -9,7 +9,7 @@
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
     net     := 'net' name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
-               'limited'? ':' refs '->' refs ('when' cond)?
+               'split'? 'limited'? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
@@ -30,7 +30,9 @@ an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7
 says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
 and implements no limit. ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can
 share a belt) says nets A and B share every belt they are on, A on the left lane and B on the
-right looking downstream: the router lays them as one pair (``fkcore.pairs``).
+right looking downstream: the router lays them as one pair (``fkcore.pairs``). ``split`` on a net
+(2.0.76) gives each of its items a lane of its own: elaboration makes it one net per item and pairs
+them two to a belt, each loaded by its own inserter filtered to its item.
 
 Ports (2.0.28, lane-level in 2.0.29; PLAN-MODULES): a module body may declare
 ``port NAME : in|out|inout ITEM[, ITEM][ | ITEM[, ITEM]] @SIDE[POS][L|R]``, and the definition may
@@ -194,6 +196,7 @@ class Net:
     when: Cond | None = None   # a gated net: its route's inserters move items while it holds
     width: int = 1         # 2.0.54: the lanes it takes, 1 or 2 (both lanes of one belt)
     lane: str | None = None    # 2.0.54: the lane (L or R) its items are on where it ends
+    split: bool = False    # 2.0.76: one net per item, two to a belt (a lane each)
 
 
 @dataclass
@@ -653,13 +656,14 @@ class _P:
             if tok.text not in ("L", "R"):
                 self.err(f"lane {tok.text}: a lane is L or R (looking downstream)", tok)
             lane = tok.text
+        split = self.accept("split") is not None
         limited = self.accept("limited") is not None
         self.expect(":")
         drivers = self.refs()
         self.expect("->")
         consumers = self.refs()
         when = self.cond() if self.accept("when") else None
-        return Net(name, items, drivers, consumers, line, limited, when, width, lane)
+        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split)
 
     def lanes(self):
         line = self.expect("lanes").line
