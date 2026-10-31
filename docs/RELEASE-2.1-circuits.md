@@ -153,7 +153,7 @@ its messages are `control_behavior.parameters`. A train stop's name is `station`
   from the game, any building on a wire, and drift.
 - `tests/test_circuits.py`: a long wire hops along poles it adds, uses the poles that stand,
   passes a pole on another net of its colour, and is `wire-too-far` with no room for a pole.
-- Full suite: 1341 tests OK.
+- Full suite, merged with 2.1.10: 1433 tests OK.
 
 ## Not in this release
 
