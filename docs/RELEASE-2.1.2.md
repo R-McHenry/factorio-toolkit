@@ -1,4 +1,4 @@
-# Toolkit 2.1 (vision): everything the game shows, zoomed out, as text or image
+# Toolkit 2.1.2: vision (zoom, layers, images)
 
 Draft for the 2.1 vision release (planned as 2.1.14; the integrator gives the number). Plan:
 `assessment-20261031\PLAN-2.1.md`, "Vision", and phase 15 of "Order".
