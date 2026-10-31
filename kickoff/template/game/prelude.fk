@@ -32,6 +32,12 @@ kind Alarm        = Entity<name=programmable-speaker,
                                                   note_id: 6}>
 kind Display      = Entity<name=display-panel, bp.always_show=true, bp.show_in_chart=true>
 
+# Power domains (2.1): a power switch joins two domains while its `when` holds; wire its sides
+# with copper lines (copper feed: main -> sw.left, copper load: sw.right -> labs). An accumulator
+# with read=SIGNAL puts its charge (0-100) on its wire (its cb.output_signal).
+kind PowerSwitch  = Entity<name=power-switch>
+kind Accumulator  = Entity<name=accumulator>
+
 # What `machine=auto` may pick (the size step chooses), by kind: one tier line is one footprint,
 # one energy and one set of fluid boxes, so a cell laid for one fits them all. A kind built on one
 # of these (kind Gears = Assembler<...>) picks from its line.

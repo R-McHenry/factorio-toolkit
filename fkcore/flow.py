@@ -1035,11 +1035,25 @@ def s_cover_power(ctx, args):
     except ImportError:
         return ["cover power: fkcore.cover is not built yet; nothing placed"], [
             Check("NO_POWER", "all factories", "no power coverage step yet")]
+    from . import domains
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         keep_out = _frame_blocked(ctx, factory, lay.size)
-        pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
         standing = _standing(ctx, factory)
+        doms = domains.active(ctx.flats.get(factory))
+        if doms is not None:
+            # 2.1: two power lines or more are domains, each its own network (fkcore.domains)
+            prev = ctx.previous.get(factory)
+            new, dlines, dchecks = domains.cover_domains(
+                ctx.flats[factory], lay, ctx.cat, doms, pole, keep_out=keep_out,
+                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"),
+                standing=standing)
+            ctx.layouts[factory] = new
+            lines += [f"{factory}: {ln}" for ln in dlines]
+            checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in dchecks]
+            checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
+            continue
+        pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
         _poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
                                         pinned=pinned, standing=standing)
         new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
@@ -1216,9 +1230,42 @@ def s_floorplan(ctx, args):
                 checks.append(Check("NO_POWER", f"{sf.name} {name}",
                                     "its grid reaches no generator (bridge it: floorplan "
                                     "--bridge-power)"))
+    _write_domains(ctx, s)
     from . import robots
     rlines, rchecks = robots.check_surface(s, ctx.cat)
     return lines + rlines, checks + rchecks + _invariant_checks(sf.name, s.problems)
+
+
+def _write_domains(ctx, s):
+    """2.1: ``out/power-domains.json``, each power domain's poles where they stand on the surface
+    ({"domains": {name: [[x, y], ...]}}), for run stats to split power by domain
+    (``fkcore.runstats``); taken away when no factory has domains."""
+    import json
+    from . import domains as dommod
+    path = os.path.join(ctx.root, "out", "power-domains.json")
+    got = {}
+    for factory in sorted(ctx.layouts):
+        doms = dommod.active(ctx.flats.get(factory))
+        if not doms:
+            continue
+        owners = {d.owner: d.name for d in doms}
+        for k in sorted(s.entities, key=fkp.natural_key):
+            head = f"{s.name}:{factory}/"
+            if not k.startswith(head):
+                continue
+            e = s.entities[k]
+            owner = k[len(head):].rsplit("/", 1)[0]
+            name = owners.get(owner) or e.attrs.get("domain")
+            if name and ctx.cat.has_entity(e.name) and ctx.cat.kind(e.name) == "electric-pole":
+                got.setdefault(name, []).append([float(e.x), float(e.y)])
+    if not got:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"domains": got}, fh, sort_keys=True)
+        fh.write("\n")
 
 
 def _on_terrain(t, s, cat):

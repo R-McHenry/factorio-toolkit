@@ -1,0 +1,52 @@
+# power-shed.fk: a lab field that sheds its load when the accumulators run low (2.1, power domains).
+# assessment-20261031\examples\power-shed.fk as it parses and builds now. Two changes from the
+# draft: the signals are declared (`signal A = signal-A`), since the game names them signal-A and
+# signal-S and a condition string reads the source's names; and the LabColumn takes no packs=
+# (its library form, with packs as a parameter, comes with the library). The test builds it with the
+# kickoff template's plant.fk and kit.fk and tests\nest\cells.fk's LabColumn.
+#
+# The base and its power plant are one domain, `main`. The lab field is a second domain, `labs`,
+# and its only power comes through one power switch from `main`. A latch watches the accumulators'
+# charge: when it drops below 20% the switch opens and the labs stop, and the switch stays open
+# until the charge is back above 80%. Without the gap between 20 and 80 the switch would flicker
+# open and shut around one threshold.
+import Plant from "plant.fk"
+import Kit from "kit.fk"
+import LabColumn from "cells.fk"
+
+plant = Plant @(966, 961)
+kit   = Kit @(1000, 1000)                 # solar panels and accumulators, in main
+
+# -- two domains ----------------------------------------------------------------------------------
+power main: cover all                     # everything the labs domain doesn't name
+power labs: cover field                   # the lab field alone, its own network
+
+field = Stack<cell=LabColumn, n=6> @(1040, 1000)
+
+# -- the latch ------------------------------------------------------------------------------------
+# The charge is signal A (0-100) and the shed flag is signal S.
+signal A = signal-A
+signal S = signal-S
+
+# One accumulator of main's bank reads the charge. The game charges a network's accumulators
+# together, so one reads them all.
+acc   = Accumulator<read=A>                                         @(1030, 1004)
+
+# shed = 1 from the moment the charge falls below 20 until it climbs back to 80: below 20 it turns
+# on, and while it is on (red.S > 0, its own output fed back) it stays on until the charge reaches
+# 80. 2.0's decider takes `or` between groups of `and`.
+latch = Decider<if="green.A < 20 or (red.S > 0 and green.A < 80)", out="S=1"> @(1032, 1004)
+
+wire level green: acc -> latch.in          # the charge, on green
+wire hold  red:   latch.out -> latch.in    # the latch's own output back to its input: its memory
+
+# -- the switch -----------------------------------------------------------------------------------
+# Closed while nothing is shed. Its condition reads the latch's output on the same red wire.
+sw = PowerSwitch @(1036, 1004) when hold.S = 0
+
+copper feed: main -> sw.left               # main's nearest pole to the switch's left side
+copper load: sw.right -> labs              # the switch's right side to the labs' nearest pole
+
+# The checks this passes: labs has a source (through sw, so no no-source), sw's condition can
+# change (S moves with A, so no switch-never), and main is not short of power with sw open (no
+# power-short).

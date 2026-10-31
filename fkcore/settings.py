@@ -207,9 +207,11 @@ def live(data):
             a, ca, b, cb = (int(v) for v in w)
             if ca in codec.COPPER or cb in codec.COPPER:
                 continue
+            # both ifs: a combinator's wire from its own output to its own input (a latch, 2.1)
+            # has the entity at both ends, and the design counts it from each
             if a == mine and b in by_n:
                 wires.add((ca, by_n[b], cb))
-            elif b == mine and a in by_n:
+            if b == mine and a in by_n:
                 wires.add((cb, by_n[a], ca))
         out[by_n[mine]] = (_fields(e, None), wires)
     return out

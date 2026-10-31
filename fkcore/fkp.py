@@ -77,10 +77,11 @@ _DIR = {d: i for i, d in enumerate(DIRS)}
 #: Entity types that move a net's items: each must carry exactly one net (CORE.md invariants).
 CARRIER_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "inserter", "pipe",
                            "pipe-to-ground", "pump", "loader", "loader-1x1", "linked-belt"})
-#: the colours of a circuit wire (copper is the codec's, derived)
-COLOURS = ("red", "green")
+#: the colours of a `w` wire: a circuit wire, or (2.1) a copper line between power domains (a
+#: pole spanning tree inside a domain stays the codec's, derived)
+COLOURS = ("red", "green", "copper")      # copper (2.1): a copper line between power domains
 #: the connector a ``w`` end may name: a combinator's input or output side
-_PORTS = ("in", "out")
+_PORTS = ("in", "out", "left", "right")   # a combinator's sides; a power switch's (2.1)
 #: The carriers with two lanes, whose ``net=`` may name a net per lane (``iron|copper``).
 LANE_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "loader", "loader-1x1",
                         "linked-belt"})

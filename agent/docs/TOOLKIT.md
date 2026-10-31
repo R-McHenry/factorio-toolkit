@@ -545,6 +545,17 @@ A belt that fills, machines that starve, a build that never happens. Read these 
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
   in the build script joins it to the plant's grid). `stop_on no-power` holds the paste until it
   does
+- `no-source` (cover power, 2.1): a power domain with no generator, and no copper line (through a
+  switch or not) to a domain that has one. Its machines never run. The domain with `cover all`
+  counts as fed, since it joins the world's grid
+- `power-short` (cover power, 2.1): with every power switch open, a domain's machines want more at
+  full load than its generators make (solar panels at their day's average, 42 kW). It names both
+  numbers. Accumulators count as neither
+- `switch-never` (2.1): a power switch whose `when` can't change. Only constants drive its wire,
+  nothing does, or no driver puts the signal it reads there. The switch stays as it starts
+- `domain-overlap` (cover power, 2.1): a machine no pole of its domain can power without its
+  supply area reaching another domain's machines; or two domains name one instance, or two
+  `cover all` lines. Give the domains a tile of room between them
 - `TILE_SHARED (x, y): N pieces`: two pieces of one net's route on one tile, so one of them is
   never laid. Splitting the net in two (or giving it room) fixes it
 - `UNREACHED` (diff, before the paste): entities the paste lays where no powered roboport's

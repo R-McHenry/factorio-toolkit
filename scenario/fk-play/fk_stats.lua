@@ -27,17 +27,28 @@ local function fk_stats_sample(f, s)
   out.items = {made = items.input_counts, used = items.output_counts}
   local fluids = f.get_fluid_production_statistics(s)
   out.fluids = {made = fluids.input_counts, used = fluids.output_counts}
-  local power, seen = {}, {}
+  local power, seen, at, nets = {}, {}, {}, 0
   for _, p in pairs(s.find_entities_filtered{type = "electric-pole", force = f}) do
     local id = p.electric_network_id
     if id and not seen[id] then
       seen[id] = true
+      nets = nets + 1
       local st = p.electric_network_statistics
       -- a network's input is what its machines used, its output what was made, in joules
       power[tostring(id)] = {made = st.output_counts, used = st.input_counts}
       for n in pairs(st.input_counts) do kind(n) end
       for n in pairs(st.output_counts) do kind(n) end
+      at[id] = {}
     end
+    if id then
+      -- 2.1: where its poles stand (doubled, so whole numbers), to tell power domains apart
+      local a = at[id]
+      a[#a + 1] = math.floor(p.position.x * 2 + 0.5)
+      a[#a + 1] = math.floor(p.position.y * 2 + 0.5)
+    end
+  end
+  if nets > 1 then
+    for id, a in pairs(at) do power[tostring(id)].at = a end
   end
   out.power = power
   local done = 0

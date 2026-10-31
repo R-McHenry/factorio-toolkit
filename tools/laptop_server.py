@@ -1841,6 +1841,285 @@ def check_fluidports(seconds=60):
     return 0 if all(ok.values()) else 1
 
 
+#: 2.1, power domains: two domains side by side, their poles 4 tiles apart (in each other's reach)
+PAIR_FK = """
+power a: cover all
+power b: cover b1, b2
+a1 = Assembler<recipe=iron-gear-wheel> @(0, 1)
+a2 = Assembler<recipe=iron-gear-wheel> @(0, 6)
+b1 = Assembler<recipe=iron-gear-wheel> @(10, 1)
+b2 = Assembler<recipe=iron-gear-wheel> @(10, 6)
+"""
+_DOMAIN_BASE = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local eei = s.create_entity{name = 'electric-energy-interface', position = {-30, -20}, force = f}
+eei.electric_buffer_size = 1e12
+eei.power_production = 1e9
+eei.energy = 1e12
+s.create_entity{name = 'substation', position = {-27, -20}, force = f}
+local rp = s.create_entity{name = 'roboport', position = {-24, -16}, force = f}
+rp.insert{name = 'construction-robot', count = 50}
+local st = s.create_entity{name = 'storage-chest', position = {-20.5, -18.5}, force = f}
+for _, n in pairs({'medium-electric-pole', 'assembling-machine-1'}) do st.insert{name = n, count = 50} end
+rcon.print('ok')"""
+
+
+def _flow_build(files, name):
+    """Build a .fk on paper in a temp dir (the flow up to write_layout): -> its .fkp Layout."""
+    import tempfile
+    from fkcore import flow, fkp
+    d = tempfile.mkdtemp(prefix="fkpower-")
+    files = dict(files)
+    files.setdefault("nauvis.build.fkb", "read_surface nauvis\nread_terrain none\nelaborate\n"
+                     "report_rates\nplace --keep pinned\nroute --only stale\n"
+                     "cover power --pole medium-electric-pole\nfloorplan\nreport_checks\n"
+                     "write_layout\n")
+    for fn, text in files.items():
+        with open(os.path.join(d, fn), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+    code, ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), echo=lambda _l: None)
+    lay = fkp.load(os.path.join(d, f"{name}.fkp"))
+    shutil.rmtree(d, True)
+    return lay, ctx
+
+
+def check_domains():
+    """2.1, power domains, the paste measurement: two domains side by side (``PAIR_FK``, their
+    poles 4 tiles apart), pasted in play mode and built by robots, twice: plot one in one paste,
+    plot two its domain a first and domain b in a second paste once a stands (a robot-built pole
+    joins the standing poles in its reach). The networks are polled while the robots work, then
+    the wire pass runs (as ``fk wait built`` runs it): each plot must come out as two networks.
+    It reports how long, in game seconds, the two domains were one network before the pass."""
+    from fkcore import apply as applymod, compose, fkp, wires as wiresmod
+    from fkcore.catalog import Catalog
+    cat, f = Catalog.load(), "lab"
+    lay, _ctx = _flow_build({"pair.fk": PAIR_FK, "nauvis.surface":
+                             "surface nauvis\nmode play\nterrain none\n"
+                             "place pair = pair plot 0,0 16x10\n"}, "pair")
+    plots = fkp.loads("fkp 1 surface lab\nplot one at 0,0 rot 0 size 16x10\n"
+                      "plot two at 0,20 rot 0 size 16x10\n")
+    s = compose.compose(plots, {"one": lay, "two": lay}, cat)
+    poles = {k: (float(e.x), float(e.y), e.attrs.get("domain") or "a")
+             for k, e in s.entities.items() if e.name == "medium-electric-pole"}
+    print("design poles:", ", ".join(f"{k} {x},{y} ({d})" for k, (x, y, d) in sorted(poles.items())))
+    probe = ("local s = game.get_surface('lab') local o = {tick = game.tick, ghosts = "
+             "s.count_entities_filtered{area = {{-2, -2}, {18, 32}}, type = 'entity-ghost'}, p = {}} "
+             "for _, e in pairs(s.find_entities_filtered{area = {{-2, -2}, {18, 32}}, "
+             "name = 'medium-electric-pole'}) do o.p[#o.p + 1] = {e.position.x, e.position.y, "
+             "e.electric_network_id} end rcon.print(helpers.table_to_json(o))")
+
+    def nets(got, plot):
+        """{domain: {network ids}} of the plot's built poles."""
+        out = {}
+        for x, y, nid in got["p"]:
+            for k, (px, py, d) in poles.items():
+                if k.startswith(f"lab:{plot}/") and abs(px - x) < 0.01 and abs(py - y) < 0.01:
+                    out.setdefault(d, set()).add(nid)
+        return out
+
+    def joined(got, plot):
+        n = nets(got, plot)
+        return bool(n.get("a", set()) & n.get("b", set()))
+
+    def watch(r, plot, limit=90):
+        """Run the game at speed 4 until no ghost is left, polling: -> (first tick the plot's two
+        domains were one network or None, the tick the robots were done)."""
+        r.lua("game.speed = 4 rcon.print(1)")
+        first, t0 = None, time.time()
+        while time.time() - t0 < limit:
+            got = json.loads(r.lua(probe).strip())
+            if first is None and joined(got, plot):
+                first = got["tick"]
+            if got["ghosts"] == 0:
+                break
+            time.sleep(0.2)
+        r.lua("game.speed = 1 rcon.print(1)")
+        return first, got["tick"]
+
+    import json
+    watchp = {"plots": "keep", "sanctioned": "mark 2h", "notify": "off"}
+    ok = True
+    with LaptopServer("power", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area("lab", f, (-64, -64, 64, 64)))
+            print("base:", r.lua(_DOMAIN_BASE).strip())
+            for plot, steps in (("one", [["lab:one/"]]),
+                                ("two", [["lab:two/power/", "lab:two/a1/", "lab:two/a2/"],
+                                         ["lab:two/power-b/", "lab:two/b1/", "lab:two/b2/"]])):
+                first, own = None, None
+                for keys in steps:
+                    rep = applymod.apply(r, s, cat, mode="play", force=f, policy=watchp,
+                                         keys=keys, own=own)
+                    own = rep.own
+                    print(f"plot {plot}, apply {' '.join(keys)}: {rep.lines()[0]}"
+                          + (f"; {rep.wires.line()}" if rep.wires and rep.wires.line() else ""))
+                    j, done = watch(r, plot)
+                    first = first if first is not None else j
+                    print(f"  robots done at tick {done}; the domains one network from tick "
+                          f"{j}" if j is not None else f"  robots done at tick {done}; the "
+                          "domains never one network")
+                before = nets(json.loads(r.lua(probe).strip()), plot)
+                area = (-1, -1 + (20 if plot == "two" else 0), 17, 11 + (20 if plot == "two" else 0))
+                t_pass = int(r.lua("rcon.print(game.tick)").strip())
+                p = wiresmod.run(r, s, cat, area)
+                after = nets(json.loads(r.lua(probe).strip()), plot)
+                two = (len(after.get("a", ())) == 1 and len(after.get("b", ())) == 1
+                       and after["a"] != after["b"])
+                held = (t_pass - first) / 60 if first is not None else 0
+                print(f"  networks before the wire pass {sorted((k, sorted(v)) for k, v in before.items())}; "
+                      f"the pass: {p.line()}; after {sorted((k, sorted(v)) for k, v in after.items())}: "
+                      f"{'two networks' if two else 'NOT two networks'}; one network for "
+                      f"{held:.1f} game s before the pass")
+                ok &= two
+    print("power domains with robots:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
+#: 2.1, power domains: examples\power-shed.fk on the lab. main holds the accumulators, the latch
+#: and (by script) the supply; shed is the load, two radars (300 kW each, always on: an idle lab
+#: draws nothing), behind the switch. The latch opens the switch below 20% and closes it at 80%.
+SHED_FK = """
+signal A = signal-A
+signal S = signal-S
+power main: cover all
+power shed: cover r1, r2
+acc   = Accumulator<read=A> @(2, 2)
+acc2  = Accumulator @(2, 5)
+latch = Decider<if="green.A < 20 or (red.S > 0 and green.A < 80)", out="S=1"> @(6, 2)
+wire level green: acc -> latch.in
+wire hold  red:   latch.out -> latch.in
+sw = PowerSwitch @(10, 2) when hold.S = 0
+copper feed: main -> sw.left
+copper load: sw.right -> shed
+r1 = Entity<name=radar> @(20, 1)
+r2 = Entity<name=radar> @(20, 5)
+"""
+
+
+def check_powershed():
+    """2.1, power domains on the lab (``fk lab``): ``SHED_FK`` built; the lab's own energy
+    interface goes, and one beside main's pole is the supply, set by script. The accumulators
+    are filled, the supply cut, and the radars run them down: the switch must open below 20%.
+    Then the supply comes back, and the switch must close again past 80%. It polls the charge,
+    the latch's signals and the switch every few ticks and reports the charge at each change."""
+    import json
+    import tempfile
+    from fkcore import lab
+    run = tempfile.mkdtemp(prefix="fkshed-")
+    game = os.path.join(run, "game")
+    os.makedirs(game)
+    for name, text in (("shed.fk", SHED_FK),
+                       ("nauvis.surface", "surface  nauvis\nmode     play\nterrain  none\n"
+                        "catalog  base\n\nplace shed = shed plot 10,10 30x12\n"),
+                       ("nauvis.build.fkb", "read_surface nauvis\n")):
+        with open(os.path.join(game, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    ok = {}
+    with LaptopServer("power", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            lines = lab.build(r, game, "shed", size=(30, 12))
+            print("\n".join(lines))
+            ws = lab.workspace(game, "shed")
+            for fn in ("cover_power.txt", "floorplan.txt", "diff.txt"):
+                try:
+                    with open(os.path.join(ws, "out", fn), encoding="utf-8") as fh:
+                        print("".join(ln for ln in fh if "check" in ln or "domain" in ln
+                                      or "copper" in ln or "wires:" in ln or "  " in ln[:4]))
+                except OSError:
+                    pass
+            x, y, w, h = lab.slots(game)["shed"]
+            box = "{{%d, %d}, {%d, %d}}" % (x - 1, y - 1, x + w + 1, y + h + 1)
+            # the lab's supply goes; ours stands beside main's pole (the one by the accumulators)
+            setup = ("local s = game.get_surface('lab') local B = BOX "
+                     "for _, e in pairs(s.find_entities_filtered{area = B, name = 'electric-energy-interface'}) do e.destroy() end "
+                     "local acc = s.find_entities_filtered{area = B, name = 'accumulator'} "
+                     "local p = s.find_entities_filtered{position = acc[1].position, radius = 9, name = 'medium-electric-pole'} "
+                     "local pole "
+                     "for _, q in pairs(p) do if not pole or q.position.x < pole.position.x then pole = q end end "
+                     "local ei "
+                     "for dx = -3, 3 do for dy = -3, 3 do if not ei then local pos = {pole.position.x + dx, pole.position.y + dy} "
+                     "if s.can_place_entity{name = 'electric-energy-interface', position = pos, force = 'lab'} "
+                     "and pos[1] < pole.position.x then ei = s.create_entity{name = 'electric-energy-interface', position = pos, force = 'lab'} end end end end "
+                     "ei.electric_buffer_size = 2e6 / 60 ei.power_production = 2e6 / 60 ei.power_usage = 0 "
+                     "for _, a in pairs(acc) do a.energy = a.electric_buffer_size end "
+                     "rcon.print(ei.position.x .. ',' .. ei.position.y .. ' net ' .. ei.electric_network_id)")
+            print("supply:", r.lua(setup.replace("BOX", box)).strip())
+            probe = ("local s = game.get_surface('lab') local B = BOX local o = {tick = game.tick} "
+                     "local acc = s.find_entities_filtered{area = B, name = 'accumulator'} "
+                     "local e, m = 0, 0 for _, a in pairs(acc) do e = e + a.energy m = m + a.electric_buffer_size end "
+                     "o.charge = 100 * e / m "
+                     "local sw = s.find_entities_filtered{area = B, name = 'power-switch'}[1] "
+                     "o.closed = sw.power_switch_state "
+                     "local d = s.find_entities_filtered{area = B, name = 'decider-combinator'}[1] "
+                     "o.A = d.get_signal({type = 'virtual', name = 'signal-A'}, defines.wire_connector_id.combinator_input_green) "
+                     "o.S = sw.get_signal({type = 'virtual', name = 'signal-S'}, defines.wire_connector_id.circuit_red) "
+                     "local nets = {} for _, p in pairs(s.find_entities_filtered{area = B, name = 'medium-electric-pole'}) do "
+                     "nets[#nets + 1] = p.electric_network_id end table.sort(nets) o.nets = nets "
+                     "local names = {} for k, v in pairs(defines.entity_status) do names[v] = k end "
+                     "local r = s.find_entities_filtered{area = B, name = 'radar'}[1] o.radar = names[r.status] "
+                     "rcon.print(helpers.table_to_json(o))").replace("BOX", box)
+            supply = ("local s = game.get_surface('lab') for _, e in pairs(s.find_entities_filtered"
+                      "{area = BOX, name = 'electric-energy-interface'}) do e.power_production = W / 60 "
+                      "e.electric_buffer_size = math.max(W, 1) / 60 end rcon.print(W)").replace("BOX", box)
+            # an accumulator charges only from a primary or secondary source, and an energy
+            # interface is tertiary as they are: the charging is done by script, W watts since tick
+            # T0, shared among the accumulators
+            charge = ("local s = game.get_surface('lab') local acc = s.find_entities_filtered"
+                      "{area = BOX, name = 'accumulator'} local j = W * (game.tick - T0) / 60 / #acc "
+                      "for _, a in pairs(acc) do a.energy = math.min(a.electric_buffer_size, a.energy + j) end "
+                      "rcon.print(1)").replace("BOX", box)
+            time.sleep(1)
+            got = json.loads(r.lua(probe).strip())
+            print(f"start: charge {got['charge']:.1f}%, A={got['A']}, S={got['S']}, switch "
+                  f"{'closed' if got['closed'] else 'open'}, pole networks {got['nets']}")
+            events = []
+
+            def watch(want_closed, charge_w=0, limit=120):
+                last = json.loads(r.lua(probe).strip())
+                t0 = time.time()
+                while time.time() - t0 < limit:
+                    if charge_w:
+                        r.lua(charge.replace("W", str(charge_w)).replace("T0", str(last["tick"])))
+                    got = json.loads(r.lua(probe).strip())
+                    if got["closed"] != last["closed"]:
+                        events.append((last, got))
+                        print(f"  tick {got['tick']}: the switch {'closes' if got['closed'] else 'opens'}"
+                              f" at charge {got['charge']:.1f}% (the tick before {last['charge']:.1f}%, "
+                              f"{'closed' if last['closed'] else 'open'}); latch input A={got['A']}, "
+                              f"S={got['S']}; radar {got['radar']}")
+                        if got["closed"] == want_closed:
+                            return got
+                    last = got
+                    time.sleep(0.02)
+                return None
+            r.lua("game.speed = 0.5 rcon.print(1)")
+            print("the supply cut to 0 W; the radars (600 kW) run the accumulators down")
+            r.lua(supply.replace("W", "0"))
+            down = watch(False)
+            hold = json.loads(r.lua(probe).strip())
+            time.sleep(2)
+            hold2 = json.loads(r.lua(probe).strip())
+            print(f"  open and the supply still 0: charge {hold['charge']:.1f}% -> {hold2['charge']:.1f}% "
+                  f"over {(hold2['tick'] - hold['tick']) / 60:.1f} game s; radar {hold2['radar']}; "
+                  f"pole networks {hold2['nets']}")
+            print("the accumulators charged by script at 1 MW (the energy interface stays at 0)")
+            up = watch(True, charge_w=1000000)
+            r.lua("game.speed = 1 rcon.print(1)")
+            after = json.loads(r.lua(probe).strip())
+            print(f"  after: charge {after['charge']:.1f}%, radar {after['radar']}")
+            ok["opens below 20%"] = down is not None and down["charge"] < 20 and \
+                events[0][0]["charge"] >= 19
+            ok["stays open while low"] = abs(hold2["charge"] - hold["charge"]) < 1 and \
+                hold2["closed"] is False
+            ok["closes past 80%"] = up is not None and up["charge"] >= 79.5 and \
+                [e[1]["closed"] for e in events] == [False, True]
+            ok["two networks"] = len(set(hold2["nets"])) == 2
+    shutil.rmtree(run, True)
+    for k, v in ok.items():
+        print(f"{k}: {'OK' if v else 'NOT as designed'}")
+    return 0 if ok and all(ok.values()) else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
@@ -1850,4 +2129,5 @@ if __name__ == "__main__":
                       "capital": check_capital, "fixes": check_fixes,
                       "vision": check_vision, "stats": check_stats,
                       "circuits": check_circuits,
-                      "fluidports": check_fluidports}[what]())
+                      "fluidports": check_fluidports, "domains": check_domains,
+                      "powershed": check_powershed}[what]())
