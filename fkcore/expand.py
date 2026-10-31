@@ -335,11 +335,14 @@ def _port_records(flat, lay):
 class PortEdge:
     """Where a port crosses its module's frame (2.0.48): the tile just ``inside`` the edge and the
     one just ``outside`` it, in the factory frame, and the crossing as the items go, ``src`` ->
-    ``dst`` (outside -> inside for an ``in`` port, inside -> outside for an ``out`` one)."""
+    ``dst`` (outside -> inside for an ``in`` port, inside -> outside for an ``out`` one).
+    ``fluid`` (2.1): the fluid of a fluid port, whose pipe crosses the edge there; None for a
+    belt's port."""
     inside: tuple
     outside: tuple
     src: tuple
     dst: tuple
+    fluid: str | None = None
 
 
 def port_edges(flat, lay, cat):
@@ -365,10 +368,12 @@ def port_edges(flat, lay, cat):
             here = (math.floor(x), math.floor(y))           # the inside role's virtual belt: outside
             ahead = (here[0] + dx, here[1] + dy)
             behind = (here[0] - dx, here[1] - dy)
+            fluid = port.items[0] if len(port.items) == 1 and port.right is None \
+                and cat is not None and cat.is_fluid(port.items[0]) else None
             if port.dir == "in":
-                out[key] = PortEdge(ahead, here, here, ahead)
+                out[key] = PortEdge(ahead, here, here, ahead, fluid)
             else:
-                out[key] = PortEdge(behind, here, behind, here)
+                out[key] = PortEdge(behind, here, behind, here, fluid)
     return out
 
 

@@ -171,9 +171,13 @@ class Catalog:
         row = (self._fluid.get("entities") or {}).get(name)
         return list(row["boxes"]) if row else []
 
-    def fluid_boxes_at(self, name, x, y, direction=None, recipe=None) -> list:
+    def fluid_boxes_at(self, name, x, y, direction=None, recipe=None, resource=None) -> list:
         """[FluidBox] of an entity of ``name`` centred at (x, y) facing ``direction`` (None = N)
         with ``recipe``, in world tiles: the boxes the game makes live, in its order.
+
+        A drill whose boxes need a fluid resource (2.1: the electric mining drill) has its box
+        live only on a ``resource`` that needs a fluid (uranium ore: sulfuric acid), and that
+        box holds the fluid; on any other ore it has none, as in the game.
 
         A crafting machine with a recipe the file measured takes that recipe's live boxes (one
         fluid on a side with several boxes holds them all: one box, every connection). A recipe
@@ -187,6 +191,12 @@ class Catalog:
         k = d // 4 if d % 4 == 0 else 0
         protos = {b["index"]: b for b in row["boxes"]}
         live = self._recipe_boxes(name, row, recipe)
+        if row.get("boxes_need_fluid_resource"):
+            need = _facts.required_fluid(resource)
+            if need is None:
+                return []
+            live = [(need[0], [[b["index"], j + 1] for j in range(len(b["connections"]))])
+                    for b in row["boxes"]]
         if live is None:
             if row.get("boxes_need_fluid_recipe"):
                 return []

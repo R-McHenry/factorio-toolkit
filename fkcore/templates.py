@@ -302,12 +302,20 @@ def miner_row(params, cat):
     speed = cat.entity(drill).get("mining_speed")
     if speed is None:
         raise TemplateError(f"{drill} does not mine")
+    # 2.1 (fluid ports): an ore that needs a fluid (uranium: sulfuric acid, 1 an ore) is mined
+    # only by a drill with a fluid box, and the fluid is one of its needs, piped in
+    wet = _facts.required_fluid(resource)
+    if wet is not None and not cat.has_fluid_boxes(drill):
+        raise TemplateError(f"{resource} needs {wet[0]}, and a {drill} has no fluid box: mine "
+                            "it with electric-mining-drill")
     out = []
     for k in range(n):
         needs = {}
         if drill in FUEL_USE_W:
             fuel = _word(params, "fuel", "coal")
             needs[fuel] = _fuel_rate(drill, fuel)
+        if wet is not None:
+            needs[wet[0]] = speed / MINING_TIME[resource] * wet[1]
         out.append(MSpec(f"m{k}", drill, None, needs, {resource: speed / MINING_TIME[resource]},
                          frozenset(needs), extra={"resource": resource}))
     return out

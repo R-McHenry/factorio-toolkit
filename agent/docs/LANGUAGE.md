@@ -298,9 +298,9 @@ module GearRib size 16x10 {
   `Belt[… ]` is retired (a belt end is two lanes). `item | item2` is the two lanes of the pair; the
   same item twice is one item on both. Two nets may feed the two lanes of a paired port, one item
   each (2.1.3): they share one belt to it as if you had written `lanes A | B`, and the module's own
-  `lanes` line inside is enough. A fluid port is refused ("pipes have no lanes"), and a net may
-  name a port only in the module that declares it: naming one from outside the module is an error
-  that says which `port` line to add.
+  `lanes` line inside is enough. A pair or a lane pin on a fluid is refused ("pipes have no
+  lanes"), and a net may name a port only in the module that declares it: naming one from outside
+  the module is an error that says which `port` line to add.
 - `size WxH` is the module's frame, and a port is a place on that frame's **edge**: it takes no
   tile. The belt crosses the edge there, from the tile just outside to the tile just inside (the
   other way for an `out` port): the module's own route reaches the tile inside, the parent's the
@@ -319,6 +319,33 @@ module GearRib size 16x10 {
   key, just moved), and `fk explain rib` shows both the template line and its plain entities.
 - Width: a port is as wide as the belt just inside it carries its item: both lanes there make it
   a both-lane port (15/s on yellow), written `item | item` or not.
+
+### Fluid ports
+
+A port may carry a fluid (2.1): it is one pipe connection across the edge, with no lanes.
+
+```
+module PlasCell size 12x10 {
+  port gas_in : in petroleum-gas @w4   # one pipe in at the west edge
+  plas = ChemPlant<recipe=plastic-bar> @(5, 3)
+  cq   = Chest<requester, item=coal, request=20> @(2, 1)
+  pbx  = Chest<storage> @(9, 1)
+  net g: gas_in -> plas
+  net c: cq -> plas
+  net p: plas -> pbx
+}
+gas  = InfinityPipe<fluid=petroleum-gas, rate=30/s> @(0, 4)
+cell = PlasCell @(6, 0)
+net gas: gas -> cell.gas_in
+```
+
+- Inside, the module's pipe reaches the tile inside the edge; outside, the parent's pipe reaches
+  the tile outside. The two join across the edge, and the check sees one connected net.
+- A fluid port carries one fluid: `in water, sulfur` is refused (a port each).
+- It is `in` or `out`, the way its net runs; `inout` is refused.
+- No lanes: a pair (`water | water`) or a lane pin (`@w4L`) is refused.
+- Uranium ore takes sulfuric acid. On uranium an electric drill's fluid box is live, and a
+  `MinerRow` there needs one acid an ore: give its net a pipe in. A burner drill can't mine it.
 
 ### The bus's connection list
 
@@ -394,6 +421,25 @@ net out: line.g_out -> box
   paired and runs on straight.
 - `Pole` pins a pole where a cell is packed so tight that no other tile reaches its inserters; a
   straight belt tunnels under it. `docs\examples\blue6.fk` is such a cell.
+- A fluid port pair works the same way (2.1): `stack acid_in -> acid_out` runs one pipe through
+  each cell, and each cell's pipe joins the next one's at their shared edge. Both ends must carry
+  the same fluid. A cell of acid drills on uranium:
+
+  ```
+  module AcidDrill size 7x7 {
+    port acid_in  : in  sulfuric-acid @w0
+    port acid_out : out sulfuric-acid @e0
+    port ore_in   : in  uranium-ore   @w6
+    port ore_out  : out uranium-ore   @e6
+    stack acid_in -> acid_out, ore_in -> ore_out
+    d = MinerRow<n=1, resource=uranium-ore> @(0, 1)
+    net a: acid_in -> d, acid_out
+    net o: ore_in, d -> ore_out
+  }
+  ```
+
+  A narrower cell can fail to route the ore (`UNREACHED`): the belt router merges a port's belt
+  and a drill's ore only with room for a splitter.
 - Reports list a stack's cells as `line/0`, `line/1` ...: each cell is an instance of its own.
 
 ## Circuits
