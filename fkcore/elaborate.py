@@ -46,7 +46,7 @@ from .templates import (CONTACT, SINGLE, TEMPLATES, MSpec, TemplateError, litera
                         machines as template_machines)
 
 __all__ = ["ElabError", "Machine", "FlatNet", "PortInst", "Check", "Flat", "load", "elaborate",
-           "elaborate_file", "AUTO_KINDS", "PRELUDE", "prelude_path", "core_of", "params_of"]
+           "elaborate_file", "AUTO_KINDS", "PRELUDE", "prelude_path", "preludes", "core_of", "params_of"]
 
 #: the templates whose count may be ``n=auto``: the rows
 AUTO_KINDS = ("MinerRow", "SmelterRow", "SmelterArray", "AsmRow", "LabRow")
@@ -331,6 +331,17 @@ def prelude_path(src):
     return PRELUDE
 
 
+def preludes(src):
+    """The preludes a file at ``src`` gets, nearest first: a run's own (``prelude_path``) over the
+    toolkit's (2.1.9). A run's prelude changes or adds kinds; whatever it doesn't name comes from
+    the toolkit's, so a kind added in a later release (``Buffer``, 2.1.8) reaches a run whose
+    prelude was copied before it."""
+    own = prelude_path(src)
+    if os.path.normcase(os.path.abspath(own)) == os.path.normcase(PRELUDE):
+        return [load_prelude(PRELUDE)]
+    return [load_prelude(own), load_prelude(PRELUDE)]
+
+
 def load_prelude(path=PRELUDE):
     """The prelude at ``path``, parsed (read again when the file changes). It holds kind lines
     only: a module belongs in a file that is imported."""
@@ -504,11 +515,11 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     """``layout`` (the factory's .fkp) is needed by Literal instances, and gives an ``n=auto``
     row the count it laid out; it also carries the committed port tiles (2.0.41), which a rebuild
     keeps. ``sizes`` ({instance path: n}, the size step's) overrides it. 2.1: the kinds are the
-    file's own (and its imports') over the prelude's (``prelude_path``)."""
+    file's own (and its imports') over the preludes' (``preludes``)."""
     flat = Flat(name, f.path)
-    prelude = load_prelude(prelude_path(f.path))
-    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}, prelude.kinds], modules)
-    flat._tiers = _Tiers([getattr(f, "tiers", {}) or {}, prelude.tiers])
+    pre = preludes(f.path)
+    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}] + [p.kinds for p in pre], modules)
+    flat._tiers = _Tiers([getattr(f, "tiers", {}) or {}] + [p.tiers for p in pre])
     _tier_checks(flat._tiers, cat)
     flat._layout = layout
     flat._sizes = dict(sizes or {})

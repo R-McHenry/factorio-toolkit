@@ -61,8 +61,9 @@ Kinds (2.1, PLAN-2.1 "B. kind"): ``kind NAME = KIND<params>`` at a file's top le
 existing kind (a core kind such as ``Machine``, a module, or another kind) with some parameters
 set. An instance's own parameters override the kind's, and the instance keeps its own name. The
 everyday kinds (``Assembler``, ``Furnace``, ``ChemPlant``, ``Refinery``) are declared this way in
-the prelude (``fkcore/prelude.fk``, or a run's ``game/prelude.fk``), which every file gets without
-an import (``fkcore.elaborate``); a file's own kind or module of the same name wins over it.
+the prelude (a run's ``game/prelude.fk`` over the toolkit's ``fkcore/prelude.fk``), which every
+file gets without an import (``fkcore.elaborate``); a file's own kind or module of the same name
+wins over it.
 ``tiers NAME: E1, E2, ...`` (2.1, "C. tiers") lists the entities ``machine=auto`` may pick for an
 instance of kind NAME (or of a kind built on it): one footprint, one energy, one set of fluid boxes,
 which elaboration checks.

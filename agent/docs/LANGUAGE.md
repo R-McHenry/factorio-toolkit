@@ -629,9 +629,11 @@ fluid boxes at the same places, or the line is refused. An assembling-machine-1 
 and -3: their boxes open only for a fluid recipe.
 
 Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `ChemPlant` and
-`Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run (the
-toolkit's own if the run has none). Change it, or write a kind or tiers line of the same name in a
-file, and that file uses yours. A prelude holds kind and tiers lines only.
+`Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run, over the
+toolkit's own: a kind or tiers line in yours replaces the toolkit's of that name, and any name
+yours doesn't have comes from the toolkit's, so kinds added in a new release reach you without a
+copy. Change yours, or write a kind or tiers line of the same name in a file, and that file uses
+yours. A prelude holds kind and tiers lines only.
 
 ## Module parameters
 

@@ -185,6 +185,20 @@ class PreludeTest(unittest.TestCase):
                 flat = elaborate_file(p, CAT)
                 self.assertEqual(flat.machines["a/m0"].prototype, "assembling-machine-2")
 
+    def test_a_runs_prelude_lies_over_the_toolkits(self):
+        # 2.1.9: a run's prelude copied before a release still gets that release's kinds (Buffer,
+        # 2.1.8) and tiers, while its own lines win
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "game/prelude.fk", "kind Assembler = Machine<entity=assembling-machine-2>\n")
+            top = write(d, "game/world.fk", "a = Assembler<recipe=pipe>\n"
+                                            "f = Furnace<recipe=iron-plate>\n"
+                                            "b = Buffer<item=iron-plate>\n")
+            flat = elaborate_file(top, CAT)
+            self.assertEqual(flat.machines["a/m0"].prototype, "assembling-machine-2")
+            self.assertEqual(flat.machines["f/m0"].prototype, "stone-furnace")
+            self.assertIn("b", {k.split("/")[0] for k in flat.machines})
+            self.assertIsNotNone(flat._tiers.find("Furnace"))
+
     def test_a_files_own_kind_and_module_win(self):
         flat = flat_of("kind Assembler = Machine<entity=assembling-machine-3>\n"
                        "a = Assembler<recipe=pipe>")
