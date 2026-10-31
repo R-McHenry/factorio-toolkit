@@ -93,7 +93,7 @@ HOP_PAD = 6
 FILTER_HANDS = frozenset({"fast-inserter", "bulk-inserter", "stack-inserter"})
 #: entity types a condition can enable
 _ENABLE = frozenset({"inserter", "pump", "offshore-pump", "assembling-machine", "furnace",
-                     "mining-drill", "lamp", "transport-belt"})
+                     "mining-drill", "lamp", "transport-belt", "power-switch"})
 #: what a gated net's route enables: its inserters and pumps
 _GATED = frozenset({"inserter", "pump"})
 #: catalog facts a ``require`` line may read (2.0 prototype values)
@@ -105,6 +105,110 @@ _CHEST_ROLES = ("provider", "storage", "buffer", "plain")
 #: what a ``set`` statement may write on an object (2.0.27): the codec's circuit
 #: attributes, nothing else
 PROP_ATTRS = ("if", "logistic", "filter", "read", "signal", "signals")
+#: the combinators with an input and an output side (2.1: ``Decider``, ``Arithmetic``)
+COMBINATORS = frozenset({"decider-combinator", "arithmetic-combinator"})
+#: the wildcards as a combinator string may write them
+_EACH = {"each": "signal-each", "anything": "signal-anything", "everything": "signal-everything"}
+#: an arithmetic combinator's operations, as the game names them
+OPERATIONS = ("*", "/", "+", "-", "%", "^", "<<", ">>", "AND", "OR", "XOR")
+_CTOKEN = re.compile(r"\s*(?:(?P<p>[()])|(?P<op><<|>>|<=|>=|!=|==|[<>=*/+%^-](?![0-9]))"
+                     r"|(?P<num>-?\d+)(?![\w.-])|(?P<word>[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)?))")
+
+
+def _ctokens(text):
+    out, i = [], 0
+    while i < len(text):
+        if text[i:].strip() == "":
+            break
+        m = _CTOKEN.match(text, i)
+        if not m or m.end() == i:
+            raise ValueError(f"{text!r}: can't read {text[i:].strip()!r}")
+        kind = m.lastgroup
+        out.append((kind, int(m.group(kind)) if kind == "num" else m.group(kind)))
+        i = m.end()
+    return out
+
+
+def parse_decider(text):
+    """A decider's condition string -> [[(left, op, right)]]: ``or`` between groups of ``and``,
+    as 2.0's decider takes it (``and`` binds first). A group may stand in parentheses; an ``or``
+    inside them is refused (the game has no such grouping). ``left`` is a word (``red.S``,
+    ``green.S``, ``S``), ``right`` a word or a whole number. Raises ValueError."""
+    toks = _ctokens(text)
+    groups, group, i, depth = [], [], 0, 0
+    if not toks:
+        raise ValueError("an empty condition")
+    while i < len(toks):
+        kind, v = toks[i]
+        if kind == "p" and v == "(":
+            if depth or group:
+                raise ValueError(f"{text!r}: parentheses hold one group of and, after an or")
+            depth, i = 1, i + 1
+            continue
+        if kind != "word" or v in ("and", "or"):
+            raise ValueError(f"{text!r}: expected a signal, got {v!r}")
+        if i + 2 >= len(toks):
+            raise ValueError(f"{text!r}: a comparison is S < N or S < T")
+        (k1, op), (k2, right) = toks[i + 1], toks[i + 2]
+        if k1 != "op" or op not in ("<", ">", "<=", ">=", "=", "==", "!="):
+            raise ValueError(f"{text!r}: expected a comparison after {v}, got {op!r}")
+        if k2 not in ("num", "word") or right in ("and", "or"):
+            raise ValueError(f"{text!r}: expected a number or a signal after {v} {op}")
+        group.append((v, "=" if op == "==" else op, right))
+        i += 3
+        if i < len(toks) and toks[i] == ("p", ")"):
+            if not depth:
+                raise ValueError(f"{text!r}: a ) with no (")
+            depth, i = 0, i + 1
+        if i == len(toks):
+            break
+        kind, v = toks[i]
+        if kind != "word" or v not in ("and", "or"):
+            raise ValueError(f"{text!r}: expected and or or, got {v!r}")
+        if v == "or":
+            if depth:
+                raise ValueError(f"{text!r}: 2.0's decider takes or between groups of and; "
+                                 "(A or B) and C is written A and C or B and C")
+            groups.append(group)
+            group = []
+        i += 1
+    if depth:
+        raise ValueError(f"{text!r}: a ( is not closed")
+    if not group or toks[-1] in (("word", "and"), ("word", "or")):
+        raise ValueError(f"{text!r}: it ends with and or or")
+    groups.append(group)
+    return groups
+
+
+def parse_outputs(text):
+    """A combinator's ``out`` -> [(signal word, constant or None)]: ``S=1`` sends 1, ``S`` the
+    input's count of S; several separated by commas."""
+    out = []
+    for part in [t.strip() for t in text.split(",")]:
+        m = re.fullmatch(r"([A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)?)\s*(?:=\s*(-?\d+))?", part)
+        if not m:
+            raise ValueError(f'out="{text}": each output is S=N (a constant) or S (the input\'s '
+                             'count of S)')
+        out.append((m.group(1), None if m.group(2) is None else int(m.group(2))))
+    return out
+
+
+def parse_calc(text):
+    """An arithmetic combinator's ``calc`` -> (left, operation, right), each side a word or a
+    whole number: ``A * 2``, ``red.A + green.A``, ``each / 4``."""
+    m = re.fullmatch(r"\s*(\S+)\s+(\*|/|\+|-|%|\^|<<|>>|AND|OR|XOR)\s+(\S+)\s*", text)
+    if not m:
+        raise ValueError(f'calc="{text}": one operation, A * 2 (spaces around it; one of '
+                         f'{" ".join(OPERATIONS)})')
+    sides = []
+    for v in (m.group(1), m.group(3)):
+        if re.fullmatch(r"-?\d+", v):
+            sides.append(int(v))
+        elif re.fullmatch(r"[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)?", v):
+            sides.append(v)
+        else:
+            raise ValueError(f'calc="{text}": {v!r} is no signal or whole number')
+    return sides[0], m.group(2), sides[1]
 
 
 def auto_pool():
@@ -152,6 +256,7 @@ class Circuit:
     sets: list = field(default_factory=list)         # [(lang.Props, scope)] (2.0.27)
     guards: list = field(default_factory=list)       # [instance path]
     settings: dict = field(default_factory=dict)     # machine key -> {attr: value}
+    emits: dict = field(default_factory=dict)        # machine key -> {signal} it sends (2.1)
     behaves: list = field(default_factory=list)      # [lang.Behave, with its scope]
     expects: list = field(default_factory=list)      # [lang.Expect]
     notes: list = field(default_factory=list)        # report lines from resolving
@@ -240,9 +345,24 @@ class _Resolver:
         return name
 
     # wires
-    def member(self, ref, scope, where, line):
+    def combinator(self, key):
+        m = self.flat.machines.get(key)
+        return m is not None and m.prototype in COMBINATORS
+
+    def member(self, ref, scope, where, line, role="driver"):
         """A wire end as written -> [("machine", key), ...] or [("net", name)]; [] and a no-wire
-        line when it names nothing."""
+        line when it names nothing. 2.1: a combinator's side, ``X.in`` or ``X.out``: a driver
+        puts its signals on the wire from its output side, a consumer reads at its input side, so
+        the side written must be the one its role uses."""
+        if len(ref.parts) >= 2 and ref.parts[-1] in ("in", "out") and not ref.star:
+            node, keys = self.flat.resolve_ref(lang.Ref(ref.parts[:-1], False, line), scope)
+            if keys and all(self.combinator(k) for k in keys):
+                want = "out" if role == "driver" else "in"
+                if ref.parts[-1] != want:
+                    self.check("no-wire", where, f"{ref}: a combinator reads a wire at its .in and "
+                               f"drives one from its .out, so as a {role} it is "
+                               f"{'.'.join(ref.parts[:-1])}.{want}", line)
+                return [("machine", k) for k in keys]
         node, keys = self.flat.resolve_ref(ref, scope)
         if keys:
             return [("machine", k) for k in keys]
@@ -262,12 +382,15 @@ class _Resolver:
                 continue
             d = WireDef(full, w.colour, line=w.line)
             for ref in w.drivers:
-                d.drivers += self.member(ref, scope, f"wire {full}", w.line)
+                d.drivers += self.member(ref, scope, f"wire {full}", w.line, "driver")
             for ref in w.consumers:
-                d.consumers += self.member(ref, scope, f"wire {full}", w.line)
+                d.consumers += self.member(ref, scope, f"wire {full}", w.line, "consumer")
             self.c.wires[full] = d
 
     def wire_named(self, name, scope):
+        """A wire by its name in ``scope`` or an enclosing one; 2.1: a dotted name reaches a wire
+        inside a module instance (``shedder.hold``)."""
+        name = name.replace(".", "/")
         for s in _chain(scope):
             full = _join(s, name)
             if full in self.c.wires:
@@ -288,7 +411,7 @@ class _Resolver:
         if left.source == ["network"]:
             kind, wire = "network", None
         else:
-            wire = self.wire_named(left.source[0], scope) if len(left.source) == 1 else None
+            wire = self.wire_named(".".join(left.source), scope)
             kind = "wire"
             if wire is None:
                 node, keys = self.flat.resolve_ref(lang.Ref(left.source, False, cond.line), scope)
@@ -358,6 +481,22 @@ class _Resolver:
                                 written=True)
                 for key in inst.machines:
                     self.c.settings.setdefault(key, {}).update(read="temperature", signal=sig)
+            if core in ("Decider", "Arithmetic"):
+                got = (self.decider if core == "Decider" else self.arithmetic)(p, scope, path,
+                                                                               inst.line)
+                if got is not None:
+                    field_, value, emits = got
+                    self.c.sets.append((lang.Props(path, None, None, {f"cb.{field_}": lang.Raw(value)},
+                                                   inst.line, inline=True), ""))
+                    for key in inst.machines:
+                        self.c.emits[key] = emits
+            if core == "Entity" and p.get("read") is not None:
+                # 2.1: an accumulator's charge (0-100) on its wire, its cb.output_signal
+                sig = self.game(str(p["read"]), scope, path, inst.line, written=True)
+                self.c.sets.append((lang.Props(path, None, None, {"cb.output_signal": sig},
+                                               inst.line, inline=True), ""))
+                for key in inst.machines:
+                    self.c.emits[key] = {sig}
             if core == "Constant" and p.get("signals") is not None:
                 rows = self.constant(str(p["signals"]), scope, path, inst.line)
                 for key in inst.machines:
@@ -419,6 +558,88 @@ class _Resolver:
                 for key in inst.machines:
                     self.c.settings.setdefault(key, {})["read"] = "ingredients"
 
+    # combinators (2.1, power domains)
+    def operand(self, word, scope, where, line, written=False):
+        """``red.S``, ``green.S`` or ``S`` -> (game signal, networks or None for both)."""
+        colour, dot, name = word.partition(".")
+        if dot and colour in ("red", "green"):
+            nets = {"red": colour == "red", "green": colour == "green"}
+        else:
+            name, nets = word, None
+        name = _EACH.get(name, name)
+        return self.game(name, scope, where, line, written=written), nets
+
+    def decider(self, p, scope, where, line):
+        """A Decider's ``if`` and ``out`` -> (``decider_conditions``, its value in the game's form
+        as the game exports it, the signals it sends); None and a CIRCUIT line when they don't
+        read."""
+        text, out = str(p["if"]), str(p["out"])
+        try:
+            groups = parse_decider(text)
+            outs = parse_outputs(out)
+        except ValueError as exc:
+            self.check("CIRCUIT", where, f"Decider: {exc}", line)
+            return None
+        conds = []
+        for g, group in enumerate(groups):
+            for k, (a, op, b) in enumerate(group):
+                sig, nets = self.operand(a, scope, where, line)
+                c = {"first_signal": sig}
+                if op != "<":
+                    c["comparator"] = codec.comparator_json(op)
+                if isinstance(b, int):
+                    if b != 0:
+                        c["constant"] = b
+                else:
+                    sig2, nets2 = self.operand(b, scope, where, line)
+                    c["second_signal"] = sig2
+                    if nets2 is not None:
+                        c["second_signal_networks"] = nets2
+                if nets is not None:
+                    c["first_signal_networks"] = nets
+                if conds and k > 0:
+                    c["compare_type"] = "and"
+                conds.append(c)
+        rows, emits = [], set()
+        for name, value in outs:
+            sig, nets = self.operand(name, scope, where, line, written=True)
+            emits.add(sig)
+            o = {"signal": sig}
+            if value is not None:
+                o["copy_count_from_input"] = False
+                if value != 1:
+                    o["constant"] = value
+            if nets is not None:
+                o["networks"] = nets
+            rows.append(o)
+        return "decider_conditions", {"conditions": conds, "outputs": rows}, emits
+
+    def arithmetic(self, p, scope, where, line):
+        """An Arithmetic's ``calc`` and ``out`` -> (``arithmetic_conditions``, its value, the
+        signal it sends)."""
+        try:
+            a, op, b = parse_calc(str(p["calc"]))
+            outs = parse_outputs(str(p["out"]))
+            if len(outs) != 1 or outs[0][1] is not None:
+                raise ValueError(f'out="{p["out"]}": an arithmetic combinator sends one signal, '
+                                 'out="S"')
+        except ValueError as exc:
+            self.check("CIRCUIT", where, f"Arithmetic: {exc}", line)
+            return None
+        got = {}
+        for side, v in (("first", a), ("second", b)):
+            if isinstance(v, int):
+                got[f"{side}_constant"] = v
+                continue
+            sig, nets = self.operand(v, scope, where, line)
+            got[f"{side}_signal"] = sig
+            if nets is not None:
+                got[f"{side}_signal_networks"] = nets
+        got["operation"] = op
+        sig, _nets = self.operand(outs[0][0], scope, where, line, written=True)
+        got["output_signal"] = sig
+        return "arithmetic_conditions", got, {sig}
+
     def constant(self, text, scope, where, line):
         rows = []
         for part in [t.strip() for t in text.split(",") if t.strip()]:
@@ -445,6 +666,8 @@ class _Resolver:
         if kind == "net":
             return set(self.flat.nets[ref].items)
         m = self.flat.machines[ref]
+        if ref in self.c.emits:
+            return set(self.c.emits[ref])
         got = self.c.settings.get(ref, {})
         if got.get("read") == "temperature":
             return {got["signal"]}
@@ -489,6 +712,7 @@ class _Resolver:
                     self.check("no-signal", where, f"when {cd.text}: no driver on {cd.wire} puts "
                                f"{s} on it (it carries {', '.join(sorted(sigs)) or 'nothing'})",
                                cd.line)
+        self.switch_never()
         for name, g in sorted(self.c.gates.items()):
             cycles = [t for b in behaved.get(g.wire, ()) for k, t, _l in b.lines if k == "cycle"]
             if cycles:
@@ -498,6 +722,60 @@ class _Resolver:
                            "always open" + ("" if g.wire is None else
                                             f"; a behave block on {g.wire} with a cycle says how "
                                             "often it runs"), self.flat.nets[name].line)
+
+    def moving(self):
+        """The wires whose signals can change: one with a driver that isn't a constant
+        combinator (a chest, a belt, an accumulator, a reactor, a crafter), or a combinator that
+        reads a wire that moves. A wire driven only by constants, or by combinators that read
+        only such wires, never changes."""
+        live = set()
+        reads = {}                                     # combinator key -> the wires it reads
+        for name, w in self.c.wires.items():
+            for kind, ref in w.consumers:
+                if kind == "machine" and self.combinator(ref):
+                    reads.setdefault(ref, set()).add(name)
+        changed = True
+        while changed:
+            changed = False
+            for name, w in self.c.wires.items():
+                if name in live:
+                    continue
+                for kind, ref in w.drivers:
+                    if kind == "net":
+                        ok = True
+                    elif self.combinator(ref):
+                        ok = bool(reads.get(ref, set()) & live)
+                    else:
+                        ok = self.flat.machines[ref].prototype != "constant-combinator"
+                    if ok:
+                        live.add(name)
+                        changed = True
+                        break
+        return live
+
+    def switch_never(self):
+        """``switch-never`` (2.1, power domains): a power switch whose condition can't change,
+        because nothing on its wire moves (or nothing puts the signal it reads there)."""
+        live = None
+        for path, cd in sorted(self.c.enables.items()):
+            inst = self.flat.insts[path]
+            if not any(self.flat.machines[k].prototype == "power-switch" for k in inst.machines):
+                continue
+            if cd.wire is None:
+                continue                                # the logistic network's count moves
+            if live is None:
+                live = self.moving()
+            w = self.c.wires[cd.wire]
+            why = None
+            if cd.wire not in live:
+                why = (f"nothing on {cd.wire} moves" + (
+                    " (only constants drive it)" if w.drivers else " (nothing drives it)"))
+            elif w.signals is not None and cd.signal not in w.signals \
+                    and cd.signal not in _WILDCARDS:
+                why = f"no driver on {cd.wire} puts {cd.signal} on it"
+            if why:
+                self.check("switch-never", path, f"when {cd.text}: {why}, so the switch stays "
+                           "as it starts", cd.line)
 
     def require(self, b, text, scope, line):
         m = re.fullmatch(r"(\S+)\s*(<=|>=|!=|==|=|<|>)\s*(\S+)", text)
@@ -587,10 +865,18 @@ class _Layer:
         e.attrs[attr] = value
         return True
 
-    def join(self, wire, key):
+    def join(self, wire, key, port=None):
         got = self.members.setdefault(wire, [])
-        if (key, None) not in got:
-            got.append((key, None))
+        if (key, port) not in got:
+            got.append((key, port))
+
+    def side(self, key, role):
+        """A wire end's port: a combinator drives from its output side and reads at its input
+        side (2.1); anything else has one side."""
+        m = self.flat.machines.get(key)
+        if m is None or m.prototype not in COMBINATORS:
+            return None
+        return "out" if role == "driver" else "in"
 
     def hops_out(self, key):
         """The inserters that pick from machine ``key``: [(inserter, what it drops into)]."""
@@ -840,14 +1126,14 @@ class _Layer:
         ``gates``), a driving net's belt. 2.1: any building with a circuit connector; one with
         none is a ``no-wire`` line."""
         for name, w in sorted(self.wires.items()):
-            for side in (w.drivers, w.consumers):
+            for role, side in (("driver", w.drivers), ("consumer", w.consumers)):
                 for kind, ref in side:
                     if kind == "machine" and ref in self.lay.entities:
                         if self.connectors(ref) == []:
                             self.check("no-wire", f"wire {name}", f"{ref}: a "
                                        f"{self.lay.entities[ref].name} has no circuit connector")
                             continue
-                        self.join(name, ref)
+                        self.join(name, ref, self.side(ref, role))
             for kind, ref in w.drivers:
                 if kind != "net":
                     continue
@@ -900,6 +1186,9 @@ class _Layer:
                     continue
                 parent[max(ri, rj)] = min(ri, rj)
                 a, b = ends[i][0], ends[j][0]
+                # 2.1: a combinator's end names its side (latch.out to latch.in is its memory)
+                ea = a if ends[i][1] is None else f"{a}.{ends[i][1]}"
+                eb = b if ends[j][1] is None else f"{b}.{ends[j][1]}"
                 reach = min(self.cat.circuit_reach(self.lay.entities[a].name),
                             self.cat.circuit_reach(self.lay.entities[b].name))
                 if d > reach + 1e-9:
@@ -916,11 +1205,11 @@ class _Layer:
                         hopped.append(f"{a} to {b} {d:.1f} tiles over {len(chain)} pole"
                                       f"{'s' if len(chain) != 1 else ''}"
                                       + (f" ({len(new)} added)" if new else ""))
-                        for x, y in zip([a] + chain, chain + [b]):
+                        for x, y in zip([ea] + chain, chain + [eb]):
                             self.lay.wires.append(fkpmod.Wire(name, colour, x, y).canonical())
                             laid += 1
                         continue
-                self.lay.wires.append(fkpmod.Wire(name, colour, a, b).canonical())
+                self.lay.wires.append(fkpmod.Wire(name, colour, ea, eb).canonical())
                 laid += 1
             if (w is not None and not w.implicit) or hopped:
                 self.lines.append(f"wire {name} {colour}: {len(ends)} entities, {laid} wire"
@@ -1088,12 +1377,16 @@ class _Layer:
         so their signals add; a line when a consumer would see a driver its net doesn't have."""
         touch = {}
         for w in self.lay.wires:
+            if w.colour == "copper":
+                continue
             for end in (w.a, w.b):
-                touch.setdefault((fkpmod.split_end(end)[0], w.colour), set()).add(w.net)
+                # a combinator's two sides are two networks (2.1)
+                key, port = fkpmod.split_end(end)
+                touch.setdefault((key, w.colour, port or ""), set()).add(w.net)
         drivers = {}
         for name, w in self.wires.items():
             drivers[name] = {ref for kind, ref in w.drivers if kind == "machine"}
-        for (key, colour), nets in sorted(touch.items()):
+        for (key, colour, _port), nets in sorted(touch.items()):
             if len(nets) < 2:
                 continue
             union = set().union(*(drivers.get(n, set()) for n in nets))
@@ -1120,7 +1413,9 @@ def lay(flat, layout, cat, keep_out=()):
             continue
         for attr in codec.CIRCUIT_ATTRS + codec.RAW_ATTRS:
             e.attrs.pop(attr, None)
-    out.wirenets, out.wires = {}, []
+    # 2.1: the copper lines between power domains are the power step's, and stay
+    out.wirenets = {n: w for n, w in out.wirenets.items() if w.colour == "copper"}
+    out.wires = [w for w in out.wires if w.colour == "copper"]
     c = getattr(flat, "circuit", None)
     if c is None or c.empty:
         return out, [], []

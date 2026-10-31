@@ -71,17 +71,28 @@ SAMPLE_LUA = r'''local function fk_stats_sample(f, s)
   out.items = {made = items.input_counts, used = items.output_counts}
   local fluids = f.get_fluid_production_statistics(s)
   out.fluids = {made = fluids.input_counts, used = fluids.output_counts}
-  local power, seen = {}, {}
+  local power, seen, at, nets = {}, {}, {}, 0
   for _, p in pairs(s.find_entities_filtered{type = "electric-pole", force = f}) do
     local id = p.electric_network_id
     if id and not seen[id] then
       seen[id] = true
+      nets = nets + 1
       local st = p.electric_network_statistics
       -- a network's input is what its machines used, its output what was made, in joules
       power[tostring(id)] = {made = st.output_counts, used = st.input_counts}
       for n in pairs(st.input_counts) do kind(n) end
       for n in pairs(st.output_counts) do kind(n) end
+      at[id] = {}
     end
+    if id then
+      -- 2.1: where its poles stand (doubled, so whole numbers), to tell power domains apart
+      local a = at[id]
+      a[#a + 1] = math.floor(p.position.x * 2 + 0.5)
+      a[#a + 1] = math.floor(p.position.y * 2 + 0.5)
+    end
+  end
+  if nets > 1 then
+    for id, a in pairs(at) do power[tostring(id)].at = a end
   end
   out.power = power
   local done = 0
@@ -168,11 +179,18 @@ def norm(raw, src):
     def pair(x):
         x = _dict(x)
         return {"made": _dict(x.get("made")), "used": _dict(x.get("used"))}
+
+    def net(x):
+        out = pair(x)
+        at = _dict(x).get("at")
+        if isinstance(at, list) and at:
+            out["at"] = at                 # 2.1: its poles, doubled (x, y, x, y ...)
+        return out
     res = _dict(raw.get("research"))
     ing = res.get("ingredients") or []
     return {"tick": int(raw.get("tick") or 0), "seed": raw.get("seed"), "src": src,
             "items": pair(raw.get("items")), "fluids": pair(raw.get("fluids")),
-            "power": {str(k): pair(v) for k, v in _dict(raw.get("power")).items()},
+            "power": {str(k): net(v) for k, v in _dict(raw.get("power")).items()},
             "research": {**res, "ingredients": [list(i) for i in ing if isinstance(i, list)]},
             "machines": {k: _dict(v) for k, v in _dict(raw.get("machines")).items()},
             "recipes": {k: _dict(v) for k, v in _dict(raw.get("recipes")).items()},
@@ -200,10 +218,46 @@ def _add(into, d):
         into[k] = _num(into.get(k, 0) + v)
 
 
-def delta(prev, cur):
+#: where the build writes the power domains' poles (2.1), in the game folder
+DOMAINS_FILE = os.path.join("out", "power-domains.json")
+#: a network none of whose poles is a domain's
+REST = "rest"
+
+
+def load_domains(game):
+    """{(2x, 2y): domain} from ``<game>/out/power-domains.json`` (the build's), or None."""
+    try:
+        with open(os.path.join(game, DOMAINS_FILE), encoding="utf-8") as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    out = {}
+    for name, poles in _dict(got.get("domains")).items():
+        for xy in poles or ():
+            if isinstance(xy, list) and len(xy) == 2:
+                out[(int(round(float(xy[0]) * 2)), int(round(float(xy[1]) * 2)))] = name
+    return out or None
+
+
+def domain_of(at, domains):
+    """The domain most of a network's poles (``at``: x2, y2, ...) belong to, else ``REST``."""
+    count = {}
+    for i in range(0, len(at or ()) - 1, 2):
+        d = domains.get((int(at[i]), int(at[i + 1])))
+        if d is not None:
+            count[d] = count.get(d, 0) + 1
+    if not count:
+        return REST
+    return sorted(count.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+
+def delta(prev, cur, domains=None):
     """One sample against the one before -> [(series, record)]. ``prev`` None: the counts since
     the map began. A reset (another map, a save loaded again, a count that went down) gives each
-    series a gap record ``{"tick", "gap": why}`` and the machines' states as they are."""
+    series a gap record ``{"tick", "gap": why}`` and the machines' states as they are. 2.1:
+    ``domains`` ({(2x, 2y): name}, ``load_domains``) splits power made and used by power domain
+    too, the power record's ``domains`` ({name: {"made": J, "used": J}}), when the sample has
+    more than one network."""
     t = cur["tick"]
     gap = None
     if prev is not None:
@@ -232,7 +286,7 @@ def delta(prev, cur):
         frm = base["tick"]
         for name in ("items", "fluids"):
             out.append((name, {"tick": t, "from": frm, **recs[name]}))
-        made, used = {}, {}
+        made, used, by = {}, {}, {}
         for net, now in cur["power"].items():
             was = base["power"].get(net, {"made": {}, "used": {}})
             m, u = _sub(now["made"], was["made"]), _sub(now["used"], was["used"])
@@ -240,10 +294,16 @@ def delta(prev, cur):
                 continue                   # a network that changed: its counts start over
             _add(made, m)
             _add(used, u)
+            if domains and now.get("at"):
+                d = by.setdefault(domain_of(now["at"], domains), {"made": 0, "used": 0})
+                d["made"] = _num(d["made"] + sum(m.values()))
+                d["used"] = _num(d["used"] + sum(u.values()))
         types = cur.get("types") or {}
-        out.append(("power", {"tick": t, "from": frm, "made": made, "used": used,
-                              "types": {n: types[n] for n in sorted(set(made) | set(used))
-                                        if n in types}}))
+        rec = {"tick": t, "from": frm, "made": made, "used": used,
+               "types": {n: types[n] for n in sorted(set(made) | set(used)) if n in types}}
+        if by:
+            rec["domains"] = by
+        out.append(("power", rec))
         packs = {n: v for n, v in recs["items"]["used"].items() if n.endswith("science-pack")}
         out.append(("research", {"tick": t, "from": frm, **_research(cur["research"]),
                                  "packs": packs}))
@@ -335,15 +395,16 @@ class Store:
         return out
 
 
-def ingest(store, state, samples):
+def ingest(store, state, samples, domains=None):
     """Each sample (normed) against the last one kept: its records appended, and it becomes the
-    last. -> how many were kept. A sample at the last one's tick is the same sample: skipped."""
+    last. -> how many were kept. A sample at the last one's tick is the same sample: skipped.
+    ``domains``: as :func:`delta` takes them."""
     n = 0
     for s in samples:
         prev = state.get("last")
         if prev and prev.get("seed") == s.get("seed") and prev["tick"] == s["tick"]:
             continue
-        for series, rec in delta(prev, s):
+        for series, rec in delta(prev, s, domains):
             store.append(series, rec)
         state["last"] = s
         n += 1
@@ -383,7 +444,7 @@ def sample(r, game, cat, force, surface, now=False, out_dir=None):
         rows.append(norm(link.read_output(r, lua_sample(force, surface, tag), tag, "stats sample",
                                           keep=False), "rcon"))
         via = "the recorder and RCON" if via else "RCON"
-    kept = ingest(store, state, rows)
+    kept = ingest(store, state, rows, load_domains(game))
     store.save_state(state)
     last = state.get("last") or {}
     nxt = (int(rec.get("tick") or 0) if live else int(last.get("tick") or tick)) + EVERY
@@ -572,6 +633,12 @@ def history_lines(game, last_n=6, top=5):
                    + "; used by " + (", ".join(f"{k} {_watts(v / mins)}" for k, v in
                                                sorted(usedp.items(), key=lambda kv: -kv[1])[:top])
                                      or "nothing"))
+        doms = wp[-1].get("domains") or {}
+        if doms:
+            # 2.1: by power domain (the build's out/power-domains.json)
+            out.append("  power by domain: " + "; ".join(
+                f"{k} made {_watts(v.get('made', 0) / mins)}, used {_watts(v.get('used', 0) / mins)}"
+                for k, v in sorted(doms.items(), key=lambda kv: (kv[0] == REST, kv[0]))))
     if mach:
         m = mach[-1]
         per = []

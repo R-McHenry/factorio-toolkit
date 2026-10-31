@@ -202,6 +202,11 @@ def is_condition_key(key):
     return isinstance(key, str) and key.endswith("condition")
 
 
+def comparator_json(op):
+    """A source comparator (``<``, ``>=``, ``!=`` ...) as the game writes it (``≥``, ``≠``)."""
+    return _COMPARATOR["=" if op == "==" else op]
+
+
 def condition_json(text, where="condition"):
     """``S<N`` / ``S>=T`` as the game's condition object."""
     return _condition(text, where)
@@ -340,7 +345,10 @@ def _settings_back(extra, fkp_attrs):
 
 def connector(colour, port=None):
     """The ``defines.wire_connector_id`` of a ``w`` end: red 1, green 2; a combinator's output
-    side 3, 4."""
+    side 3, 4. 2.1: copper 5 (a pole's, a power switch's left side), a power switch's right side
+    6."""
+    if colour == "copper":
+        return 6 if port == "right" else POLE_COPPER
     return _CONNECTOR[colour][1 if port == "out" else 0]
 
 
@@ -503,15 +511,31 @@ def wire_attrs(keys, wires):
             for i, ls in links.items()}
 
 
+def pole_domain(row):
+    """The power domain a pole row belongs to (2.1): None for a pole with no ``domain`` attr (the
+    main grid, which every plot's joins), else the domain's name and its plot (a composed key's
+    ``surface:plot``), so two plots' domains of one name stay apart."""
+    dom = (row.get("attrs") or {}).get("domain")
+    if not dom:
+        return None
+    head = str(row.get("src") or "").split("/", 1)[0]
+    return dom, head if ":" in head else ""
+
+
 def pole_wires(rows, cat):
     """[(i, j)] row indices to wire: a minimum spanning forest over the electric poles, an edge
-    only within both poles' wire reach, at most MAX_POLE_WIRES per pole. Deterministic."""
+    only within both poles' wire reach, at most MAX_POLE_WIRES per pole. Deterministic. 2.1: only
+    poles of one power domain (:func:`pole_domain`) are wired together; a copper line between
+    domains is a ``w`` record of its own."""
     poles = [i for i, r in enumerate(rows) if cat.has_entity(r["name"])
              and cat.kind(r["name"]) == "electric-pole"]
+    dom = {i: pole_domain(rows[i]) for i in poles}
     edges = []
     for a in range(len(poles)):
         for b in range(a + 1, len(poles)):
             i, j = poles[a], poles[b]
+            if dom[i] != dom[j]:
+                continue
             ri, rj = rows[i], rows[j]
             d2 = (float(ri["x"]) - float(rj["x"])) ** 2 + (float(ri["y"]) - float(rj["y"])) ** 2
             reach = min(cat.pole_reach(ri["name"]), cat.pole_reach(rj["name"]))

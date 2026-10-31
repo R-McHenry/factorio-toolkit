@@ -221,14 +221,45 @@ def entity_(params, cat):
     isn't a crafter (a lamp, a speaker, a display panel, a pump, a train stop, a beacon): placed,
     powered and wireable, and in no item flow. Its size, circuit connectors and power use come
     from the catalog."""
-    _only(params, ("name",))
+    _only(params, ("name", "read"))
     name = _word(params, "name")
     if not cat.has_entity(name):
         raise TemplateError(f"unknown entity {name}: the catalog has no such building")
     use = _NOT_ENTITY.get(cat.kind(name))
     if use:
         raise TemplateError(f"{name} crafts: write {use.format(name)}")
+    if "read" in params and cat.kind(name) != "accumulator":
+        # 2.1 (power domains): read=SIGNAL puts an accumulator's charge (0-100) on its wire
+        raise TemplateError(f"read={params['read']}: an Entity reads only an accumulator's "
+                            "charge; set another building's reading with cb. fields")
     return [MSpec("m0", name, None, {}, {}, frozenset(), extra={"entity": True})]
+
+
+def decider(params, cat):
+    """``Decider<if="...", out="...">`` (2.1, power domains): one decider combinator.
+    ``if`` is its condition in 2.0's form, ``or`` between groups of ``and``
+    (``"green.A < 20 or (red.S > 0 and green.A < 80)"``, ``red.S`` / ``green.S`` reading one
+    wire colour, a bare signal both); ``out`` what it sends while the condition holds
+    (``"S=1"`` a constant, ``"S"`` the input's count of S). ``fkcore.circuits`` reads both. Its
+    two sides are wired as ``NAME.in`` and ``NAME.out``. It moves no items."""
+    _only(params, ("if", "out"))
+    for k in ("if", "out"):
+        if not isinstance(params.get(k), str) or not params[k].strip():
+            raise TemplateError(f'Decider needs {k}="..." (a quoted string)')
+    return [MSpec("m0", "decider-combinator", None, {}, {}, frozenset(),
+                  extra={"circuit": True, "combinator": True})]
+
+
+def arithmetic(params, cat):
+    """``Arithmetic<calc="A * 2", out="B">`` (2.1, power domains): one arithmetic combinator,
+    ``calc`` one operation on two operands (a signal, ``red.S`` / ``green.S``, ``each`` or a whole
+    number), ``out`` the signal it sends. Its sides are ``NAME.in`` and ``NAME.out``."""
+    _only(params, ("calc", "out"))
+    for k in ("calc", "out"):
+        if not isinstance(params.get(k), str) or not params[k].strip():
+            raise TemplateError(f'Arithmetic needs {k}="..." (a quoted string)')
+    return [MSpec("m0", "arithmetic-combinator", None, {}, {}, frozenset(),
+                  extra={"circuit": True, "combinator": True})]
 
 
 def _smelt_recipe(params, cat):
@@ -637,6 +668,8 @@ TEMPLATES = {
     "Reactor": reactor,
     "HeatExchanger": heat_exchanger,
     "Constant": constant,
+    "Decider": decider,
+    "Arithmetic": arithmetic,
     "Pole": pole,
     "InfinityPipe": infinity_pipe,
     "LabRow": lab_row,
@@ -652,7 +685,7 @@ TEMPLATES = {
 #: ``expand`` and ``elaborate``; a kind resolves to one of these or not)
 SINGLE = ("Machine", "Entity", "Chest", "Pumpjack", "OffshorePump", "Pole", "Boiler",
           "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger", "SteamTurbine",
-          "Constant", "Roboport")
+          "Constant", "Roboport", "Decider", "Arithmetic")
 
 
 def literal_machines(entities, cat):

@@ -201,6 +201,7 @@ class Flat:
     insts: dict = field(default_factory=dict)       # path -> Inst
     asserts: list = field(default_factory=list)     # [(lang.Assert, scope path)]
     covers: list = field(default_factory=list)      # [(lang.Cover, scope path)]
+    coppers: list = field(default_factory=list)     # [lang.Copper] (2.1, the top level's)
     checks: list = field(default_factory=list)      # [Check]
     scopes: dict = field(default_factory=dict)      # scope path -> {name: Inst}
     circuit_src: dict = field(default_factory=dict)  # kind -> [(lang node, scope path)] (2.0)
@@ -798,6 +799,11 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
         flat.asserts.append((a, prefix))
     for c in mod.covers:
         flat.covers.append((c, prefix))
+    for c in getattr(mod, "coppers", ()):
+        if prefix:
+            raise ElabError(src, c.line, f"copper {c.name}: power domains and their copper wires "
+                                         "are written at the top level, not inside a module")
+        flat.coppers.append(c)
     for kind in ("signals", "wires", "behaves", "expects", "sets"):
         flat.circuit_src.setdefault(kind, []).extend((node, prefix)
                                                      for node in getattr(mod, kind, ()))

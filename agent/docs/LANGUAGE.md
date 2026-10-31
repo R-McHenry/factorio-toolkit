@@ -764,11 +764,40 @@ checked (`require-not-met`), and a gated net whose wire has no `cycle` is a `gat
 takes it as always open). The fuel saver above is the starter plant's: the reactor loads a cell
 only below 550 C, so its fuel slot is empty while it coasts, and that is normal.
 
+### Deciders and arithmetic combinators (2.1)
+
+```
+signal A = signal-A
+signal S = signal-S
+latch = Decider<if="green.A < 20 or (red.S > 0 and green.A < 80)", out="S=1"> @(6, 2)
+double = Arithmetic<calc="green.A * 2", out="S"> @(9, 2)
+wire level green: acc -> latch.in
+wire hold  red:   latch.out -> latch.in       # its own output back in: a latch
+```
+
+- `Decider<if="...", out="...">`: `if` is the condition as 2.0's decider takes it, `or` between
+  groups of `and` (`and` binds first). A group may stand in parentheses after an `or`; `(A or B)
+  and C` is refused, since the game has no such grouping: write `A and C or B and C`. Each
+  comparison is `SIGNAL OP N` or `SIGNAL OP SIGNAL`, with `<`, `>`, `<=`, `>=`, `=` and `!=`.
+- `red.S` and `green.S` read one colour only; a bare `S` reads both.
+- `out` lists what it sends while the condition holds, separated by commas: `S=1` sends 1, `S`
+  sends the input's count of S.
+- `Arithmetic<calc="A OP B", out="S">`: `A` a signal (or `each`), `B` a signal or a whole number,
+  `OP` one of `+ - * / % ^ << >> AND OR XOR`, with spaces round it.
+- A combinator has two sides: `x.in` reads and `x.out` sends. A wire's consumer end is `x.in`
+  and its driver end `x.out`; the wrong side is a `no-wire` line, and a bare `x` takes the
+  side its end needs.
+- A wire from a combinator's `out` to its own `in` is allowed. It is a latch's memory.
+- The strings take a module's parameters: `if="green.$in < $lo"` in a module with `in` and `lo`.
+- A wire inside an unsealed module is named from outside by its path: `shedder.hold.S` in a
+  `when`, `shedder.latch.in` as a wire's end. A sealed module (one with a size or ports) keeps
+  its inside to itself.
+
 ### Combinators the language doesn't write yet: a Literal
 
-Deciders, arithmetic and selector combinators, a machine's recipe set by a signal, and a
-requester's requests set by one are not in the language yet. A `Literal` whose file is a
-blueprint string keeps every one of them, with its settings and wires, as written. The circuit
+Selector combinators, a machine's recipe set by a signal, and a requester's requests set by one
+are not in the language yet. A `Literal` whose file is a blueprint string keeps every one of
+them, with its settings and wires, as written. The circuit
 auto mall is one: one assembler, one requester, one active provider and ten combinators that keep
 a stock list full (`factorio-design\drafts\automall-20261030`, `gen_mall.py` writes it). Three
 things the game does that a hand-written blueprint can get wrong (measured 2026-10-30):
@@ -915,3 +944,34 @@ settings. Add your own the same way, with no toolkit release:
 
 The build script's `cover power` step adds the poles every factory needs; `floorplan
 --bridge-power` joins factories to the plant's grid. Don't put poles in the source.
+
+### Power domains (2.1)
+
+A design with more than one `power` line has one electric network per line: a **domain**.
+
+```
+power main: cover all                 # everything no other domain names
+power labs: cover field               # the lab field alone
+sw = PowerSwitch @(1036, 1004) when hold.S = 0
+copper feed: main -> sw.left
+copper load: sw.right -> labs
+```
+
+- `power NAME: cover A, B` names instances, with their whole insides. A route's inserters go
+  with the machine they feed or take from. `cover all` takes everything no other domain names.
+  One `power` line is one network, as before.
+- Each domain gets its own poles (`power-labs/p0`, ...). Poles are never wired across domains,
+  and no pole is put where its supply area reaches another domain's machines. A machine with no
+  such spot left is a `domain-overlap` line.
+- `copper NAME: A -> B` lays a copper wire between two domains, or between a domain and a
+  switch's side. It goes from the nearest pole in reach, or the build adds a bridge pole. Two
+  domains joined with no switch are one network, and the report says so.
+- `PowerSwitch` is a prelude kind. Its sides are `sw.left` and `sw.right`. It is closed (the
+  sides joined) while its `when` holds.
+- `Accumulator<read=S>` puts its charge (0 to 100) on its wire as S. The game charges a
+  network's accumulators together, so one reads them all.
+- Copper lines and domains are written at the top level, not inside a module.
+- The checks: `no-source`, `power-short`, `switch-never` and `domain-overlap` (TOOLKIT.md, "The
+  checks").
+- The run stats split power by domain: `power by domain: labs made 0 W, used 1.8 MW; main made
+  3.1 MW, used 1.2 MW`. A network the build didn't lay is `rest`.

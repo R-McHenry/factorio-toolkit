@@ -8,7 +8,7 @@
                '{' stmt* '}'                            # buffer: before or after size, once
     mparam  := name ('=' value)?                          # no default: required (2.1)
     stmt    := inst | net | lanes | bundle | assert | cover | signal | wire | behave | expect | set
-             | port
+             | port | copper
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
@@ -21,6 +21,8 @@
     index   := '[' (int | '*') ']'    # a Stack's cell k, [-1] the last, [*] every one (2.1)
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
+    copper  := 'copper' name ':' ref '->' ref     # two power domains, or a domain and a power
+                                                  # switch's side (X.left, X.right) (2.1)
     param   := name '=' value | name | raw              # a bare name is a flag (Chest<provider>)
     value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
     word    := WORD | '$' name ('[' num ']')?               # $p: a module parameter (2.1)
@@ -122,7 +124,7 @@ from dataclasses import dataclass, field
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
            "Module", "Port", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand",
            "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers", "MParam", "RESERVED", "Raw",
-           "RAW_PREFIXES", "is_raw"]
+           "RAW_PREFIXES", "is_raw", "Copper"]
 
 
 class FkSyntaxError(Exception):
@@ -352,6 +354,17 @@ class Cover:
 
 
 @dataclass
+class Copper:
+    """``copper NAME: A -> B`` (2.1, power domains): a copper wire between two power domains, or a
+    domain and one side of a power switch (``sw.left``, ``sw.right``). Each end is a ref: a
+    domain's name, or an instance and its side."""
+    name: str
+    a: Ref
+    b: Ref
+    line: int
+
+
+@dataclass
 class Module:
     name: str
     line: int
@@ -359,6 +372,7 @@ class Module:
     nets: list = field(default_factory=list)
     asserts: list = field(default_factory=list)
     covers: list = field(default_factory=list)
+    coppers: list = field(default_factory=list)    # [Copper] (2.1, power domains)
     signals: list = field(default_factory=list)
     wires: list = field(default_factory=list)
     behaves: list = field(default_factory=list)
@@ -761,6 +775,8 @@ class _P:
             mod.asserts.append(self.assert_())
         elif tok.text in _COVER_KINDS and self.peek(1).kind == "word" and self.peek(2).text == ":":
             mod.covers.append(self.cover())
+        elif tok.text == "copper" and self.peek(1).kind == "word" and self.peek(2).text == ":":
+            mod.coppers.append(self.copper())
         elif tok.text == "signal" and self.peek(1).kind == "word":
             mod.signals.append(self.signal())
         elif tok.text == "wire" and self.peek(1).kind == "word" and self.peek(2).text in _COLOURS:
@@ -1084,6 +1100,17 @@ class _P:
             k, v = self.param()
             params[k] = v
         return Cover(tok.text, name, targets, params, tok.line)
+
+    def copper(self):
+        line = self.expect("copper").line
+        name = self.name("copper name").text
+        self.expect(":")
+        a = self.ref()
+        self.expect("->")
+        b = self.ref()
+        if a.star or b.star:
+            self.err("copper joins one domain or one switch side to another, not X.*")
+        return Copper(name, a, b, line)
 
     def inst(self):
         tok = self.name("instance name")

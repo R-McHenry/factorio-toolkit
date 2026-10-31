@@ -114,6 +114,7 @@ class _Node:
     key: str | None = None
     spot: tuple | None = None
     bridge: bool = False
+    dom: object = None             # 2.1: its power domain (codec.pole_domain); wired only within
 
 
 # -- geometry -------------------------------------------------------------------------------------
@@ -141,11 +142,13 @@ def networks(ents, cat):
     """The wire networks of an entity list (a layout's or a composed surface's entities):
     ``[{"poles": [keys], "sources": [keys]}]``, a source being a grid source (generator, solar,
     accumulator ...) inside some pole's supply area. Poles wire to every pole in reach, as the game
-    auto-wires them; wires are not recorded anywhere yet."""
+    auto-wires them; wires are not recorded anywhere yet. 2.1: only poles of one power domain
+    (``codec.pole_domain``) are wired together."""
     ents = sorted(ents, key=lambda e: natural_key(e.key))
     poles = [e for e in ents if cat.kind(e.name) == "electric-pole"]
-    nodes = [_Node(float(e.x), float(e.y), cat.pole_supply(e.name), cat.pole_reach(e.name), e.key)
-             for e in poles]
+    from .codec import pole_domain
+    nodes = [_Node(float(e.x), float(e.y), cat.pole_supply(e.name), cat.pole_reach(e.name), e.key,
+                   dom=pole_domain({"src": e.key, "attrs": e.attrs})) for e in poles]
     sources = [(e.key, _rect(fkp.tiles_of(cat, e))) for e in ents
                if cat.kind(e.name) in GRID_SOURCE_TYPES]
     out = []
@@ -169,7 +172,7 @@ def _groups(nodes):
 
     for i in range(len(nodes)):
         for j in range(i + 1, len(nodes)):
-            if _wired(nodes[i], nodes[j]):
+            if nodes[i].dom == nodes[j].dom and _wired(nodes[i], nodes[j]):
                 ri, rj = find(i), find(j)
                 if ri != rj:
                     parent[max(ri, rj)] = min(ri, rj)
@@ -180,14 +183,18 @@ def _groups(nodes):
 
 
 class _Ground:
-    """Where a new pole may stand: the frame, the entities' tiles, keep_out, poles placed so far."""
+    """Where a new pole may stand: the frame, the entities' tiles, keep_out, poles placed so far.
+    2.1 (power domains): ``deny``, the tile rectangles of another domain's machines, which a new
+    pole's supply square (``supply``) may not reach."""
 
-    def __init__(self, taken, keep_out, size, pole_size):
+    def __init__(self, taken, keep_out, size, pole_size, deny=(), supply=0.0):
         self.taken = taken                       # tile -> entity key
         self.keep_out = keep_out
         self.size = size                         # (W, H) or None
         self.pw, self.ph = pole_size
         self.placed = set()
+        self.deny = list(deny)
+        self.supply = supply
 
     def tiles(self, spot):
         i, j = spot
@@ -211,6 +218,10 @@ class _Ground:
         for t in self.tiles(spot):
             if t in self.placed:
                 return "pole"
+        if self.deny:
+            cx, cy = self.centre(spot)
+            if any(_overlap(r, cx, cy, self.supply) for r in self.deny):
+                return "domain"
         return None
 
     def free(self, spot):
@@ -381,7 +392,7 @@ def _check_args(lay, cat, pole, owner):
 
 
 def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=(),
-                standing=None):
+                standing=None, only=None, deny=(), attrs=None):
     """``(poles, report)``: the poles to add to ``lay`` and a :class:`CoverReport`.
 
     ``keep_out`` is an iterable of ``(x, y)`` tiles no pole may use (a route's tiles, a reserved
@@ -391,6 +402,12 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     stands, so switching ``pole`` keeps the built grid and lays the new kind where the old one
     never stood (2.0.1, the first lead run: medium poles were SHORT before steel, and switching to
     small dropped every medium pole, the built ones too). ``lay`` is not changed.
+
+    2.1 (power domains, ``fkcore.domains``): ``only``, the keys of the entities and poles of one
+    domain (None: all of them); every other entity's tiles stay taken, and its poles are no wire
+    nodes. ``deny``: the tile rectangles of other domains' machines, which no new pole's supply
+    area may reach (an entity that only such spots could power is a ``domain-overlap`` line).
+    ``attrs``: the new poles' attrs (``domain=NAME``).
     """
     _check_args(lay, cat, pole, owner)
     s, wire = cat.pole_supply(pole), cat.pole_reach(pole)
@@ -407,6 +424,8 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         for t in sorted(tiles):
             taken.setdefault(t, e.key)
         kind = _kind(cat, e)
+        if only is not None and e.key not in only:
+            continue                                 # another domain's: its tiles stay taken
         if kind == "electric-pole" and e.attrs.get("dnp"):
             # 2.0.63: a DNP pole is never built, so it powers nothing; its tiles stay taken. What
             # a DNP piece would power still gets its poles, ready for when it is built
@@ -417,7 +436,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         elif _needs_power(cat, e):
             electric.append((e.key, _rect(tiles)))
     ground = _Ground(taken, {(math.floor(x), math.floor(y)) for x, y in keep_out}, lay.size,
-                     cat.size(pole))
+                     cat.size(pole), deny, s)
 
     # The committed poles that still fit: kept as they stand (wire nodes, prunable last); one of
     # another kind only when it stands built (``standing``) and takes the same footprint.
@@ -531,19 +550,22 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     new = sorted((n for n in nodes if n.spot is not None and n.key not in keep_keys),
                  key=lambda n: (n.spot[1], n.spot[0]))
     top = max([int(k.rsplit("/p", 1)[1]) for k in keep_keys] + [-1]) + 1
-    poles = [Entity(f"{owner}/p{top + k}", pole, n.x, n.y) for k, n in enumerate(new)]
+    poles = [Entity(f"{owner}/p{top + k}", pole, n.x, n.y, None, dict(attrs or {}))
+             for k, n in enumerate(new)]
     key_of = {id(n): e.key for n, e in zip(new, poles)}
     for n in nodes:
         if n.key is not None:
             key_of[id(n)] = n.key
     still = [n for n in nodes if n.key in keep_keys]
-    poles += [Entity(n.key, names.get(n.key, pole), n.x, n.y) for n in still]
+    poles += [Entity(n.key, names.get(n.key, pole), n.x, n.y, None, dict(attrs or {}))
+              for n in still]
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
             reason = _why_not(ground, rect, s, pole, lay.size)
             uncovered.append((key, reason))
-            checks.append(Check("NO_POWER", key, reason))
+            checks.append(Check("domain-overlap" if "another power domain" in reason
+                                else "NO_POWER", key, reason))
     splits = []
     for g in groups[1:]:
         keys = [key_of[id(nodes[i])] for i in g]
@@ -586,14 +608,19 @@ def _why_not(ground, rect, s, pole, size):
         parts.append(f"{count['pole']} under other poles")
     if count.get("frame"):
         parts.append(f"{count['frame']} outside the {size[0]}x{size[1]} frame")
+    if count.get("domain"):
+        parts.append(f"{count['domain']} would power another power domain's machines too")
     return f"all {len(spots)} spots a {pole} could power it from are taken: " + "; ".join(parts)
 
 
 def apply_cover(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=(),
-                standing=None):
+                standing=None, only=None, deny=(), attrs=None, poles=None):
     """A new Layout: ``lay`` without ``owner``'s previous poles, with the pinned ones that still
-    fit, the new ones and the record ``cover <owner> power pole=<pole>``. ``lay`` is not changed."""
-    poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned, standing)
+    fit, the new ones and the record ``cover <owner> power pole=<pole>``. ``lay`` is not changed.
+    ``poles``: :func:`cover_power`'s, when the caller has them already."""
+    if poles is None:
+        poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned, standing, only, deny,
+                                  attrs)
     out = copy.deepcopy(lay)
     out.entities = {k: e for k, e in out.entities.items() if not _is_own_pole(e, owner, cat)}
     old = out.covers.get(owner)
