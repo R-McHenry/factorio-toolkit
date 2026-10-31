@@ -40,12 +40,24 @@ the pool, shared by appetite like any net. The bus's row is the pool's; each net
 a row of its own from the same utilizations, its ports passing the balance on (a load's net
 delivers what its drivers make, a tap's net what its consumers take). No capacity, as everywhere
 in V1: the routed rates know what the bus's belts carry.
+
+**A buffer** (2.1, PLAN-2.1 G: a ``Buffer`` chest, or an instance of a ``module NAME buffer``) is a
+role, not an entity: one net fills it and another drains it. Downstream it is an unlimited supply
+of what it holds, so its users are rated as if it never runs dry; upstream an unlimited sink, so
+its makers are never blocked by it. The model doesn't follow its stock over time. What it reports
+is the **derivative** per item, what comes in minus what goes out (``Model.buffers``, the
+``BUFFER`` lines): a mine into a buffer is filling, and a buffer whose users take more than it
+gets is draining, which is the line to grow. On a net its drivers cover first and the buffers the
+rest; what the consumers leave goes to the sinks with a rate first, then evenly to the unlimited
+ones. A buffer module's ports are its ends on the nets outside it (``_buffer_view``); its inside is
+the designer's, and is not joined to the outside through them.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
-__all__ = ["Model", "solve", "report"]
+__all__ = ["Model", "solve", "report", "buffer_lines"]
 
 INF = float("inf")
 DAMPING = 0.5
@@ -80,10 +92,21 @@ class Model:
     sink_share: dict = field(default_factory=dict)  # (sink key, net, item) -> its cap there
     pools: dict = field(default_factory=dict)     # (net, item) -> its bus pool's (net, item)
     ends: dict = field(default_factory=dict)      # (net, item) as solved -> drivers, consumers
+    #: 2.1: buffer instance path -> {item: (in /s, out /s)}, its derivative is in - out
+    buffers: dict = field(default_factory=dict)
+    #: 2.1: (buffer endpoint key, item) -> what it gives its nets /s
+    buffer_out: dict = field(default_factory=dict)
+    #: 2.1: {(buffer path, item)} that unbounded sources fill through gated nets (``when``)
+    buffer_gated: set = field(default_factory=set)
 
     def rate(self, key, item):
-        """Items/s machine ``key`` makes of ``item``; for a bus port, what passes through it."""
+        """Items/s machine ``key`` makes of ``item``; for a bus port, what passes through it; for a
+        buffer (2.1), what it gives its nets."""
+        if (key, item) in self.buffer_out:
+            return self.buffer_out[(key, item)]
         m = self.flat.machines[key]
+        if m.extra.get("buffer"):
+            return 0.0
         if m.extra.get("port"):
             return self.port_rate(key)
         return m.makes.get(item, 0.0) * self.util[key]
@@ -128,8 +151,8 @@ def _pools(flat):
 
     holds = (getattr(flat, "_in_hold", {}), getattr(flat, "_out_hold", {}))
     for key, m in flat.machines.items():
-        if not m.extra.get("port"):
-            continue
+        if not m.extra.get("port") or m.extra.get("buffer"):
+            continue                    # 2.1: a buffer module's port ends its nets, joins none
         for item in m.extra.get("items") or [m.extra["item"]]:
             nets = [n for hold in holds for n in hold.get((key, item), ())]
             for n in nets:
@@ -152,9 +175,35 @@ def _is_bus(flat, net):
     return inst is not None and inst.kind == "Bus"
 
 
+def _buffer_view(flat):
+    """{key: Machine} for the model: each port of a buffer module (2.1) as the buffer's end, an
+    in port an unlimited sink of its items and an out port an unlimited supply of them; every
+    other machine as it is."""
+    out = dict(flat.machines)
+    for key, m in flat.machines.items():
+        if not (m.extra.get("port") and m.extra.get("buffer")):
+            continue
+        items = list(dict.fromkeys(m.extra.get("items") or [m.extra.get("item")]))
+        way = m.extra["port"]
+        out[key] = dataclasses.replace(
+            m, needs={}, makes={i: INF for i in items} if way in ("out", "inout") else {},
+            takes=frozenset(items), sink=way in ("in", "inout"), drain=None,
+            source=way in ("out", "inout"))
+    return out
+
+
+def _is_end(flat, key, net):
+    """Whether machine ``key`` is one of ``net``'s ends in the model: not a port (a conduit the
+    pools join through), except a buffer module's port on a net outside its module (2.1)."""
+    m = flat.machines[key]
+    if not m.extra.get("port"):
+        return True
+    return bool(m.extra.get("buffer")) and flat.nets[net].scope != m.inst
+
+
 def _structure(flat, pools=None):
     """(ends, feeds, outs) as the model solves them: the nets a bus joins are one pool, its
-    ports left out (``_pools``)."""
+    ports left out (``_pools``); a buffer module's ports are ends of the nets outside it."""
     pools = pools or {}
     ends = {}                          # (net, item) -> {"drivers": [k], "consumers": [k]}
     feeds, outs = {}, {}
@@ -165,7 +214,7 @@ def _structure(flat, pools=None):
         for side, rows, table in (("drivers", net.drivers, outs),
                                   ("consumers", net.consumers, feeds)):
             for key, item in rows:
-                if flat.machines[key].extra.get("port"):
+                if not _is_end(flat, key, name):
                     continue
                 ni = pools.get((name, item), (name, item))
                 if ni != (name, item) and key in ends[ni][side]:
@@ -241,7 +290,8 @@ def _lines(flat, pools, ends):
                 continue
             ins = [n for n in holds[0].get((key, item), ()) if n in names]
             outs = [n for n in holds[1].get((key, item), ()) if n in names]
-            c = key in chain and flat.ports[key].dir == "out"
+            # a belt's chain port; a pipe's (2.1, fluid ports) is no queue: a fluid pool is shared
+            c = key in chain and flat.ports[key].dir == "out" and m.prototype != "pipe"
             for a in ins:
                 for b in outs:
                     edges.append((a, b, c))
@@ -335,7 +385,7 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
     pools = _pools(flat)
     unbounded = set(unbounded) | {pk[0] for ni, pk in pools.items() if ni[0] in unbounded}
     ends, feeds, outs = _structure(flat, pools)
-    machines = flat.machines
+    machines = _buffer_view(flat)
     lines = _lines(flat, pools, ends)
 
     # A sink's rate cap, split over the (net, item) endpoints it sits on by full-speed supply.
@@ -520,11 +570,85 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                 nets[ni] = NetItem(**dict(vars(stats[pk]), net=name))
             else:
                 nets[ni] = _absorbed(flat, ni, stats[pk], ends[pk], util, feeds, outs,
-                                     sink_share, potential, name in unbounded)
+                                     sink_share, potential, name in unbounded, machines)
     model = Model(flat, util, binding, nets, done, residual, sink_share=sink_share,
                   pools=pools, ends=ends)
+    model.buffers, model.buffer_out, model.buffer_gated = _buffer_flows(
+        flat, machines, ends, stats, util, outs, feeds, sink_share)
     model.asserts = _asserts(model)
     return model
+
+
+def _buffer_of(flat, key):
+    """The buffer instance path machine ``key`` is an end of, or None (2.1)."""
+    m = flat.machines[key]
+    b = m.extra.get("buffer")
+    if b is True:
+        return m.inst
+    return b if isinstance(b, str) and m.extra.get("port") else None
+
+
+def _buffer_flows(flat, machines, ends, stats, util, outs, feeds, sink_share):
+    """({buffer: {item: (in, out)}}, {(key, item): out}) per item of each buffer (2.1), over the
+    nets as solved (a bus pool once). On each: the consumers take what they take; the drivers that
+    aren't sources cover it first, and the unbounded ones (buffers, requesters without a rate)
+    share what is left of it evenly. What the consumers leave of the drivers' make goes to the
+    sinks with a rate first, then evenly to the unlimited ones, a buffer among them; one an
+    unbounded driver other than itself feeds fills without end, unless that net is gated
+    (``when``): then the gate tops up what goes out, and it is steady. A buffer inside a buffer
+    module is the module's inside, and gets no line."""
+    keys = {k: b for k in machines if (b := _buffer_of(flat, k)) is not None}
+    if not keys:
+        return {}, {}, set()
+    gated = set()
+    modules = {p for p, how in getattr(flat, "buffers", {}).items() if how == "module"}
+    flows, given = {}, {}
+    for ni, e in ends.items():
+        mine = [k for k in dict.fromkeys(e["drivers"] + e["consumers"]) if k in keys]
+        if not mine:
+            continue
+        item = ni[1]
+        st = stats[ni]
+        made = sum(machines[k].makes.get(item, 0.0) / len(outs[(k, item)]) * util[k]
+                   for k in e["drivers"] if not machines[k].source)
+        unb = [k for k in e["drivers"] if machines[k].source]
+        taken = st.demand if st.demand != INF else 0.0
+        short = max(0.0, taken - made)
+        left = max(0.0, made - taken)
+        finite, open_ = 0.0, []
+        for k in dict.fromkeys(e["consumers"]):
+            m = machines[k]
+            if not m.sink or m.needs.get(item, 0.0) > 0:
+                continue
+            cap = sink_share.get((k,) + ni, 0.0)
+            if cap == INF:
+                open_.append(k)
+            else:
+                finite += cap
+        rest = max(0.0, left - finite)
+        for k in mine:
+            got = flows.setdefault(keys[k], {}).setdefault(item, [0.0, 0.0])
+            if k in unb:
+                out = short / len(unb)
+                got[1] += out
+                given[(k, item)] = given.get((k, item), 0.0) + out
+            if k in open_:
+                if any(u != k for u in unb):
+                    net = flat.nets.get(ni[0])
+                    if net is not None and getattr(net, "when", None):
+                        gated.add((keys[k], item))
+                    else:
+                        got[0] = INF
+                elif got[0] != INF:
+                    got[0] += rest / len(open_)
+    inner = {b for b in flows if any(b.startswith(p + "/") for p in modules)}
+    for b, item in gated:
+        got = flows[b][item]
+        if got[0] != INF:
+            got[0] = max(got[0], got[1])
+    out = {b: {i: tuple(v) for i, v in items.items()} for b, items in flows.items()
+           if b not in inner}
+    return out, given, {g for g in gated if g[0] in out and out[g[0]][g[1]][0] != INF}
 
 
 def underfed(model, margin=0.05):
@@ -598,7 +722,8 @@ def _filtered_out(flat, sink, item):
     return False
 
 
-def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, unbounded):
+def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, unbounded,
+              machines=None):
     """The row of a net a bus pool absorbed: what its own drivers make and its own consumers take
     at the pool's utilizations, its ports passing the balance on. A load's net delivers all its
     drivers make (the pool took it, or they slowed); an unbounded one what the pool delivers
@@ -608,15 +733,16 @@ def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, un
     net = flat.nets[name]
     pk = (pool.net, item)
     st = NetItem(name, item)
+    machines = machines or flat.machines
 
     def made(key):
-        return flat.machines[key].makes.get(item, 0.0) / len(outs[(key, item)]) * util[key]
+        return machines[key].makes.get(item, 0.0) / len(outs[(key, item)]) * util[key]
 
     s = d = would = 0.0
     unb, into, caps, own = unbounded, False, [], set()
     for key, it in net.drivers:
-        m = flat.machines[key]
-        if it != item or m.extra.get("port"):
+        m = machines[key]
+        if it != item or not _is_end(flat, key, name):
             continue
         own.add(key)
         if m.source:
@@ -624,10 +750,10 @@ def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, un
             continue
         s += made(key)
     for key, it in net.consumers:
-        m = flat.machines[key]
+        m = machines[key]
         if it != item:
             continue
-        if m.extra.get("port"):
+        if not _is_end(flat, key, name):
             into = into or m.extra["port"] in ("load", "in")
             continue
         need = m.needs.get(item, 0.0)
@@ -650,7 +776,7 @@ def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, un
         flow = s
         if unb and pool.delivered != INF:            # what the others don't bring
             others = sum(made(k) for k in ends["drivers"] if k not in own
-                         and not flat.machines[k].source)
+                         and not machines[k].source)
             flow = s + max(0.0, pool.delivered - others - s)
         elif unb:
             flow = INF
@@ -662,6 +788,30 @@ def _absorbed(flat, ni, pool, ends, util, feeds, outs, sink_share, potential, un
     return st
 
 
+def _port_rate(model, keys):
+    """Items/s through a sealed module's ports (2.1): ``assert cols[2].rate`` (its out ports) or
+    ``assert cols[2].pl.rate`` (one port). An out port's rate is what the module's machines make of
+    its items, an in port's what they take; it used to fail with a KeyError on the port."""
+    flat = model.flat
+    ports = [flat.ports[k] for k in keys]
+    outs = [p for p in ports if p.dir in ("out", "inout")] or ports
+    total, seen = 0.0, set()
+    for p in outs:
+        inst = flat.insts.get(p.scope)
+        inside = [k for k in (inst.machines if inst else ()) if k not in flat.ports]
+        for item in dict.fromkeys(p.all_items):
+            if (p.scope, item, p.dir == "in") in seen:
+                continue
+            seen.add((p.scope, item, p.dir == "in"))
+            if p.dir == "in":
+                total += sum(flat.machines[k].needs.get(item, 0.0) * model.util.get(k, 0.0)
+                             for k in inside)
+            else:
+                total += sum(flat.machines[k].makes.get(item, 0.0) * model.util.get(k, 0.0)
+                             for k in inside)
+    return total
+
+
 def _asserts(model):
     flat = model.flat
     out = []
@@ -670,6 +820,8 @@ def _asserts(model):
         net_name = "/".join(p for p in (scope, ".".join(a.ref.parts)) if p)
         if node is not None and node.kind == "Bus":
             value = model.inst_rate(node.path)
+        elif keys and all(k in flat.ports for k in keys):
+            value = _port_rate(model, keys)        # a sealed module, or one of its ports (2.1)
         elif keys:
             item = primary(flat, keys)
             value = sum(model.rate(k, item) for k in keys)
@@ -695,6 +847,8 @@ def _f(v, scale=1.0):
 def _why(model, key):
     b = model.binding.get(key)
     m = model.flat.machines[key]
+    if m.extra.get("buffer") is True:
+        return "buffer (BUFFER below)"
     if m.sink:
         return "sink"
     if m.source:
@@ -771,6 +925,8 @@ def report(model, title=None) -> str:
         made = f"{item} {model.inst_rate(path, item) * 60:.2f}" if item else ""
         if item and model.inst_rate(path, item) == INF:
             made = f"{item} unbounded"
+        if path in model.buffers:
+            made = f"{item} {model.inst_rate(path, item) * 60:.2f} out" if item else ""
         lines.append(f"  {path:<18} {inst.kind:<12} {len(keys):>3} {min(us):>6.3f}  {made:<38} "
                      f"{_why(model, keys[0])}")
     lines += ["", f"  {'net':<16} {'item':<26} {'supply/s':>9} {'would take':>10} {'taken/s':>8} "
@@ -779,8 +935,30 @@ def report(model, title=None) -> str:
         surplus = st.supply - st.delivered if st.supply != INF else INF
         lines.append(f"  {net:<16} {item:<26} {_f(st.supply):>9} {_f(st.would_take):>10} "
                      f"{_f(st.demand):>8} {_f(st.to_sinks):>8} {_f(surplus):>9}")
+    if model.buffers:
+        lines += [""] + ["  " + line for line in buffer_lines(model)]
     if model.asserts:
         lines += ["", "  asserts"]
         for text, ok, value, target, op in model.asserts:
             lines.append(f"  {'PASS' if ok else 'rate-not-met'} {text}: {_f(value, 60)}/min")
     return "\n".join(lines)
+
+
+def buffer_lines(model):
+    """``BUFFER b: +12.0/min iron-plate (filling)`` per buffer and item (2.1): what comes in
+    minus what goes out, filling, draining or steady. What one unbounded source feeds fills
+    without end."""
+    out = []
+    for path in sorted(model.buffers):
+        for item, (got, gave) in sorted(model.buffers[path].items()):
+            if got == INF:
+                out.append(f"BUFFER {path}: +unbounded/min {item} (filling: an unbounded source "
+                           f"feeds it; gives {gave * 60:.1f}/min)")
+                continue
+            d = (got - gave) * 60
+            how = "filling" if d > 0.05 else "draining" if d < -0.05 else "steady"
+            if (path, item) in model.buffer_gated:
+                how += ", its gated sources top up what goes out"
+            out.append(f"BUFFER {path}: {'+' if d >= 0 else '-'}{abs(d):.1f}/min {item} ({how}: in "
+                       f"{got * 60:.1f}, out {gave * 60:.1f})")
+    return out

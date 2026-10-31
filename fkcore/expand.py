@@ -46,8 +46,8 @@ from .fragments import E, N, S, W, FEnt, Fragment, FragmentError, Role, _finish,
 from .templates import CONTACT, SINGLE
 from .terrain import fmt_amount
 
-__all__ = ["belts", "fragment_of", "expand_factory", "explain", "unfold", "attach_points",
-           "frame_of", "planned_frame", "frame_overlaps"]
+__all__ = ["belts", "fragment_of", "expand_factory", "explain", "explain_net", "unfold",
+           "attach_points", "frame_of", "planned_frame", "frame_overlaps"]
 
 #: 2.1: the core kinds that are one machine each (``templates.SINGLE``); an instance is single when
 #: its kind resolves to one of them (``Assembler`` is a ``Machine``)
@@ -335,11 +335,14 @@ def _port_records(flat, lay):
 class PortEdge:
     """Where a port crosses its module's frame (2.0.48): the tile just ``inside`` the edge and the
     one just ``outside`` it, in the factory frame, and the crossing as the items go, ``src`` ->
-    ``dst`` (outside -> inside for an ``in`` port, inside -> outside for an ``out`` one)."""
+    ``dst`` (outside -> inside for an ``in`` port, inside -> outside for an ``out`` one).
+    ``fluid`` (2.1): the fluid of a fluid port, whose pipe crosses the edge there; None for a
+    belt's port."""
     inside: tuple
     outside: tuple
     src: tuple
     dst: tuple
+    fluid: str | None = None
 
 
 def port_edges(flat, lay, cat):
@@ -365,10 +368,12 @@ def port_edges(flat, lay, cat):
             here = (math.floor(x), math.floor(y))           # the inside role's virtual belt: outside
             ahead = (here[0] + dx, here[1] + dy)
             behind = (here[0] - dx, here[1] - dy)
+            fluid = port.items[0] if len(port.items) == 1 and port.right is None \
+                and cat is not None and cat.is_fluid(port.items[0]) else None
             if port.dir == "in":
-                out[key] = PortEdge(ahead, here, here, ahead)
+                out[key] = PortEdge(ahead, here, here, ahead, fluid)
             else:
-                out[key] = PortEdge(behind, here, behind, here)
+                out[key] = PortEdge(behind, here, behind, here, fluid)
     return out
 
 
@@ -596,7 +601,7 @@ def _machine_attrs(m):
         attrs["rate"] = fkpmod.fmt(m.drain)
     if m.makes and not m.recipe and not m.source and "resource" not in m.extra:
         attrs["rate"] = fkpmod.fmt(next(iter(m.makes.values())))
-    if m.source and "item" not in attrs:
+    if m.source and "item" not in attrs and m.makes and not m.extra.get("buffer"):
         attrs["item"] = next(iter(m.makes))
     if m.takes is not None and m.sink and len(m.takes) == 1:
         attrs["item"] = next(iter(m.takes))
@@ -1026,7 +1031,9 @@ def explain(flat, lay, path, cat) -> str:
     if inst.kind == "Literal" or rec is None:
         nets = sorted({lay.entities[k].net for k in mine if lay.entities[k].net})
         lines.append(f"  nets      {', '.join(nets) or '-'}")
-        return "\n".join(lines)
+        for name, key in sorted(getattr(flat, "literal_names", {}).get(path, {}).items()):
+            lines.append(f"  name      {path}.{name} = {key}")
+        return "\n".join(lines + _limited_lines(flat, inst))
     frag, binding = fragment_of(flat, path, cat)
     if inst.kind == "Bus":
         return "\n".join(lines[:1] + _explain_bus(flat, lay, path, frag, binding))
@@ -1042,7 +1049,50 @@ def explain(flat, lay, path, cat) -> str:
         lines.append(f"  {role.side:<4} {name:<4} net {net:<14} items {', '.join(role.items):<30} "
                      f"attach {where:<11} carriers {_span(carriers)}")
     lines.append(f"  size      {frag.size[0]}x{frag.size[1]} (its own frame)")
+    return "\n".join(lines + _limited_lines(flat, inst))
+
+
+def _limited_lines(flat, inst):
+    """2.1: what limits each ``limited`` net the instance is an end of, as its source says it."""
+    keys = set(inst.machines)
+    out = []
+    for name in sorted(flat.nets):
+        net = flat.nets[name]
+        if not net.limited or not any(k in keys for k, _i in net.drivers + net.consumers):
+            continue
+        out.append(f"  limited   net {name}: " + (net.why if getattr(net, "why", None) else
+                                                   "(no reason given: limited \"...\" says what)"))
+    return out
+
+
+def explain_net(flat, name) -> str:
+    """``fk explain FILE NET`` (2.1): one net, its items and ends, and what limits it."""
+    net = flat.nets[name]
+    lines = [f"net {name}: {', '.join(net.items) or 'no items'}"
+             + (" (declared)" if net.declared else " (from its drivers)")
+             + (" sushi" if net.sushi else "")]
+    for side, rows in (("drivers", net.drivers), ("consumers", net.consumers)):
+        insts = list(dict.fromkeys(flat.machines[k].inst for k, _i in rows))
+        lines.append(f"  {side:<9} {', '.join(insts) or '-'}")
+    if name in getattr(flat, "lane_of", {}):
+        lines.append(f"  lanes     {flat.lane_of[name]}")
+    bufs = sorted({b for k, _i in net.drivers + net.consumers
+                   for b in [_buffer_end(flat, k)] if b})
+    if bufs:
+        lines.append(f"  buffers   {', '.join(bufs)} (an unlimited supply downstream, an unlimited "
+                     "sink upstream: fk rates gives each one's BUFFER line)")
+    if net.limited:
+        lines.append("  limited   " + (net.why if getattr(net, "why", None) else
+                                       "(no reason given: limited \"...\" says what)"))
     return "\n".join(lines)
+
+
+def _buffer_end(flat, key):
+    m = flat.machines[key]
+    b = m.extra.get("buffer")
+    if b is True:
+        return m.inst
+    return b if isinstance(b, str) else None
 
 
 def _explain_bus(flat, lay, path, frag, binding):

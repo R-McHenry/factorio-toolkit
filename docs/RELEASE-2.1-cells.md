@@ -106,15 +106,20 @@ Working share per lab over 60 s, bottom to top:
 as the furnaces do. The model has no per-lab prediction: a lab is a sink, and the model gives the
 field's total (114/min at this feed).
 
-## Found, not changed
+## Also fixed
+
+- `assert X.rate` on a sealed module instance raised a `KeyError` on its ports. Now
+  `assert cols[2].rate` is what the module's machines make of its out ports' items, and
+  `assert cols[2].pl.rate` the same for one port (an in port: what they take of its items).
+
+## Found, not fixed
 
 - A requester of two items (`item="a, b"`) feeding two nets loads each net with an unfiltered
   inserter, so both belts carried green packs and the red labs starved. The lab field uses a
-  chest per pack.
+  chest per pack. For a later release.
 - The router can't split a belt of two paired lanes (`r | g`) to two ports ("its two lanes come
   in paired, and no straight belt runs on"). `LabColumn` carries red and green on two header
-  belts, which the router joins into each column.
-- `assert X.rate` on a sealed module instance fails in the model (a `KeyError` on its ports).
+  belts, which the router joins into each column. For a later release.
 - The rate model's per-net rows for a net between two ports show 0 (the each nets among them);
   the machines' rates are right.
 - Labs are sinks, so the model doesn't serve them in order; a lab field's last labs aren't

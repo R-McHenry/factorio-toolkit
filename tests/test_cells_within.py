@@ -273,6 +273,15 @@ class LastCellTest(unittest.TestCase):
             for k in range(3):
                 self.assertLess(abs(got[c][k] - measured[c][k]), 1.5, (c, k, got[c], measured[c]))
 
+    def test_an_assert_on_a_sealed_module(self):
+        # it raised a KeyError on the module's ports; now the rate through them
+        text = HEAD.replace("rate=15/s", "rate=4.5/s") + "box = Boxes\n" \
+            "net each plates: cols[*].pl -> box\n" \
+            "assert cols[1].rate >= 1/s\nassert cols[2].pl.rate >= 1/s\nassert box.i0.rate >= 1/s"
+        model = rates.solve(flat_of(text))
+        got = [(round(v, 4), ok) for _t, ok, v, _r, _o in model.asserts]
+        self.assertEqual(got, [(1.3125, True), (0.6563, False), (0.0, False)])
+
     def test_a_plain_net_is_shared_as_before(self):
         text = """
         ore = Chest<requester, item=iron-ore, rate=1/s>

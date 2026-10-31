@@ -81,6 +81,7 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 
+from .catalog import FluidBox
 from .elaborate import Check
 from .fkp import CARRIER_TYPES, map_nets, natural_key, net_names
 from .templates import CONTACT
@@ -119,6 +120,7 @@ class Node:
     ug: str | None = None          # "in" | "out" for an underground end
     recipe: str | None = None      # a crafting machine's recipe (it decides its fluid boxes)
     prio: tuple | None = None      # a splitter's (input, output) priority: left, right or None
+    resource: str | None = None    # a drill's ore (2.1: on uranium ore its fluid box is live)
 
     @property
     def carrier(self):
@@ -304,6 +306,9 @@ def _port_joints(g, ports):
         by_edge.setdefault((tuple(pe.src), tuple(pe.dst)), []).append(key)
     for (src, dst), keys in by_edge.items():
         keys.sort(key=lambda k: (tuple(ports[k].src) != tuple(ports[k].inside), natural_key(k)))
+        if any(getattr(ports[k], "fluid", None) for k in keys):
+            _fluid_port_joints(g, ports, src, dst, keys)
+            continue
         a, b = g.at.get(src), g.at.get(dst)
         if a is not None and b is not None:
             g.succ[a] = [kv for kv in g.succ.get(a, []) if kv[0] != b]
@@ -314,6 +319,69 @@ def _port_joints(g, ports):
         for u, v in zip(chain, chain[1:]):
             if u is not None and v is not None:
                 _edge(g, u, v, "belt")
+
+
+#: a fluid port's two boxes (2.1): box 1 is its outside net's end, box 2 its inside net's
+PORT_OUTSIDE, PORT_INSIDE = 1, 2
+
+
+def port_box(pe, which):
+    """The FluidBox of fluid port ``pe``'s ``which`` side (``PORT_OUTSIDE`` / ``PORT_INSIDE``): it
+    gives what crosses the edge to the side the fluid goes, and takes it from the side it comes
+    from, so it drives the net on the side the fluid enters and ends the one it leaves."""
+    inbound = tuple(pe.src) == tuple(pe.outside)             # an in port: the fluid comes in
+    gives = (which == PORT_INSIDE) == inbound
+    return FluidBox(which, pe.fluid, "output" if gives else "input", ())
+
+
+def _fluid_port_joints(g, ports, src, dst, keys):
+    """A fluid port's edge (2.1, fluid ports): the pipe (or machine box) on each side of the
+    frame's edge joins the other there; that join becomes box -> port -> box, the port a node of
+    its own with two boxes, one per net it ends (``port_box``), each joined only to its own side.
+    So the port is the outside net's consumer and the inside net's driver (an in port), never a
+    join between two nets. Two ports on one edge (stacked cells) chain, the out port first: the
+    net between them joins their two outside boxes and lays nothing."""
+    def facing(tile, other):
+        out = []
+        for nid, b in g.boxes.items():
+            if nid[0] in keys:
+                continue
+            for c in b.conns:
+                if c.type == "normal" and c.tile == tile and c.target == other:
+                    out.append((nid, c.flow))
+        return out
+    a_side, b_side = facing(src, dst), facing(dst, src)
+    a_ids, b_ids = {nid for nid, _f in a_side}, {nid for nid, _f in b_side}
+    gone = [(x, y, v) for x, y, v in g.joins if v == "pipe" and
+            ((x in a_ids and y in b_ids) or (x in b_ids and y in a_ids))]
+    for x, y, v in gone:
+        g.joins.remove((x, y, v))
+        for u, w in ((x, y), (y, x)):
+            if u in g.fluid:
+                g.fluid[u] = [kv for kv in g.fluid[u] if kv[0] != w]
+    chain = []
+    for key in keys:
+        pe = ports[key]
+        g.nodes[key] = Node(key, "port", "port", None, dst[0] + 0.5, dst[1] + 0.5, 0, ())
+        first = PORT_INSIDE if tuple(pe.src) == tuple(pe.inside) else PORT_OUTSIDE
+        last = PORT_OUTSIDE if first == PORT_INSIDE else PORT_INSIDE
+        for which in (PORT_OUTSIDE, PORT_INSIDE):
+            g.boxes[(key, which)] = port_box(pe, which)
+        chain.append(((key, first), (key, last)))
+    done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
+    for nid, flow in a_side:
+        head = chain[0][0]
+        _fluid_join(g, (nid, flow), (head, g.boxes[head].production), "pipe", done)
+    for (_s, end), (start, _e) in zip(chain, chain[1:]):
+        _fluid_join(g, (end, g.boxes[end].production), (start, g.boxes[start].production),
+                    "pipe", done)
+    for nid, flow in b_side:
+        tail = chain[-1][1]
+        _fluid_join(g, (tail, g.boxes[tail].production), (nid, flow), "pipe", done)
+
+
+def _box_key(nid):
+    return (natural_key(nid[0]), nid[1])
 
 
 def _add_node(g, e, cat):
@@ -339,7 +407,8 @@ def _add_node(g, e, cat):
             g.problems.append(f"{e.key}: an underground with no ug=in|out")
             ug = None
     g.nodes[e.key] = Node(e.key, e.name, kind, net, float(e.x), float(e.y), d, tiles, ug,
-                          e.attrs.get("recipe"), _priority(e) if kind == "splitter" else None)
+                          e.attrs.get("recipe"), _priority(e) if kind == "splitter" else None,
+                          e.attrs.get("resource") if kind == "mining-drill" else None)
     for t in tiles:
         if t in g.at:
             g.problems.append(f"{e.key}: tile {t[0]},{t[1]} is already {g.at[t]}")
@@ -434,7 +503,7 @@ def _fluid_joins(g, cat):
     for key, n in g.nodes.items():
         if not cat.has_fluid_boxes(n.name):
             continue
-        for b in cat.fluid_boxes_at(n.name, n.x, n.y, n.dir, n.recipe):
+        for b in cat.fluid_boxes_at(n.name, n.x, n.y, n.dir, n.recipe, resource=n.resource):
             nid = (key, b.box)
             g.boxes[nid] = b
             for c in b.conns:
@@ -616,8 +685,13 @@ def endpoint_box(boxes, item, side):
 
 
 def _endpoint_boxes(g, mine, key, item, side):
-    """The (key, box) of machine ``key`` that holds a fluid net's ``item`` (out: a driver)."""
+    """The (key, box) of machine ``key`` that holds a fluid net's ``item`` (out: a driver). A fluid
+    port (2.1) has a box per net it ends: the one that gives for a driver, takes for a consumer."""
     nids = mine.get(key, ())
+    n = g.nodes.get(key)
+    if n is not None and n.kind == "port":
+        want = "output" if side == "out" else "input"
+        return [nid for nid in nids if g.boxes[nid].production == want][:1]
     b = endpoint_box([g.boxes[nid] for nid in nids], item, side)
     return [] if b is None else [(key, b.box)]
 

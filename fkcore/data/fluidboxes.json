@@ -99,6 +99,38 @@
    "size": [3, 3],
    "type": "assembling-machine"
   },
+  "electric-mining-drill": {
+   "boxes": [
+    {
+     "connections": [
+      {
+       "at": [[-1, 0], [0, -1], [1, 0], [0, 1]],
+       "dir": 12,
+       "flow": "input-output",
+       "type": "normal"
+      },
+      {
+       "at": [[1, 0], [0, 1], [-1, 0], [0, -1]],
+       "dir": 4,
+       "flow": "input-output",
+       "type": "normal"
+      },
+      {
+       "at": [[0, 1], [-1, 0], [0, -1], [1, 0]],
+       "dir": 8,
+       "flow": "input-output",
+       "type": "normal"
+      }
+     ],
+     "index": 1,
+     "production": "none"
+    }
+   ],
+   "boxes_need_fluid_resource": true,
+   "read": "2.1 (fluid ports), on a laptop server: prototypes.entity's fluidbox_prototypes[1].pipe_connections, and a drill created facing N, E, S and W on uranium ore (its live box and get_pipe_connections agree); on ore that needs no fluid the drill has no live box",
+   "size": [3, 3],
+   "type": "mining-drill"
+  },
   "heat-exchanger": {
    "boxes": [
     {

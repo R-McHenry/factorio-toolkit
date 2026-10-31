@@ -10,6 +10,9 @@ power step's, not yet known when the size step chooses. Pure, stdlib only.
 """
 from __future__ import annotations
 
+from . import facts as _facts
+from .catalog import expected
+
 __all__ = ["item_cost", "design_cost"]
 
 #: what one unit of a fluid costs: a pump moves 1200/s of water, so a fluid is nearly free
@@ -25,14 +28,21 @@ def item_cost(cat, item, memo=None, open_=None):
         return memo[item]
     if cat.is_fluid(item):
         return FLUID
+    # an ore is mined: it costs 1 whatever else makes it (2.1: with the game's probabilities read
+    # in, ``iron-ore-recycling`` gives ore back at 0.25 and asteroid crushing gives it too). A
+    # recycler is no recipe for anything: it unmakes
+    if any(item in (r.get("results") or ()) for r in _facts.load()["resources"].values()):
+        memo[item] = 1.0
+        return 1.0
     recipe = item if cat.has_recipe(item) else next(
-        (r["name"] for r in cat.recipes() if any(p.get("name") == item
-                                                 for p in r.get("products", ()))), None)
+        (r["name"] for r in cat.recipes() if r.get("category") != "recycling"
+         and any(p.get("name") == item for p in r.get("products", ()))), None)
     if recipe is None or item in open_:
         memo[item] = 1.0
         return 1.0
     r = cat.recipe(recipe)
-    made = sum(p.get("amount", 1) for p in r.get("products", ()) if p.get("name") == item) or 1
+    made = sum(expected(p) if "amount" in p or "amount_min" in p else p.get("probability", 1)
+               for p in r.get("products", ()) if p.get("name") == item) or 1
     open_.add(item)
     total = sum(i.get("amount", 1) * item_cost(cat, i["name"], memo, open_)
                 for i in r.get("ingredients", ()))

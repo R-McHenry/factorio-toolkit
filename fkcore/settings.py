@@ -252,7 +252,7 @@ def describe(fields, wires=None):
             parts.append(f"read={word}")
     if cb.pop("circuit_read_hand_contents", None):
         mode = cb.pop("circuit_contents_read_mode", None)
-        parts.append({0: "read=pulse", 1: "read=hold"}.get(mode, "read=hand"))
+        parts.append({0: "read=pulse", 1: "read=hold", 2: "read=hold-all"}.get(mode, "read=hand"))
     sections = cb.pop("sections", None)
     if sections:
         sig = [f"{f.get('name')}:{f.get('count')}" for s in sections.get("sections") or ()

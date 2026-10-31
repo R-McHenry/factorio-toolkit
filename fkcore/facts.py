@@ -84,6 +84,15 @@ def mines(drill, resource) -> bool:
     return r.get("category") in (entity(drill).get("resource_categories") or ())
 
 
+def required_fluid(resource):
+    """(fluid, per item) a drill takes to mine ``resource`` (uranium ore: sulfuric acid, 1 an
+    ore: the game's ``fluid_amount`` is for 10 mining cycles), or None when it needs none."""
+    r = load()["resources"].get(resource) or {} if resource else {}
+    if not r.get("required_fluid"):
+        return None
+    return r["required_fluid"], float(r.get("fluid_amount") or 0) / 10
+
+
 def solid_resources() -> dict:
     """{resource: mining time} of every resource a drill mines into items, in the game's order."""
     return {n: float(r["mining_time"]) for n, r in load()["resources"].items()

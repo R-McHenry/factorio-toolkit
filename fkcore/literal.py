@@ -27,6 +27,11 @@ codec derives them.
 makes its corner the Literal's frame origin, so a Literal placed at its plot's corner sits where
 the file says. Without a box the frame starts at the entities' top-left tile.
 
+2.1 (PLAN-2.1 H): a JSON file may name its machines, ``"names": {"asm10": 37}``, a name to the
+index of an entity in the file's list (from 0; a blueprint's entity order when the file holds
+only ``bp``). ``automall.asm10`` is then a net end like any machine's (``names_of``, read by
+``fkcore.elaborate``). ``fk capture`` writes a name for each machine it captures.
+
 Keys are ``<inst>/<prototype><k>`` in file order. Carriers get a net by connectivity, since a file
 has no netlist: each group of touching pipes is ``<inst>/fluid<k>``, each group of touching belts
 ``<inst>/belt<k>``, each inserter ``<inst>/hand<k>`` (one inserter is a route). Rename them in source
@@ -38,11 +43,13 @@ import hashlib
 import json
 import math
 import os
+import re
 
 from . import codec
 from . import fkp as fkpmod
 
-__all__ = ["LiteralError", "read_entities", "import_entities", "signature"]
+__all__ = ["LiteralError", "read_entities", "import_entities", "signature", "names_of",
+           "machine_names"]
 
 _DIRS = {0, 4, 8, 12}
 _PIPES = ("pipe", "pipe-to-ground", "pump")
@@ -132,7 +139,9 @@ def _own_settings(e):
 
 
 def _settings(attrs):
-    return {k: attrs[k] for k in _SETTINGS if k in attrs}
+    """A blueprint row's game settings: ``recipe``/``ug``/``config``, and its circuit settings,
+    which the codec reads back typed (``if``, ``read``, ...; 2.1: they were dropped before)."""
+    return {k: attrs[k] for k in _SETTINGS + codec.CIRCUIT_ATTRS if k in attrs}
 
 
 def _box(text):
@@ -214,6 +223,71 @@ def _name_nets(ents, inst, cat):
         groups[family].append(net)
         for g in group:
             g.attrs["net"] = net
+
+
+_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+#: 2.1, ``fk capture``'s names: a machine's prototype (or its kind) -> the stem of its name
+_STEMS = {"chemical-plant": "chem", "oil-refinery": "refinery", "centrifuge": "centrifuge",
+          "rocket-silo": "silo"}
+_KIND_STEMS = {"assembling-machine": "asm", "furnace": "furnace", "mining-drill": "drill",
+               "lab": "lab", "rocket-silo": "silo"}
+
+
+def machine_names(names, cat):
+    """``{name: index}`` for the machines among ``names`` (entity names in file order): ``asm1``,
+    ``asm2``, ... ``furnace1``, ... ``drill1``, ``lab1``, numbered from 1 per stem, as ``fk
+    capture`` writes them (2.1). Crafters, drills and labs: what a Literal makes machines of."""
+    out, count = {}, {}
+    for k, name in enumerate(names):
+        try:
+            kind = cat.kind(name)
+        except KeyError:
+            continue
+        stem = _STEMS.get(name) or _KIND_STEMS.get(kind)
+        if stem is None:
+            continue
+        count[stem] = count.get(stem, 0) + 1
+        out[f"{stem}{count[stem]}"] = k
+    return out
+
+
+def names_of(path, ents, box=None):
+    """``{name: entity key}`` from a JSON Literal file's ``"names"`` (2.1): each name an index
+    into the file's entities (from 0), mapped to the key ``import_entities`` gave it (``ents``,
+    after ``box``). {} when the file names nothing."""
+    if not path.lower().endswith(".json"):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        try:
+            data = json.load(fh)
+        except ValueError:
+            return {}
+    if not isinstance(data, dict) or not data.get("names"):
+        return {}
+    names = data["names"]
+    if not isinstance(names, dict):
+        raise LiteralError(f'{path}: "names" maps a name to an entity\'s index, like '
+                           '{"asm10": 37}')
+    rows, _wires = read_entities(path)
+    kept = list(range(len(rows)))
+    if box is not None:
+        x0, y0, x1, y1 = _box(box)
+        kept = [k for k in kept if x0 <= math.floor(rows[k][1]) < x1
+                and y0 <= math.floor(rows[k][2]) < y1]
+    pos = {k: n for n, k in enumerate(kept)}
+    out = {}
+    for name, idx in names.items():
+        if not _NAME.match(str(name)):
+            raise LiteralError(f"{path}: names {name}: a name is a word without dashes (asm10), "
+                               "so a net can name it")
+        if isinstance(idx, bool) or not isinstance(idx, int) or not 0 <= idx < len(rows):
+            raise LiteralError(f"{path}: names {name}: {idx!r} is no entity's index (the file has "
+                               f"{len(rows)}, from 0)")
+        if idx not in pos:
+            raise LiteralError(f"{path}: names {name}: entity {idx} ({rows[idx][0]}) lies outside "
+                               f"box {box}")
+        out[str(name)] = ents[pos[idx]].key
+    return out
 
 
 def signature(ents, size):

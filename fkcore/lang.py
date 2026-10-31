@@ -4,7 +4,8 @@
     import  := 'import' Name (',' Name)* 'from' STRING     # a module or a kind of that file
     kind    := 'kind' Name '=' Kind ('<' param (',' param)* '>')?   # a name with defaults (2.1)
     tiers   := 'tiers' Name ':' word (',' word)*        # what machine=auto may pick (2.1)
-    module  := 'module' Name ('<' mparam (',' mparam)* '>')? ('size' WxH)? '{' stmt* '}'
+    module  := 'module' Name ('<' mparam (',' mparam)* '>')? 'buffer'? ('size' WxH)? 'buffer'?
+               '{' stmt* '}'                            # buffer: before or after size, once
     mparam  := name ('=' value)?                          # no default: required (2.1)
     stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
@@ -12,7 +13,7 @@
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
     net     := 'net' 'each'? name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
-               'split'? 'limited'? ':' refs '->' refs ('when' cond)?
+               'split'? ('limited' STRING?)? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     refs    := ref (',' ref)*          ref := name index? ('.' name index?)* ('.' '*')?
     index   := '[' (int | '*') ']'    # a Stack's cell k, [-1] the last, [*] every one (2.1)
@@ -33,7 +34,11 @@ Words may contain dashes (item names); instance, module and net names may not. E
 source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
 an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7, Rory 2026-10-21)
 says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
-and implements no limit. ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can
+and implements no limit. 2.1: ``limited "..."`` says what limits it (``Net.why``), a convention of
+the source that ``fk explain`` and the report show where ``CLOG`` would have been; nothing checks
+it. ``module NAME buffer { ... }`` (2.1) marks a module as a buffer (``Module.buffer``): the model
+takes what goes in at its ports as an unlimited sink and what comes out as an unlimited supply.
+``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can
 share a belt) says nets A and B share every belt they are on, A on the left lane and B on the
 right looking downstream: the router lays them as one pair (``fkcore.pairs``). ``split`` on a net
 (2.0.76) gives each of its items a lane of its own: elaboration makes it one net per item and pairs
@@ -57,8 +62,9 @@ Kinds (2.1, PLAN-2.1 "B. kind"): ``kind NAME = KIND<params>`` at a file's top le
 existing kind (a core kind such as ``Machine``, a module, or another kind) with some parameters
 set. An instance's own parameters override the kind's, and the instance keeps its own name. The
 everyday kinds (``Assembler``, ``Furnace``, ``ChemPlant``, ``Refinery``) are declared this way in
-the prelude (``fkcore/prelude.fk``, or a run's ``game/prelude.fk``), which every file gets without
-an import (``fkcore.elaborate``); a file's own kind or module of the same name wins over it.
+the prelude (a run's ``game/prelude.fk`` over the toolkit's ``fkcore/prelude.fk``), which every
+file gets without an import (``fkcore.elaborate``); a file's own kind or module of the same name
+wins over it.
 ``tiers NAME: E1, E2, ...`` (2.1, "C. tiers") lists the entities ``machine=auto`` may pick for an
 instance of kind NAME (or of a kind built on it): one footprint, one energy, one set of fluid boxes,
 which elaboration checks.
@@ -235,6 +241,7 @@ class Net:
     width: int = 1         # 2.0.54: the lanes it takes, 1 or 2 (both lanes of one belt)
     lane: str | None = None    # 2.0.54: the lane (L or R) its items are on where it ends
     split: bool = False    # 2.0.76: one net per item, two to a belt (a lane each)
+    why: str | None = None     # 2.1: `limited "..."`, what limits the net (shown, not checked)
     each: bool = False     # 2.1: `net each`: one net per Stack cell, cell k with cell k
 
 
@@ -311,6 +318,7 @@ class Module:
     size: tuple | None = None                      # (W, H) of its frame as written, or None
     stacks: list = field(default_factory=list)     # [(near, far, line)]: stack pairs (2.0.48)
     dnps: list = field(default_factory=list)       # [Ref]: `dnp A, B.c` (2.0.63), do not populate
+    buffer: bool = False                           # 2.1: `module NAME buffer { ... }`
     params: list = field(default_factory=list)     # [MParam]: `module NAME<p, q=v>` (2.1)
     args: dict | None = None                       # the values a substituted copy was made with
 
@@ -582,6 +590,8 @@ class _P:
         mod = Module(self.name("module name").text, line)
         if self.accept("<"):
             mod.params = self.module_params(mod.name)
+        if self.accept("buffer"):
+            mod.buffer = True
         if self.accept("size"):
             tok = self.peek()
             if tok.kind == "param":
@@ -593,6 +603,10 @@ class _P:
             if w < 1 or h < 1:
                 self.err(f"size {tok.text}: a frame is at least 1x1", tok)
             mod.size = (w, h)
+        if self.accept("buffer"):
+            if mod.buffer:
+                self.err(f"module {mod.name}: buffer is written twice")
+            mod.buffer = True
         self.expect("{")
         self.mparams, self.modname = [p.name for p in mod.params], mod.name
         try:
@@ -885,12 +899,20 @@ class _P:
             lane = tok.text
         split = self.accept("split") is not None
         limited = self.accept("limited") is not None
+        why = None
+        if limited and self.peek().kind == "string":
+            # 2.1: `limited "..."`, what limits the net, in the source's own words
+            tok = self.next()
+            why = tok.text[1:-1].strip()
+            if not why:
+                self.err("limited \"\": say what limits the net, or write a bare limited", tok)
         self.expect(":")
         drivers = self.refs()
         self.expect("->")
         consumers = self.refs()
         when = self.cond() if self.accept("when") else None
-        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split, each)
+        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split, why,
+                   each=each)
 
     def lanes(self):
         line = self.expect("lanes").line

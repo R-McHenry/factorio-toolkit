@@ -134,6 +134,8 @@ def _ends(flat, lay, cat, model, lg):
                 each = INF if m.drain is None else (
                     m.drain if m.extra.get("each") else m.drain / len(items))
                 demand[nid] = {i: each for i in items}
+            if m.source and solid_makes:            # 2.1: a buffer drains as it fills
+                supply[nid] = {i: INF for i in solid_makes}
             continue
         if m.source:
             if solid_makes:
