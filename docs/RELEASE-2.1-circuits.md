@@ -22,11 +22,14 @@ line. Now a player can wire and set up any building from source.
 - Two conveniences, at any depth:
   - a string in a signal field (`*_signal`, `*signal_id`, `signal`, `icon`) becomes the game's
     signal, typed from the game's list;
-  - a string in a condition field (`*condition`) is `S<N` or `S>=T`, as `if=` takes it.
+  - a string in a condition field (`*condition`) is `S<N` or `S>=T`, as `if=` takes it; spaces
+    around the comparator don't matter.
   An object is taken as written.
 - The typed properties stay as the short form. Where a typed property and a `cb.` field write
   the same field, the `cb.` one goes in the blueprint, and a `CIRCUIT` line says so.
-- A `$name` inside a quoted string is left as written, for module parameters.
+- In a module, `$p` works in a raw value (2.1.7): alone (`bp.text=$label`) or inside a quoted
+  string (`cb.circuit_condition="signal-A < $lo"`), at any depth. Elaboration substitutes it per
+  instance.
 
 Inside:
 - The layout keeps them as two entity attrs, `cb` and `bp`, each a JSON object in the game's form.
@@ -43,7 +46,8 @@ Refused:
   isn't one.
 - `no-signal`: a signal the game hasn't got; a parameter signal or `signal-unknown` anywhere; a
   wildcard in an output signal (`*output_signal`).
-- A module instance takes none: elaboration already refuses any parameter but `duty` and `dnp`.
+- A module instance takes none: elaboration refuses a parameter its module doesn't declare, and
+  no module can declare `cb.x`. Pass a `$p` in instead.
 - Syntax errors: a field that isn't a word of letters, digits and `_`, a key given twice, a key
   that isn't a word or string, a value that isn't one of the above.
 
@@ -143,10 +147,10 @@ its messages are `control_behavior.parameters`. A train stop's name is `station`
 ## Checks
 
 - Golden: 54 of 54 identical against 2.0.78.
-- `tests/test_open_circuits.py`: the value syntax and its errors, raw settings on a set line, an
-  instance, a kind and a hand, the game's forms, the codec and the `.fkp` round trips, a cb. over
-  a typed setting, every refusal, the prelude's presets, signals from the game, any building on a
-  wire, and drift.
+- `tests/test_open_circuits.py`: the value syntax and its errors, `$p` in raw values, raw
+  settings on a set line, an instance, a kind and a hand, the game's forms, the codec and the
+  `.fkp` round trips, a cb. over a typed setting, every refusal, the prelude's presets, signals
+  from the game, any building on a wire, and drift.
 - `tests/test_circuits.py`: a long wire hops along poles it adds, uses the poles that stand,
   passes a pole on another net of its colour, and is `wire-too-far` with no room for a pole.
 - Full suite: 1341 tests OK.

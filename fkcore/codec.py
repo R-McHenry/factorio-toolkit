@@ -126,8 +126,10 @@ _COMPARATOR = {"<": "<", ">": ">", "=": "=", "<=": "≤", ">=": "≥", "!=": "�
 _CONDITION = re.compile(r"^(?P<a>[A-Za-z0-9_\-]+?)(?P<op><=|>=|!=|<|>|=)"
                         r"(?P<b>-?\d+|[A-Za-z][A-Za-z0-9_\-]*)$")
 #: belt reading modes (2.0 ``circuit_contents_read_mode``, with ``circuit_read_hand_contents``:
-#: measured on a laptop test server, 2.0.77, by the lead engineer, 2026-10-22)
-_BELT_READ = {"pulse": 0, "hold": 1}
+#: measured on a laptop test server, 2.0.77, by the lead engineer, 2026-10-22). 2.1: ``hold-all``
+#: is 2.0's "hold, all belts" (``entire_belt_hold``, 2): the whole belt's contents, not one tile's,
+#: as a sushi loop's gate reads it (PLAN-2.1 G; measured on a laptop test server, 2026-10-31)
+_BELT_READ = {"pulse": 0, "hold": 1, "hold-all": 2}
 #: where a signal ID sits in the fields the typed settings make
 _SIGNAL_KEYS = ("first_signal", "second_signal", "temperature_signal")
 #: connector ids by colour: (entity or combinator input, combinator output)
@@ -240,8 +242,8 @@ def control_behavior(attrs, where="entity"):
     elif read == "contents":
         cb["read_contents"] = True
     elif read is not None:
-        raise CodecError(f"{where}: read={read}: temperature, hold, pulse, hand, ingredients or "
-                         "contents")
+        raise CodecError(f"{where}: read={read}: temperature, hold, hold-all, pulse, hand, "
+                         "ingredients or contents")
     flt = attrs.get("filter")
     if flt == "circuit":
         cb["circuit_set_filters"] = True

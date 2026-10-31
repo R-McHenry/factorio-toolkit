@@ -10,6 +10,8 @@ kind Assembler = Machine<entity=assembling-machine-1>
 kind Furnace   = Machine<entity=stone-furnace, fuel=coal>
 kind ChemPlant = Machine<entity=chemical-plant>
 kind Refinery  = Machine<entity=oil-refinery, recipe=basic-oil-processing>
+# a buffer (2.1): one net fills it, another drains it; Buffer<chest=iron-chest, bar=20>
+kind Buffer    = Chest<plain, hold, chest=steel-chest>
 
 # Buildings the toolkit has no kind of, set up with raw settings (2.1): `cb.FIELD=` is a field of
 # the building's control behaviour and `bp.FIELD=` any other blueprint field, as the game names

@@ -563,6 +563,7 @@ class _Layer:
         self.wires = dict(self.c.wires)                # the declared and implicit, plus fill's
         self.lines, self.checks = [], []
         self.members = {}                              # wire -> [(entity key, port)]
+        self.net_read = {}                             # 2.1: net -> its reader belt's read mode
         self.g = connect.graph(out, cat)
         self.keep_out = set(keep_out)
         self.ground = None                             # where a hop pole may stand (2.1)
@@ -660,6 +661,18 @@ class _Layer:
                            f"{', '.join(PROP_ATTRS)}, or a raw cb.FIELD or bp.FIELD")
                 continue
             inst = self.flat.insts.get(path)
+            if inst is None and p.side is None and p.into is None and set(p.attrs) == {"read"}:
+                # 2.1: `set NET: read=hold-all`, how a wire reads a net's belt (a sushi loop's gate
+                # reads the whole belt); `explicit` sets it on the belt the wire reads
+                net = next((n for n in (_join(s, p.target) for s in _chain(scope))
+                            if n in self.flat.nets), None)
+                if net is not None:
+                    if p.attrs["read"] not in ("hold", "pulse", "hold-all"):
+                        self.check("no-match", label, f"read={p.attrs['read']}: a net's belt reads "
+                                   "hold, hold-all or pulse")
+                    else:
+                        self.net_read[net] = p.attrs["read"]
+                    continue
             if inst is None:
                 self.check("no-match", label, f"no instance {p.target} to set at {path}")
                 continue
@@ -754,6 +767,7 @@ class _Layer:
             self.raw_signal(v, where, written=key.endswith("output_signal"))
             return codec.signal_json(v)
         if codec.is_condition_key(key):
+            v = re.sub(r"\s*([<>=!]+)\s*", r"\1", v.strip())     # "signal-A < 50" as if= takes it
             try:
                 a, _op, b = codec.parse_condition(v, where)
             except codec.CodecError as exc:
@@ -840,8 +854,11 @@ class _Layer:
                 belt = self.reader(ref, name)
                 if belt is None:
                     self.check("no-wire", f"wire {name}", f"net {ref} has no belt to read")
-                elif self.set(belt, "read", "hold", f"wire {name}"):
+                elif self.set(belt, "read", self.net_read.get(ref, "hold"), f"wire {name}"):
                     self.join(name, belt)
+                    if ref in self.net_read:
+                        self.lines.append(f"wire {name}: net {ref}'s belt {belt} reads "
+                                          f"{self.net_read[ref]}")
 
     def reader(self, net, wire):
         belts = [e for e in self.lay.entities.values()
@@ -1061,7 +1078,7 @@ class _Layer:
         wired = {fkpmod.split_end(end)[0] for w in self.lay.wires for end in (w.a, w.b)}
         for key in sorted(self.lay.entities, key=fkpmod.natural_key):
             e = self.lay.entities[key]
-            if e.attrs.get("read") in ("hold", "pulse") and key not in wired \
+            if e.attrs.get("read") in ("hold", "pulse", "hold-all") and key not in wired \
                     and self.kind(key) == "transport-belt":
                 self.check("no-wire", key, f"read={e.attrs['read']} on a belt that is on no wire: "
                            "its reading reaches nothing until the belt is wired to something")

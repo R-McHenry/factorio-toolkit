@@ -192,7 +192,7 @@ set gear.in: cb.circuit_read_hand_contents=true
         src = "module M {\n  a = Chest<storage> @(0, 0)\n}\nm = M<cb.x=1> @(0, 0)\n"
         with self.assertRaises(ElabError) as cm:
             flat_of(src)
-        self.assertIn("not cb.x", str(cm.exception))
+        self.assertIn("no parameter cb.x", str(cm.exception))
 
     def test_a_changed_raw_setting_is_laid_again_and_a_removed_one_goes(self):
         _f, lay, _l, _c = laid(SPEAKER + "set spk: bp.parameters={playback_volume: 1}\n")
@@ -348,6 +348,50 @@ class DriftTest(unittest.TestCase):
             "total_logistic_output_signal": {"name": "signal-Y", "type": "virtual"}}}
         self.assertEqual(settings._fields(exported),
                          {"control_behavior": {"read_items_mode": 0, "read_robot_stats": True}})
+
+
+WARN = """module Warn<lo, label, icon=iron-plate> size 6x2 {
+  spk  = Alarm                                                   @(0, 0)
+  note = Display<bp.text=$label,
+                 cb.parameters=[{condition: "$icon<$lo", icon: $icon, text: "$label"}]> @(3, 0)
+  set spk: cb.circuit_condition="signal-A < $lo"
+}
+"""
+
+
+class ModuleParamsTest(unittest.TestCase):
+    """2.1.7's $p reaches raw values: a bare $p, $p inside a quoted string, at any depth."""
+
+    def test_p_inside_a_quoted_condition_on_a_set_line(self):
+        _f, lay, _l, cks = laid(WARN + "w = Warn<lo=50, label=\"Iron low\"> @(0, 0)\n")
+        self.assertEqual(cks, [])
+        self.assertEqual(raw(lay, "w/spk/m0", "cb")["circuit_condition"], {
+            "comparator": "<", "constant": 50,
+            "first_signal": {"type": "virtual", "name": "signal-A"}})
+
+    def test_a_bare_p_is_a_raw_value(self):
+        _f, lay, _l, cks = laid(WARN + "w = Warn<lo=50, label=\"Iron low\"> @(0, 0)\n"
+                                       "v = Warn<lo=7, label=Copper, icon=copper-plate> @(0, 4)\n")
+        self.assertEqual(cks, [])
+        self.assertEqual(raw(lay, "w/note/m0", "bp")["text"], "Iron low")
+        self.assertEqual(raw(lay, "v/note/m0", "bp")["text"], "Copper")
+        self.assertEqual(raw(lay, "v/note/m0", "cb")["parameters"], [{
+            "condition": {"comparator": "<", "constant": 7,
+                          "first_signal": {"type": "item", "name": "copper-plate"}},
+            "icon": {"type": "item", "name": "copper-plate"}, "text": "Copper"}])
+
+    def test_the_parser_keeps_p_for_elaboration(self):
+        f = lang.parse(WARN, "t.fk")
+        note = next(i for i in f.modules["Warn"].insts if i.name == "note")
+        self.assertEqual(note.params["bp.text"], lang.Raw("$label"))
+        self.assertEqual(f.modules["Warn"].sets[0].attrs["cb.circuit_condition"],
+                         lang.Raw("signal-A < $lo"))
+
+    def test_a_p_outside_a_module_is_refused(self):
+        with self.assertRaises(lang.FkSyntaxError):
+            lang.parse("a = Alarm<bp.text=$label> @(0, 0)\n", "t.fk")
+        with self.assertRaises(lang.FkSyntaxError):
+            lang.parse("module M<x> size 2x2 {\n  a = Alarm<bp.text=$y> @(0, 0)\n}\n", "t.fk")
 
 
 if __name__ == "__main__":

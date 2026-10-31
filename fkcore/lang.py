@@ -4,20 +4,23 @@
     import  := 'import' Name (',' Name)* 'from' STRING     # a module or a kind of that file
     kind    := 'kind' Name '=' Kind ('<' param (',' param)* '>')?   # a name with defaults (2.1)
     tiers   := 'tiers' Name ':' word (',' word)*        # what machine=auto may pick (2.1)
-    module  := 'module' Name ('size' WxH)? '{' stmt* '}'
+    module  := 'module' Name ('<' mparam (',' mparam)* '>')? 'buffer'? ('size' WxH)? 'buffer'?
+               '{' stmt* '}'                            # buffer: before or after size, once
+    mparam  := name ('=' value)?                          # no default: required (2.1)
     stmt    := inst | net | lanes | assert | cover | signal | wire | behave | expect | set | port
     port    := 'port' name ':' ('in' | 'out' | 'inout') items ('|' items)? '@' side (pos)? (lane)?
     inst    := name '=' Kind ('<' param (',' param)* '>')? hint* place ('when' cond)?
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
     net     := 'net' name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
-               'split'? 'limited'? ':' refs '->' refs ('when' cond)?
+               'split'? ('limited' STRING?)? ':' refs '->' refs ('when' cond)?
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     refs    := ref (',' ref)*          ref := name ('.' name)* ('.' '*')?
     assert  := 'assert' ref '.rate' op number '/' ('s' | 'min' | 'h')
     cover   := ('power' | 'robots') name ':' 'cover' ('all' | refs) (',' param)*
     param   := name '=' value | name | raw              # a bare name is a flag (Chest<provider>)
     value   := number ('/' unit)? | word ('|' word)* | STRING | 'auto' (number '..' number)?
+    word    := WORD | '$' name ('[' num ']')?               # $p: a module parameter (2.1)
     raw     := ('cb' | 'bp') '.' word '=' rawval        # a blueprint field as the game names it (2.1)
     rawval  := number | STRING | 'true' | 'false' | word
              | '{' (key ':' rawval (',' key ':' rawval)*)? '}' | '[' (rawval (',' rawval)*)? ']'
@@ -36,7 +39,11 @@ Words may contain dashes (item names); instance, module and net names may not. E
 source line. ``n=auto`` (1.6) is a row count the build's ``size`` step chooses (``fkcore.size``):
 an :class:`Auto`, ``auto LO..HI`` within those bounds. ``limited`` on a net (1.7, Rory 2026-10-21)
 says the source limits what each maker puts on it: it silences the mixed-belt advice (``CLOG``)
-and implements no limit. ``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can
+and implements no limit. 2.1: ``limited "..."`` says what limits it (``Net.why``), a convention of
+the source that ``fk explain`` and the report show where ``CLOG`` would have been; nothing checks
+it. ``module NAME buffer { ... }`` (2.1) marks a module as a buffer (``Module.buffer``): the model
+takes what goes in at its ports as an unlimited sink and what comes out as an unlimited supply.
+``lanes A | B`` (2.0, Rory 2026-10-21: a net is one lane, so two nets can
 share a belt) says nets A and B share every belt they are on, A on the left lane and B on the
 right looking downstream: the router lays them as one pair (``fkcore.pairs``). ``split`` on a net
 (2.0.76) gives each of its items a lane of its own: elaboration makes it one net per item and pairs
@@ -60,11 +67,21 @@ Kinds (2.1, PLAN-2.1 "B. kind"): ``kind NAME = KIND<params>`` at a file's top le
 existing kind (a core kind such as ``Machine``, a module, or another kind) with some parameters
 set. An instance's own parameters override the kind's, and the instance keeps its own name. The
 everyday kinds (``Assembler``, ``Furnace``, ``ChemPlant``, ``Refinery``) are declared this way in
-the prelude (``fkcore/prelude.fk``, or a run's ``game/prelude.fk``), which every file gets without
-an import (``fkcore.elaborate``); a file's own kind or module of the same name wins over it.
+the prelude (a run's ``game/prelude.fk`` over the toolkit's ``fkcore/prelude.fk``), which every
+file gets without an import (``fkcore.elaborate``); a file's own kind or module of the same name
+wins over it.
 ``tiers NAME: E1, E2, ...`` (2.1, "C. tiers") lists the entities ``machine=auto`` may pick for an
 instance of kind NAME (or of a kind built on it): one footprint, one energy, one set of fluid boxes,
 which elaboration checks.
+
+Module parameters (2.1, PLAN-2.1 "D. Module parameters"): ``module NAME<p, q=default> size WxH``
+declares parameters, and ``$p`` in the body stands for p's value wherever a word may stand: an item
+in a port, net or ``items`` list, a parameter value, a signal, and inside a quoted string. ``$p[k]``
+picks item k of a list value (``a|b|c``); ``$p`` alone spreads a list where an item list goes. The
+parser keeps ``$p`` and ``$p[k]`` as the strings ``"$p"`` and ``"$p[k]"`` (no word holds a ``$``),
+and elaboration substitutes them per instance. A ``$`` where a name, a position or a size belongs
+is refused here, as is a ``$`` outside a module that declares it. A module may not declare a
+parameter a Stack takes itself (``RESERVED``).
 
 The world design (2.0.43, PLAN-GLOBAL phase B): **a file's body is a module**, so
 ``import Outpost from "outpost.fk"`` needs no wrapping when ``outpost.fk`` declares no ``Outpost``
@@ -97,8 +114,8 @@ from dataclasses import dataclass, field
 
 __all__ = ["FkSyntaxError", "tokenize", "parse", "Ref", "Inst", "Net", "Lanes", "Assert", "Cover",
            "Module", "Port", "File", "Auto", "AUTO_TOP", "Signal", "Wire", "Cond", "Operand",
-           "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers", "Raw", "RAW_PREFIXES",
-           "is_raw"]
+           "Behave", "Expect", "Props", "COMPARATORS", "Kind", "Tiers", "MParam", "RESERVED", "Raw",
+           "RAW_PREFIXES", "is_raw"]
 
 
 class FkSyntaxError(Exception):
@@ -112,6 +129,7 @@ _TOKEN = re.compile(r"""
   | (?P<string>"[^"\n]*")
   | (?P<dim>\d+x\d+)(?![A-Za-z0-9_])
   | (?P<num>-?\d+(?:\.\d+)?(?![A-Za-z_\-]))
+  | (?P<param>\$[A-Za-z_][A-Za-z0-9_]*)
   | (?P<op>->|>=|<=|==|!=|[{}()\[\]<>,:=|@./*])
   | (?P<word>[A-Za-z_](?:[A-Za-z0-9_]|-(?!>))*)
 """, re.X)
@@ -125,6 +143,11 @@ COMPARATORS = ("<", ">", "<=", ">=", "=", "!=")
 _BEHAVE = ("state", "require", "expect", "cycle", "fails")
 #: the top of a plain ``n=auto``: a bound that never stops a real design, only a runaway one
 AUTO_TOP = 100
+#: 2.1: the parameters a Stack takes itself (and every instance's duty and dnp), so no module may
+#: declare one: a Stack passes every other parameter on to its cells
+RESERVED = ("cell", "n", "head", "built", "duty", "dnp")
+_WHERE = ("a parameter stands for an item, a value or a signal, never a name, a position or a "
+          "size")
 
 
 @dataclass
@@ -246,6 +269,7 @@ class Net:
     width: int = 1         # 2.0.54: the lanes it takes, 1 or 2 (both lanes of one belt)
     lane: str | None = None    # 2.0.54: the lane (L or R) its items are on where it ends
     split: bool = False    # 2.0.76: one net per item, two to a belt (a lane each)
+    why: str | None = None     # 2.1: `limited "..."`, what limits the net (shown, not checked)
 
 
 @dataclass
@@ -321,6 +345,17 @@ class Module:
     size: tuple | None = None                      # (W, H) of its frame as written, or None
     stacks: list = field(default_factory=list)     # [(near, far, line)]: stack pairs (2.0.48)
     dnps: list = field(default_factory=list)       # [Ref]: `dnp A, B.c` (2.0.63), do not populate
+    buffer: bool = False                           # 2.1: `module NAME buffer { ... }`
+    params: list = field(default_factory=list)     # [MParam]: `module NAME<p, q=v>` (2.1)
+    args: dict | None = None                       # the values a substituted copy was made with
+
+
+@dataclass
+class MParam:
+    """A module parameter (2.1): ``p`` (required, ``default`` None) or ``p=value``."""
+    name: str
+    default: object
+    line: int
 
 
 @dataclass
@@ -394,6 +429,8 @@ class File:
 class _P:
     def __init__(self, toks, path):
         self.t, self.i, self.path = toks, 0, path
+        self.mparams = None          # the parameters of the module being read, None outside one
+        self.modname = None
 
     def peek(self, k=0):
         return self.t[min(self.i + k, len(self.t) - 1)]
@@ -420,6 +457,8 @@ class _P:
 
     def word(self, what="name"):
         tok = self.next()
+        if tok.kind == "param":
+            self.err(f"expected {what}, got the parameter {tok.text}: {_WHERE}", tok)
         if tok.kind != "word":
             self.err(f"expected {what}, got {tok.text or tok.kind!r}", tok)
         return tok
@@ -430,8 +469,35 @@ class _P:
             self.err(f"{what} {tok.text!r} may not contain dashes", tok)
         return tok
 
+    def pword(self, what="a word"):
+        """A word, or a module parameter where a word may stand (2.1): ``$p`` or ``$p[k]``, kept
+        as that text for elaboration to substitute."""
+        tok = self.peek()
+        if tok.kind != "param":
+            return self.word(what).text
+        self.next()
+        name = tok.text[1:]
+        if self.mparams is None:
+            self.err(f"{tok.text}: a parameter is written inside a module that declares it, like "
+                     f"module NAME<{name}> size WxH {{ ... }}", tok)
+        if name not in self.mparams:
+            have = ", ".join(self.mparams) or "none"
+            self.err(f"{tok.text}: module {self.modname} has no parameter {name} (its "
+                     f"parameters: {have})", tok)
+        if self.peek().text == "[" and self.peek().kind == "op":
+            self.next()
+            k = self.next()
+            if k.kind != "num" or not k.text.isdigit():
+                self.err(f"{tok.text}[{k.text}]: an index is a whole number from 0, like "
+                         f"{tok.text}[0]", k)
+            self.expect("]")
+            return f"{tok.text}[{int(k.text)}]"
+        return tok.text
+
     def number(self):
         tok = self.next()
+        if tok.kind == "param":
+            self.err(f"expected a number, got the parameter {tok.text}: {_WHERE}", tok)
         if tok.kind != "num":
             self.err(f"expected a number, got {tok.text or tok.kind!r}", tok)
         v = float(tok.text)
@@ -550,8 +616,14 @@ class _P:
     def module(self):
         line = self.expect("module").line
         mod = Module(self.name("module name").text, line)
+        if self.accept("<"):
+            mod.params = self.module_params(mod.name)
+        if self.accept("buffer"):
+            mod.buffer = True
         if self.accept("size"):
             tok = self.peek()
+            if tok.kind == "param":
+                self.err(f"size {tok.text}: {_WHERE}; a module's frame is written `size WxH`", tok)
             if tok.kind != "dim":
                 self.err("a module's frame is written `size WxH`, like size 24x10", tok)
             self.next()
@@ -559,12 +631,41 @@ class _P:
             if w < 1 or h < 1:
                 self.err(f"size {tok.text}: a frame is at least 1x1", tok)
             mod.size = (w, h)
+        if self.accept("buffer"):
+            if mod.buffer:
+                self.err(f"module {mod.name}: buffer is written twice")
+            mod.buffer = True
         self.expect("{")
-        while not self.accept("}"):
-            if self.peek().kind == "eof":
-                self.err(f"module {mod.name} is not closed")
-            self.stmt(mod)
+        self.mparams, self.modname = [p.name for p in mod.params], mod.name
+        try:
+            while not self.accept("}"):
+                if self.peek().kind == "eof":
+                    self.err(f"module {mod.name} is not closed")
+                self.stmt(mod)
+        finally:
+            self.mparams = self.modname = None
         return mod
+
+    def module_params(self, modname):
+        """``<p, q=default, ...>`` after a module's name (2.1): a parameter without a default is
+        required. A default is a value as an instance gives one, and names no parameter."""
+        out = []
+        if self.accept(">"):
+            return out
+        while True:
+            tok = self.peek()
+            name = self.name("parameter").text
+            if name in RESERVED:
+                self.err(f"module {modname}<{name}>: {name} is a parameter every Stack or "
+                         f"instance takes itself ({', '.join(RESERVED)}), so a module can't "
+                         "declare it: name it otherwise", tok)
+            if any(p.name == name for p in out):
+                self.err(f"module {modname}: parameter {name} is declared twice", tok)
+            default = self.value() if self.accept("=") else None
+            out.append(MParam(name, default, tok.line))
+            if self.accept(">"):
+                return out
+            self.expect(",")
 
     def port(self):
         """``port NAME : in|out|inout ITEM[, ITEM][ | ITEM[, ITEM]] @SIDE[POS][L|R]`` (2.0.29,
@@ -576,14 +677,14 @@ class _P:
         direction = self.word("in, out or inout").text
         if direction not in ("in", "out", "inout"):
             self.err(f"a port carries items in, out or inout, got {direction!r}")
-        left = [self.word("item").text]
+        left = [self.pword("item")]
         while self.accept(","):
-            left.append(self.word("item").text)
+            left.append(self.pword("item"))
         right = None
         if self.accept("|"):                 # the pair: what comes before it is the left lane
-            right = [self.word("item").text]
+            right = [self.pword("item")]
             while self.accept(","):
-                right.append(self.word("item").text)
+                right.append(self.pword("item"))
         self.expect("@")
         tok = self.word("a side: n, e, s or w, with a tile along it like w4, and L or R")
         text, rest = tok.text, tok.text[1:]
@@ -616,6 +717,12 @@ class _P:
 
     def stmt(self, mod):
         tok = self.peek()
+        if tok.kind == "param":
+            self.word("a statement (an instance's name)")     # refused: $p names nothing
+        if tok.kind == "word" and self.peek(1).kind == "param" and tok.text in (
+                "net", "lanes", "signal", "wire", "behave", "set", "port", "stack", "dnp"):
+            self.next()
+            self.word(f"the name after {tok.text}")             # refused: $p names nothing
         if tok.kind != "word":
             self.err(f"expected a statement, got {tok.text or tok.kind!r}")
         if tok.text == "net" and self.peek(1).kind == "word":
@@ -703,8 +810,11 @@ class _P:
 
     def raw_value(self):
         """A raw setting's value (2.1): a number, a quoted string, true, false, a bare word (a
-        string), an object ``{key: value, ...}`` or a list ``[value, ...]``."""
+        string), an object ``{key: value, ...}`` or a list ``[value, ...]``. Inside a module a
+        value may be ``$p`` and a string may hold ``$p``: elaboration substitutes them."""
         tok = self.peek()
+        if tok.kind == "param":
+            return self.pword("a value")
         if tok.kind == "num":
             return self.number()
         if tok.kind == "string":
@@ -749,7 +859,7 @@ class _P:
         (``inserter < 1000`` -> ``inserter<1000``)."""
         out = []
         while self.peek().kind != "eof" and self.peek().line == line and self.peek().text != ",":
-            out.append(self.next().text)
+            out.append(self.pword() if self.peek().kind == "param" else self.next().text)
         return re.sub(r" ?([<>=]) ?", r"\1", " ".join(out)).strip()
 
     def signal(self):
@@ -757,7 +867,7 @@ class _P:
         name = self.name("signal name").text
         game = None
         if self.accept("="):
-            game = self.word("a game signal (signal-T, iron-plate)").text
+            game = self.pword("a game signal (signal-T, iron-plate)")
         return Signal(name, game, line)
 
     def wire(self):
@@ -776,7 +886,9 @@ class _P:
             self.err(f"a condition reads W.no-signal, network.ITEM or INSTANCE.no-signal, got "
                      f"{tok.text!r}", tok)
         while self.accept("."):
-            parts.append(self.word("a signal").text)
+            if self.peek().kind == "param" and self.peek(1).text == ".":
+                self.word("a wire, network or instance")      # refused: a name
+            parts.append(self.pword("a signal"))
         return Operand(parts[:-1], parts[-1])
 
     def cond(self):
@@ -832,9 +944,9 @@ class _P:
         name = self.name("net name").text
         items = None
         if self.accept("items"):
-            items = [self.word("item").text]
+            items = [self.pword("item")]
             while self.accept(","):
-                items.append(self.word("item").text)
+                items.append(self.pword("item"))
         width = 1
         if self.accept("width"):
             tok = self.peek()
@@ -850,12 +962,19 @@ class _P:
             lane = tok.text
         split = self.accept("split") is not None
         limited = self.accept("limited") is not None
+        why = None
+        if limited and self.peek().kind == "string":
+            # 2.1: `limited "..."`, what limits the net, in the source's own words
+            tok = self.next()
+            why = tok.text[1:-1].strip()
+            if not why:
+                self.err("limited \"\": say what limits the net, or write a bare limited", tok)
         self.expect(":")
         drivers = self.refs()
         self.expect("->")
         consumers = self.refs()
         when = self.cond() if self.accept("when") else None
-        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split)
+        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split, why)
 
     def lanes(self):
         line = self.expect("lanes").line
@@ -966,6 +1085,8 @@ class _P:
             word = self.peek().text
             if word == "@":
                 self.hint(hints)
+            elif word == "size" and self.peek(1).kind == "param":
+                self.err(f"size {self.peek(1).text}: {_WHERE}", self.peek(1))
             elif word == "size" and self.peek(1).kind == "dim":
                 self.next()
                 dim = self.next()
@@ -998,18 +1119,23 @@ class _P:
             return key, Raw(self.raw_value())
         if not self.accept("="):
             return key, True
+        return key, self.value()
+
+    def value(self):
+        """A parameter's value: a number (a rate), a string, ``auto``, a word or a list ``a|b``;
+        inside a module, a word may be ``$p`` (2.1)."""
         tok = self.peek()
         if tok.kind == "num":
-            return key, self.rate()
+            return self.rate()
         if tok.kind == "string":
             self.next()
-            return key, tok.text[1:-1]
-        words = [self.word("value").text]
+            return tok.text[1:-1]
+        words = [self.pword("value")]
         if words[0] == "auto" and self.peek().text != "|":
-            return key, self.auto()
+            return self.auto()
         while self.accept("|"):
-            words.append(self.word("value").text)
-        return key, words[0] if len(words) == 1 else words
+            words.append(self.pword("value"))
+        return words[0] if len(words) == 1 else words
 
     def auto(self):
         """What follows ``auto``: nothing, or the bounds ``LO..HI``."""

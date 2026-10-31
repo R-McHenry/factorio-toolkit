@@ -27,6 +27,19 @@ X0,Y0,X1,Y1` waits until the robots have built the area. It asks first: run it a
 `--sure`. The run has 30 minutes of waiting in all; `wait-budget.json` in your folder says how
 much is spent.
 
+A buffer (LANGUAGE.md, "Buffers") gets a line per item at the end of `fk rates`: what comes in
+minus what goes out.
+
+```
+BUFFER b: +60.0/min iron-ore (filling: in 60.0, out 0.0)
+BUFFER b: -52.5/min iron-ore (draining: in 60.0, out 112.5)
+BUFFER e: +0.0/min iron-plate (steady, its gated sources top up what goes out: in 150.0, out 150.0)
+BUFFER e: +unbounded/min iron-plate (filling: an unbounded source feeds it; gives 240.0/min)
+```
+
+Draining is the line to grow. The drill numbers are base rates; the game adds mining
+productivity.
+
 One thing `fk rates` gets wrong: it shares a short net in proportion to what each machine wants,
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
 one side of a splitter) takes its fill, and the ones further on get what is left, or nothing. So a
@@ -675,6 +688,8 @@ fk stage check N                 a planned stage built on paper in its own folde
 fk lab NAME --from stages\N      that stage built for real on its own lab slot; then
                                  fk lab NAME --measure 60 for what it really makes ("The lab")
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
+fk explain main.fk NET           one net: its items, drivers, consumers, lanes, buffers and the
+                                 string its limited gives
 fk build --to diff               what the next build would take up, and how long the robots need
                                  (a dry run: nothing written, nothing pasted)
 fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them,
@@ -708,7 +723,8 @@ fk capture lab NAME              something built, as a file a Literal reads: a l
 fk capture world X0,Y0,X1,Y1     of the game (fk sim game capture world ...: of the planner), or
 fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  X = Literal<file="captured/NAME.json"> @(x, y) puts it anywhere,
-                                 inside a module too, and fk sim place takes the same file
+                                 inside a module too, and fk sim place takes the same file. The
+                                 file names its machines (asm1, furnace1, ...): X.asm1 is a net end
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]

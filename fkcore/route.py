@@ -275,6 +275,7 @@ def jobs(flat, lay, cat) -> dict:
                 job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
                 mine.append((side, job.goals[-1]))
             job.owners.append(f"{path}.{role}")
+    _literal_ends(flat, lay, cat, out, fluids)
     if getattr(flat, "pairs", None):
         from . import pairs
         pairs.merge(flat, out)
@@ -287,6 +288,34 @@ def jobs(flat, lay, cat) -> dict:
         elif not job.consumers():
             job.skip = "no consumer role is placed"
     return out
+
+
+def _literal_ends(flat, lay, cat, out, fluids):
+    """2.1 (PLAN-2.1 H): a Literal's named machine on a net is an end the router reaches from
+    outside the Literal's entities, as it reaches a single machine: an inserter beside it, on a
+    free tile. Only named machines: the rest of a Literal is laid by hand, its own carriers."""
+    for path, names in sorted(getattr(flat, "literal_names", {}).items()):
+        if path not in lay.insts:
+            continue
+        for name, key in sorted(names.items()):
+            if key not in lay.entities:
+                continue
+            ts = fkpmod.tiles_of(cat, lay.entities[key])
+            rect = (min(t[0] for t in ts), min(t[1] for t in ts),
+                    max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
+            for side, hold in (("out", flat._out_hold), ("in", flat._in_hold)):
+                for net in sorted({n for (k, _i), ns in hold.items() if k == key for n in ns}):
+                    if net in fluids or net not in flat.nets:
+                        continue
+                    job = out.setdefault(net, NetJob(net))
+                    owner = f"{path}.{name}"
+                    mine = job.anchors.setdefault(owner, [])
+                    (job.sources if side == "out" else job.taps).append((key, rect))
+                    if side == "out":
+                        job.drv.append(((key, rect), path))
+                    mine.append((side, key, rect))
+                    if owner not in job.owners:
+                        job.owners.append(owner)
 
 
 # -- the ground -----------------------------------------------------------------------------------

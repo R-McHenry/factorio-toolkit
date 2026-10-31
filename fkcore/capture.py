@@ -15,7 +15,11 @@ Three sources, one kind of file:
 The game sources blueprint the area and write ``{"bp": "0e...", ...}``; the design source writes
 an entity list ``{"entities": [{name, x, y, direction, recipe, ...}]}``. Both are what
 ``Literal<file="...">`` reads (``fkcore.literal``) and what ``fk sim place`` takes, so the same
-file goes into a module, onto another plot, or into the planner."""
+file goes into a module, onto another plot, or into the planner.
+
+2.1 (PLAN-2.1 H): the file names each machine it holds, ``"names": {"asm1": 0, ...}`` (``asm1``,
+``asm2``, ...; ``furnace1``, ...; ``drill1``, ``lab1``), each an index into its entities, so a
+net outside the Literal can end on one (``mall.asm3``)."""
 from __future__ import annotations
 
 import json
@@ -127,3 +131,32 @@ def write(path, data):
 def summary(names):
     """'12 assembling-machine-2, 40 transport-belt, ...' (most first)."""
     return ", ".join(f"{n} {k}" for k, n in sorted(names.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def names(entity_names, cat):
+    """{name: index} for the machines among ``entity_names`` (file order), 2.1."""
+    from .literal import machine_names
+    return machine_names(entity_names, cat)
+
+
+def names_of_bp(bp, cat):
+    """{name: index} for the machines of blueprint string ``bp``, in its entities' order (the
+    order ``fkcore.literal`` reads them in)."""
+    from . import codec
+    try:
+        rows, _desc, _wires = codec.parse_blueprint(bp)
+    except codec.CodecError:
+        return {}
+    return names([r["name"] for r in rows], cat)
+
+
+def name_span(named):
+    """'asm1..asm12, furnace1..furnace4' for the report line."""
+    import re
+    stems = {}
+    for name in named:
+        m = re.fullmatch(r"([a-z]+)(\d+)", name)
+        if m:
+            stems.setdefault(m.group(1), []).append(int(m.group(2)))
+    return ", ".join(f"{s}{min(v)}" + (f"..{s}{max(v)}" if len(v) > 1 else "")
+                     for s, v in stems.items())
