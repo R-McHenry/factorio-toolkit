@@ -1,0 +1,220 @@
+{
+"entities": [
+{
+"enabled": true,
+"entity": "fast-inserter",
+"item": "fast-inserter",
+"known": true,
+"stock": 37
+},
+{
+"enabled": true,
+"entity": "inserter",
+"item": "inserter",
+"known": true,
+"stock": 100
+},
+{
+"enabled": true,
+"entity": "iron-chest",
+"item": "iron-chest",
+"known": true,
+"stock": 12
+},
+{
+"enabled": true,
+"entity": "medium-electric-pole",
+"item": "medium-electric-pole",
+"known": true,
+"stock": 82
+},
+{
+"enabled": true,
+"entity": "small-electric-pole",
+"item": "small-electric-pole",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "transport-belt",
+"item": "transport-belt",
+"known": true,
+"stock": 505
+}
+],
+"force": "player",
+"networks": 1,
+"recipes": [
+{
+"enabled": true,
+"known": true,
+"recipe": "advanced-circuit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "advanced-oil-processing"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "assembling-machine-1"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "automation-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "battery"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "chemical-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "copper-cable"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "electric-engine-unit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "electronic-circuit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "empty-sulfuric-acid-barrel"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "engine-unit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "explosives"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "firearm-magazine"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "flying-robot-frame"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "grenade"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "heavy-oil-cracking"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "inserter"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "iron-gear-wheel"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "land-mine"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "light-oil-cracking"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "logistic-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "lubricant"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "military-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "piercing-rounds-magazine"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "pipe"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "plastic-bar"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "stone-wall"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "sulfur"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "sulfuric-acid"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "sulfuric-acid-barrel"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "transport-belt"
+}
+],
+"research": {
+"current": "physical-projectile-damage-4",
+"labs": 12,
+"progress": 0.7421874999975767,
+"queue": [
+"physical-projectile-damage-4",
+"mining-productivity-2",
+"stronger-explosives-1",
+"military-3"
+],
+"researched": 63
+},
+"surface": "nauvis",
+"tick": 3048953,
+"when": "report_bom --stock live"
+}
