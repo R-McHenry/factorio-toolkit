@@ -27,6 +27,19 @@ X0,Y0,X1,Y1` waits until the robots have built the area. It asks first: run it a
 `--sure`. The run has 30 minutes of waiting in all; `wait-budget.json` in your folder says how
 much is spent.
 
+A buffer (LANGUAGE.md, "Buffers") gets a line per item at the end of `fk rates`: what comes in
+minus what goes out.
+
+```
+BUFFER b: +60.0/min iron-ore (filling: in 60.0, out 0.0)
+BUFFER b: -52.5/min iron-ore (draining: in 60.0, out 112.5)
+BUFFER e: +0.0/min iron-plate (steady, its gated sources top up what goes out: in 150.0, out 150.0)
+BUFFER e: +unbounded/min iron-plate (filling: an unbounded source feeds it; gives 240.0/min)
+```
+
+Draining is the line to grow. The drill numbers are base rates; the game adds mining
+productivity.
+
 One thing `fk rates` gets wrong: it shares a short net in proportion to what each machine wants,
 but the game doesn't. The machine that reaches the items first (the first inserters along a belt,
 one side of a splitter) takes its fill, and the ones further on get what is left, or nothing. So a
@@ -136,9 +149,27 @@ Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on obj
 NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
 before the floorplan (`out\floorplan.txt`, the `circuits` lines, says what each one set), and the
 .fkp shows them on the entity lines (`if=`, `logistic=`, `read=`, `filter=`, `signals=`) and as
-`wire` / `w` lines. Change a limit and the next build lays the inserters it touches fresh, so the
-game has the new one (`out\apply.txt`: "with new circuit settings"); no script sets them, and a
-rebuild never loses them.
+`wire` / `w` lines. Change a limit and the next build writes it on the inserters that stand: the
+paste sets every setting, so nothing is taken up and robots make no trip; a rebuild never loses
+them. Drills and offshore pumps are the exception: the game takes no settings from a paste on
+them, so the build lays them fresh.
+
+A build changes what stands in one of three ways, and `out\apply.txt` names each with why:
+
+- **written in place:** new settings, or a hand edit set back. The paste writes them.
+- **upgraded:** another entity of the same fast-replace group and size stands on a design
+  entity's spot: inserter tiers (not the long-handed one), assembler 1, 2 and 3, belt,
+  underground and splitter tiers, any chest to any other chest, stone to steel furnace, small to
+  medium pole. Robots swap it, and its settings, wires and contents stay.
+- **laid fresh:** everything else (another size or group, turned, a carrier that held another
+  net's items): it is taken up and built new.
+
+Wires follow the design too. After the paste, and again when `fk wait built` finds the robots
+done, the build adds the design's missing red, green and copper wires and cuts the ones between
+your design's entities that the design doesn't have. A pole robots build joins itself to the
+poles in reach that its own paste didn't lay (another plot's, say); this takes that back. Wires
+to anything outside the design are left alone. `out\apply.txt` gives one line, `wires: 3 added,
+1 cut`; a circuit wire made by hand is named once as `by-hand` before it goes.
 
 A build also takes back what it built before and your design no longer has: a row you replaced,
 the old ground of a plot you moved or shrank, a factory you emptied, its unbuilt ghosts too. The
@@ -621,9 +652,9 @@ answer is the next build. Nothing here is broken by itself.
   on; adopt it into your source, leave it out, or come back to it. A Claude lead hears it like
   chat (`out\hand.txt` keeps every one). It also names settings changed by hand on what the
   toolkit placed, with what the paste does: `rory_618 changed inserter at 14.5,0.5 (mall/i0):
-  logistic=copper-plate>7 (the paste sets logistic=iron-plate<50)`. A paste writes the design's
-  condition, request, chest limit and recipe over the one set by hand; a wire or condition the
-  design lacks stays. To keep it, write it into the source (`logistic=copper-plate>7`);
+  logistic=copper-plate>7 (the paste sets logistic=iron-plate<50)`. A build sets every setting
+  back to the design's (condition, request, filter, chest limit, recipe), cuts a wire the design
+  lacks and adds one it has. To keep it, write it into the source (`logistic=copper-plate>7`);
   `stop_on by-hand` holds a paste until you have
 - `re-laid` (diff, before the paste): belts, undergrounds, splitters or inserters stand on their
   design tiles under the right name but facing another way (or as the other underground end), so
@@ -651,6 +682,8 @@ fk stage check N                 a planned stage built on paper in its own folde
 fk lab NAME --from stages\N      that stage built for real on its own lab slot; then
                                  fk lab NAME --measure 60 for what it really makes ("The lab")
 fk explain main.fk gears         one row as its template and as the entities and nets it becomes
+fk explain main.fk NET           one net: its items, drivers, consumers, lanes, buffers and the
+                                 string its limited gives
 fk build --to diff               what the next build would take up, and how long the robots need
                                  (a dry run: nothing written, nothing pasted)
 fk fresh X0,Y0,X1,Y1             belts and pipes there with old items or fluid in them,
@@ -684,7 +717,8 @@ fk capture lab NAME              something built, as a file a Literal reads: a l
 fk capture world X0,Y0,X1,Y1     of the game (fk sim game capture world ...: of the planner), or
 fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  X = Literal<file="captured/NAME.json"> @(x, y) puts it anywhere,
-                                 inside a module too, and fk sim place takes the same file
+                                 inside a module too, and fk sim place takes the same file. The
+                                 file names its machines (asm1, furnace1, ...): X.asm1 is a net end
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]

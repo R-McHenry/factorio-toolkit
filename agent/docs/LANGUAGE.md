@@ -190,9 +190,13 @@ share, below): the drivers put items on it, the consumers take them.
   can't clog: it takes only what its sink accepts. A mall's products belt into one chest: the
   chest goes best without `limit=`, since a full chest stops the whole belt (`SUSHI_LIMIT`), and
   the limit belongs at each maker.
-- `net NAME limited: ...` (also after `items a, b`) says your design limits what each maker puts
-  on the net. It only quiets `CLOG` and `no-limit` for it: it limits nothing itself. The limits
-  are `set` properties on the makers' hands (Properties on objects, below).
+- `net NAME limited "WHY": ...` (also after `items a, b`) says your design limits what each maker
+  puts on the net, and the string says how (2.1: `limited "each source loads while the loop holds
+  less than its amount"`). It only quiets `CLOG` and `no-limit` for it: it limits nothing itself.
+  The limits are `set` properties on the makers' hands (Properties on objects, below), or gates on
+  a wire. `fk explain FILE NET` and `fk check` show the string; a bare `limited` still works, and
+  `fk check` asks for the string on a sushi net (an `advice limited-why` line). `CLOG` stays the
+  one warning a sushi net gets, and only `limited` clears it.
 - `net NAME split: ...` (2.0.76, also after `items a, b`) gives each item of a mixed net a lane of
   its own: the net becomes one net per item, `NAME_<item>` (`blue_engine_unit`), paired two to a
   belt as `lanes` pairs in item order, and an odd last item gets a belt to itself. Each lane is
@@ -246,6 +250,47 @@ lanes ore_ | fuel        # one belt into smelt: ore on the left lane, coal on th
   empty. The build's `could-pair` check names the pair when you leave it on two belts, whoever drives
   them; `SmelterArray` and `CircuitStack` are the exception, since they side-load two nets onto
   their own feed belts and want them apart.
+
+## Buffers
+
+2.1. A buffer is a role: one net fills it and another drains it. The rate model treats it as an
+unlimited supply to the nets it drives and an unlimited sink to the nets that feed it, and gives
+what it gains or loses a minute as a `BUFFER` line (TOOLKIT.md).
+
+```
+b = Buffer                          # a steel chest; Buffer<chest=iron-chest, bar=20>
+net ore_: drills -> b               # BUFFER b: +60.0/min iron-ore (filling: in 60.0, out 0.0)
+net feed: b -> smelt                # draining when smelt takes more than the drills bring
+
+module LoopEnd buffer size 3x3 {    # a module whose ports are a buffer's ends
+  port i : in iron-plate @w1
+  port o : out iron-plate @e1
+  net t limited "a belt through": i -> o
+}
+```
+
+- `Buffer` is a chest, the prelude's `kind Buffer = Chest<plain, hold, chest=steel-chest>`:
+  `Buffer<chest=, bar=, item=>` (the chest, how many of its slots it may fill, and what it holds
+  when no net says). Its items are what the nets into it carry.
+- `module NAME<p> buffer size WxH { ... }` (parameters first, `buffer` before or after `size`): its
+  ports are its ends on the outside nets.
+  Its inside is yours, and the model doesn't join it to the outside. A buffer module needs ports.
+- A buffer fed by an unbounded source (a requester with no rate) fills without end on paper,
+  unless that net is gated (`when`): then the gate tops up what goes out, and the line is steady.
+- A buffer never gets `no-taker` or `no-rate`, and a buffer whose nets are all `limited` gets no
+  `SUSHI_LIMIT`. A sushi net with a buffer on it gets no `SUSHI_SINK`: what no machine takes ends
+  in the buffer, or goes round by it. `CLOG` stays.
+
+**Sushi patterns.** A mixed belt runs while no item piles up. Three ways that work, each written
+`limited "..."`:
+
+- one inserter from a buffer straight into each machine: it takes only what the machine uses;
+- sources gated on what the buffer holds of their item: `wire bw red: b` and
+  `net s_fe: fe -> b when bw.iron-plate < 40`;
+- a loop: the machines take from one belt, its end goes into an end buffer that feeds its head,
+  and each source loads only while the loop (the belt read `hold-all` plus the end buffer, on one
+  wire) holds less than its amount. The belt never stops. A circuit wire reaches 9 tiles, so
+  chain the wire from the reader belt by the end buffer to the sources.
 
 ## A bus
 
@@ -469,6 +514,8 @@ set pipe.out            : logistic=pipe<100             # a row, all its output 
 - Properties: `logistic=ITEM<N` (the logistic network's count, no wire), `if=ITEM<N` (a circuit
   condition; name the chest with `-> CHEST` so it reads that chest), `filter=`, `read=`, `signal=`,
   `signals=`.
+- `set NET: read=hold-all` (2.1; a net's name as the selector): the belt a wire reads on that net
+  reads its whole belt, not one tile (`hold`, the default, and `pulse` too).
 - Every `set` reports the hands it hit (`on 2 hands (~out/i0, ~out/i1)`), and one that matches
   nothing is a `no-match` line, never a silent no-op.
 - A limit is real, but it does not quiet `CLOG`: a mixed belt quiets when you write the net
@@ -570,6 +617,15 @@ things the game does that a hand-written blueprint can get wrong (measured 2026-
   {"circuit_mode_of_operation": 1}`; `"set_requests": true` is ignored;
 - a decider outputs `each` only when one of its conditions reads `each`.
 
+**Names inside a Literal** (2.1). A JSON Literal file may name its machines: `"names": {"asm10":
+37}`, a name (no dashes) to the index of an entity in the file (from 0; the blueprint's entity
+order when the file holds only `"bp"`). `automall.asm10` is then a net end like any machine's:
+`net out: automall.asm10 -> box`, and the router reaches it from outside the Literal. `fk explain`
+lists the names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order). A
+name of an entity that is no machine is refused when a net uses it. A blueprint Literal keeps its
+circuit settings (`if=`, `read=`, ...) and its wires; a wire longer than the game's 9 tiles is
+dropped by the game.
+
 ## Checks on paper
 
 `assert INST.rate >= 10/min` (or `/s`, `/h`): checked by the rate model (`fk rates`); a failed one
@@ -619,9 +675,69 @@ fluid boxes at the same places, or the line is refused. An assembling-machine-1 
 and -3: their boxes open only for a fluid recipe.
 
 Every file gets the **prelude** without an import: `Assembler`, `Furnace`, `ChemPlant` and
-`Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run (the
-toolkit's own if the run has none). Change it, or write a kind or tiers line of the same name in a
-file, and that file uses yours. A prelude holds kind and tiers lines only.
+`Refinery` are kind lines in it, with the tiers lines. It is `game\prelude.fk` in your run, over the
+toolkit's own: a kind or tiers line in yours replaces the toolkit's of that name, and any name
+yours doesn't have comes from the toolkit's, so kinds added in a new release reach you without a
+copy. Change yours, or write a kind or tiers line of the same name in a file, and that file uses
+yours. A prelude holds kind and tiers lines only.
+
+## Module parameters
+
+A module can take parameters, so one cell serves iron and copper:
+
+```
+module FurnaceCell<plate, ore> size 7x3 {
+  port ore_in  : in  $ore   @s0
+  port ore_out : out $ore   @n0
+  port pl_in   : in  $plate @n6
+  port pl_out  : out $plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=$plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+one  = FurnaceCell<plate=copper-plate, ore=copper-ore> @(0, 0)
+iron = Stack<cell=FurnaceCell, n=12, plate=iron-plate, ore=iron-ore> @(10, 0)
+kind CopperCell = FurnaceCell<plate=copper-plate, ore=copper-ore>
+cu   = Stack<cell=CopperCell, n=12> @(20, 0)
+```
+
+- **Declaring.** `module NAME<p, q=default> size WxH`. A parameter without a default is required:
+  an instance that leaves it out is refused, naming it. A default is a word, a number, a string
+  or a list.
+- **Writing one.** `$p` stands for p's value wherever a word may stand: an item in a port, a net's
+  `items` or another list, a parameter value, a signal, a `set` value, and inside a quoted
+  string (`file="$name.json"`). It never stands for an instance, net or port name, a position or
+  the `size`: a `$` there is refused.
+- **Values** are words, numbers or lists. There is no arithmetic.
+- **Lists.** `ins=iron-plate|copper-cable` is a list. `$ins` spreads it where an item list goes;
+  `$ins[0]` picks one item, so each ingredient can get a lane of its own. An index past the end is
+  refused, with the list's length.
+
+  ```
+  module AsmCell<recipe, ins, out> size 7x3 {
+    port i_in  : in  $ins[0] | $ins[1] @s0     # two ingredients, one belt, a lane each
+    port i_out : out $ins[0] | $ins[1] @n0
+    port o_in  : in  $out @n6
+    port o_out : out $out @s6
+    stack i_in -> i_out, o_out -> o_in
+    a = Assembler<recipe=$recipe> @(2, 0)
+    net i items $ins split: i_in -> a, i_out
+    net o: o_in, a -> o_out
+  }
+  ```
+- **Stacks pass them on.** A Stack gives every parameter other than `cell`, `n`, `head`, `built`,
+  `duty` and `dnp` to each cell, and to the head when the head declares it. So a module can't
+  declare a parameter of one of those six names. A Stack's `cell=` may name a kind of a module, as
+  `CopperCell` above. The cell's ports are filled in before the Stack checks that each pair
+  carries the same items.
+- **Inside a module**, a parameter can pass one on: `f = FurnaceCell<plate=$plate, ore=$ore>`.
+- **A cell names its machine.** Its size, inserters and pipes fit one machine's footprint, so it
+  takes no size, and a machine of another footprint is another cell.
+- **Rebuilds.** The values are part of each instance's line in the `.fkp`, so changing one
+  re-lays the instance as a changed recipe does. `machine=auto` and `modules=auto` inside a cell
+  are one choice for each set of values: the iron line and the copper line choose apart.
+- Every module still takes `duty=` and `dnp`; any other parameter it doesn't declare is refused.
 
 ## Power
 

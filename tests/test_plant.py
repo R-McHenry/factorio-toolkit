@@ -94,7 +94,8 @@ class PlantTest(unittest.TestCase):
         mine = {e["position"]["y"]: e for e in by_name(bp, "inserter")}
         ref = {e["position"]["y"] + 38: e for e in by_name(self.ref, "inserter")}
         self.assertEqual(mine[6.5]["control_behavior"], ref[6.5]["control_behavior"])
-        self.assertNotIn("control_behavior", mine[5.5])         # the spent cells' inserter
+        # the spent cells' inserter: none set, so the codec's reset (2.1: a paste clears a hand edit)
+        self.assertEqual(mine[5.5]["control_behavior"], codec.RESET_CB)
 
     def test_the_paste_puts_it_where_the_kickoff_does(self):
         self.build()

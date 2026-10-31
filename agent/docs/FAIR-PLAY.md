@@ -19,6 +19,8 @@ how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
   items from the network), or build the inserters, requests and belts that do it.
 - **Big combinator signal tables may be filled by script after the paste.** That is an exception,
   for speed.
+- **Wires may be added and cut by script.** The build does it itself, so the red, green and
+  copper wires between the design's entities match the design (Rory, 2026-10-31).
 
 ## Seeing the world
 

@@ -1,0 +1,28 @@
+# cells.fk for the module-parameters test (2.1, PLAN-2.1 "D. Module parameters"): the kickoff
+# template's FurnaceCell with its plate and ore as parameters, and a two-ingredient assembler cell
+# that takes its ingredients as a list.
+
+# One electric furnace beside two belts: the ore runs up through every cell on the west belt, the
+# plates come back down the east one.
+module FurnaceCell<plate, ore> size 7x3 {
+  port ore_in  : in  $ore   @s0
+  port ore_out : out $ore   @n0
+  port pl_in   : in  $plate @n6
+  port pl_out  : out $plate @s6
+  stack ore_in -> ore_out, pl_out -> pl_in
+  f = Furnace<recipe=$plate, machine=electric-furnace> @(2, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# Two ingredients on one belt, a lane each, and the product back on the other belt.
+module AsmCell<recipe, ins, out> size 7x3 {
+  port i_in   : in  $ins[0] | $ins[1] @s0
+  port i_out  : out $ins[0] | $ins[1] @n0
+  port o_in   : in  $out @n6
+  port o_out  : out $out @s6
+  stack i_in -> i_out, o_out -> o_in
+  a = Assembler<recipe=$recipe> @(2, 0)
+  net i items $ins split: i_in -> a, i_out
+  net o: o_in, a -> o_out
+}

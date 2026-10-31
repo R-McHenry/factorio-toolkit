@@ -54,6 +54,19 @@ A ``w`` record is ``[a, c, b, c]`` with red 1 and green 2, a combinator's output
 connector table); reading a blueprint that carries its records leaves the wires they explain out
 of the ``wire`` attrs.
 
+Settings changed in place (2.1): a paste over a standing entity sets its whole state, so the codec
+writes the state a paste would otherwise leave. Measured on a laptop server (2.0.77, 2026-10-31):
+every settable field absent from the blueprint entity is cleared by the paste (requests, trash and
+buffer flags, a chest's limit, a storage chest's filter, an inserter's filters, a combinator's
+signals, conditions and on/off), except a control behaviour: one the blueprint gives at the game's
+defaults (``circuit_enabled=false`` and the rest, or ``{}``) is ignored, and with no control
+behaviour at all a wired machine keeps its own (an inserter its filters too). One that differs
+from the defaults in any field is written whole. So a machine of ``RESET_TYPES`` whose design
+sets no control behaviour gets ``RESET_CB``: off, and a condition with no signal (it never
+holds). Mining drills, pumpjacks and offshore pumps take no settings from a paste at all (not even
+a new condition): the apply lays them fresh (``PASTE_SKIPS``). Reading a blueprint drops
+``RESET_CB`` again.
+
 Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
@@ -101,8 +114,10 @@ _FLUIDS = frozenset((
     "lubricant", "molten-copper", "molten-iron", "petroleum-gas", "steam", "sulfuric-acid",
     "thruster-fuel", "thruster-oxidizer", "water"))
 #: belt reading modes (2.0 ``circuit_contents_read_mode``, with ``circuit_read_hand_contents``:
-#: measured on a laptop test server, 2.0.77, by the lead engineer, 2026-10-22)
-_BELT_READ = {"pulse": 0, "hold": 1}
+#: measured on a laptop test server, 2.0.77, by the lead engineer, 2026-10-22). 2.1: ``hold-all``
+#: is 2.0's "hold, all belts" (``entire_belt_hold``, 2): the whole belt's contents, not one tile's,
+#: as a sushi loop's gate reads it (PLAN-2.1 G; measured on a laptop test server, 2026-10-31)
+_BELT_READ = {"pulse": 0, "hold": 1, "hold-all": 2}
 #: where a signal ID sits in the fields the typed settings make
 _SIGNAL_KEYS = ("first_signal", "second_signal", "temperature_signal")
 #: the virtual signals of the game (fnet's signal_space.VIRTUAL_SIGNALS, copied 2026-10-22)
@@ -120,6 +135,16 @@ VIRTUAL_SIGNALS = frozenset(
         "up-right-arrow"])
 #: connector ids by colour: (entity or combinator input, combinator output)
 _CONNECTOR = {"red": (1, 3), "green": (2, 4)}
+#: entity types whose control behaviour a paste writes whole when it differs from the game's
+#: defaults (measured, 2.1: each one wired, with a condition set by hand, then pasted over)
+RESET_TYPES = frozenset({"inserter", "transport-belt", "assembling-machine", "furnace", "pump",
+                         "lamp", "power-switch", "train-stop", "agricultural-tower"})
+#: the control behaviour of a ``RESET_TYPES`` machine whose design sets none: off, and a condition
+#: with no signal (it never holds). The game's defaults are ignored by a paste; this is not
+RESET_CB = {"circuit_enabled": False, "circuit_condition": {"comparator": "<", "constant": 1}}
+#: entity types a paste writes no settings on at all (measured, 2.1): a settings change lays them
+#: fresh
+PASTE_SKIPS = frozenset({"mining-drill", "offshore-pump"})
 
 
 class CodecError(ValueError):
@@ -192,8 +217,8 @@ def control_behavior(attrs, where="entity"):
     elif read == "contents":
         cb["read_contents"] = True
     elif read is not None:
-        raise CodecError(f"{where}: read={read}: temperature, hold, pulse, hand, ingredients or "
-                         "contents")
+        raise CodecError(f"{where}: read={read}: temperature, hold, hold-all, pulse, hand, "
+                         "ingredients or contents")
     flt = attrs.get("filter")
     if flt == "circuit":
         cb["circuit_set_filters"] = True
@@ -266,6 +291,21 @@ def links_of(rows, wires):
     return sorted(out)
 
 
+def entity_type(name):
+    """The game's type of an entity name (``fkcore.facts``), None when it has no such entity."""
+    from . import facts
+    return facts.entity(name).get("type")
+
+
+def is_reset(cb):
+    """True for ``RESET_CB`` as the codec writes it or as the game exports it (without the
+    false ``circuit_enabled``)."""
+    if not isinstance(cb, dict):
+        return False
+    got = {k: v for k, v in cb.items() if not (k == "circuit_enabled" and v is False)}
+    return got == {"circuit_condition": RESET_CB["circuit_condition"]}
+
+
 def _entity_json(row, number):
     entity = {
         "entity_number": number,
@@ -289,6 +329,8 @@ def _entity_json(row, number):
     config = attrs.pop("config", None)
     if config is not None:
         entity.update(_config(row, config, entity))
+    if "control_behavior" not in entity and entity_type(row["name"]) in RESET_TYPES:
+        entity["control_behavior"] = json.loads(json.dumps(RESET_CB))
     tags = {}
     if row.get("src") is not None:
         tags["src"] = row["src"]
@@ -510,6 +552,8 @@ def parse_blueprint(s):
         if extra.get("type") in _UG_BACK:
             attrs["ug"] = _UG_BACK[extra.pop("type")]
         fkp_attrs = dict(tags.get("fkp") or {})
+        if is_reset(extra.get("control_behavior")):
+            del extra["control_behavior"]
         _settings_back(extra, fkp_attrs)
         if extra:
             attrs["config"] = config_text(extra)

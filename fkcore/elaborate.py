@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from dataclasses import dataclass, field
 
 from . import facts as _facts
@@ -45,7 +46,7 @@ from .templates import (CONTACT, SINGLE, TEMPLATES, MSpec, TemplateError, litera
                         machines as template_machines)
 
 __all__ = ["ElabError", "Machine", "FlatNet", "PortInst", "Check", "Flat", "load", "elaborate",
-           "elaborate_file", "AUTO_KINDS", "PRELUDE", "prelude_path", "core_of", "params_of"]
+           "elaborate_file", "AUTO_KINDS", "PRELUDE", "prelude_path", "preludes", "core_of", "params_of"]
 
 #: the templates whose count may be ``n=auto``: the rows
 AUTO_KINDS = ("MinerRow", "SmelterRow", "SmelterArray", "AsmRow", "LabRow")
@@ -90,6 +91,7 @@ class FlatNet:
     scope: str = ""            # the path of the body it is written in (2.0.28)
     width: int = 1             # 2.0.54, `net NAME width 2:` both lanes of one belt
     lane: str | None = None    # 2.0.54, `net NAME lane L:` its lane where it ends on a belt
+    why: str | None = None     # 2.1, `net NAME limited "...":` what limits it, as written
 
     @property
     def sushi(self):
@@ -214,6 +216,11 @@ class Flat:
     stack_ends: set = field(default_factory=set)    # port keys a stack leaves open: dead ends
     #: 2.0.63, do not populate: the instance paths that are DNP (each with all it holds)
     dnp: set = field(default_factory=set)
+    #: 2.1, the buffers: instance path -> "chest" (a Buffer, a Chest<hold>) or "module" (an
+    #: instance of a `module NAME buffer`)
+    buffers: dict = field(default_factory=dict)
+    #: 2.1, a Literal's names (its file's "names"): instance path -> {name: machine key}
+    literal_names: dict = field(default_factory=dict)
 
     def is_dnp(self, key):
         """A machine key or instance path inside a DNP instance (2.0.63)."""
@@ -322,6 +329,17 @@ def prelude_path(src):
                 break
             d = up
     return PRELUDE
+
+
+def preludes(src):
+    """The preludes a file at ``src`` gets, nearest first: a run's own (``prelude_path``) over the
+    toolkit's (2.1.9). A run's prelude changes or adds kinds; whatever it doesn't name comes from
+    the toolkit's, so a kind added in a later release (``Buffer``, 2.1.8) reaches a run whose
+    prelude was copied before it."""
+    own = prelude_path(src)
+    if os.path.normcase(os.path.abspath(own)) == os.path.normcase(PRELUDE):
+        return [load_prelude(PRELUDE)]
+    return [load_prelude(own), load_prelude(PRELUDE)]
 
 
 def load_prelude(path=PRELUDE):
@@ -497,11 +515,11 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     """``layout`` (the factory's .fkp) is needed by Literal instances, and gives an ``n=auto``
     row the count it laid out; it also carries the committed port tiles (2.0.41), which a rebuild
     keeps. ``sizes`` ({instance path: n}, the size step's) overrides it. 2.1: the kinds are the
-    file's own (and its imports') over the prelude's (``prelude_path``)."""
+    file's own (and its imports') over the preludes' (``preludes``)."""
     flat = Flat(name, f.path)
-    prelude = load_prelude(prelude_path(f.path))
-    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}, prelude.kinds], modules)
-    flat._tiers = _Tiers([getattr(f, "tiers", {}) or {}, prelude.tiers])
+    pre = preludes(f.path)
+    flat._kinds = _Kinds([getattr(f, "kinds", {}) or {}] + [p.kinds for p in pre], modules)
+    flat._tiers = _Tiers([getattr(f, "tiers", {}) or {}] + [p.tiers for p in pre])
     _tier_checks(flat._tiers, cat)
     flat._layout = layout
     flat._sizes = dict(sizes or {})
@@ -624,14 +642,17 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
         if inst.kind in modules:
             if inst.kind in stack:
                 raise ElabError(src, inst.line, f"module {inst.kind} contains itself")
-            extra = sorted(set(inst.params) - set(META))
-            if extra:
-                raise ElabError(src, inst.line, f"{path}: a module instance takes only duty= and "
-                                                f"dnp, not {', '.join(extra)}")
+            # 2.1 (PLAN-2.1 "D. Module parameters"): the instance's parameters, the defaults
+            # under them, substituted into a copy of the module's body
+            body, values = _with_args(modules[inst.kind], inst.params, path, src, inst.line)
+            if stacked is None and values:
+                inst = dataclasses.replace(inst, params=dict(
+                    {k: v for k, v in values.items() if k not in inst.params}, **inst.params))
             before = set(flat.machines)
-            _expand(flat, modules[inst.kind], path, modules, cat, d, src, stack + (inst.kind,),
-                    dn)
+            _expand(flat, body, path, modules, cat, d, src, stack + (inst.kind,), dn)
             keys = [k for k in flat.machines if k not in before and k not in flat.ports]
+            if getattr(modules[inst.kind], "buffer", False):
+                _buffer_module(flat, modules[inst.kind], path, inst, src)
             # 2.0.43 (PLAN-GLOBAL phase B): an instance line's own `size WxH` is the frame a plot
             # gets from its placement, and it seals the instance as the module's own `size` does
             size = getattr(inst, "size", None) or modules[inst.kind].size
@@ -676,6 +697,10 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                     m.extra["dnp"] = True
                 flat.machines[m.key] = m
                 keys.append(m.key)
+            if core == "Chest" and any(flat.machines[k].extra.get("buffer") for k in keys):
+                flat.buffers[path] = "chest"
+            if imported is not None and path in getattr(flat, "_lit_names", {}):
+                _literal_names(flat, path, imported, keys, inst, src)
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
                         inst.line, imported, conns=inst.conns)
             if auto is not None:
@@ -813,6 +838,10 @@ def _choose(flat, mod, inst, path, params, cat, src, core=None, names=None, kdef
                             + (" (machine=auto: " + ", ".join(sorted(flat._tiers.names())) + ")"
                                if param in ("machine", "entity") else ""))
         key = f"{mod.name}.{inst.name}.{param}"
+        if getattr(mod, "args", None):
+            # 2.1: a parameterised module's line is one choice per set of values (an iron and a
+            # copper line of one cell may want other modules)
+            key = f"{mod.name}<{_args_text(mod.args)}>.{inst.name}.{param}"
         pick = flat._sizes.get(key, menu[0])
         pick = pick if pick in menu else menu[0]
         ch = flat.choices.setdefault(key, Choice(key, param, menu, pick))
@@ -836,8 +865,40 @@ def _choose(flat, mod, inst, path, params, cat, src, core=None, names=None, kdef
     return picked
 
 
+def _buffer_module(flat, mod, path, inst, src):
+    """An instance of ``module NAME buffer`` (2.1): its ports are the buffer's ends. The model
+    takes each in port as an unlimited sink and each out port as an unlimited supply of its items
+    (``fkcore.rates``), on the nets outside; inside, it is what the designer chose."""
+    ports = [k for k, p in flat.ports.items() if p.scope == path]
+    if not ports:
+        raise ElabError(src, inst.line, f"{path} = {inst.kind}: module {inst.kind} is a buffer, "
+                                        "and a buffer's ends are its ports: declare them (`port "
+                                        "NAME : in ITEM @SIDE`, and one out)")
+    for key in ports:
+        flat.machines[key].extra["buffer"] = path
+    flat.buffers[path] = "module"
+
+
+def _literal_names(flat, path, imported, keys, inst, src):
+    """A Literal's ``names`` (2.1, PLAN-2.1 H): ``{name: entity key}`` from its file, each name of
+    a machine a net end like any machine's (``automall.asm10``). A name of an entity that is no
+    machine of the netlist (a belt, a pole, a crafter without a recipe, a chest without a role) is
+    kept apart, so a ref to it is refused with what it names."""
+    names, other = {}, {}
+    for name, ekey in flat._lit_names[path].items():
+        if ekey in keys:
+            names[name] = ekey
+        else:
+            other[name] = next((e.name for e in imported[0] if e.key == ekey), "?")
+    flat.literal_names[path] = names
+    if other:
+        flat._lit_other = getattr(flat, "_lit_other", {})
+        flat._lit_other[path] = other
+
+
 def _literal_entities(flat, path, params, cat, src):
-    """A Literal's entities: imported from ``file=`` (-> the import tuple), else pinned in the .fkp."""
+    """A Literal's entities: imported from ``file=`` (-> the import tuple), else pinned in the .fkp.
+    2.1: the file's ``names`` ({name: entity key}) go to ``flat._lit_names[path]``."""
     from . import literal
     extra = sorted(set(params) - {"file", "box"})
     if extra:
@@ -846,8 +907,13 @@ def _literal_entities(flat, path, params, cat, src):
         try:
             ents, size, origin = literal.import_entities(literal.resolve(src, params["file"]),
                                                          path, cat, params.get("box"))
+            names = literal.names_of(literal.resolve(src, params["file"]), ents,
+                                     params.get("box"))
         except (literal.LiteralError, OSError) as exc:
             raise TemplateError(str(exc)) from None
+        if names:
+            flat._lit_names = getattr(flat, "_lit_names", {})
+            flat._lit_names[path] = names
         return ents, size, origin, literal.signature(ents, size)
     if flat._layout is None:
         raise TemplateError("a Literal without file= needs the factory's .fkp")
@@ -952,6 +1018,14 @@ def _resolve(flat, ref, scope, items=None, side=None, src=None):
         key = _join(node.path, part)
         if node.scope is None and key in flat.machines:
             return None, [key]
+        named = flat.literal_names.get(node.path) if node.scope is None else None
+        if named and part in named and used == len(ref.parts) - 1 and not ref.star:
+            return None, [named[part]]      # 2.1: a Literal's name for one of its machines
+        other = getattr(flat, "_lit_other", {}).get(node.path, {})
+        if node.scope is None and part in other:
+            raise ElabError(src, ref.line, f"{ref}: {part} names a {other[part]} of Literal "
+                            f"{node.path}, which is no machine of the netlist (a crafter with a "
+                            "recipe, a drill, a lab, a chest with a role)")
         return None, []
     if node.path in flat.sealed:
         return _sealed_ref(flat, node, ref, used, items, side, src)
@@ -1014,15 +1088,28 @@ def _stack_module(flat, inst, path, modules, src, cat=None):
     and a ref ``STACK.P`` names the head's port P, or with no head the first cell's NEAR port P or
     the last cell's FAR port P (``flat.stack_alias``)."""
     p = inst.params
-    extra = sorted(set(p) - {"cell", "n", "head", "built"} - set(META))
-    if extra:
-        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head=, built=, duty= "
-                                        f"and dnp, not {', '.join(extra)}")
+    # 2.1: every parameter but the Stack's own goes to each cell (and to the head, where it
+    # declares it); a cell or head may be a kind of a module, whose parameters come first
+    fwd = {k: v for k, v in p.items() if k not in lang.RESERVED}
     cname, hname = p.get("cell"), p.get("head")
+    cname, cfwd = _module_kind(flat, cname, fwd, modules, src, inst.line, path)
     if not isinstance(cname, str) or cname not in modules:
         raise ElabError(src, inst.line, f"{path} = Stack: cell= names a module, got {cname!r}")
+    hfwd = None
+    if hname is not None:
+        hname, hfwd = _module_kind(flat, hname, fwd, modules, src, inst.line, path)
     if hname is not None and (not isinstance(hname, str) or hname not in modules):
         raise ElabError(src, inst.line, f"{path} = Stack: head= names a module, got {hname!r}")
+    extra = sorted(set(cfwd) - {q.name for q in modules[cname].params})
+    if extra and (hname is None or set(extra) - {q.name for q in modules[hname].params}):
+        have = ", ".join(q.name for q in modules[cname].params)
+        raise ElabError(src, inst.line, f"{path} = Stack: takes cell=, n=, head=, built=, duty= "
+                                        f"and dnp, and passes the cell's own parameters on ("
+                                        f"{cname}: {have or 'none'}), not {', '.join(extra)}")
+    if hname is not None:
+        hdecl = {q.name for q in modules[hname].params}
+        hfwd = {k: v for k, v in hfwd.items() if k in hdecl}
+        cfwd = {k: v for k, v in cfwd.items() if k not in extra}
     n = p.get("n")
     if isinstance(n, float) and n.is_integer():
         n = int(n)
@@ -1036,7 +1123,8 @@ def _stack_module(flat, inst, path, modules, src, cat=None):
     if not isinstance(built, int) or isinstance(built, bool) or not 0 <= built <= n:
         raise ElabError(src, inst.line, f"{path} = Stack: built= a whole number of cells from 0 "
                                         f"to n={n}, got {built!r}")
-    cell = modules[cname]
+    # substituted before the ports are checked, so both ends of a pair carry the same items
+    cell, _values = _with_args(modules[cname], cfwd, f"{path}/0", src, inst.line)
     if cell.size is None or not cell.stacks:
         raise ElabError(src, inst.line, f"{path} = Stack: cell {cname} needs a size and its "
                                         "`stack NEAR -> FAR` pairs")
@@ -1065,7 +1153,7 @@ def _stack_module(flat, inst, path, modules, src, cat=None):
         raise ElabError(src, inst.line, f"{path} = Stack: every FAR port of {cname} stands on one "
                                         f"edge, so the cells stack one way (got {sorted(sides)})")
     grow = sides.pop()
-    head = modules[hname] if hname else None
+    head = _with_args(modules[hname], hfwd, f"{path}/head", src, inst.line)[0] if hname else None
     if head is not None:
         hports = {q.name: q for q in head.ports}
         for near, far, line in cell.stacks:
@@ -1080,11 +1168,11 @@ def _stack_module(flat, inst, path, modules, src, cat=None):
     hw, hh = head.size if head is not None else (0, 0)
     at = {"n": lambda k: (0, (n - 1 - k) * h), "s": lambda k: (0, hh + k * h),
           "e": lambda k: (hw + k * w, 0), "w": lambda k: ((n - 1 - k) * w, 0)}[grow]
-    insts = [lang.Inst(str(k), cname, {"dnp": True} if k >= built else {}, {"at": (*at(k), 0)},
-                       inst.line) for k in range(n)]
+    insts = [lang.Inst(str(k), cname, dict(cfwd, dnp=True) if k >= built else dict(cfwd),
+                       {"at": (*at(k), 0)}, inst.line) for k in range(n)]
     if head is not None:
         hat = {"n": (0, n * h), "s": (0, 0), "e": (0, 0), "w": (n * w, 0)}[grow]
-        insts.insert(0, lang.Inst("head", hname, {}, {"at": (*hat, 0)}, inst.line))
+        insts.insert(0, lang.Inst("head", hname, dict(hfwd), {"at": (*hat, 0)}, inst.line))
     nets = []
     for near, far, _line in cell.stacks:
         items = list(dict.fromkeys(ports[far].all_items))
@@ -1114,6 +1202,139 @@ def _stack_module(flat, inst, path, modules, src, cat=None):
     flat.stack_alias[path] = alias
     flat.stacks[path] = (cname, n, hname)
     return lang.Module(f"Stack:{path}", inst.line, insts=insts, nets=nets)
+
+
+# -- 2.1: module parameters ------------------------------------------------------------------------
+_PARAM = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)(?:\s*\[\s*(\d+)\s*\])?")
+
+
+def _args_text(values):
+    return ", ".join(f"{k}={_value_text(v)}" for k, v in values.items())
+
+
+def _value_text(v):
+    return "|".join(map(str, v)) if isinstance(v, list) else str(v)
+
+
+def _module_kind(flat, name, given, modules, src, line, path):
+    """A Stack's ``cell=`` or ``head=`` that names a kind of a module (``kind CopperCell =
+    FurnaceCell<plate=...>``) -> (the module, the kind's parameters under ``given``)."""
+    if not isinstance(name, str) or name in modules:
+        return name, dict(given)
+    core, plist, _names = flat._kinds.resolve(name, src, line)
+    if core not in modules:
+        return name, dict(given)
+    return core, _kind_merge(core, plist + [given], src, line, path)
+
+
+def _with_args(mod, given, path, src, line):
+    """(the module's body with its parameters substituted, the values) for an instance that gives
+    ``given`` (2.1, PLAN-2.1 "D. Module parameters"). A module without parameters is itself.
+    Refused: a parameter it doesn't declare, a required one left out, and a flag for a value."""
+    given = {k: v for k, v in given.items() if k not in META}
+    decl = {q.name: q for q in mod.params}
+    unknown = sorted(set(given) - set(decl))
+    if unknown:
+        have = ", ".join(decl)
+        raise ElabError(src, line, f"{path}: module {mod.name} has no parameter "
+                                   f"{', '.join(unknown)} (" + (f"its parameters: {have}; "
+                                                              if have else "it takes none; ")
+                        + "every module also takes duty= and dnp)")
+    missing = [q.name for q in mod.params if q.default is None and q.name not in given]
+    if missing:
+        raise ElabError(src, line, f"{path}: module {mod.name} needs "
+                                   + ", ".join(f"{m}=" for m in missing)
+                        + (" (a parameter with no default)" if len(missing) == 1
+                           else " (parameters with no default)"))
+    for k, v in given.items():
+        if v is True:
+            raise ElabError(src, line, f"{path}: {mod.name}'s parameter {k} takes a value, like "
+                                       f"{k}=iron-plate")
+    if not mod.params:
+        return mod, {}
+    values = {q.name: given.get(q.name, q.default) for q in mod.params}
+    return _Subst(mod, values, src).module(), values
+
+
+class _Subst:
+    """A module's body with ``$p`` and ``$p[k]`` replaced by the values (2.1): in port, net and
+    ``items`` lists (a list value spreads), parameter values, signals, ``set`` values, the text of
+    ``behave`` and ``expect`` lines, and inside strings."""
+
+    def __init__(self, mod, values, src):
+        self.mod, self.values, self.src = mod, values, src
+
+    def one(self, name, idx, line):
+        if name not in self.values:
+            raise ElabError(self.src, line, f"${name}: module {self.mod.name} has no parameter "
+                                            f"{name} (its parameters: {', '.join(self.values)})")
+        v = self.values[name]
+        if idx is None:
+            return v
+        items = v if isinstance(v, list) else [v]
+        if int(idx) >= len(items):
+            raise ElabError(self.src, line, f"${name}[{idx}]: {name} is a list of {len(items)} "
+                                            f"({_value_text(v)}) in this {self.mod.name}, so "
+                                            f"${name}[0] to ${name}[{len(items) - 1}]")
+        return items[int(idx)]
+
+    def value(self, v, line):
+        """A value as written -> its value: ``$p`` alone is p's value as given (a word, a number,
+        a list), ``$p`` inside a string is its text, and a list spreads a list."""
+        if isinstance(v, list):
+            out = []
+            for x in v:
+                y = self.value(x, line)
+                out.extend(y if isinstance(y, list) else [y])
+            return out
+        if not isinstance(v, str) or "$" not in v:
+            return v
+        m = _PARAM.fullmatch(v)
+        if m:
+            return self.one(m.group(1), m.group(2), line)
+        return self.text(v, line)
+
+    def text(self, v, line):
+        if not isinstance(v, str) or "$" not in v:
+            return v
+        return _PARAM.sub(lambda m: _value_text(self.one(m.group(1), m.group(2), line)), v)
+
+    def items(self, items, line):
+        if items is None:
+            return None
+        out = self.value(list(items), line)
+        return [_value_text(x) for x in out]
+
+    def cond(self, c):
+        if c is None:
+            return None
+        op = lambda o: o if not isinstance(o, lang.Operand) else dataclasses.replace(
+            o, signal=_value_text(self.value(o.signal, c.line)))
+        return dataclasses.replace(c, left=op(c.left), right=op(c.right))
+
+    def module(self):
+        mod, R = self.mod, dataclasses.replace
+        insts = []
+        for i in mod.insts:
+            hints = dict(i.hints)
+            if isinstance(hints.get("patch"), str):
+                hints["patch"] = self.text(hints["patch"], i.line)
+            insts.append(R(i, params={k: self.value(v, i.line) for k, v in i.params.items()},
+                           hints=hints, when=self.cond(i.when)))
+        return R(mod, params=[], args=dict(self.values), insts=insts,
+                 ports=[R(p, items=self.items(p.items, p.line), right=self.items(p.right, p.line))
+                        for p in mod.ports],
+                 nets=[R(n, items=self.items(n.items, n.line), when=self.cond(n.when))
+                       for n in mod.nets],
+                 covers=[R(c, params={k: self.value(v, c.line) for k, v in c.params.items()})
+                         for c in mod.covers],
+                 signals=[R(s, game=None if s.game is None
+                            else _value_text(self.value(s.game, s.line))) for s in mod.signals],
+                 sets=[R(s, attrs={k: self.text(v, s.line) for k, v in s.attrs.items()})
+                       for s in mod.sets],
+                 behaves=[R(b, lines=[(k, self.text(t, ln), ln) for k, t, ln in b.lines])
+                          for b in mod.behaves],
+                 expects=[R(e, text=self.text(e.text, e.line)) for e in mod.expects])
 
 
 def _conn_want(flat, bus, keys):
@@ -1335,6 +1556,7 @@ def _resolve_nets(flat, cat):
     for name, p in pending:
         work[name] = {"items": list(p.net.items) if p.net.items else _fluids_taken(flat, p, cat),
                       "drivers": [], "consumers": []}
+    _buffer_items(flat, pending, cat)
 
     def add_drivers(name, p, ref, free_only):
         w = work[name]
@@ -1419,8 +1641,50 @@ def _resolve_nets(flat, cat):
                                   p.net.items is not None, p.net.line,
                                   getattr(p.net, "limited", False),
                                   None if when is None else (when, p.scope), p.scope,
-                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None))
+                                  getattr(p.net, "width", 1), getattr(p.net, "lane", None),
+                                  getattr(p.net, "why", None))
     flat._out_hold, flat._in_hold = out_hold, in_hold
+
+
+def _buffer_items(flat, pending, cat):
+    """What each buffer chest without ``item=`` holds (2.1): the items of the nets into it, their
+    declared items or what their drivers make (another buffer's, once it is known), so a buffer
+    drives what it is filled with ("driver gbuf makes no electronic-circuit" was a plain chest in
+    the middle, 20261030-2352). Explicit refs only; a fluid stays out (a chest holds none)."""
+    bufs = {k for k, m in flat.machines.items()
+            if m.extra.get("buffer") is True and m.source and not m.makes}
+    if not bufs:
+        return
+
+    def keys_of(p, refs, side):
+        out = []
+        for ref in refs:
+            if ref.star:
+                continue
+            try:
+                out += _resolve(flat, ref, p.scope, items=p.net.items, side=side, src=p.src)[1]
+            except ElabError:
+                continue                # the main pass reports it
+        return out
+    for _round in range(len(bufs) + 1):
+        changed = False
+        for _name, p in pending:
+            into = [k for k in keys_of(p, p.net.consumers, "consumer") if k in bufs]
+            if not into:
+                continue
+            if p.net.items:
+                items = list(p.net.items)
+            else:
+                items = [i for k in keys_of(p, p.net.drivers, "driver")
+                         for i in flat.machines[k].makes if k in flat.machines]
+            for k in into:
+                m = flat.machines[k]
+                for item in dict.fromkeys(items):
+                    if item not in m.makes and not cat.is_fluid(item):
+                        m.makes[item] = float("inf")
+                        changed = True
+        if not changed:
+            break
 
 
 def _bus_nets(flat):
@@ -1484,7 +1748,7 @@ def _split_nets(flat, cat):
                 for end in ends:
                     hold[end] = [sub if n == name else n for n in hold.get(end, [])]
             flat.nets[sub] = FlatNet(sub, [item], drivers, consumers, True, net.line, net.limited,
-                                     net.when, net.scope)
+                                     net.when, net.scope, why=net.why)
             subs.append(sub)
         del flat.nets[name]
         flat.split[name] = subs
@@ -1593,7 +1857,24 @@ def _group(rows):
 _STORES = ("provider", "storage")
 #: the 1.1 check lines about limited production, and 2.0.1's UNDERFED (a rate fact about the
 #: design): advice that tests of other things, and fk stage check's list, leave out
-ADVICE = ("CLOG", "no-limit", "SHARED_SINK", "SUSHI_LIMIT", "short-feed", "could-pair")
+ADVICE = ("CLOG", "no-limit", "SHARED_SINK", "SUSHI_LIMIT", "short-feed", "could-pair",
+          "limited")
+
+
+def advice(flat):
+    """``fk check``'s advice voice (2.1), lines that are not checks of the design and leave the
+    netlist's own check lines as they were: a bare ``limited`` on a sushi net is asked what
+    limits it (``limited-why``)."""
+    out = []
+    for name, net in flat.nets.items():
+        if net.sushi and net.limited and not getattr(net, "why", None) \
+                and net.drivers and net.consumers:
+            out.append(Check("limited-why", f"net {name}",
+                             "limited says something limits what goes on it: say what, so a "
+                             "reader sees it where CLOG would be (`net "
+                             f"{name.rsplit('/', 1)[-1]} limited \"the end buffer gates the "
+                             "sources\":`)", net.line))
+    return out
 #: chests that take any item that reaches them
 _TAKE_ALL = ("provider", "storage", "buffer", "plain")
 
@@ -1643,11 +1924,19 @@ def _clog_checks(flat, in_hold, fed):
 
     A net written ``limited`` (1.7) says the source limits each of its makers: no ``CLOG`` and
     no ``no-limit`` for it. It only silences them; no tool can tell whether a source is limited.
+
+    2.1 (Rory, 2026-10-31: no sushi clog model): ``limited "..."`` says what limits it, and that
+    string is the ``limited`` line where ``CLOG`` would have been, so a reader sees the mechanism.
+    A bare ``limited`` builds as before, with no line of its own (old files check unchanged);
+    ``fk check``'s advice (``advice``) asks for the string.
+    A buffer chest a limited sushi net fills draws no ``SUSHI_LIMIT``: the limit is the design's.
     """
     sushi_in = {}                          # chest key -> the mixed nets of makers it takes
     for name, net in flat.nets.items():
         made = any(not flat.machines[k].extra.get("port")
                    and flat.machines[k].extra.get("role") != "requester" for k, _i in net.drivers)
+        if net.limited and getattr(net, "why", None):
+            flat.checks.append(Check("limited", f"net {name}", net.why, net.line))
         if net.sushi and net.drivers and net.consumers and not net.limited:
             flat.checks.append(Check(
                 "CLOG", f"net {name}",
@@ -1665,6 +1954,8 @@ def _clog_checks(flat, in_hold, fed):
                 sushi_in.setdefault(k, set()).add(name)
     for key in sorted(sushi_in, key=lambda k: flat.machines[k].inst):
         m = flat.machines[key]
+        if m.extra.get("buffer") and all(flat.nets[n].limited for n in sushi_in[key]):
+            continue
         if m.extra.get("limit") is not None:
             nets = sorted(sushi_in[key])
             flat.checks.append(Check(
@@ -1908,8 +2199,8 @@ def _endpoint_checks(flat, cat):
         if m.sink and key not in fed and cat.kind(m.prototype) != "roboport":
             unfed.append((m.inst, "anything", key))
         for item in m.makes:
-            if (key, item) not in out_hold:
-                unconsumed.append((m.inst, item, key))
+            if (key, item) not in out_hold and not m.extra.get("buffer"):
+                unconsumed.append((m.inst, item, key))     # 2.1: a buffer may only fill
     for inst, item, n in _group(unfed):
         flat.checks.append(Check("no-feed", inst, f"{item} has no net"
                                  + (f" ({n} machines)" if n > 1 else "")))
@@ -1919,6 +2210,8 @@ def _endpoint_checks(flat, cat):
     for name, net in flat.nets.items():
         if not net.sushi:
             continue
+        if any(flat.machines[k].extra.get("buffer") for k, _i in net.drivers + net.consumers):
+            continue        # 2.1: what no machine takes ends in (or goes round by) the buffer
         rows = []
         for key, _item in net.consumers:
             m = flat.machines[key]
@@ -1936,7 +2229,7 @@ def _endpoint_checks(flat, cat):
     seen = set()
     driving = {key for key, _item in out_hold}
     for key, m in flat.machines.items():
-        if m.source and m.inst not in seen and key in driving:
+        if m.source and m.inst not in seen and key in driving and not m.extra.get("buffer"):
             seen.add(m.inst)
             item = next(iter(m.makes))
             nets = out_hold.get((key, item)) or []

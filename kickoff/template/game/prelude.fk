@@ -10,6 +10,8 @@ kind Assembler = Machine<entity=assembling-machine-1>
 kind Furnace   = Machine<entity=stone-furnace, fuel=coal>
 kind ChemPlant = Machine<entity=chemical-plant>
 kind Refinery  = Machine<entity=oil-refinery, recipe=basic-oil-processing>
+# a buffer (2.1): one net fills it, another drains it; Buffer<chest=iron-chest, bar=20>
+kind Buffer    = Chest<plain, hold, chest=steel-chest>
 
 # What `machine=auto` may pick (the size step chooses), by kind: one tier line is one footprint,
 # one energy and one set of fluid boxes, so a cell laid for one fits them all. A kind built on one
