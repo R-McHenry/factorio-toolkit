@@ -256,9 +256,58 @@ wire ctl red: k -> gate
         flat = flat_of("signal a\nsignal b = down-arrow\n" + self.SRC)
         self.assertEqual(flat.circuit.autos, {"a": circuits.auto_pool()[1]})
 
-    def test_a_wire_too_long_is_a_wire_reach_line(self):
-        _flat, _lay, _lines, cks = laid(self.SRC.replace("@(3, 0)", "@(30, 0)"))
+    def test_a_wire_too_long_hops_along_poles_it_adds(self):
+        """2.1: a wire longer than the reach hops along poles, new ones where there is a gap."""
+        _flat, lay, lines, cks = laid(self.SRC.replace("@(3, 0)", "@(30, 0)"))
+        self.assertEqual(cks, [])
+        poles = sorted(k for k in lay.entities if k.startswith("circuit-poles/"))
+        self.assertEqual(poles, ["circuit-poles/p1", "circuit-poles/p2", "circuit-poles/p3"])
+        self.assertEqual(lay.covers["circuit-poles"].kind, "wires")
+        self.assertEqual(len(lay.wires), 4)
+        for w in lay.wires:
+            a, b = lay.entities[w.a], lay.entities[w.b]
+            self.assertLessEqual(circuits._distance(a, b), 9.0)
+        self.assertIn("on poles: gate/m0 to k/m0 31.0 tiles over 3 poles (3 added)", lines[-1])
+        self.assertEqual(fkp.invariants(lay, CAT), [])
+        # laid again from the same layout: the same poles, no more
+        flat = flat_of(self.SRC.replace("@(3, 0)", "@(30, 0)"))
+        again, _l, _c = circuits.lay(flat, lay, CAT)
+        self.assertEqual(sorted(k for k in again.entities if k.startswith("circuit-poles/")),
+                         poles)
+        self.assertEqual(again.wires, lay.wires)
+
+    def test_a_long_wire_uses_the_poles_that_stand(self):
+        src = self.SRC.replace("@(3, 0)", "@(30, 0)") + \
+            "p1 = Pole<pole=medium-electric-pole> @(8, 2)\np2 = Pole<pole=medium-electric-pole> " \
+            "@(16, 2)\np3 = Pole<pole=medium-electric-pole> @(24, 2)\n"
+        _flat, lay, lines, cks = laid(src)
+        self.assertEqual(cks, [])
+        self.assertFalse([k for k in lay.entities if k.startswith("circuit-poles/")])
+        ends = {k for w in lay.wires for k in (w.a, w.b)}
+        self.assertEqual(ends, {"gate/m0", "k/m0", "p1/m0", "p2/m0", "p3/m0"})
+
+    def test_a_long_wire_with_no_room_for_a_pole_is_a_wire_reach_line(self):
+        flat = flat_of(self.SRC.replace("@(3, 0)", "@(30, 0)"))
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT)
+        every = {(x, y) for x in range(-10, 50) for y in range(-10, 20)}
+        _out, _lines, cks = circuits.lay(flat, r.layout, CAT, keep_out=every)
         self.assertEqual([c.code for c in cks], ["wire-too-far"])
+        self.assertIn("no chain of poles or free tiles joins them", cks[0].msg)
+
+    def test_a_pole_on_another_net_of_the_colour_is_not_used(self):
+        src = self.SRC.replace("@(3, 0)", "@(30, 0)") + """
+p1 = Pole<pole=medium-electric-pole> @(8, 2)
+p2 = Pole<pole=medium-electric-pole> @(16, 2)
+p3 = Pole<pole=medium-electric-pole> @(24, 2)
+k2 = Constant<signals="signal-B=1"> @(14, 0)
+lamp = Entity<name=small-lamp> @(16, 0)
+wire other red: k2 -> p2, lamp
+"""
+        _flat, lay, _lines, cks = laid(src)
+        ctl = {k for w in lay.wires if w.net == "ctl" for k in (w.a, w.b)}
+        self.assertNotIn("p2/m0", ctl)
+        self.assertNotIn("wires-share", [c.code for c in cks])
 
     def test_two_red_nets_with_other_drivers_on_one_entity_leak(self):
         src = self.SRC + """

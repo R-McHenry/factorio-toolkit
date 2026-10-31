@@ -31,9 +31,30 @@ What the source says, and what the layout gets:
   to every inserter that feeds it, which sets its filters from them (``filter=circuit``). A
   recipe changed in the game changes what they carry, with no script and no new paste of them.
 
-The wires of a wire net are a minimum spanning tree over its entities, centre to centre, each
-within both ends' reach (9 tiles, a pole's wire reach): a longer one is a ``wire-too-far`` line
-(wires are not routed through poles yet). ``behave`` blocks keep their lines: a ``require`` with
+Open circuits (2.1, PLAN-2.1 "Circuits that reach any building", Rory 2026-10-31):
+
+- **Raw settings.** ``cb.FIELD=VALUE`` (a field of the entity's control behaviour) and
+  ``bp.FIELD=VALUE`` (any other blueprint field), as a ``set`` property or an instance's or kind's
+  parameter, so a building the toolkit never modelled can be set up from source. The value is
+  written as the game's blueprint has it, with two conveniences: a string in a field that holds a
+  signal (``*_signal``, ``*signal_id``, ``signal``, ``icon``) becomes the game's SignalID, typed
+  from the game's signal list, and a string in a field that holds a condition (``*condition``) is
+  ``S<N`` / ``S>=T`` as ``if=`` takes it. An object is taken as written. The rate model takes a
+  raw condition as always open, as it does a ``when`` with no ``cycle``.
+- **Signals from the game** (``fkcore.facts``): every item, fluid, virtual signal, recipe, entity,
+  quality, space location and asteroid chunk the game puts on a wire. A signal that never goes out
+  on a wire (``signal-each``, the parameters, ...) is refused where it is written (a
+  ``Constant``, a reactor's reading, a raw output signal); the parameters and ``signal-unknown``
+  anywhere.
+- **Any building with a connector** can be a wire's end; one without (a pipe, a beacon) is a
+  ``no-wire`` line.
+- **Wires carried on poles.** The wires of a wire net are a minimum spanning tree over its
+  entities, centre to centre. An edge longer than both ends reach (9 tiles; a big pole 32) hops
+  along the layout's poles that no other net of its colour uses, with a pole added on a free tile
+  where there is a gap (``circuit-poles/p<k>``, the power cover's pole), the fewest new poles
+  first. Only when no chain exists is it a ``wire-too-far`` line.
+
+``behave`` blocks keep their lines: a ``require`` with
 numbers from the catalog is checked (``require-not-met``), a gated net with no ``cycle`` on its wire is a
 ``gate-open`` line (the rate model takes it as always open), ``expect`` lines are reported.
 
@@ -43,23 +64,31 @@ records, laid again from the source on every build. Pure, stdlib only.
 """
 from __future__ import annotations
 
+import heapq
+import json
 import math
 import re
 from dataclasses import dataclass, field
 
 from . import codec
+from . import facts
 from . import fkp as fkpmod
 from . import lang
 
 __all__ = ["Circuit", "WireDef", "CondDef", "resolve", "lay", "NON_TRANSMITTING",
            "auto_pool", "FILTER_HANDS"]
 
-#: signals the game accepts and never sends on a wire (fnet's signal_space.EXCLUDED, measured live)
-NON_TRANSMITTING = frozenset({"signal-fluid-parameter", "signal-fuel-parameter",
-                              "signal-item-parameter", "signal-signal-parameter",
-                              "signal-unknown"})
 _WILDCARDS = frozenset({"signal-each", "signal-everything", "signal-anything",
                         "signal-any-quality"})
+#: every signal the game takes and never puts on a wire (2.1: the game's list, ``facts.json``)
+NEVER_SENT = facts.never_sent()
+#: those of them no condition can use either: the parameters and ``signal-unknown`` (a wildcard
+#: reads, it only never goes out)
+NON_TRANSMITTING = frozenset(NEVER_SENT - _WILDCARDS)
+#: the owner of the poles a long wire adds where it has a gap (2.1), and its cover record's kind
+POLE_OWNER = "circuit-poles"
+#: tiles a long wire's chain may stray outside the box of its two ends
+HOP_PAD = 6
 #: inserters that can filter (2.0: the fast and bulk inserters took over the filter ones)
 FILTER_HANDS = frozenset({"fast-inserter", "bulk-inserter", "stack-inserter"})
 #: entity types a condition can enable
@@ -82,8 +111,8 @@ def auto_pool():
     """fnet's auto pool, at normal quality: the virtual signals that are not wildcards, letters,
     digits or reserved, sorted."""
     letters = {f"signal-{c}" for c in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
-    return [n for n in sorted(codec.VIRTUAL_SIGNALS)
-            if n not in _WILDCARDS and n not in letters and n not in NON_TRANSMITTING]
+    return [n for n in sorted(facts.signals().get("virtual") or ())
+            if n not in _WILDCARDS and n not in letters and n not in NEVER_SENT]
 
 
 @dataclass
@@ -145,7 +174,8 @@ def _chain(scope):
 
 
 def _known(name, cat):
-    return name in codec.VIRTUAL_SIGNALS or cat.is_fluid(name) or cat.is_item(name)
+    """A signal the game has (2.1: its own list, any type), or an item or fluid of the catalog."""
+    return facts.is_signal(name) or cat.is_fluid(name) or cat.is_item(name)
 
 
 class _Resolver:
@@ -189,16 +219,23 @@ class _Resolver:
             self.c.notes.append("signals the build picked: " + ", ".join(
                 f"{n} = {g}" for n, g in sorted(self.c.autos.items())))
 
-    def game(self, name, scope, where, line):
-        """A signal as written -> its game name (a declared one, else the name itself)."""
+    def game(self, name, scope, where, line, written=False):
+        """A signal as written -> its game name (a declared one, else the name itself).
+        ``written``: the signal is put on a wire (a Constant's, a reading's), so a wildcard is
+        refused too."""
         for s in _chain(scope):
             full = _join(s, name)
             if full in self.c.signals:
-                return self.c.signals[full]
+                got = self.c.signals[full]
+                # its declaration was checked; a wildcard may be declared to read with
+                if written and got in NEVER_SENT and got not in NON_TRANSMITTING:
+                    self.check("no-signal", where, f"{name} ({got}) never goes out on a wire",
+                               line)
+                return got
         if not _known(name, self.cat):
             self.check("no-signal", where, f"{name} is no declared signal and no game signal",
                        line)
-        elif name in NON_TRANSMITTING:
+        elif name in NON_TRANSMITTING or (written and name in NEVER_SENT):
             self.check("no-signal", where, f"{name} never goes out on a wire", line)
         return name
 
@@ -311,8 +348,14 @@ class _Resolver:
             # 2.1: a kind's instance reads as its core kind, with the kinds' defaults
             p = getattr(inst, "kparams", None) or inst.params
             core = getattr(inst, "core", None) or inst.kind
+            raw = {k: v for k, v in p.items() if lang.is_raw(k)}
+            if raw:
+                # 2.1: an instance's (or its kind's) raw settings, as a set line on its machines
+                self.c.sets.append((lang.Props(path, None, None, raw, inst.line, inline=True),
+                                    ""))
             if core == "Reactor" and p.get("read") == "temperature":
-                sig = self.game(str(p.get("signal", "signal-T")), scope, path, inst.line)
+                sig = self.game(str(p.get("signal", "signal-T")), scope, path, inst.line,
+                                written=True)
                 for key in inst.machines:
                     self.c.settings.setdefault(key, {}).update(read="temperature", signal=sig)
             if core == "Constant" and p.get("signals") is not None:
@@ -383,7 +426,7 @@ class _Resolver:
             if not eq or not re.fullmatch(r"-?\d+", count.strip()):
                 from .elaborate import ElabError
                 raise ElabError(self.flat.path, line, f'{where}: signals="S=N, T=M", got {text!r}')
-            rows.append((self.game(name.strip(), scope, where, line), int(count)))
+            rows.append((self.game(name.strip(), scope, where, line, written=True), int(count)))
         return rows
 
     # what each wire carries, and the paper checks
@@ -505,10 +548,14 @@ def _distance(a, b):
     return math.hypot(float(a.x) - float(b.x), float(a.y) - float(b.y))
 
 
+def _clean(v):
+    return int(v) if float(v).is_integer() else v
+
+
 class _Layer:
     """One pass over a layout: the settings to write, the wires to lay, the report."""
 
-    def __init__(self, flat, out, cat):
+    def __init__(self, flat, out, cat, keep_out=()):
         from .elaborate import Check
         from . import connect
         self.flat, self.lay, self.cat, self.Check = flat, out, cat, Check
@@ -517,6 +564,8 @@ class _Layer:
         self.lines, self.checks = [], []
         self.members = {}                              # wire -> [(entity key, port)]
         self.g = connect.graph(out, cat)
+        self.keep_out = set(keep_out)
+        self.ground = None                             # where a hop pole may stand (2.1)
 
     def check(self, code, where, msg):
         self.checks.append(self.Check(code, where, msg))
@@ -603,12 +652,12 @@ class _Layer:
         the router happened to put a hand; a selector that matches nothing is a check line."""
         for p, scope in self.c.sets:
             path = _join(scope, p.target)
-            label = "set " + p.target + (("." + p.side) if p.side else "") + (
-                (" -> " + p.into) if p.into else "")
-            unknown = [a for a in p.attrs if a not in PROP_ATTRS]
+            label = ("" if getattr(p, "inline", False) else "set ") + p.target + (
+                ("." + p.side) if p.side else "") + ((" -> " + p.into) if p.into else "")
+            unknown = [a for a in p.attrs if a not in PROP_ATTRS and not lang.is_raw(a)]
             if unknown:
                 self.check("no-match", label, f"unknown property {unknown[0]}: one of "
-                           f"{', '.join(PROP_ATTRS)}")
+                           f"{', '.join(PROP_ATTRS)}, or a raw cb.FIELD or bp.FIELD")
                 continue
             inst = self.flat.insts.get(path)
             if inst is None:
@@ -660,13 +709,84 @@ class _Layer:
                     self.wires[wire] = WireDef(wire, "red", [("machine", chest)], implicit=True)
             for k in keys:
                 for attr, value in p.attrs.items():
-                    self.set(k, attr, value, label)
+                    if lang.is_raw(attr):
+                        self.raw(k, attr, value, label)
+                    else:
+                        self.set(k, attr, value, label)
                 if wire:
                     self.join(wire, k)
             kind = "hand" if p.side else "machine"
             self.lines.append(f"{label}: " + ", ".join(f"{a}={v}" for a, v in p.attrs.items())
                               + f" on {len(keys)} {kind}" + ("s" if len(keys) != 1 else "")
                               + f" ({', '.join(keys[:4])}" + (" ..." if len(keys) > 4 else "") + ")")
+
+    # raw settings (2.1)
+    def raw(self, key, attr, value, why):
+        """``cb.FIELD=VALUE`` / ``bp.FIELD=VALUE`` on entity ``key``: the field, in the game's
+        form, into the entity's ``cb`` / ``bp`` attr (a JSON object)."""
+        which, _dot, name = attr.partition(".")
+        if which == "bp" and name in codec.BP_REFUSED:
+            self.check("CIRCUIT", why, f"bp.{name}: the codec writes {name} from the design"
+                       + ("; a control behaviour field is cb.FIELD" if name == "control_behavior"
+                          else ""))
+            return
+        v = value.value if isinstance(value, lang.Raw) else value
+        got = self.convert(name, v, f"{why}: {attr}")
+        e = self.lay.entities[key]
+        have = json.loads(e.attrs.get(which) or "{}")
+        if name in have and have[name] != got:
+            self.check("CIRCUIT", key, f"{attr} is set twice ({why} wants "
+                       f"{codec.config_text(got)}): it keeps {codec.config_text(have[name])}")
+            return
+        have[name] = got
+        e.attrs[which] = codec.config_text(have)
+
+    def convert(self, key, v, where):
+        """A raw value in the game's form: a signal name in a signal field becomes a SignalID, a
+        condition string in a condition field the game's condition; the rest as written."""
+        if isinstance(v, dict):
+            return {k: self.convert(k, x, where) for k, x in v.items()}
+        if isinstance(v, list):
+            return [self.convert(key, x, where) for x in v]
+        if not isinstance(v, str):
+            return v
+        if codec.is_signal_key(key):
+            self.raw_signal(v, where, written=key.endswith("output_signal"))
+            return codec.signal_json(v)
+        if codec.is_condition_key(key):
+            try:
+                a, _op, b = codec.parse_condition(v, where)
+            except codec.CodecError as exc:
+                self.check("CIRCUIT", where, str(exc))
+                return v
+            for s in [a] + ([b] if isinstance(b, str) else []):
+                self.raw_signal(s, where)
+            return codec.condition_json(v, where)
+        return v
+
+    def raw_signal(self, name, where, written=False):
+        if not _known(name, self.cat):
+            self.check("no-signal", where, f"{name} is no game signal")
+        elif name in NON_TRANSMITTING or (written and name in NEVER_SENT):
+            self.check("no-signal", where, f"{name} never goes out on a wire")
+
+    def raw_overlaps(self):
+        """A ``cb.`` field that a typed setting of the same entity also writes: the ``cb.`` one
+        wins in the blueprint, and a line says so."""
+        for key in sorted(self.lay.entities, key=fkpmod.natural_key):
+            e = self.lay.entities[key]
+            if not e.attrs.get("cb"):
+                continue
+            typed = {a: e.attrs[a] for a in codec.CIRCUIT_ATTRS if e.attrs.get(a)}
+            try:
+                made = codec.control_behavior(typed, key).get("control_behavior") or {}
+            except codec.CodecError:
+                continue
+            both = sorted(set(made) & set(json.loads(e.attrs["cb"])))
+            if both:
+                self.check("CIRCUIT", key, f"cb.{both[0]} and a typed setting "
+                           f"({', '.join(f'{a}={v}' for a, v in typed.items())}) both write "
+                           f"{both[0]}: the cb. one goes in the blueprint")
 
     def guards(self):
         for path in self.c.guards:
@@ -691,13 +811,28 @@ class _Layer:
                            f"{self.lay.entities[plain[0]].name} can't filter; a fast inserter "
                            "can (the router's default hand)")
 
+    def connectors(self, key):
+        """The entity's circuit connectors (the catalog's, from the game), None when the catalog
+        doesn't say."""
+        try:
+            row = self.cat.entity(self.lay.entities[key].name)
+        except KeyError:
+            return None
+        got = (row.get("circuit") or {}).get("connectors")
+        return None if got is None else list(got)
+
     def explicit(self):
         """The declared wires' members: their machines, the gated nets' carriers (joined by
-        ``gates``), a driving net's belt."""
+        ``gates``), a driving net's belt. 2.1: any building with a circuit connector; one with
+        none is a ``no-wire`` line."""
         for name, w in sorted(self.wires.items()):
             for side in (w.drivers, w.consumers):
                 for kind, ref in side:
                     if kind == "machine" and ref in self.lay.entities:
+                        if self.connectors(ref) == []:
+                            self.check("no-wire", f"wire {name}", f"{ref}: a "
+                                       f"{self.lay.entities[ref].name} has no circuit connector")
+                            continue
                         self.join(name, ref)
             for kind, ref in w.drivers:
                 if kind != "net":
@@ -741,7 +876,7 @@ class _Layer:
                     parent[k] = parent[parent[k]]
                     k = parent[k]
                 return k
-            laid = 0
+            laid, hopped, added = 0, [], 0
             for d, _ka, _kb, i, j in edges:
                 ri, rj = find(i), find(j)
                 if ri == rj:
@@ -751,14 +886,174 @@ class _Layer:
                 reach = min(self.cat.circuit_reach(self.lay.entities[a].name),
                             self.cat.circuit_reach(self.lay.entities[b].name))
                 if d > reach + 1e-9:
-                    self.check("wire-too-far", f"wire {name}", f"{a} to {b} is {d:.1f} tiles; a "
-                               f"wire reaches {reach:g}: move them closer, or put a pole between")
+                    # 2.1: a long wire hops along poles, a new one where there is a gap
+                    chain = self.hops(a, b, colour, name)
+                    if chain is None:
+                        self.check("wire-too-far", f"wire {name}", f"{a} to {b} is {d:.1f} tiles; "
+                                   f"a wire reaches {reach:g}, and no chain of poles or free "
+                                   "tiles joins them: move them closer, or make room for a pole "
+                                   "between")
+                    else:
+                        new = [k for k in chain if k.startswith(POLE_OWNER + "/")]
+                        added += len(new)
+                        hopped.append(f"{a} to {b} {d:.1f} tiles over {len(chain)} pole"
+                                      f"{'s' if len(chain) != 1 else ''}"
+                                      + (f" ({len(new)} added)" if new else ""))
+                        for x, y in zip([a] + chain, chain + [b]):
+                            self.lay.wires.append(fkpmod.Wire(name, colour, x, y).canonical())
+                            laid += 1
+                        continue
                 self.lay.wires.append(fkpmod.Wire(name, colour, a, b).canonical())
                 laid += 1
-            if w is not None and not w.implicit:
+            if (w is not None and not w.implicit) or hopped:
                 self.lines.append(f"wire {name} {colour}: {len(ends)} entities, {laid} wire"
-                                  f"{'s' if laid != 1 else ''}")
+                                  f"{'s' if laid != 1 else ''}"
+                                  + (f"; on poles: {'; '.join(hopped)}" if hopped else ""))
         self.lay.wires = fkpmod.sort_wires(self.lay.wires)
+
+    # wires carried on poles (2.1)
+    def _pole_used(self, key, colour, net):
+        """Pole ``key`` already carries a wire of ``colour`` for another net (their signals
+        would add)."""
+        for w in self.lay.wires:
+            if w.colour == colour and w.net != net and key in (fkpmod.split_end(w.a)[0],
+                                                               fkpmod.split_end(w.b)[0]):
+                return True
+        for other, ends in self.members.items():
+            if other != net and any(k == key for k, _p in ends) and \
+                    (self.wires[other].colour if other in self.wires else "red") == colour:
+                return True
+        return False
+
+    def _hop_pole(self):
+        """The pole a gap gets: the power cover's, else a medium pole."""
+        cover = self.lay.covers.get("power")
+        pole = (cover.params.get("pole") if cover is not None else None) or "medium-electric-pole"
+        if not self.cat.has_entity(pole) or self.cat.kind(pole) != "electric-pole":
+            pole = "medium-electric-pole"
+        return pole
+
+    def _ground(self, pole):
+        if self.ground is None:
+            from . import cover
+            taken = {}
+            for e in self.lay.entities.values():
+                try:
+                    for t in fkpmod.tiles_of(self.cat, e):
+                        taken[t] = e.key
+                except (KeyError, ValueError):
+                    continue
+            self.ground = cover._Ground(taken, self.keep_out, self.lay.size, self.cat.size(pole))
+        return self.ground
+
+    def hops(self, a, b, colour, net):
+        """A chain of poles carrying a wire from entity ``a`` to entity ``b``: [pole key], each
+        step within both its ends' circuit reach. The layout's poles that carry no other net of
+        ``colour`` cost nothing; a new pole on a free tile (inside the frame, on no entity and
+        no keep-out tile, within ``HOP_PAD`` of the box around a and b) costs one, and the chain
+        with the fewest new ones wins, then the fewest steps. The new poles are added to the
+        layout (``circuit-poles/p<k>``). None when no chain exists."""
+        ents = self.lay.entities
+        ea, eb = ents[a], ents[b]
+        ax, ay, bx, by = float(ea.x), float(ea.y), float(eb.x), float(eb.y)
+        x0, x1 = min(ax, bx) - HOP_PAD, max(ax, bx) + HOP_PAD
+        y0, y1 = min(ay, by) - HOP_PAD, max(ay, by) + HOP_PAD
+        pole = self._hop_pole()
+        ground = self._ground(pole)
+        pw, ph = ground.pw, ground.ph
+        new_reach = self.cat.circuit_reach(pole)
+        rb = self.cat.circuit_reach(eb.name)
+        poles = []
+        for k in sorted(ents, key=fkpmod.natural_key):
+            e = ents[k]
+            if k in (a, b) or self.kind(k) != "electric-pole":
+                continue
+            if not (x0 <= float(e.x) <= x1 and y0 <= float(e.y) <= y1):
+                continue
+            if self._pole_used(k, colour, net):
+                continue
+            poles.append((k, float(e.x), float(e.y), self.cat.circuit_reach(e.name)))
+        # nodes: ("a",) the start, ("p", index) a pole, ("s", spot) a free spot
+        start = ("a",)
+        info = {start: (ax, ay, self.cat.circuit_reach(ea.name))}
+        best = {start: (0, 0, 0.0)}
+        back = {start: None}
+        heap = [(0, 0, 0.0, 0, start)]
+        tie = 0
+        done = set()
+        offsets = {}
+        while heap:
+            new, steps, length, _t, node = heapq.heappop(heap)
+            if node in done:
+                continue
+            done.add(node)
+            x, y, r = info[node]
+            if math.hypot(x - bx, y - by) <= min(r, rb) + 1e-9 and node != start:
+                chain, n = [], node
+                while n != start:
+                    chain.append(n)
+                    n = back[n]
+                return self._lay_chain(chain[::-1], poles, pole)
+            cands = []
+            for i, (_k, px, py, pr) in enumerate(poles):
+                if math.hypot(x - px, y - py) <= min(r, pr) + 1e-9:
+                    cands.append((("p", i), 0, (px, py, pr)))
+            step = min(r, new_reach)
+            ox, oy = x - pw / 2, y - ph / 2
+            bi, bj = math.floor(ox), math.floor(oy)
+            fx, fy = ox - bi, oy - bj
+            offs = offsets.get((step, fx, fy))
+            if offs is None:
+                d = int(math.ceil(step)) + 1
+                lim2 = step * step + 1e-9
+                offs = [(di, dj) for dj in range(-d, d + 1) for di in range(-d, d + 1)
+                        if (di - fx) ** 2 + (dj - fy) ** 2 <= lim2]
+                offsets[(step, fx, fy)] = offs
+            for di, dj in offs:
+                spot = (bi + di, bj + dj)
+                cx, cy = spot[0] + pw / 2, spot[1] + ph / 2
+                if not (x0 <= cx <= x1 and y0 <= cy <= y1):
+                    continue
+                if ("s", spot) in done or not ground.free(spot):
+                    continue
+                cands.append((("s", spot), 1, (cx, cy, new_reach)))
+            for nxt, cost, where in cands:
+                if nxt in done:
+                    continue
+                # the fewest new poles, then the fewest steps, then the shortest (the straightest)
+                score = (new + cost, steps + 1,
+                         round(length + math.hypot(where[0] - x, where[1] - y), 6))
+                if nxt in best and best[nxt] <= score:
+                    continue
+                best[nxt], back[nxt], info[nxt] = score, node, where
+                tie += 1
+                heapq.heappush(heap, (score[0], score[1], score[2], tie, nxt))
+        return None
+
+    def _lay_chain(self, chain, poles, pole):
+        """The chain's nodes as pole keys; its new spots become poles of the layout."""
+        ground = self.ground
+        used = [int(m.group(1)) for k in self.lay.entities
+                if (m := re.fullmatch(re.escape(POLE_OWNER) + r"/p(\d+)", k))]
+        n = max(used) + 1 if used else 1
+        out = []
+        for node in chain:
+            if node[0] == "p":
+                out.append(poles[node[1]][0])
+                continue
+            spot = node[1]
+            key = f"{POLE_OWNER}/p{n}"
+            n += 1
+            cx, cy = spot[0] + ground.pw / 2, spot[1] + ground.ph / 2
+            e = fkpmod.Entity(key, pole, _clean(cx), _clean(cy))
+            self.lay.add(e)
+            ground.place(spot)
+            for t in fkpmod.tiles_of(self.cat, e):
+                ground.taken[t] = key
+            out.append(key)
+        if POLE_OWNER not in self.lay.covers and any(k.startswith(POLE_OWNER + "/") for k in out):
+            self.lay.covers[POLE_OWNER] = fkpmod.Cover(POLE_OWNER, "wires", {"pole": pole})
+        return out
 
     def unwired(self):
         """A belt keeps its reading only on a wire (the game keeps no setting on an unwired belt,
@@ -791,29 +1086,34 @@ class _Layer:
                            "of them the other colour")
 
 
-def lay(flat, layout, cat):
+def lay(flat, layout, cat, keep_out=()):
     """``layout`` (not changed) with the factory's circuits laid from its source: a new Layout,
     report lines and check lines. Every circuit setting and wire record is written again from
     the source, so a changed limit reaches the .fkp (and the next paste) on the next build; a
-    Literal keeps its own settings (``config``) and wires."""
+    Literal keeps its own settings (``config``) and wires. The poles a long wire added on the last
+    build (``circuit-poles``) are taken out and laid again; ``keep_out``: tiles no such pole may
+    take (the terrain's)."""
     import copy
     out = copy.deepcopy(layout)
+    out.entities = {k: e for k, e in out.entities.items() if e.owner != POLE_OWNER}
+    out.covers.pop(POLE_OWNER, None)
     literal = {path for path, inst in flat.insts.items() if inst.kind == "Literal"}
     for e in out.entities.values():
         if e.owner in literal or any(e.owner.startswith(p + "/") for p in literal):
             continue
-        for attr in codec.CIRCUIT_ATTRS:
+        for attr in codec.CIRCUIT_ATTRS + codec.RAW_ATTRS:
             e.attrs.pop(attr, None)
     out.wirenets, out.wires = {}, []
     c = getattr(flat, "circuit", None)
     if c is None or c.empty:
         return out, [], []
-    L = _Layer(flat, out, cat)
+    L = _Layer(flat, out, cat, keep_out)
     L.machine_settings()
     L.gates()
     L.enables()
     L.setprops()
     L.guards()
+    L.raw_overlaps()
     L.explicit()
     L.wire_up()
     L.unwired()

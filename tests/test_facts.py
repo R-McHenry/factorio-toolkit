@@ -87,8 +87,15 @@ class GameFactsTest(unittest.TestCase):
         for name in ("signal-everything", "signal-anything", "signal-each"):
             self.assertIn(name, never)
             self.assertNotIn(name, sig["virtual"])
-        # the codec's hand-copied list is all the game's
-        self.assertEqual(sorted(set(codec.VIRTUAL_SIGNALS) - set(sig["virtual"]) - set(never)), [])
+        # 2.1: the codec types every signal from the game's list (its hand-copied lists went)
+        self.assertFalse(hasattr(codec, "VIRTUAL_SIGNALS"))
+        for name, kind in (("signal-A", "virtual"), ("signal-each", "virtual"),
+                           ("signal-alarm", "virtual"), ("water", "fluid"),
+                           ("fusion-plasma", "fluid"), ("iron-plate", "item"),
+                           ("iron-gear-wheel", "item"), ("basic-oil-processing", "recipe"),
+                           ("straight-rail", "entity"), ("legendary", "quality"),
+                           ("nauvis", "space-location"), ("no-such-thing", "item")):
+            self.assertEqual(codec.signal_type(name), kind, name)
 
     def test_wire_connectors(self):
         ids = facts.load()["circuit"]["connector_ids"]

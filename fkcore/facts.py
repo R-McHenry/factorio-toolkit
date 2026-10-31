@@ -25,7 +25,8 @@ import os
 __all__ = ["PATH", "load", "entity", "energy_w", "is_burner", "burns", "mining_radius",
            "mining_time", "mines", "solid_resources", "fuel_value", "fuels", "module_slots",
            "module_effects", "productive", "steam_per_s", "heat_w", "wire_reach", "signals",
-           "never_transmit", "electric_consumer"]
+           "never_transmit", "electric_consumer", "signal_type", "is_signal", "never_sent",
+           "SIGNAL_TYPES"]
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "facts.json")
 
@@ -140,3 +141,42 @@ def signals() -> dict:
 def never_transmit() -> dict:
     """{type: [name]}: signals a combinator takes but never puts on its wire."""
     return load()["never_transmit"]
+
+
+#: a signal name's type when the game has it under several (an item that is also a recipe and an
+#: entity is the item, as the game reads a signal written without its type)
+SIGNAL_TYPES = ("virtual", "item", "fluid", "entity", "recipe", "quality", "space-location",
+                "asteroid-chunk")
+_TYPE_OF = {}
+
+
+def _types():
+    if not _TYPE_OF:
+        got = {}
+        sigs, never = signals(), never_transmit()
+        for kind in SIGNAL_TYPES:
+            for name in list(sigs.get(kind) or ()) + list(never.get(kind) or ()):
+                got.setdefault(name, kind)
+        for kind in sorted(set(sigs) - set(SIGNAL_TYPES)):
+            for name in sigs[kind]:
+                got.setdefault(name, kind)
+        _TYPE_OF.update(got)
+    return _TYPE_OF
+
+
+def is_signal(name) -> bool:
+    """``name`` is a signal of the game (one that can go on a wire, or one the game takes and
+    never sends, like ``signal-each``)."""
+    return name in _types()
+
+
+def signal_type(name):
+    """A signal's type by its name (2.1, from the game): ``virtual``, ``item``, ``fluid``,
+    ``entity``, ``recipe``, ``quality``, ``space-location`` or ``asteroid-chunk``; ``item`` for a
+    name the game has no signal of (the game's default type)."""
+    return _types().get(name, "item")
+
+
+def never_sent() -> frozenset:
+    """Every signal the game takes but never puts on a wire, of any type."""
+    return frozenset(n for names in never_transmit().values() for n in names)

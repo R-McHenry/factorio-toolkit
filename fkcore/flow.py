@@ -1134,7 +1134,8 @@ def _circuits(ctx):
         flat = ctx.flats.get(factory)
         if flat is None:
             continue
-        new, clines, cchecks = circuits.lay(flat, lay, ctx.cat)
+        new, clines, cchecks = circuits.lay(flat, lay, ctx.cat,
+                                            keep_out=_frame_blocked(ctx, factory, lay.size))
         ctx.layouts[factory] = new
         lines += [f"circuits {factory}: {line}" for line in clines]
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in cchecks]

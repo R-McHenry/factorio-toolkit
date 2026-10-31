@@ -95,7 +95,9 @@ def _rate(params, key, default=None):
 
 
 def _only(params, allowed):
-    extra = sorted(set(params) - set(allowed) - set(COMMON_PARAMS))
+    # 2.1: a raw setting (cb.FIELD=, bp.FIELD=) goes on any template's machines (fkcore.circuits)
+    extra = sorted(k for k in set(params) - set(allowed) - set(COMMON_PARAMS)
+                   if not (isinstance(k, str) and k.partition(".")[0] in ("cb", "bp") and "." in k))
     if extra:
         raise TemplateError("unknown parameter%s %s (allowed: %s)" % (
             "s" if len(extra) > 1 else "", ", ".join(extra), ", ".join(allowed) or "none"))
