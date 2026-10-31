@@ -21,3 +21,4 @@ write_layout                              # write the .fkp files: the design the
 apply           --scope stale             # the paste: ghosts, robots build them (the game)
 stop_on         malformed                 # the default: only malformed data stops the run
 stop_on         no-route no-destination   # and no paste with a net unrouted, or a maker whose product reaches no sink
+stop_on         cannot-carry              # or a machine on a net whose items it takes none of (it would be left off the route)

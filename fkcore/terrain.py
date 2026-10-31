@@ -288,6 +288,52 @@ def merge(surface, area, parts) -> "Terrain":
                    tiles, sorted(ungen))
 
 
+def combine(old: "Terrain", new: "Terrain") -> "Terrain":
+    """A read of ``new.area`` merged into what ``old`` holds (2.1.2: ``read-terrain --area`` had
+    replaced the whole file with the one area, and a run lost its base's terrain). Inside the new
+    area the new read wins, tile by tile; outside it the old file stays. The area is the box round
+    both. Counts (enemies, blocking tiles by name) add up when the two areas don't meet, and take
+    the larger of the two where they do."""
+    nx0, ny0, nx1, ny1 = new.area
+
+    def outside(x, y):
+        return not (nx0 <= x < nx1 and ny0 <= y < ny1)
+
+    resources = {}
+    for name, tiles in old.resources.items():
+        kept = {t: a for t, a in tiles.items() if outside(*t)}
+        if kept:
+            resources[name] = kept
+    for name, tiles in new.resources.items():
+        resources.setdefault(name, {}).update(tiles)
+    water = frozenset({t for t in old.water if outside(*t)} | set(new.water))
+    other = frozenset({t for t in old.other if outside(*t)} | set(new.other))
+    cliffs = {(c.name, c.x, c.y): c for c in old.cliffs if outside(math.floor(c.x),
+                                                                    math.floor(c.y))}
+    cliffs.update({(c.name, c.x, c.y): c for c in new.cliffs})
+    removable = {}
+    for src, keep in ((old.removable, True), (new.removable, False)):
+        for name, r in src.items():
+            at = [p for p in r["at"] if not keep or outside(math.floor(p[0]), math.floor(p[1]))]
+            if at:
+                removable.setdefault(name, {"type": r["type"], "at": []})["at"] += at
+    ox0, oy0, ox1, oy1 = old.area
+    meet = ox0 < nx1 and nx0 < ox1 and oy0 < ny1 and ny0 < oy1
+
+    def counts(a, b):
+        out = dict(a)
+        for k, v in b.items():
+            out[k] = max(out.get(k, 0), v) if meet else out.get(k, 0) + v
+        return out
+
+    ungen = {c for c in old.ungenerated if outside(c[0] * 32, c[1] * 32)} | set(new.ungenerated)
+    area = (min(ox0, nx0), min(oy0, ny0), max(ox1, nx1), max(oy1, ny1))
+    return Terrain(new.surface, area, new.tick if new.tick is not None else old.tick, resources,
+                   water, other, [cliffs[k] for k in sorted(cliffs)], removable,
+                   counts(old.enemies, new.enemies), counts(old.tiles, new.tiles),
+                   sorted(tuple(c) for c in ungen))
+
+
 # -- geometry -------------------------------------------------------------------------------------
 def cliff_tiles(box, orientation=0.0, inset=CLIFF_INSET):
     """The tiles a (possibly turned) collision box overlaps, each tile taken ``inset`` inside
