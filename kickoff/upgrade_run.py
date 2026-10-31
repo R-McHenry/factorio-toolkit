@@ -30,6 +30,12 @@ Between two of the player's turns, from the commit SHA (git archive, like new_ru
   `.claude\\agents\\worker.md` (the old one kept in `.upgrade-<old sha>\\`).
 - 2.0.12: the build script gets the template's `stop_on no-route no-destination` (the stops it lacks),
   and a Claude player's `.toolkit` the loop's watchdog (watchdog.py), which the loop starts.
+- 2.1 (run stats): a Claude player's `.toolkit` gets stats_sample.py and the loop that runs it every
+  5 game minutes. The run's map keeps the script it was made with, so a map made before the fk-play
+  recorder is read over RCON, read-only; its save is not changed and nothing is registered in it.
+  A run without the loop (one driven from a conversation) gets its samples from
+  `python <run>\\.toolkit\\stats_sample.py <run>` on a schedule (any interval: it keeps only what is
+  due), or `fk stats --sample`, which skips the footer.
 
 It prints what the player should be told: which commands are new, which docs to read again.
 """

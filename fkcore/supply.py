@@ -99,6 +99,34 @@ for _, t in pairs(f.technologies) do if t.researched then done = done + 1 end en
 local research = {current = f.current_research and f.current_research.name or nil,
   progress = f.research_progress, queue = q, researched = done,
   labs = s.count_entities_filtered{type = 'lab', force = f}}
+local cr = f.current_research
+if cr then
+  local ps = f.get_item_production_statistics(s)
+  local labs = s.find_entities_filtered{type = 'lab', force = f}
+  local sn = {}
+  for k, v in pairs(defines.entity_status) do sn[v] = k end
+  local ing, all, states = {}, 0, {}
+  for _, i in pairs(cr.research_unit_ingredients) do
+    local function used(p) return ps.get_flow_count{name = i.name, category = 'output', precision_index = p, count = true} end
+    ing[#ing + 1] = {name = i.name, amount = i.amount, held = 0,
+      min1 = used(defines.flow_precision_index.one_minute), min10 = used(defines.flow_precision_index.ten_minutes)}
+  end
+  for _, l in pairs(labs) do
+    local inv = l.get_inventory(defines.inventory.lab_input)
+    local every = inv ~= nil
+    for _, i in pairs(ing) do
+      if inv and inv.get_item_count(i.name) > 0 then i.held = i.held + 1 else every = false end
+    end
+    if every then all = all + 1 end
+    local k = sn[l.status] or 'none'
+    states[k] = (states[k] or 0) + 1
+  end
+  research.tick = game.tick
+  research.units = cr.research_unit_count
+  research.ingredients = ing
+  research.labs_all = all
+  research.lab_states = states
+end
 """
 
 
@@ -387,8 +415,59 @@ def _tech_brief(t):
     return f"{t.get('name')} ({cost_text(t)}{tail})"
 
 
+def _minutes(m):
+    if m < 1:
+        return "under a minute left"
+    if m < 120:
+        return f"~{m:.0f} min left"
+    return f"~{m / 60:.1f} h left"
+
+
+def _stall_cause(st, ing):
+    """What stops research whose labs used no pack in the last minute, when the read can tell."""
+    labs = int(st.get("labs") or 0)
+    states = st.get("lab_states") if isinstance(st.get("lab_states"), dict) else {}
+    if labs == 0:
+        return "no labs"
+    dark = int(states.get("no_power") or 0)
+    if dark >= labs:
+        return f"the {labs} lab{'s have' if labs != 1 else ' has'} no power"
+    none = [i["name"] for i in ing if not int(i.get("held") or 0)]
+    if none:
+        return "no lab holds " + ", ".join(none)
+    if not int(st.get("labs_all") or 0) and len(ing) > 1:
+        worst = max(ing, key=lambda i: labs - int(i.get("held") or 0))
+        return (f"no lab holds all {len(ing)} packs ({worst['name']} missing in "
+                f"{labs - int(worst.get('held') or 0)} of {labs} labs)")
+    if dark:
+        return f"{dark} of {labs} labs without power"
+    busy = ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in
+                     sorted(states.items(), key=lambda kv: -kv[1]))
+    return f"labs: {busy}" if busy else ""
+
+
+def research_rate(state):
+    """-> (packs per minute in the last minute, minutes left or None), or None when the read
+    has no pack counts (an older read). The rate counts the current research's packs used in the
+    last game minute; the time left is the units still to go at that pace."""
+    st = state or {}
+    ing = [i for i in _list(st.get("ingredients")) if isinstance(i, dict) and i.get("name")]
+    if not st.get("current") or not ing:
+        return None
+    per_min = sum(float(i.get("min1") or 0) for i in ing)
+    per_unit = sum(float(i.get("amount") or 1) for i in ing)
+    units = float(st.get("units") or 0)
+    left = None
+    if per_min > 0 and units > 0:
+        left = (1 - float(st.get("progress") or 0)) * units / (per_min / per_unit)
+    return per_min, left
+
+
 def research_line(state):
-    """The footer line: what researches now; loud when nothing does."""
+    """The footer line: what researches now, how fast and how long it takes yet (2.1, Rory
+    2026-10-31: ``research military-3 34%, 41 packs/min, ~22 min left``); loud when nothing
+    researches, or when the labs used no pack in the last minute, with the cause when the read
+    can tell (``no lab holds military-science-pack``)."""
     st = state or {}
     labs = int(st.get("labs") or 0)
     q = [x for x in _list(st.get("queue")) if x and x != st.get("current")]
@@ -396,7 +475,18 @@ def research_line(state):
         pct = f" {float(st.get('progress') or 0) * 100:.0f}%" if st.get("progress") is not None else ""
         queue = f"; queue: {', '.join(q)}" if q else ""
         warn = " (0 labs: it will not move)" if labs == 0 else ""
-        return f"research: {st['current']}{pct}{queue}; {labs} lab{'s' if labs != 1 else ''}{warn}"
+        tail = f"{queue}; {labs} lab{'s' if labs != 1 else ''}{warn}"
+        rate = research_rate(st)
+        if rate is None:
+            return f"research: {st['current']}{pct}{tail}"
+        per_min, left = rate
+        if per_min <= 0 and int(st.get("tick") or 0) >= 3600:
+            ing = [i for i in _list(st.get("ingredients")) if isinstance(i, dict)]
+            cause = _stall_cause(st, ing)
+            return (f"RESEARCH STALLED: {st['current']}{pct}, 0 packs/min in the last minute"
+                    + (f": {cause}" if cause else "") + tail)
+        when = f", {_minutes(left)}" if left is not None else ""
+        return f"research {st['current']}{pct}, {per_min:.0f} packs/min{when}{tail}"
     return (f"RESEARCH: NONE. Nothing is researching and the queue is empty; {labs} "
             f"lab{'s' if labs != 1 else ''}. Locked recipes stay locked: `fk research TECH` starts "
             "one, `fk tech ITEM` says which technology opens an item and what it costs.")

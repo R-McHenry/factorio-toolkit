@@ -64,6 +64,11 @@ the game chat and to the player. The world line leads with a dead base (no iron 
 in the last minute), the reactor's fuel out or low and robots in chests while the network has
 none, and ends with the plates per minute, the makers that stand and why, and items in chests
 outside every logistic network; the first three are notes too, like no research.
+
+2.1 (Rory, 2026-10-31: run stats). Every 5 game minutes (by the tick the watcher reads) the loop
+takes the run's stats sample (stats_sample.py: the scenario recorder's samples, or one read-only
+RCON read for a map made before it, and the capital every 10 game minutes) and writes the stats
+page, game\\out\\stats\\index.html. play.log says what each sample kept.
 """
 import argparse
 import atexit
@@ -81,6 +86,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import claude_hook  # noqa: E402  (beside this file: the hook that hands the notes over)
+import stats_sample  # noqa: E402  (beside this file: the run's stats, 2.1)
 
 MODEL = "claude-opus-5-5"
 BACKOFF = [2, 5, 10, 20, 30]  # minutes, after the 1st, 2nd, ... failed round in a row
@@ -891,6 +897,8 @@ class Watch(threading.Thread):
         self.woke = set()                # the WAKE keys noted while they last
         self.health_error = None         # the health read's last error, logged once
         self.capital, self.capital_at = None, 0.0   # the working capital's sentence, and when
+        self.tick = None                 # the game tick the last read saw
+        self.stats_due = None            # the game tick the next stats sample is due at (2.1)
         self.mutex = threading.Lock()
 
     def note(self, text):
@@ -946,10 +954,29 @@ class Watch(threading.Thread):
                       "\n(Adopt it into the design, leave it out, or come back to it.)")
             self.log("hand: " + short(text, 300))
 
+    def stats(self, tick):
+        """The run's stats sample when it is due (2.1): 5 game minutes after the last one, as
+        out\\stats\\state.json says; at once the first time, and when the game went back (a save
+        loaded). The sampler itself keeps only what is due, so an early call costs one read."""
+        if tick is None or (self.stats_due is not None
+                            and self.stats_due - stats_sample.EVERY <= tick < self.stats_due):
+            return
+        try:
+            lines, ok = stats_sample.sample(self.folder, self.cfg)
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+            self.log(f"  (stats: {type(exc).__name__}: {short(exc, 200)})")
+            lines, ok = [], False
+        due = stats_sample.next_due(self.folder)
+        # a failed or empty read tries again a game minute later
+        self.stats_due = due if ok and due and due > tick else tick + 3600
+        if not ok or any(" kept " in ln or "not " in ln for ln in lines):
+            self.log("stats: " + short("; ".join(lines), 400))
+
     def run(self):
         while True:
             try:
                 self.check()
+                self.stats(self.tick)          # outside the lock: the notes never wait on it
             except Exception as exc:  # the watch never stops the player
                 self.log(f"  (watch: {type(exc).__name__}: {short(exc, 200)})")
             time.sleep(WATCH)
@@ -992,6 +1019,7 @@ class Watch(threading.Thread):
                 with open(self.cursor_file, "w") as f:
                     f.write(str(self.cursor))
             line, key = status_line(st)
+            self.tick = int(st.get("tick") or 0)
             if time.time() - self.capital_at > CAPITAL:
                 self.capital_at = time.time()
                 try:
