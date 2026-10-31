@@ -581,6 +581,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                 raise ElabError(src, p.line,
                                 f"port {p.name}: {item} is a fluid, and a pipe has no lanes: drop "
                                 f"the {p.lane}")
+        fluid = _fluid_port(p, cat, src)
         ports[p.name] = key
         items = p.all_items
         flat.ports[key] = PortInst(key=key, name=p.name, dir=p.dir, items=list(p.items),
@@ -589,7 +590,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                                    right=None if p.right is None else list(p.right))
         # a conduit: makes and takes every item on either lane at no rate of its own (rates._pools
         # joins the two nets that name it into one pool), so a crossing net meets itself here
-        flat.machines[key] = Machine(key, prefix, "Port", "transport-belt", None, {},
+        flat.machines[key] = Machine(key, prefix, "Port", "pipe" if fluid else "transport-belt",
+                                     None, {},
                                      {item: 0.0 for item in items}, frozenset(items),
                                      False, None, False, 1.0,
                                      {"port": p.dir, "items": items,
@@ -632,7 +634,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             if stack_auto is not None:
                 inst = dataclasses.replace(inst, params=dict(inst.params,
                                                              **{stack_auto[3]: stack_auto[2]}))
-            synth = _stack_module(flat, inst, path, modules, src)
+            synth = _stack_module(flat, inst, path, modules, src, cat=cat)
             modules[synth.name] = synth
             inst = lang.Inst(inst.name, synth.name,
                              {k: v for k, v in inst.params.items() if k in META},
@@ -1058,7 +1060,24 @@ def _conn_direction(flat, keys, ref, item, src):
     raise ElabError(src, ref.line, f"connection {ref}: it neither makes nor takes {item}")
 
 
-def _stack_module(flat, inst, path, modules, src):
+def _fluid_port(p, cat, src):
+    """The fluid a port carries (2.1, fluid ports), or None for a belt's port. A fluid port is one
+    pipe connection on its frame's edge: one fluid, in or out (its net's way), no lanes (the
+    pair and lane refusals above)."""
+    fluids = [i for i in p.all_items if cat.is_fluid(i)]
+    if not fluids:
+        return None
+    if len(set(p.all_items)) > 1:
+        raise ElabError(src, p.line, f"port {p.name}: a fluid port is one pipe, and a pipe holds "
+                                     f"one fluid: {', '.join(p.all_items)} need a port each")
+    if p.dir == "inout":
+        raise ElabError(src, p.line, f"port {p.name}: {fluids[0]} is a fluid, and a fluid port is "
+                                     "in or out, the way its net runs: inout is for a belt's "
+                                     "port")
+    return fluids[0]
+
+
+def _stack_module(flat, inst, path, modules, src, cat=None):
     """``Stack<cell=CELL, n=N, head=HEAD>`` (2.0.48, Rory 2026-10-26: "a more generic linear
     template, with each unit programmed routed and validated like any other module ... matching
     input and output ports on opposite sides so that it can stack linearly") -> the lang.Module it
@@ -1121,6 +1140,11 @@ def _stack_module(flat, inst, path, modules, src):
             raise ElabError(src, line, f"stack {near} -> {far}: the two ports stand on opposite "
                                        "edges at the same pinned tile (like @s3 and @n3), so one "
                                        "cell's meets the next one's")
+        wet = [i for i in a.all_items + b.all_items if cat is not None and cat.is_fluid(i)]
+        if wet and a.all_items != b.all_items:
+            raise ElabError(src, line, f"stack {near} -> {far}: a fluid port's two ends carry the "
+                                       f"same fluid, so one cell's pipe joins the next one's (got "
+                                       f"{', '.join(a.all_items)} and {', '.join(b.all_items)})")
         if {a.dir, b.dir} != {"in", "out"} or a.all_items != b.all_items:
             raise ElabError(src, line, f"stack {near} -> {far}: one port in and one out, "
                                        "carrying the same items")

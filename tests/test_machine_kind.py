@@ -40,7 +40,8 @@ class MachineTest(unittest.TestCase):
         self.assertEqual((m.prototype, m.recipe, m.kind), ("centrifuge", "uranium-processing",
                                                            "Machine"))
         self.assertAlmostEqual(m.needs["uranium-ore"], 10 / 12)
-        self.assertAlmostEqual(m.makes["uranium-238"], 1 / 12)
+        self.assertAlmostEqual(m.makes["uranium-238"], 0.993 / 12)    # the game's odds (2.1)
+        self.assertAlmostEqual(m.makes["uranium-235"], 0.007 / 12)
 
     def test_machine_is_a_synonym_for_entity(self):
         a = flat_of("a = Machine<machine=assembling-machine-2, recipe=iron-gear-wheel>")

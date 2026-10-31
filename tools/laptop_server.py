@@ -52,6 +52,11 @@ Checks it can run on its own (each starts a server, checks, stops it):
                                             minutes, the RCON read gives the same numbers, the
                                             research line's rate and its stall; with a save, the
                                             RCON path and the capital on that map
+    python tools/laptop_server.py fluidports
+                                            2.1: a Stack of acid drill cells on a copy of a
+                                            uranium patch, acid in through a fluid port: acid
+                                            in every drill, the ore rate against the model,
+                                            the acid an ore takes
 """
 from __future__ import annotations
 
@@ -1673,6 +1678,169 @@ def check_circuits():
     return 0 if ok else 1
 
 
+#: 2.1 (fluid ports): the lab's acid drill cell: acid in on the west pipe row and through to the
+#: east, one electric drill on uranium, its ore onto the cell's through belt; three cells, the acid
+#: from an infinity pipe outside the Stack, the ore into a chest.
+FLUIDPORTS = """
+module AcidDrill size 7x7 {
+  port acid_in  : in  sulfuric-acid @w0
+  port acid_out : out sulfuric-acid @e0
+  port ore_in   : in  uranium-ore   @w6
+  port ore_out  : out uranium-ore   @e6
+  stack acid_in -> acid_out, ore_in -> ore_out
+  d = MinerRow<n=1, resource=uranium-ore> @(0, 1)
+  net a: acid_in -> d, acid_out
+  net o: ore_in, d -> ore_out
+}
+acid  = InfinityPipe<fluid=sulfuric-acid, rate=10/s> @(0, 0)
+cells = Stack<cell=AcidDrill, n=3> @(2, 0)
+box   = Chest<storage> @(30, 6)
+net acid: acid -> cells.acid_in
+net ore: cells.ore_out -> box
+"""
+
+
+def check_fluidports(seconds=60):
+    """2.1, fluid ports: a Stack of three acid drill cells on the lab, on a copy of a uranium patch
+    of the server's nauvis, its acid from an infinity pipe outside the Stack. It reads the acid in
+    every drill, the ore rate against the model (0.25/s a drill), and the acid an ore takes (the
+    infinity pipe shut, the acid held in the slot's pipes and drills before and after)."""
+    import json as jsonmod
+    import tempfile
+    from fkcore import lab
+    from fkcore.catalog import Catalog
+    cat = Catalog.load()
+    run = tempfile.mkdtemp(prefix="fkfluidports-")
+    game = os.path.join(run, "game")
+    os.makedirs(game)
+    for name, text in (("acid.fk", FLUIDPORTS),
+                       ("nauvis.surface", "surface  nauvis\nmode     play\nterrain  none\n"
+                        "catalog  base\n\nplace acid = acid plot 0,0 34x10\n"),
+                       ("nauvis.build.fkb", "read_surface nauvis\n")):
+        with open(os.path.join(game, name), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+    out, ok = [], {}
+
+    def tick(r):
+        return int(r.lua("rcon.print(game.tick)").strip())
+
+    def wait(r, s):
+        t = tick(r)
+        while tick(r) < t + s * 60:
+            time.sleep(0.5)
+
+    with LaptopServer("fluidports", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            # -- a uranium patch on nauvis: the chunks around spawn, wider until one shows
+            find = ("local s = game.surfaces.nauvis local e = s.find_entities_filtered{name = "
+                    "'uranium-ore', limit = 1}[1] rcon.print(e and (math.floor(e.position.x) .. "
+                    "',' .. math.floor(e.position.y)) or '')")
+            at, t0 = r.lua(find).strip(), time.time()
+            for radius in (8, 12, 16, 24):
+                if at:
+                    break
+                r.lua(f"game.surfaces.nauvis.request_to_generate_chunks({{0, 0}}, {radius}) "
+                      "rcon.print(1)")
+                t1 = time.time()
+                while not at and time.time() - t1 < 60:
+                    time.sleep(2)
+                    at = r.lua(find).strip()
+            if not at:
+                print("fluidports: no uranium on the server's nauvis within 24 chunks")
+                return 1
+            ux, uy = (int(v) for v in at.split(","))
+            out.append(f"uranium on nauvis at {ux},{uy} ({time.time() - t0:.0f} s to find)")
+            # the patch's middle (the first tile found is on its edge), then the densest 22x7
+            # rectangle there, for the three cells' drills (x 2..24, y 0..7 of the design)
+            mid = r.lua("local s = game.surfaces.nauvis local n, x, y = 0, 0, 0 "
+                        "for _, e in pairs(s.find_entities_filtered{name = 'uranium-ore', "
+                        f"position = {{{ux}, {uy}}}, radius = 48}}) do n = n + 1 "
+                        "x = x + e.position.x y = y + e.position.y end "
+                        "rcon.print(math.floor(x / n) .. ',' .. math.floor(y / n))").strip()
+            ux, uy = (int(v) for v in mid.split(","))
+            best = jsonmod.loads(r.lua(
+                "local s = game.surfaces.nauvis local b = {0, 0, 0} "
+                f"for y = {uy - 16}, {uy + 10}, 2 do for x = {ux - 30}, {ux + 8}, 2 do "
+                "local n = s.count_entities_filtered{name = 'uranium-ore', area = {{x, y}, "
+                "{x + 22, y + 7}}} if n > b[3] then b = {x, y, n} end end end "
+                "rcon.print(helpers.table_to_json(b))").strip())
+            bx, by, n = best
+            out.append(f"densest 22x7 there: {bx},{by}, {n} of 154 tiles uranium")
+
+            # -- the build (a slot), the patch copied under the cells, the build again (a drill
+            # finds its ore when it is built), then the infinity pipe set to its fluid: the lab
+            # flow leaves that to a fixture (tools/lab_fluids.py start)
+            lab.build(r, game, "acid", cat=cat)
+            out += lab.ore(r, game, "acid", copy=f"{bx},{by},{bx + 22},{by + 7}", to=(2, 0))
+            out += lab.build(r, game, "acid", cat=cat)
+            sx, sy, sw, sh = lab.slots(game)["acid"]
+            area = f"{{{{{sx - 2}, {sy - 2}}}, {{{sx + 40}, {sy + 14}}}}}"
+            got = r.lua(f"local n = 0 for _, e in pairs(game.get_surface('lab')."
+                        f"find_entities_filtered{{area = {area}, name = 'infinity-pipe'}}) do "
+                        "e.set_infinity_pipe_filter{name = 'sulfuric-acid', percentage = 1, "
+                        "mode = 'at-least'} n = n + 1 end rcon.print(n)").strip()
+            out.append(f"infinity pipes set to sulfuric-acid: {got}")
+            wait(r, 20)
+
+            # -- acid in every drill
+            drills = jsonmod.loads(r.lua(
+                f"local o = {{}} for _, e in pairs(game.get_surface('lab').find_entities_filtered"
+                f"{{area = {area}, name = 'electric-mining-drill'}}) do local f = e.fluidbox[1] "
+                "o[#o + 1] = {e.position.x, e.position.y, f and f.name or '', f and f.amount or 0, "
+                "e.status} end rcon.print(helpers.table_to_json(o))").strip())
+            working = 1        # defines.entity_status.working
+            for x, y, fl, amount, status in drills:
+                out.append(f"drill at {x},{y}: {fl or 'no fluid'} {amount:.1f}, status {status}"
+                           + (" (working)" if status == working else ""))
+            ok["acid in every drill"] = (len(drills) == 3 and all(
+                fl == "sulfuric-acid" and amount > 0 and status == working
+                for _x, _y, fl, amount, status in drills))
+
+            # -- the ore rate against the model: the lab force's mined ore (its production
+            # statistics; fk measure reads crafting machines only), and what reaches the chest.
+            # The model is full speed (0.25/s a drill); the lab force's mining productivity
+            # research adds its bonus on top
+            from fkcore.templates import miner_row
+            model = sum(s.makes["uranium-ore"] for s in
+                        miner_row({"n": 1, "resource": "uranium-ore"}, cat)) * 3
+            bonus = float(r.lua("rcon.print(game.forces.lab.mining_drill_productivity_bonus)")
+                          .strip())
+            mined = ("rcon.print(game.forces.lab.get_item_production_statistics('lab')"
+                     ".input_counts['uranium-ore'] or 0)")
+            box = (f"local c = game.get_surface('lab').find_entities_filtered{{area = {area}, "
+                   "name = 'storage-chest'}[1] rcon.print(c and c.get_item_count('uranium-ore') "
+                   "or -1)")
+            m0, b0, t0 = int(r.lua(mined).strip()), int(r.lua(box).strip()), tick(r)
+            wait(r, seconds)
+            m1, b1, t1 = int(r.lua(mined).strip()), int(r.lua(box).strip()), tick(r)
+            span = (t1 - t0) / 60
+            rate, into = (m1 - m0) / span, (b1 - b0) / span
+            want = model * (1 + bonus)
+            out.append(f"ore over {span:.0f} s: {m1 - m0} mined, {rate * 60:.1f}/min; "
+                       f"{b1 - b0} into the chest, {into * 60:.1f}/min. The model: "
+                       f"{model * 60:.1f}/min at full speed, {want * 60:.1f}/min with the lab "
+                       f"force's mining productivity +{bonus * 100:.0f}%")
+            ok["the ore rate"] = abs(rate / want - 1) <= 0.1 and abs(into / want - 1) <= 0.15
+
+            # -- the acid an ore takes: the lab force's acid used (its fluid statistics) against
+            # every ore mined since the build, less the productivity bonus (a bonus ore takes no
+            # acid). A drill draws its acid 10 at a time (a draw before its 10 mining cycles),
+            # so with one acid an ore the use is the ore mined and at most 10 a drill more
+            acid = int(float(r.lua("rcon.print(game.forces.lab.get_fluid_production_statistics("
+                                   "'lab').output_counts['sulfuric-acid'] or 0)").strip()))
+            ore = int(r.lua(mined).strip())
+            cycles = ore / (1 + bonus)
+            out.append(f"acid used since the build: {acid}, for {ore} ore mined ({cycles:.0f} "
+                       f"mining cycles without the bonus); the model's one acid an ore, drawn 10 "
+                       f"at a time a drill, says {cycles:.0f} to {cycles + 30:.0f}")
+            ok["one acid an ore"] = cycles > 0 and cycles - 1 <= acid <= cycles + 31
+    print("\n".join(out))
+    for k, v in ok.items():
+        print(f"{k}: {'OK' if v else 'NOT as designed'}")
+    shutil.rmtree(run, True)
+    return 0 if all(ok.values()) else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
@@ -1681,4 +1849,5 @@ if __name__ == "__main__":
                       "robots": check_robots, "lab": check_lab,
                       "capital": check_capital, "fixes": check_fixes,
                       "vision": check_vision, "stats": check_stats,
-                      "circuits": check_circuits}[what]())
+                      "circuits": check_circuits,
+                      "fluidports": check_fluidports}[what]())
