@@ -18,6 +18,13 @@ Notify (the surface file's ``notify``, or ``--notify``):
   ``<game>/out/inbox.txt`` (``fkcore.notify``);
 - ``off``: report only, nothing pushed.
 
+Vision (2.1, ``fkcore.vision``): ``view`` (``vision.View``) zooms out (N tiles a cell), adds
+layers (robots, power, defense, pollution, pipes, recipes, tags; the design render gets those it
+knows) and writes a PNG instead of the text. At zoom 1 with no layer and no image the look is
+2.0.78's, byte for byte. A map look (zoom 8 and up, or a big area) reads counts per cell
+(``link.vision_read``), not every entity, and gives no verdicts; in play mode a zoomed-out look
+reads only charted chunks, what the game's map view shows.
+
 Fair play: a look reads only its area. In play mode the area must be given; a lab look without
 one covers everything designed (the lab's global diff). ``--watch`` overrides the watch policy for
 one look (``strict``, or ``plots=keep,sanctioned=strict``). ``report`` is pure (the tests feed it
@@ -28,12 +35,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from . import compose, fkp, link, scene, sense
+from . import compose, fkp, link, scene, sense, vision
 from . import notify as notifymod
 from . import own as ownmod
 from . import surface as surfacemod
 
-__all__ = ["LookError", "Look", "composed", "net_items", "policy", "default_area", "report",
+__all__ = ["LookError", "Look", "MapLook", "composed", "net_items", "policy", "default_area", "report",
            "side_by_side", "unpaired", "run"]
 
 _LAYOUT_VERDICTS = ("ok", "ghost", "settings-changed", "other-entity", "not-placed")
@@ -58,6 +65,8 @@ class Look:
     wrote: int = 0                   # marks written into the surface .fkp
     notes: list = field(default_factory=list)
     unpaired: list = field(default_factory=list)   # built underground ends with no partner
+    view_lines: list | None = None   # the vision renders (zoom, layers, image) in place of the plain one
+    image: str | None = None         # the PNG written, with --image
 
     @property
     def designed(self):
@@ -87,7 +96,10 @@ class Look:
             out.append(f"{relay} belts or pipes here hold what the net they were laid under before "
                        "carried (other-item): the next fk build takes them up and lays them fresh "
                        "by itself")
-        out += side_by_side(self.design, self.live, self.area)[0]
+        if self.view_lines is not None:
+            out += self.view_lines
+        else:
+            out += side_by_side(self.design, self.live, self.area)[0]
         if p["notify"] == "all":
             out.append(f"notify all: pushed {len(self.pushed)} line(s) to game chat and "
                        "out/inbox.txt")
@@ -218,14 +230,69 @@ def unpaired(live):
     return out
 
 
-def report(s, live, cat, area, pol, net_items=None, own=None) -> Look:
+def report(s, live, cat, area, pol, net_items=None, own=None, view=None, facts=None,
+           tags=None) -> Look:
     """The look at ``area`` of the composed ``s`` against the ``live`` scene. Pure. ``own``: the
-    toolkit's own entities (``fkcore.own``): those the design dropped read unowned."""
+    toolkit's own entities (``fkcore.own``): those the design dropped read unowned. ``view``
+    (``vision.View``): zoom, layers and image; ``facts``: the game's vision read
+    (``vision.facts_from_read``); ``tags``: ``vision.design_tags``."""
     area = tuple(int(v) for v in area)
     rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items, own=own)
-    design = compose.render_scene(scene.design_scene(s, cat, list(area)), cat, area)
-    return Look(s.name, area, dict(pol), rep, design, compose.render_scene(live, cat, area),
-                unpaired=unpaired(live))
+    dsc = scene.design_scene(s, cat, list(area))
+    design = compose.render_scene(dsc, cat, area)
+    lk = Look(s.name, area, dict(pol), rep, design, compose.render_scene(live, cat, area),
+              unpaired=unpaired(live))
+    if view is not None and not view.plain:
+        plots, _insts = tags or (vision.plots_of(s), [])
+        frame = vision.Frame(area, view.zoom)
+        base = side_by_side(design, lk.live, area)[0] if view.zoom == 1 else None
+        lk.view_lines, lk.image = vision.compose_view(
+            view, frame, cat, dsc, live, facts, plots, tags or (plots, []),
+            title=f"look {s.name}", plain_base=base)
+    return lk
+
+
+@dataclass
+class MapLook:
+    """A map look (``vision.map_mode``): counts per cell, no verdicts."""
+    surface: str
+    area: tuple
+    zoom: int
+    tick: int | None
+    view_lines: list
+    image: str | None = None
+    calls: list = field(default_factory=list)       # seconds of each game call
+    notes: list = field(default_factory=list)
+
+    def lines(self):
+        a = ",".join(str(int(v)) for v in self.area)
+        out = [f"look {self.surface} --source world, area {a}, tick {self.tick}: map view at "
+               f"zoom {self.zoom}, counts per cell (verdicts come from a look at zoom 1 to 4 "
+               f"of {vision.MAP_TILES} tiles or fewer)"]
+        out += self.view_lines
+        if self.calls:
+            out.append(f"read in {len(self.calls)} game call(s), {sum(self.calls):.2f} s "
+                       f"(longest {max(self.calls):.2f} s)")
+        out += [f"note: {n}" for n in self.notes]
+        return out
+
+
+def image_path(game, area, zoom):
+    """Where ``--image`` writes when no path is given: ``<game>/out/look-X0_Y0_X1_Y1-zN.png``."""
+    a = "_".join(str(int(v)) for v in area)
+    return os.path.join(game, "out", f"look-{a}-z{zoom}.png")
+
+
+def _vision_facts(r, sf, s, area, view, plots, cells, timings):
+    from .apply import force_for
+    play = sf.mode != "lab"
+    want = [n for n in view.layers if n != "tags"]
+    if not want and not cells and not (play and view.zoom > 1):
+        return None
+    force = getattr(sf, "force", None) or force_for(sf.mode)
+    cfg = vision.read_config(sf.name, force, vision.Frame(area, view.zoom), want, play,
+                             plots if cells else (), cells, link.SKIP_TYPES)
+    return link.vision_read(r, cfg, timings=timings)
 
 
 def _rows(text, w, h):
@@ -251,9 +318,11 @@ def side_by_side(design, live, area, max_width=MAX_WIDTH):
     return out, differ
 
 
-def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag="look") -> Look:
+def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag="look",
+        view=None):
     """Look at ``area`` of the game codebase ``game`` in the game: snapshot, sense, render; write
-    the marks (``write_marks``) and push (notify all)."""
+    the marks (``write_marks``) and push (notify all). ``view`` (``vision.View``): zoom, layers,
+    image; a map look returns a :class:`MapLook`."""
     sf, surface_lay, lay_path, s = composed(game, cat)
     if area is None:
         if sf.mode != "lab":
@@ -262,10 +331,32 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
         area = default_area(s, cat)
         if area is None:
             raise LookError("nothing is designed on this surface")
+    if view is not None and view.image == "":
+        view = vision.View(view.zoom, view.layers, image_path(game, area, view.zoom))
+    if view is not None and not view.plain:
+        tags = vision.design_tags(game, sf, s)
+        area = tuple(int(v) for v in area)
+        timings = []
+        if vision.map_mode(area, view.zoom):
+            raw = _vision_facts(r, sf, s, area, view, tags[0], True, timings)
+            facts = vision.facts_from_read(raw)
+            dsc = scene.design_scene(s, cat, list(area))
+            lines, image = vision.compose_view(view, vision.Frame(area, view.zoom), cat, dsc,
+                                               None, facts, tags[0], tags,
+                                               title=f"look {sf.name}")
+            return MapLook(sf.name, area, view.zoom, facts.tick, lines, image, timings,
+                           [f"composed surface: {p}" for p in s.problems])
     items, notes = net_items(game, sf, cat)
     pol = policy(sf, notify, watch)
     live = scene.from_capture(link.snapshot(r, sf.name, area, tag, keep=False))
-    lk = report(s, live, cat, area, pol, items, ownmod.load(game, sf.name))
+    facts = tags = None
+    if view is not None and not view.plain:
+        raw = _vision_facts(r, sf, s, area, view, (), False, timings)
+        tags = vision.design_tags(game, sf, s)
+        facts = vision.facts_from_read(raw, live, tags[0]) if raw is not None else None
+        if facts is None and view.layers:
+            facts = vision.facts_from_read({}, live, tags[0])
+    lk = report(s, live, cat, area, pol, items, ownmod.load(game, sf.name), view, facts, tags)
     ghosts = sorted({v.name for v in lk.rep.verdicts if v.verdict == "ghost"})
     if ghosts:
         # a ghost that stays is a blocked build: say why (SHORT: the network holds none of the

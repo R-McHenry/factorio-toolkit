@@ -190,11 +190,22 @@ def _world(a, cat, what, body):
     return 0
 
 
+def _view(a):
+    """The look's vision.View from --zoom, --layers and --image; exits with the reason."""
+    from . import vision
+    try:
+        layers = vision.parse_layers(a.layers)
+    except ValueError as exc:
+        raise SystemExit(f"error: look --layers: {exc}")
+    return vision.View(a.zoom, layers, a.image)
+
+
 def _look_world(a, cat):
     from . import look
     area = _area(a.area)
+    view = _view(a)
     return _world(a, cat, "look --source world", lambda r: look.run(
-        r, a.game, cat, area, a.notify, a.watch, a.write_marks).lines())
+        r, a.game, cat, area, a.notify, a.watch, a.write_marks, view=view).lines())
 
 
 def _alerts(a, cat):
@@ -279,6 +290,23 @@ def _look(a, cat):
         print(f"error: {exc}", file=sys.stderr)
         return 2
     box = _area(a.area)
+    view = _view(a)
+    if not view.plain:
+        from . import scene, vision
+        box = box or look.default_area(s, cat)
+        if box is None:
+            print("error: nothing is designed on this surface", file=sys.stderr)
+            return 2
+        if view.image == "":
+            view = vision.View(view.zoom, view.layers, look.image_path(a.game, box, view.zoom))
+        tags = vision.design_tags(a.game, sf, s)
+        lines, _img = vision.compose_view(view, vision.Frame(box, view.zoom), cat,
+                                          scene.design_scene(s, cat, list(box)), plots=tags[0],
+                                          tags=tags, title=f"look {sf.name} --source design")
+        print(f"look {sf.name} --source design: {len(s.plots)} plots, {len(s.entities)} "
+              f"entities, {len(s.problems)} invariant problems; zoom {view.zoom}")
+        print("\n".join(lines))
+        return 0
     print(f"look {sf.name} --source design: {len(s.plots)} plots, {len(s.entities)} entities, "
           f"{len(s.problems)} invariant problems (. plot, : claim, ! mark, blank sanctioned)")
     print(compose.render(s, cat, box))
@@ -1131,6 +1159,13 @@ def main(argv=None):
     lk.add_argument("--notify", choices=("nearby", "all", "off"))
     lk.add_argument("--watch", help="strict | keep | revert | mark DUR, or plots=A,sanctioned=B")
     lk.add_argument("--write-marks", action="store_true")
+    lk.add_argument("--zoom", type=int, default=1, choices=(1, 2, 4, 8, 16, 32),
+                    help="tiles a cell (2.1): 1 draws every tile; from 8 up, a map with plots")
+    lk.add_argument("--layers", default="", metavar="NAME[,NAME]|all",
+                    help="robots, power, defense, pollution, pipes, recipes, tags, or all")
+    lk.add_argument("--image", nargs="?", const="", default=None, metavar="PATH",
+                    help="write a PNG instead of the text renders (default "
+                         "<game>/out/look-X0_Y0_X1_Y1-zN.png) and print its path")
     wt = sub.add_parser("wait", description="a bounded wait for the ghosts in an area (fkcore.wait)")
     wt.add_argument("game")
     wt.add_argument("what", choices=("built",))

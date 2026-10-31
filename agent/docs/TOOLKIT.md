@@ -17,6 +17,9 @@ fk build --to diff               a dry run: the design against the world and wha
                                  take up; nothing written, nothing pasted
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
+fk look AREA --zoom 16 --layers all --image
+                                 zoomed out, with every layer, as a PNG (see "Zoom, layers and
+                                 images")
 ```
 
 Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, and `fk wait built
@@ -423,6 +426,55 @@ Anything in the area that the design doesn't explain is:
   placed it, and a hint when it looks like a fix to a net)
 - `unowned`: nobody owns it; the next build removes it. This is also what the toolkit built and
   your design no longer has ("the toolkit's own, dropped from the design")
+
+### Zoom, layers and images
+
+`fk look AREA --zoom N` draws N tiles in one cell (N is 1, 2, 4, 8, 16 or 32). Zoom 1 draws every
+tile, as before; without a layer it is the same text as before.
+
+- **A cell shows what matters most in it**, in this order: a machine (the commonest kind), a
+  roboport, a turret, belt when at least half of what is in the cell is belt (its main direction:
+  `^ > v <`), a tank `K`, a chest, an accumulator `Z`, a solar panel `Y`, a beacon `b`, a radar `r`,
+  any belt, a pump `P`, an inserter, a combinator `c`, a pipe, a pole, a power switch `$`, a wall
+  `#`. `?` is anything else, `.` free ground. A line under the render names the glyphs it shows.
+- **From zoom 8 up, each plot is its outline** (`*---*`, `|`) with its name and how many machines
+  stand in it, like the game's map view.
+- **Zoom 8 and up, or more than 65536 tiles, is a map look.** It reads counts per cell, not every
+  entity, so a look at the whole base is quick (a base of 1024 x 1024 tiles and 87,000 entities
+  reads in about 1.3 s). It gives no verdicts: look at zoom 1 to 4 for those.
+- **In play mode a zoomed-out look reads only charted chunks**, what your map view shows. An
+  uncharted chunk is blank. The lab is all charted.
+
+`--layers NAME,...` (or `--layers all`) adds one panel for each layer, design | live, each with
+legend lines under it. A layer's marks go on free cells, and its points go over anything.
+
+- **`robots`**: each roboport's logistic area in its network's key (`1`, `2`...) and its
+  construction area as `,`. The legend gives each logistic network's robots: logistic and
+  construction, busy and idle, in flight, docked and charging. `!` is a ghost outside every
+  construction area: robots never build it.
+- **`power`**: each electric network's pole supply area in its key, `X` a machine with no power,
+  `~` one with low power, and each power switch, `$` on or `/` off.
+- **`defense`**: turret ranges (`g` gun, `l` laser, `f` flamethrower, `a` artillery, `*` two
+  kinds), `T` a turret and `0` one with no ammo, `x` land mines, `#` walls and `G` gates, `!` a wall
+  outside every turret's range (a gap in the ring), `@` a nest and `w` a worm. The legend gives the
+  ammo.
+- **`pollution`**: each chunk's pollution in bands (`1` up to 20, `2` up to 100, `3` up to 500, `4`
+  more), and `!` a nest the pollution reaches.
+- **`pipes`**: each pipeline in its own letter, with its fluid and how full it is in the legend,
+  `K` a tank, `P` a pump, and `!` a machine with a fluid connection nothing meets.
+- **`recipes`**: each machine's recipe as a short tag on its top row (`gear`, `circ`, `adv`) and
+  its status below it (`*` working, `n` no ingredients, `f` output full, `P` no power...). Zoomed
+  out, a cell shows the recipe's key, or `!` when a machine there doesn't work. The tags are in
+  `fkcore/data/recipe-tags.json`; a recipe it lacks gets one made from its name.
+- **`tags`**: your design's plots (outlined) and instances (a letter on each one's corner).
+
+The design side gets the layers the design knows: coverage, networks, turret ranges, recipes and
+tags. Pollution and pipes are the game's only.
+
+`--image` writes a PNG instead of the text renders, and prints its path (`out/look-X0_Y0_X1_Y1-zN.png`
+under the game folder, or `--image PATH`). It has the same render and the same layers: cells in
+colour, layers as tints and outlines, and labels. Read it like a screenshot. The legend lines stay
+in the text.
 
 ## The checks
 

@@ -694,9 +694,219 @@ def check_capital(save=None):
     return 0 if max(took) < 5 and out[0].startswith("capital nauvis") else 1
 
 
+#: check_vision's base around games/lab-sense (iron 310,420 20x24, gears 332,420 16x16): power
+#: network A (an energy interface, poles, two assemblers, a laser turret, roboport A with robots
+#: and a storage chest, a requester), a power switch left open to network B (an assembler with no
+#: power), roboport B far east (its own logistic network), ghosts inside A's construction area
+#: (robots fly) and two outside every construction area, two gun turrets (one empty), a wall with a
+#: gate and a gap, land mines, a nest and a worm, pollution, a water line with a pump and a tank, a
+#: crude line, and a chemical plant no pipe meets. Test setup, by Lua.
+VISION_SETUP = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local function at(name, x, y, extra)
+  local t = {name = name, position = {x, y}, force = f}
+  for k, v in pairs(extra or {}) do t[k] = v end
+  return s.create_entity(t)
+end
+local function wire(a, b, ida, idb)
+  a.get_wire_connector(ida or defines.wire_connector_id.pole_copper, true).connect_to(
+    b.get_wire_connector(idb or defines.wire_connector_id.pole_copper, true))
+end
+local eei = at('electric-energy-interface', 281, 461)
+eei.power_production = 1000000
+eei.electric_buffer_size = 10000000
+local pa = {at('medium-electric-pole', 283.5, 461.5), at('medium-electric-pole', 290.5, 461.5),
+            at('medium-electric-pole', 297.5, 461.5), at('medium-electric-pole', 283.5, 468.5),
+            at('medium-electric-pole', 283.5, 475.5), at('medium-electric-pole', 290.5, 468.5)}
+wire(pa[1], pa[2]) wire(pa[2], pa[3]) wire(pa[1], pa[4]) wire(pa[4], pa[5]) wire(pa[2], pa[6])
+at('assembling-machine-2', 288.5, 465.5, {recipe = 'iron-gear-wheel'})
+at('assembling-machine-2', 293.5, 465.5, {recipe = 'copper-cable'})
+at('laser-turret', 291, 471)
+local sw = at('power-switch', 301, 462)
+local pb = at('medium-electric-pole', 307.5, 461.5)
+wire(pa[3], sw, nil, defines.wire_connector_id.power_switch_left_copper)
+wire(pb, sw, nil, defines.wire_connector_id.power_switch_right_copper)
+sw.power_switch_state = false
+at('assembling-machine-2', 310.5, 465.5, {recipe = 'electronic-circuit'})
+local ra = at('roboport', 287, 477)
+ra.insert{name = 'construction-robot', count = 10}
+ra.insert{name = 'logistic-robot', count = 5}
+local st = at('storage-chest', 293.5, 477.5)
+st.insert{name = 'wooden-chest', count = 50}
+st.insert{name = 'iron-plate', count = 200}
+local rq = at('requester-chest', 309.5, 498.5)
+rq.get_logistic_sections().get_section(1).set_slot(1, {value = 'iron-plate', min = 200})
+for k = 0, 9 do at('entity-ghost', 330.5 + k, 497.5, {inner_name = 'wooden-chest'}) end
+at('entity-ghost', 343.5, 492.5, {inner_name = 'wooden-chest'})
+at('entity-ghost', 343.5, 493.5, {inner_name = 'wooden-chest'})
+local rb = at('roboport', 400, 476)
+rb.insert{name = 'construction-robot', count = 2}
+local g1 = at('gun-turret', 360, 470)
+g1.insert{name = 'firearm-magazine', count = 20}
+at('gun-turret', 372, 470)
+for x = 350, 390 do
+  if x == 370 then at('gate', x + 0.5, 486.5, {direction = defines.direction.east})
+  else at('stone-wall', x + 0.5, 486.5) end
+end
+for k = 0, 2 do at('land-mine', 355.5 + 2 * k, 495.5) end
+s.create_entity{name = 'biter-spawner', position = {410, 440}, force = 'enemy'}
+s.create_entity{name = 'small-worm-turret', position = {405, 455}, force = 'enemy'}
+for x = 320, 327 do at('pipe', x + 0.5, 472.5).insert_fluid{name = 'water', amount = 50} end
+at('pump', 329, 472.5, {direction = defines.direction.east})
+for x = 330, 335 do at('pipe', x + 0.5, 472.5).insert_fluid{name = 'water', amount = 20} end
+local tank = at('storage-tank', 317.5, 473.5)
+tank.insert_fluid{name = 'water', amount = 8000}
+for x = 320, 326 do at('pipe', x + 0.5, 477.5).insert_fluid{name = 'crude-oil', amount = 40} end
+at('chemical-plant', 340.5, 476.5, {recipe = 'plastic-bar'})
+game.map_settings.pollution.enabled = true
+s.pollute({400, 430}, 200)
+s.pollute({300, 470}, 50)
+s.pollute({330, 430}, 800)
+rcon.print('ok')
+"""
+
+#: check_vision's big base: per chunk of the area, nine assemblers, a belt row, inserters and
+#: poles (about 60 entities a chunk), laid in batches of chunks.
+VISION_BIG = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local n = 0
+for cx = CX0, CX1 do for cy = CY0, CY1 do
+  local x, y = cx * 32, cy * 32
+  for i = 0, 2 do for j = 0, 2 do
+    if s.create_entity{name = 'assembling-machine-2', position = {x + 2.5 + 4 * i, y + 2.5 + 4 * j}, force = f, recipe = 'iron-gear-wheel'} then n = n + 1 end
+  end end
+  for i = 0, 31 do
+    if s.create_entity{name = 'transport-belt', position = {x + i + 0.5, y + 14.5}, direction = defines.direction.east, force = f} then n = n + 1 end
+    if s.create_entity{name = 'transport-belt', position = {x + 20.5, y + i + 0.5}, direction = defines.direction.south, force = f} then n = n + 1 end
+  end
+  for i = 0, 8 do
+    if s.create_entity{name = 'inserter', position = {x + 1.5 + i, y + 13.5}, force = f} then n = n + 1 end
+  end
+  for i = 0, 3 do
+    if s.create_entity{name = 'medium-electric-pole', position = {x + 24.5, y + 0.5 + 8 * i}, force = f} then n = n + 1 end
+  end
+end end
+rcon.print(n)
+"""
+
+
+def check_vision():
+    """2.1 vision: a small base around games/lab-sense (VISION_SETUP) looked at with --layers
+    all at zoom 1, 4 and 16, as text and as a PNG; then a big base (about 60k entities on 1024
+    chunks) looked at zoom 16 and 32 over the whole of it, timed; then fair play on nauvis in play
+    mode: a map look draws only the charted chunk. Everything goes to out/vision-check/."""
+    import json
+    from unittest import mock
+    from fkcore import apply as applymod, look, vision
+    from fkcore.catalog import Catalog
+    cat = Catalog.load()
+    out = os.path.join(ROOT, "out", "vision-check")
+    game = os.path.join(out, "game")
+    shutil.rmtree(game, ignore_errors=True)
+    shutil.copytree(os.path.join(ROOT, "games", "lab-sense"), game)
+    play = os.path.join(out, "game-play")
+    shutil.rmtree(play, ignore_errors=True)
+    os.makedirs(play)
+    with open(os.path.join(play, "nauvis.surface"), "w", encoding="utf-8") as fh:
+        fh.write("surface  nauvis\nmode     play\nterrain  none\ncatalog  base\n")
+    area = (270, 410, 420, 500)
+    big = (1024, -512, 2048, 512)
+    results, ok = {}, True
+
+    def save(name, lines):
+        with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+
+    with LaptopServer("vision", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            r.lua(link.lua_generate_area("lab", "lab", (area[0] - 64, area[1] - 64,
+                                                        area[2] + 64, area[3] + 64)))
+            sf, _lay, _p, s = look.composed(game, cat)
+            rep = applymod.apply(r, s, cat, mode="lab", force="lab")
+            print("\n".join(rep.lines()[:3]))
+            print("setup:", r.lua(VISION_SETUP).strip())
+            time.sleep(1)
+            for z in (1, 4, 16):
+                t0 = time.time()
+                lk = look.run(r, game, cat, area, notify="off",
+                              view=vision.View(z, vision.LAYERS))
+                took = time.time() - t0
+                lines = lk.lines()
+                save(f"look-z{z}.txt", lines)
+                png = os.path.join(out, f"look-z{z}.png")
+                lki = look.run(r, game, cat, area, notify="off",
+                               view=vision.View(z, vision.LAYERS, png))
+                save(f"look-z{z}-image.txt", lki.lines())
+                results[f"z{z}"] = (took, len(lines), png)
+                print(f"zoom {z}: {len(lines)} lines in {took:.2f} s; {png}")
+            cap = link.snapshot(r, "lab", area, "plain", keep=False)
+            with mock.patch.object(link, "snapshot", lambda *_a, **_k: cap):
+                plain = look.run(r, game, cat, area, notify="off")
+                same = plain.lines() == look.run(r, game, cat, area, notify="off",
+                                                 view=vision.View()).lines()
+            save("look-plain.txt", plain.lines())
+            print("zoom 1, no layers: the plain look", "OK" if same else "NOT the same")
+            ok = ok and same
+            # the big base
+            r.lua(link.lua_generate_area("lab", "lab", big))
+            laid, t0 = 0, time.time()
+            cxs = list(range(big[0] // 32, big[2] // 32))
+            for k in range(0, len(cxs), 2):
+                lua = (VISION_BIG.replace("CX0", str(cxs[k])).replace("CX1", str(cxs[min(k + 1, len(cxs) - 1)]))
+                       .replace("CY0", str(big[1] // 32)).replace("CY1", str(big[3] // 32 - 1)))
+                laid += int(r.lua(lua).strip())
+            print(f"big base: {laid} entities laid in {time.time() - t0:.1f} s")
+            for z, layers in ((32, ()), (16, ()), (16, vision.LAYERS), (8, ())):
+                t0 = time.time()
+                lk = look.run(r, game, cat, big, notify="off",
+                              view=vision.View(z, layers, os.path.join(
+                                  out, f"big-z{z}{'-all' if layers else ''}.png")))
+                took = time.time() - t0
+                save(f"big-z{z}{'-all' if layers else ''}.txt", lk.lines())
+                results[f"big z{z}{' all' if layers else ''}"] = (took, max(lk.calls), len(lk.calls))
+                print(f"big base, zoom {z}{' layers all' if layers else ''}: {took:.2f} s, "
+                      f"{len(lk.calls)} game calls, longest {max(lk.calls):.2f} s")
+                ok = ok and max(lk.calls) < 5
+            lk = look.run(r, game, cat, big, notify="off", view=vision.View(16))
+            save("big-z16.txt", lk.lines())
+            # fair play: nauvis in play mode, two chunks built and charted by nobody (a
+            # headless server with no player charts nothing, even after force.chart)
+            setup = """
+local s, f = game.surfaces.nauvis, game.forces.player
+s.request_to_generate_chunks({1040, 16}, 2)
+s.force_generate_chunk_requests()
+local tiles = {}
+for x = 1024, 1087 do for y = 0, 31 do tiles[#tiles + 1] = {name = 'landfill', position = {x, y}} end end
+s.set_tiles(tiles)
+for _, e in pairs(s.find_entities_filtered{area = {{1024, 0}, {1088, 32}}}) do e.destroy() end
+f.cancel_charting(s)
+for _, c in pairs({{1032.5, 8.5}, {1064.5, 8.5}}) do
+  s.create_entity{name = 'assembling-machine-2', position = c, force = f}
+end
+f.chart(s, {{1024, 0}, {1055, 31}})
+rcon.print(tostring(f.is_chunk_charted(s, {32, 0})) .. ' ' .. tostring(f.is_chunk_charted(s, {33, 0})))
+"""
+            print("play setup (chunk 32,0 and 33,0 charted):", r.lua(setup).strip())
+            time.sleep(1)
+            pl = look.run(r, play, cat, (1024, 0, 1088, 32), notify="off",
+                          view=vision.View(8, ("recipes", "power")))
+            save("play-z8.txt", pl.lines())
+            rows = [ln for ln in pl.lines() if ln[:5].strip().lstrip("-").isdigit()]
+            print("\n".join(pl.lines()))
+            fair = bool(rows) and all(r_[17:25] == "        " for r_ in rows) \
+                and "recipes: no crafting machine here" in pl.lines()
+            print("fair play (uncharted chunks are blank, their machines unread):",
+                  "OK" if fair else "NOT")
+            ok = ok and fair
+    with open(os.path.join(out, "results.json"), "w", encoding="utf-8") as fh:
+        json.dump(results, fh, indent=1)
+    print("vision:", "OK" if ok else "NOT as designed")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
                       "turned": check_turned, "health": check_health,
                       "settings": check_settings, "lab": check_lab,
-                      "capital": check_capital}[what]())
+                      "capital": check_capital, "vision": check_vision}[what]())
