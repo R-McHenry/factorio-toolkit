@@ -105,6 +105,7 @@ class ApplyReport:
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
+    released: dict = field(default_factory=dict)  # roboports not held, and why (2.1.2)
     hand: list = field(default_factory=list)   # placed by hand, replaced or removed (2.0)
     turned: list = field(default_factory=list)  # keys found turned, ordered out, laid fresh (2.0.5)
     relaid: list = field(default_factory=list)   # carriers laid fresh under another net
@@ -142,6 +143,9 @@ class ApplyReport:
                 out.append(f"  scaffold: {self.held} old poles and roboports stay up until the "
                            "design's own stand here, so power and robots keep running; the "
                            "first apply after that takes them up")
+            for why, n in sorted(self.released.items()):
+                out.append(f"  scaffold: {n} old roboport{'s' if n != 1 else ''} ordered out "
+                           f"now, {why}")
             if self.hand:
                 out.append(f"  by-hand: {len(self.hand)} placed by hand, replaced or removed by "
                            "this build (adopt into the design, leave out, or come back to it):")
@@ -333,7 +337,9 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.dnp_kept = sum(1 for v in before.verdicts if v.verdict == "dnp-standing")
         rep.dnp_taken = sum(1 for v in before.verdicts if v.verdict == "unowned"
                             and v.key and v.detail.startswith(("DNP", "a ghost of a DNP")))
-        held = scaffold(before, s, cat, area)
+        stock = _scaffold_stock(r, s.name, force, before, cat)
+        held = scaffold(before, s, cat, area, stock)
+        rep.released = _released(before, s, cat, area, held)
         rep.hand = sense.hand_edits(before, held)
         gone = [v for v in before.verdicts
                 if v.verdict == "unowned" and (v.name, v.x, v.y) not in held]
@@ -419,23 +425,105 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     return rep
 
 
-def scaffold(before, s, cat, area):
+#: why an old roboport is not held up (2.1.2)
+MOVED_OUT = "the toolkit's own, moved or dropped in the design"
+STOCK_OUT = "since the network holds too few roboports to build the design's: theirs build them"
+
+
+def _kind(cat, name):
+    try:
+        return cat.kind(name)
+    except KeyError:
+        return None
+
+
+def _waiting(before, cat):
+    """[(name, x, y)] of the design's roboports the paste lays (not built yet)."""
+    return [(v.name, v.x, v.y) for v in before.verdicts
+            if v.verdict in ("ghost", "not-placed", "other-entity") and _kind(cat, v.name) == "roboport"]
+
+
+def _waiting_roboports(before, cat):
+    """{name: count} of the design's roboports the paste lays (not built yet)."""
+    out = {}
+    for name, _x, _y in _waiting(before, cat):
+        out[name] = out.get(name, 0) + 1
+    return out
+
+
+def _scaffold_stock(r, surface, force, before, cat):
+    """{roboport name: items of it in the networks whose construction areas reach the design's
+    roboports waiting to be built}, or None when none waits or the read fails (2.1.2)."""
+    waiting = _waiting(before, cat)
+    if not waiting:
+        return None
+    try:
+        got = json.loads(r.lua(_lua_build_stock(surface, force, waiting)).strip())
+        return {n: int(got.get(n, 0)) for n, _x, _y in waiting} if isinstance(got, dict) else \
+            {n: 0 for n, _x, _y in waiting}
+    except (link.LinkError, OSError, ValueError, KeyError, TypeError, IndexError):
+        return None
+
+
+def _lua_build_stock(surface, force, things):
+    """{name: items of it} in the logistic networks whose construction areas reach ``things``
+    [(name, x, y)], each network counted once (a free read)."""
+    data = json.dumps([[n, float(x), float(y)] for n, x, y in things])
+    q = link._q
+    return f"""
+local s, f = game.get_surface({q(surface)}), game.forces[{q(force)}]
+local out, seen = {{}}, {{}}
+for _, t in pairs(helpers.json_to_table({q(data)})) do
+  out[t[1]] = out[t[1]] or 0
+  for _, net in pairs(s.find_logistic_networks_by_construction_area({{t[2], t[3]}}, f)) do
+    local k = t[1] .. '/' .. net.network_id
+    if not seen[k] then
+      seen[k] = true
+      out[t[1]] = out[t[1]] + net.get_item_count(t[1])
+    end
+  end
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
+def _released(before, s, cat, area, held):
+    """{why: how many} of the built unowned roboports :func:`scaffold` would have held before
+    2.1.2 and orders out now."""
+    old = scaffold(before, s, cat, area, moved=False)
+    out = {}
+    for v in before.verdicts:
+        if (v.name, v.x, v.y) in old and (v.name, v.x, v.y) not in held:
+            why = MOVED_OUT if v.action == "own" else STOCK_OUT
+            out[why] = out.get(why, 0) + 1
+    return out
+
+
+def scaffold(before, s, cat, area, stock=None, moved=True):
     """What an apply leaves standing for now (1.7, Rory 2026-10-21: old poles and roboports stay
     up until the new grid stands, so a rebuild doesn't cut power or the robot network; both
     overnight players lost power to a re-laid grid): the built ``unowned`` poles and roboports on
     no tile of the design, while a pole (or roboport) the design has in ``area`` is not built
     yet (a ghost, missing, or under something else). One under a design tile goes as before (the
-    paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}."""
+    paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}.
+
+    2.1.2: a roboport the design moved or dropped (the toolkit's own) is never held: it goes as
+    any unowned entity does (the 10-31 run's moved roboports stood after two applies; ``moved``
+    False keeps the 1.7 rule). ``stock``: {roboport name: items in the network} for the design's
+    roboports waiting; no old roboport is held while the network holds fewer than they need: the
+    old ones are taken up first and their items build the new (10-29: the replacements waited as
+    ghosts for the scaffold's own items, a deadlock)."""
     def kind(name):
-        try:
-            return cat.kind(name)
-        except KeyError:
-            return None
+        return _kind(cat, name)
 
     waiting = {kind(v.name) for v in before.verdicts
                if v.verdict in ("ghost", "not-placed", "other-entity") and kind(v.name) in SCAFFOLD_KINDS}
     if not waiting:
         return set()
+    if stock is not None:
+        need = _waiting_roboports(before, cat)
+        if any(stock.get(n, 0) < k for n, k in need.items()):
+            waiting.discard("roboport")
     taken = set()
     for e in s.entities.values():
         if _touches(e.tiles, area):
@@ -443,6 +531,8 @@ def scaffold(before, s, cat, area):
     out = set()
     for v in before.verdicts:
         if v.verdict != "unowned" or v.ghost or kind(v.name) not in waiting:
+            continue
+        if moved and kind(v.name) == "roboport" and v.action == "own":
             continue
         tiles = {tuple(t) for t in cat.tiles(v.name, float(v.x), float(v.y), 0)}
         if not tiles & taken:
