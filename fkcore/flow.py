@@ -885,7 +885,8 @@ def s_route(ctx, args):
         try:
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
                                    blocked=blocked, hand=hand, patch=pinned, ug=ug,
-                                   m2m=o["m2m"] not in (False, "no"))
+                                   m2m="left" if o["m2m"] == "left"
+                                   else o["m2m"] not in (False, "no"))
         finally:
             route.PROGRESS = saved
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)

@@ -7,13 +7,14 @@ from every producer to every consumer. A producer is a requester chest at a rate
 items on the net's belt by an inserter), a consumer a provider chest at a rate (it takes them off by
 one). Everything is generated here, offline: no game, no committed file.
 
-Per case it prints one row: the net's flow (demand), the max-flow of what was laid, one lane a run
-(``fkcore.maxflow``), reach (``fkcore.connect``'s verdict: every producer reaches every consumer, no
-SPILL), the waist (the runs crossing the vertical line midway between the columns, and the fewest
+Per case it prints one row: the net's flow (demand), the max-flow of what was laid on the lane
+graph as it is (``fkcore.maxflow``, ``lanes=True``), reach (``fkcore.connect``'s verdict: every
+producer reaches every consumer, no SPILL), the waist (the runs crossing the vertical line midway between the columns, and the fewest
 across any vertical line of the gap), belts, underground ends, splitters, inserters, the runs the
-router added, its belt cost (steiner's costs) and the route time. ``--today`` adds a row per case
-routed without ``--m2m`` (the router as it was: one trunk, both lanes by a side-load above one
-lane), its max-flow counted on both lanes. ``--balancer`` adds a row per case laid through a
+router added, its belt cost (steiner's costs) and the route time. The m2m router fills both lanes
+(2.1.21); ``--left`` adds a row per case on the left lane only (``m2m-left``, version 1).
+``--today`` adds a row per case routed without ``--m2m`` (the router as it was: one trunk, both
+lanes by a side-load above one lane). ``--balancer`` adds a row per case laid through a
 balancer at the waist (``lay_balancer``: Rory's layers of splitters alternating by one).
 
 Keep the table as it is printed: later versions of the router are compared on it.
@@ -98,8 +99,8 @@ def _crossing(g, nodes, x):
 
 
 def measure(name, cat, m2m=True, gap=GAP, router=None):
-    """One row of the table, as a dict. ``router``: "m2m" (default with ``m2m``), "today" or
-    "balancer" (``lay_balancer``)."""
+    """One row of the table, as a dict. ``router``: "m2m" (default with ``m2m``), "m2m-left",
+    "today" or "balancer" (``lay_balancer``)."""
     router = router or ("m2m" if m2m else "today")
     flat, lay, bounds, blocked, mid = build(name, cat, gap)
     t0 = time.time()
@@ -107,20 +108,14 @@ def measure(name, cat, m2m=True, gap=GAP, router=None):
         r = lay_balancer(flat, lay, cat, bounds, blocked, mid)
     else:
         r = route.route_layout(flat, lay, cat, bounds=bounds, blocked=sorted(blocked),
-                               m2m=router == "m2m")
+                               m2m="left" if router == "m2m-left" else router == "m2m")
     secs = time.time() - t0
     ends = {n: tuple(v) for n, v in connect.endpoints(flat).items()}      # every pair, not dealt
     rep = connect.connect(r.layout, cat, ends)
     nr = rep.nets.get(NET)
     reach = bool(nr and nr.connected and not nr.leaks)
     mine = [e for e in r.layout.entities.values() if e.owner == f"~{NET}"]
-    flow = maxflow.of_net(flat, r.layout, cat, NET)
-    if router == "today":
-        # the router as it was may put the net on both lanes: count both
-        from fkcore import lanes as lanesmod
-        supply, take = maxflow.rates_of(flat, NET)
-        lg_ents = mine + [r.layout.entities[k] for k in set(supply) | set(take)]
-        flow = _two_lane(lanesmod, lg_ents, cat, supply, take, flow.demand)
+    flow = maxflow.of_net(flat, r.layout, cat, NET, lanes=True)
     keys = {e.key for e in mine}
     g = rep.graph
     waist = _crossing(g, keys, mid)
@@ -325,54 +320,6 @@ def _rect(cat, e):
             max(t[1] for t in ts) + 1)
 
 
-def _two_lane(lanesmod, ents, cat, supply, take, demand):
-    """The max-flow on both lanes of every carrier (the lane graph as it is)."""
-    lg = lanesmod.build(ents, cat)
-    from collections import deque
-    res, adj = {}, {}
-
-    def link(u, v, c):
-        if (u, v) not in res:
-            adj.setdefault(u, []).append(v)
-            adj.setdefault(v, []).append(u)
-            res[(u, v)] = 0.0
-            res.setdefault((v, u), 0.0)
-        res[(u, v)] += c
-
-    for nid, n in lg.nodes.items():
-        link((nid, 0), (nid, 1), min(n.cap, 1e9))
-    for e in lg.edges():
-        link((e.src, 1), (e.dst, 0), min(e.cap, 1e9))
-    for k, v in supply.items():
-        if (k, "") in lg.nodes:
-            link("S", ((k, ""), 0), v)
-    for k, v in take.items():
-        if (k, "") in lg.nodes:
-            link(((k, ""), 1), "T", v)
-    total = 0.0
-    while True:
-        par, todo = {"S": None}, deque(["S"])
-        while todo and "T" not in par:
-            u = todo.popleft()
-            for v in adj.get(u, ()):
-                if v not in par and res[(u, v)] > 1e-9:
-                    par[v] = u
-                    todo.append(v)
-        if "T" not in par:
-            break
-        push, v = float("inf"), "T"
-        while par[v] is not None:
-            push = min(push, res[(par[v], v)])
-            v = par[v]
-        v = "T"
-        while par[v] is not None:
-            res[(par[v], v)] -= push
-            res[(v, par[v])] += push
-            v = par[v]
-        total += push
-    return maxflow.Flow(total, demand, 7.5)
-
-
 def draw(m, cat):
     """The case as laid, in text: belts ^ > v <, splitters S, underground ends U (in) and u
     (out), inserters i, producers P, consumers C, the wall #, the midline : where it is free."""
@@ -428,6 +375,7 @@ def table(rows):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--only", default="", help="case names, comma separated")
+    ap.add_argument("--left", action="store_true", help="also route each case on the left lane only")
     ap.add_argument("--today", action="store_true", help="also route each case without --m2m")
     ap.add_argument("--balancer", action="store_true",
                     help="also lay each case through a balancer at the waist")
@@ -439,7 +387,8 @@ def main(argv=None):
     names = [n for n in CASES if not a.only or n in a.only.split(",")]
     rows = []
     for name in names:
-        routers = ["m2m"] + (["today"] if a.today else []) + (["balancer"] if a.balancer else [])
+        routers = (["m2m"] + (["m2m-left"] if a.left else []) + (["today"] if a.today else [])
+                   + (["balancer"] if a.balancer else []))
         for router in routers:
             m = measure(name, cat, gap=a.gap, router=router)
             rows.append(m)

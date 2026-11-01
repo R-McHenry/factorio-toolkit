@@ -1,7 +1,8 @@
 """2.1 m2m (DESIGN-M2M.md, releases 1 and 2): the many-to-many router's baseline (``route --m2m``:
 the hub without side-loads, then augmenting runs), the max-flow of a laid net (``fkcore.maxflow``,
 the ``MAXFLOW`` line) and the hourglass bench (``tools/hourglass.py``): a column of producers, a
-column of consumers, one net between them."""
+column of consumers, one net between them. 2.1.21: on both lanes, the router picking each
+driver's lane; ``route --m2m left`` is version 1, the left lane only."""
 import os
 import sys
 import unittest
@@ -46,6 +47,52 @@ class HourglassTest(unittest.TestCase):
         self.assertEqual(m["runs"], 0)
         self.assertEqual(m["splitters"], 2)          # one merge, one split: the hub as today
 
+    def test_the_waist_is_a_band_of_belts(self):
+        # two lanes a run: the waist is the flow in belts, rounded up
+        for name, m in self.rows.items():
+            with self.subTest(case=name):
+                need = -(-m["demand"] // 15.0)
+                self.assertGreaterEqual(m["narrow"], need)
+        self.assertEqual(self.rows["16to16"]["narrow"], 2)
+
+    def test_drivers_drop_on_both_lanes(self):
+        lg = lanes.build(self.rows["16to16"]["layout"], CAT)
+        onto = {e.dst[1] for e in lg.edges() if e.via == "drop"
+                and e.src[0].startswith("~plates/") and e.dst[1]}
+        self.assertEqual(onto, {"L", "R"})
+
+    def test_no_side_loads(self):
+        for name, m in self.rows.items():
+            lg = lanes.build(m["layout"], CAT)
+            with self.subTest(case=name):
+                self.assertFalse([e for e in lg.edges() if e.via in ("side", "ug_side")])
+
+    def test_maxflow_line(self):
+        m = self.rows["16to16"]
+        line = next(ln for ln in m["lines"] if ln.startswith("MAXFLOW"))
+        self.assertIn("22.4 of 22.4/s", line)
+        self.assertIn("m2m: ", m["line"])
+
+    def test_table(self):
+        text = hourglass.table(list(self.rows.values()))
+        self.assertIn("waist", text.splitlines()[0])
+        self.assertEqual(len(text.splitlines()), 2 + len(hourglass.CASES))
+
+
+class LeftTest(unittest.TestCase):
+    """``route --m2m left``: version 1, every driver on the left lane, one lane a run."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rows = {name: hourglass.measure(name, CAT, router="m2m-left")
+                    for name in hourglass.CASES}
+
+    def test_reach_and_demand(self):
+        for name, m in self.rows.items():
+            with self.subTest(case=name):
+                self.assertTrue(m["reach"], m["line"])
+                self.assertGreaterEqual(m["maxflow"], m["demand"] - 1e-6, m["line"])
+
     def test_the_waist_is_a_band_of_lanes(self):
         # one lane a run: the waist is the flow in lanes, rounded up
         for name, m in self.rows.items():
@@ -63,17 +110,6 @@ class HourglassTest(unittest.TestCase):
                     and e.src[0].startswith("~plates/") and e.dst[1]}
             with self.subTest(case=name):
                 self.assertEqual(onto, {"L"})
-
-    def test_maxflow_line(self):
-        m = self.rows["16to16"]
-        line = next(ln for ln in m["lines"] if ln.startswith("MAXFLOW"))
-        self.assertIn("22.4 of 22.4/s", line)
-        self.assertIn("m2m: ", m["line"])
-
-    def test_table(self):
-        text = hourglass.table(list(self.rows.values()))
-        self.assertIn("waist", text.splitlines()[0])
-        self.assertEqual(len(text.splitlines()), 2 + len(hourglass.CASES))
 
 
 class BalancerTest(unittest.TestCase):
@@ -133,7 +169,7 @@ class GateTest(unittest.TestCase):
         r = route.route_layout(flat, lay, CAT, bounds=box, m2m=True)
         self.assertEqual(r.failed, {})
         self.assertEqual(r.maxflow, {})
-        free = maxflow.of_net(flat, r.layout, CAT, "plates", unbounded=True)
+        free = maxflow.of_net(flat, r.layout, CAT, "plates", unbounded=True, lanes=True)
         self.assertGreaterEqual(free.lanes, 4 - 1e-6)
         self.assertFalse(any(ln.startswith("ribbon") for ln in r.lines))
         # without --m2m it is a ribbon, as before
@@ -178,6 +214,19 @@ class MaxflowTest(unittest.TestCase):
         u = maxflow.of_net(flat, lay, CAT, "n", unbounded=True)
         self.assertAlmostEqual(u.lanes, 1.0)          # one run: one lane
         self.assertTrue(all(k.startswith("~n/b") for k in u.cut), u.cut)
+
+    def test_lanes_a_belt_filled_from_one_side_carries_one_lane(self):
+        ents = [self.ins(0, 1, 0, 12), self.ins(1, 1, 2, 12), self.ins(2, 5, 0, 12),
+                self.ins(3, 5, 2, 12)]
+        ents += [self.belt(0, 2, 0, 8), self.belt(1, 2, 1, 8), self.belt(2, 2, 2, 8),
+                 self.belt(3, 2, 3, 4), self.belt(4, 3, 3, 4), self.belt(5, 4, 3, 0),
+                 self.belt(6, 4, 2, 0), self.belt(7, 4, 1, 0), self.belt(8, 4, 0, 0)]
+        flat, lay = self.lay(ents)
+        f = maxflow.of_net(flat, lay, CAT, "n", lanes=True)
+        self.assertAlmostEqual(f.value, 4.0)
+        u = maxflow.of_net(flat, lay, CAT, "n", unbounded=True, lanes=True)
+        self.assertAlmostEqual(u.lanes, 1.0)           # both drop on one side: one lane
+        self.assertTrue(all(":" in k for k in u.cut), u.cut)
 
     def test_short_names_the_cut(self):
         ents = [self.ins(0, 1, 0, 12), self.ins(1, 1, 2, 12), self.ins(2, 5, 0, 12),

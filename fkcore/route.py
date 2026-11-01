@@ -120,7 +120,8 @@ _HUBS = 8          # hub candidates tried at most
 _HUB_WINS = 3      # stop after this many hubs that route
 _NEAR = 12         # tiles around a net's own ends it is searched in first (2.0.45)
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
-#: 2.1 ``route --m2m``: many-to-many nets above one lane go to ``fkcore.m2m`` (``route_layout``)
+#: 2.1 ``route --m2m``: many-to-many nets above one lane go to ``fkcore.m2m`` (``route_layout``);
+#: True on both lanes (2.1.21), "left" on the left lane only (version 1)
 _M2M = False
 #: 2.1.19 (the live run, ~4525k: a real paste routed 15+ min with nothing said): a callable the
 #: route loop tells how far it is, at most every PROGRESS_EVERY seconds; None says nothing
@@ -1038,6 +1039,7 @@ def _mark_m2m(flat, cat, js):
             continue
         if fn.width > 2 or _flow(flat, fn) > cap + 1e-9:
             job.m2m = m2mmod.spec_of(flat, cat, fn, job, cap)
+            job.m2m["both"] = _M2M != "left"
 
 
 def _widen(flat, cat, js):
@@ -2068,12 +2070,13 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     as it, and lays each tunnel with the slowest tier that reaches it (2.1 ribbon tunnels).
     ``m2m`` (2.1, ``route --m2m``): a net with two or more drivers and two or more consumers
     whose flow is above one lane (or whose ``width`` above 2 asks for that many lanes) is laid by
-    ``fkcore.m2m`` and gets a ``MAXFLOW`` line; without it nothing changes."""
+    ``fkcore.m2m`` and gets a ``MAXFLOW`` line; without it nothing changes. ``m2m="left"``: on
+    the left lane only (version 1); otherwise on both lanes (2.1.21)."""
     global _HANDS, _M2M
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
-    _M2M = bool(m2m)
+    _M2M = "left" if m2m == "left" else bool(m2m)
     try:
         if not hand or hand == "fast-inserter":
             return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)

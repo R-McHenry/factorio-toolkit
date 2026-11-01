@@ -24,7 +24,19 @@ belt cost. A net with two or more drivers and two or more consumers whose flow i
 
 No grouping rule: which drivers share a run comes out of the search. A net whose flow fits a lane
 is not laid here. Out of version 1: side-loads, both lanes, lane balancing, and the even split of
-a splitter (a real network can carry less than its max-flow). Pure, stdlib only, deterministic.
+a splitter (a real network can carry less than its max-flow).
+
+**Both lanes** (2.1.21, the default; ``route --m2m left`` is version 1): a driver's inserter may
+stand on either side of its belt, and the side is its lane (an inserter across a belt fills the far
+lane). The hub takes the taps its search finds; an added run may start from a driver on either
+side. The max-flow is the lane graph's (``maxflow.solve(lanes=True)``): no side-loads are laid and
+a splitter keeps the lanes, so the left and the right lanes are two networks on the same belts. A
+run keeps its lanes from end to end, so it is searched lane by lane: its start upstream of the cut
+on that lane (a split belt's lane, or the lane its new inserter drops on), its end downstream of
+the cut on it (a merge belt's lane; a consumer picks from both); the cheaper of the two is laid.
+A run that does not raise the flow is banned and the search tried again, so the router picks the
+lanes that help. Still out: side-loads, lane balancing, a splitter's even split. Pure, stdlib
+only, deterministic.
 """
 from __future__ import annotations
 
@@ -38,6 +50,7 @@ from .steiner import COSTS, DX, DY, FixedSink, TapSink, Tree, _astar
 __all__ = ["LeftTap", "route", "spec_of", "report"]
 
 _RUNS = 24         # runs added at most
+_BANS = 12         # runs passed over (they raised no flow) at most
 _TRIES = 6         # searches per run when a found run overlaps its own start or end
 _ROUNDS = 3        # improve rounds
 _BELT_NAMES = ("transport-belt", "underground-belt", "splitter")
@@ -112,7 +125,7 @@ def spec_of(flat, cat, fn, job, lane):
         take[("goal", tuple(tile))] = lane
     demand = min(sum(supply.values()), sum(take.values()), rt._flow(flat, fn))
     return {"supply": supply, "take": take, "demand": demand,
-            "lanes": fn.width if fn.width > 2 else None}
+            "lanes": fn.width if fn.width > 2 else None, "both": True}
 
 
 # -- the net as laid: plan entities by id ---------------------------------------------------------
@@ -266,7 +279,8 @@ class _Ctx:
             key = net.key(at[k[1]]) if isinstance(k, tuple) and k[1] in at else k
             take[key] = take.get(key, 0.0) + r
         return mfmod.solve(net.entities() + self.machines, self.cat, supply, take,
-                           demand=self.spec["demand"], unbounded=unbounded)
+                           demand=self.spec["demand"], unbounded=unbounded,
+                           lanes=self.spec.get("both", False))
 
     def need(self, net):
         """(the flow to raise, unbounded?) or None when the net meets its demand and its lanes."""
@@ -290,8 +304,28 @@ class _Ctx:
         return g, at
 
     def search(self, net, f, banned=()):
-        """One new run from the source side of ``f``'s cut to its sink side, or None."""
+        """One new run from the source side of ``f``'s cut to its sink side, or None; on both
+        lanes, the cheaper of a run on the left lane and one on the right."""
+        if not self.spec.get("both"):
+            return self._search(net, f, banned, None)
+        best, why = None, None
+        for ln in ("L", "R"):
+            got, w = self._search(net, f, banned, ln)
+            if got is not None and (best is None or got[2] < best[2] - 1e-9):
+                best = got
+            why = why or w
+        return (best, None) if best is not None else (None, why)
+
+    def _search(self, net, f, banned, ln):
+        """``search`` on lane ``ln`` (None: one lane a run, version 1)."""
         from . import route as rt
+
+        def upstream(key):
+            return ((key, ln), 0) in f.lane_S if ln else (key, 0) in f.S
+
+        def downstream(key):
+            return ((key, ln), 1) in f.lane_T if ln else (key, 1) in f.T
+
         grid, at = self.grid(net)
         anchor = next(iter(sorted(at)))
         tree = Tree(grid, (anchor[0], anchor[1], 0, 0))
@@ -301,13 +335,13 @@ class _Ctx:
         starts, sinks, ends = [], [], []
         straights = _straights(net)
         for i, n, d in straights:
-            if (net.key(i), 0) not in f.S:
+            if not upstream(net.key(i)):
                 continue
             for side in (1, 3):
                 sh = (d + side) % 4
                 m = (n[0] + DX[sh], n[1] + DY[sh])
                 o2 = (m[0] + DX[d], m[1] + DY[d])
-                how = ("split", i, side)
+                how = ("split", i, side) + ((ln,) if ln else ())
                 if how not in banned and tree.free(m) and tree.free(o2):
                     starts.append(((o2[0], o2[1], d, 0), k["split"] - k["belt"], how, (m,)))
         for key in self.drivers:
@@ -316,14 +350,15 @@ class _Ctx:
             for q in rt._beside(grid, self.rects[key]):
                 r = _away(self.rects[key], q)
                 b = (q[0] + DX[r], q[1] + DY[r])
-                h = (r + 1) % 4              # the inserter on the belt's right: the left lane
-                c = (b[0] + DX[h], b[1] + DY[h])
-                how = ("src", key, q, b, h, r)
-                if how not in banned and tree.free(q) and tree.free(b) and tree.free(c):
-                    starts.append(((c[0], c[1], h, 0), k["tap"] + k["belt"], how, (q, b)))
+                # the inserter on the belt's right: the left lane; on its left: the right lane
+                for h in ((r + 3) % 4,) if ln == "R" else ((r + 1) % 4,):
+                    c = (b[0] + DX[h], b[1] + DY[h])
+                    how = ("src", key, q, b, h, r)
+                    if how not in banned and tree.free(q) and tree.free(b) and tree.free(c):
+                        starts.append(((c[0], c[1], h, 0), k["tap"] + k["belt"], how, (q, b)))
         hands = rt._HANDS[0]
         for i, n, d in straights:
-            if (net.key(i), 1) not in f.T:
+            if not downstream(net.key(i)):
                 continue
             for side in (1, 3):
                 sh = (d + side) % 4
@@ -359,7 +394,7 @@ class _Ctx:
         adds, swaps, taken = [], [], set()
         tiles = [(s[0], s[1]) for s in path]
         if how[0] == "split":
-            _k, i, side = how
+            _k, i, side = how[:3]
             p = net.items[i]
             n, d = _tile(p), _head(p)
             sh = (d + side) % 4
@@ -452,23 +487,31 @@ def route(cat, job, blocked, spans, clear, box, limit, ents):
             hands = tuple(h for h in hands if h != "long-handed-inserter") or hands
         return LeftTap(key, rect, k, hands)
 
-    plan, how = rt._hub_search(cat, job, blocked, spans, clear, box, limit, tap=tap)
+    both = job.m2m.get("both", False)
+
+    def either(key, rect, k, hands):
+        if rate.get(key, 0.0) > slow + 1e-9:
+            hands = tuple(h for h in hands if h != "long-handed-inserter") or hands
+        return TapSink(key, rect, k, hands)
+
+    plan, how = rt._hub_search(cat, job, blocked, spans, clear, box, limit,
+                               tap=either if both else tap)
     left = True
-    if plan is None:
+    if plan is None and not both:
         plan, how = rt._hub_search(cat, job, blocked, spans, clear, box, limit)
         left = False
-        if plan is None:
-            return None, how
+    if plan is None:
+        return None, how
     hub = how.rsplit(", hub ", 1)[-1] if ", hub " in how else "?"
     ctx = _Ctx(cat, job, blocked, spans, clear, box, limit, ents, job.m2m)
     net = _Net(cat, job.net, plan)
-    runs, why, before = [], None, ctx.flow(net)
-    for _n in range(_RUNS):
+    runs, why, before, banned, bans = [], None, ctx.flow(net), set(), 0
+    while len(runs) < _RUNS:
         want = ctx.need(net)
         if want is None:
             break
         f, unb = want
-        found, why = ctx.search(net, f)
+        found, why = ctx.search(net, f, banned)
         if found is None:
             break
         run = ctx.lay(net, found)
@@ -476,7 +519,12 @@ def route(cat, job, blocked, spans, clear, box, limit, ents):
         if g.value <= f.value + 1e-6:
             ctx.rip(net, run)
             why = "a run that raises the flow was not found"
-            break
+            banned.add(found[3])              # its start: search again without it
+            bans += 1
+            if bans > _BANS:
+                break
+            continue
+        banned.clear()
         runs.append(run)
     _improve(ctx, net, runs)
     after = ctx.flow(net)
@@ -487,7 +535,8 @@ def route(cat, job, blocked, spans, clear, box, limit, ents):
             f"{c['splitter']} splitters, {c['ins']} inserters, hub {hub}; m2m: "
             f"{len(runs)} run{'s' if len(runs) != 1 else ''} added, max-flow "
             f"{_num(before.value)} -> {_num(after.value)} of {_num(after.demand)}/s"
-            + ("" if left else "; drivers on either lane (no hub with left-lane taps)")
+            + ("; both lanes" if both else "" if left
+               else "; drivers on either lane (no hub with left-lane taps)")
             + (f"; short: {why}" if not after.met and why else "")
             + f" ({time.time() - t0:.1f} s)")
     return net.plan(), text
@@ -513,8 +562,9 @@ def report(cat, job, laid, ents):
         return out
 
     supply, take = keyed(spec["supply"]), keyed(spec["take"])
-    f = mfmod.solve(list(laid) + machines, cat, supply, take, demand=spec["demand"])
-    u = mfmod.solve(list(laid) + machines, cat, supply, take, unbounded=True)
+    both = spec.get("both", False)
+    f = mfmod.solve(list(laid) + machines, cat, supply, take, demand=spec["demand"], lanes=both)
+    u = mfmod.solve(list(laid) + machines, cat, supply, take, unbounded=True, lanes=both)
     lanes = u.value / u.lane if u.lane and u.value != float("inf") else 0.0
     text = (f"MAXFLOW   {job.net}: {_num(f.value)} of {_num(f.demand)}/s, the narrowest cut "
             f"{lanes:g} lane{'s' if lanes != 1 else ''}")

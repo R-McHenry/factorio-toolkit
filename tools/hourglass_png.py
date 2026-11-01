@@ -2,8 +2,9 @@
 
     python tools/hourglass_png.py OUT_DIR [--only NAME[,NAME]] [--scale PX]
 
-Per case one image, three panels side by side: the m2m router, today's router and Rory's balancer
-at the waist, each with its row of the bench's table. Belts are drawn with their heading, splitters
+Per case one image, four panels side by side: the m2m router on both lanes and on the left lane
+only (version 1), today's router and Rory's balancer at the waist, each with its row of the
+bench's table. Belts are drawn with their heading, splitters
 as one block across their two tiles, underground ends as U (in) and u (out), inserters as small
 squares, producers red, consumers blue, the wall grey, the midline dotted. Each layout is also
 written as a blueprint string (``CASE-ROUTER.txt``), for a blueprint renderer. Stdlib only.
@@ -37,7 +38,7 @@ MID = (90, 90, 140)
 TEXT = (225, 225, 225)
 DIM = (150, 150, 160)
 
-ROUTERS = ("m2m", "today", "balancer")
+ROUTERS = ("m2m", "m2m-left", "today", "balancer")
 
 
 def _arrow(cv, x, y, s, d, rgb):

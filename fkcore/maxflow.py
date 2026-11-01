@@ -18,7 +18,15 @@ The cut where it binds: the nodes reached from the source in the residual graph 
 those that reach the sink in it (``Flow.T``), each as (key, 0) for its ``in`` side and (key, 1)
 for its ``out`` side; ``Flow.cut`` names the carriers (and splitter halves) at capacity between
 the two sides. A splitter divides evenly, so a real network can carry less than this (the lab
-measures the gap). Pure, stdlib only, deterministic.
+measures the gap).
+
+``lanes`` (2.1.21, the router on both lanes): the lane graph as it is, a node per lane. An
+inserter drops onto one lane and picks from both, a straight, a turn, a tunnel and a splitter keep
+the lanes, a side-load puts both onto the near lane; a lane carries one lane's worth, a
+splitter's lane both halves'. A belt end that supplies or takes (a key with lanes and no node of
+its own) does so on either lane. ``Flow.S`` and ``Flow.T`` still name carriers, (key, 0 | 1),
+whichever of their lanes is reached; ``Flow.cut`` names lanes (``key:L``), ``through`` sums both.
+Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
@@ -44,6 +52,8 @@ class Flow:
     S: set = field(default_factory=set)           # (key, 0 | 1) reached from the source
     T: set = field(default_factory=set)           # (key, 0 | 1) that reach the sink
     through: dict = field(default_factory=dict)   # key -> items/s through it
+    lane_S: set = field(default_factory=set)      # with ``lanes``: (node id, 0 | 1) reached
+    lane_T: set = field(default_factory=set)      # with ``lanes``: (node id, 0 | 1) that reach
 
     @property
     def short(self):
@@ -59,19 +69,21 @@ class Flow:
         return self.value / self.lane if self.lane else 0.0
 
 
-def _graph(ents, cat, unbounded, hand):
-    """{key: capacity}, {(a, b): capacity} of the one-lane carrier graph."""
+def _graph(ents, cat, unbounded, hand, lanes=False):
+    """{node: capacity}, {(a, b): capacity} of the one-lane carrier graph (a node a key), or with
+    ``lanes`` of the lane graph (a node a lane graph node id)."""
     lg = lanesmod.build(ents, cat, hand=hand)
     cap, edges = {}, {}
-    for _nid, n in lg.nodes.items():
+    for nid, n in lg.nodes.items():
+        node = nid if lanes else n.key
         if n.kind in ("lane", "splitter"):
-            cap[n.key] = n.cap
+            cap[node] = n.cap
         elif n.kind == "inserter":
-            cap[n.key] = _BIG if unbounded else min(n.cap, _BIG)
+            cap[node] = _BIG if unbounded else min(n.cap, _BIG)
         else:
-            cap[n.key] = _BIG
+            cap[node] = _BIG
     for e in lg.edges():
-        a, b = e.src[0], e.dst[0]
+        a, b = (e.src, e.dst) if lanes else (e.src[0], e.dst[0])
         if a == b:
             continue
         c = min(e.cap, _BIG)
@@ -79,10 +91,11 @@ def _graph(ents, cat, unbounded, hand):
     return lg, cap, edges
 
 
-def solve(ents, cat, supply, take, demand=None, unbounded=False, hand=1, lane=None) -> Flow:
+def solve(ents, cat, supply, take, demand=None, unbounded=False, hand=1, lane=None,
+          lanes=False) -> Flow:
     """The max-flow (module docstring). ``supply`` / ``take``: {node key: items/s}; a key the
-    entities don't hold counts for nothing."""
-    lg, cap, edges = _graph(ents, cat, unbounded, hand)
+    entities don't hold counts for nothing. ``lanes``: on the lane graph as it is."""
+    lg, cap, edges = _graph(ents, cat, unbounded, hand, lanes)
     if lane is None:
         lane = next((lanesmod.lane_rate(cat, n.name) for n in lg.nodes.values()
                      if n.kind == "lane"), 7.5)
@@ -101,12 +114,33 @@ def solve(ents, cat, supply, take, demand=None, unbounded=False, hand=1, lane=No
         link((k, 0), (k, 1), cap[k])
     for (a, b) in sorted(edges):
         link((a, 1), (b, 0), edges[(a, b)])
-    gave = {k: (_BIG if unbounded else min(r, _BIG)) for k, r in supply.items() if k in cap}
-    got = {k: (_BIG if unbounded else min(r, _BIG)) for k, r in take.items() if k in cap}
-    for k in sorted(gave):
-        link(_SRC, (k, 0), gave[k])
-    for k in sorted(got):
-        link((k, 1), _SNK, got[k])
+    def nodes_of(k):
+        """The graph nodes an end key stands for: itself, or with ``lanes`` its machine node or
+        a belt end's two lanes."""
+        if not lanes:
+            return [k] if k in cap else []
+        if (k, "") in cap:
+            return [(k, "")]
+        return [(k, ln) for ln in ("L", "R") if (k, ln) in cap]
+
+    for k in sorted(supply, key=str):
+        ns = nodes_of(k)
+        r = _BIG if unbounded else min(supply[k], _BIG)
+        if len(ns) == 1:
+            link(_SRC, (ns[0], 0), r)
+        elif ns:
+            link(_SRC, (("<in>", k), 1), r)
+            for n in ns:
+                link((("<in>", k), 1), (n, 0), _BIG)
+    for k in sorted(take, key=str):
+        ns = nodes_of(k)
+        r = _BIG if unbounded else min(take[k], _BIG)
+        if len(ns) == 1:
+            link((ns[0], 1), _SNK, r)
+        elif ns:
+            for n in ns:
+                link((n, 1), (("<out>", k), 0), _BIG)
+            link((("<out>", k), 0), _SNK, r)
     if demand is None:
         demand = min(sum(supply.values()), sum(take.values()))
     if unbounded:
@@ -146,18 +180,37 @@ def solve(ents, cat, supply, take, demand=None, unbounded=False, hand=1, lane=No
                 back.add(u)
                 todo.append(u)
     T = back - {_SNK}
+
+    def key_of(n):
+        return n[0] if lanes else n
+
+    def name_of(n):
+        return f"{n[0]}:{n[1]}" if lanes and n[1] else key_of(n)
+
     cut = []
-    for k in sorted(cap):
-        if (k, 0) in S and (k, 1) not in S and k in lg.graph.nodes \
+    for n in sorted(cap, key=str):
+        k = key_of(n)
+        if (n, 0) in S and (n, 1) not in S and k in lg.graph.nodes \
                 and lg.graph.nodes[k].kind in ("transport-belt", "underground-belt", "splitter",
                                                "inserter"):
-            cut.append(k)
-    for (a, b) in sorted(edges):
-        if (a, 1) in S and (b, 0) not in S and edges[(a, b)] < _BIG / 2 and b not in cut:
-            cut.append(f"{a}>{b}")
-    through = {k: orig[((k, 0), (k, 1))] - res[((k, 0), (k, 1))] for k in cap}
+            cut.append(name_of(n))
+    for (a, b) in sorted(edges, key=str):
+        if (a, 1) in S and (b, 0) not in S and edges[(a, b)] < _BIG / 2 and \
+                name_of(b) not in cut:
+            cut.append(f"{name_of(a)}>{name_of(b)}")
+    through = {}
+    for n in cap:
+        k = key_of(n)
+        through[k] = through.get(k, 0.0) + orig[((n, 0), (n, 1))] - res[((n, 0), (n, 1))]
+    lane_S, lane_T = set(), set()
+    if lanes:                          # the carriers, whichever of their lanes is reached
+        lane_S = {(n, side) for n, side in S if n in cap}
+        lane_T = {(n, side) for n, side in T if n in cap}
+        S = {(key_of(n), side) for n, side in lane_S}
+        T = {(key_of(n), side) for n, side in lane_T}
     value = min(flow, _BIG)
-    return Flow(value if value < _BIG / 2 else INF, demand, lane, cut, S, T, through)
+    return Flow(value if value < _BIG / 2 else INF, demand, lane, cut, S, T, through, lane_S,
+                lane_T)
 
 
 def rates_of(flat, net):
@@ -188,9 +241,9 @@ def rates_of(flat, net):
     return supply, take
 
 
-def of_net(flat, lay, cat, net, unbounded=False) -> Flow:
+def of_net(flat, lay, cat, net, unbounded=False, lanes=False) -> Flow:
     """The max-flow of ``net`` as laid in ``lay``: its carriers (``~net``) and its machines."""
     supply, take = rates_of(flat, net)
     ents = [e for e in lay.entities.values() if e.owner == f"~{net}"]
     ents += [lay.entities[k] for k in sorted(set(supply) | set(take)) if k in lay.entities]
-    return solve(ents, cat, supply, take, unbounded=unbounded)
+    return solve(ents, cat, supply, take, unbounded=unbounded, lanes=lanes)
