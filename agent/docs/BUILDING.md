@@ -92,6 +92,24 @@ SmelterArray's 445). A `Stack<cell=DrillPair, n=8>` on a patch is a drill line y
 change. A cell you write earns a place in your library once it has built and measured clean in
 the lab; until then it lives in the one module that needs it.
 
+## Adding a machine
+
+The toolkit's catalog is the base game's. A Space Age or modded building it lacks, or lacks
+something of (a foundry's fluid boxes), takes three steps:
+
+1. `fk catalog learn foundry` reads it from your game into `game\learned.json`: its size, energy,
+   fluid boxes, crafting categories, built-in effects (a foundry's +50% productivity), where it
+   drops its output, and the recipes it crafts. `--mod NAME` learns every building a mod adds and
+   `--all-mods` every modded one. Every design step plans with it from then on;
+   `fk catalog show foundry` says what the toolkit knows of it.
+2. Wrap it: a Literal file with the machine and a name for it (`{"entities": [{"name": "foundry",
+   "x": 2.5, "y": 2.5, "recipe": "casting-iron-gear-wheel"}], "names": {"f": 0}}`), or
+   `fk capture` one you built by hand, inserters and all. `Machine<entity=foundry, recipe=...>`
+   places one without a file.
+3. Use it in a cell, `m = Literal<file="foundry.json"> @(0, 2)` with `net mi: mi_in -> m.f,
+   mi_out`, and stack the cell like any other. On the lab, three stacked foundry cells routed and
+   connected 12 of 12 nets and cast gears from molten iron.
+
 ## Bootstrap
 
 The kit has no labs and no stone furnaces, 3 assembling-machine-1s, 10 burner drills, 200 belts and

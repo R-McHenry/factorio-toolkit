@@ -36,6 +36,8 @@ COMMON_PARAMS = ("duty", "dnp", "inserter", "modules") + CIRCUIT_PARAMS
 #: from facts.json (``fkcore.facts``): every entity with module slots, every module.
 MODULE_SLOTS = _facts.module_slots()
 MODULE_EFFECTS = _facts.module_effects()
+#: 3.0: the recipes that take productivity (a machine's built-in bonus, too)
+PRODUCTIVE = _facts.productive()
 #: Items that pass by contact, with no carrier (2.0): a reactor heats the exchanger it touches.
 #: A net of only these has no route; it is connected when its machines touch.
 CONTACT = frozenset({"heat"})
@@ -112,9 +114,23 @@ def _crafter(cat, local, machine, recipe, fuel=None):
     if speed is None:
         raise TemplateError(f"{machine} does not craft")
     needs, makes = cat.recipe_rates(recipe, speed)
+    f = _facts.entity(machine)
+    # 3.0: a machine's built-in productivity (a foundry's or an electromagnetic plant's +50%,
+    # the game's effect_receiver.base_effect), on the recipes that take productivity
+    bonus = float((f.get("base_effect") or {}).get("productivity") or 0.0)
+    if bonus and recipe in PRODUCTIVE:
+        makes = {k: v * (1.0 + bonus) for k, v in makes.items()}
     if fuel is not None:
         needs[fuel] = needs.get(fuel, 0.0) + _fuel_rate(machine, fuel)
-    return MSpec(local, machine, recipe, needs, makes, frozenset(needs))
+    extra = {}
+    cats = f.get("crafting_categories")
+    category = cat.recipe(recipe).get("category")
+    if cats and category and category not in cats:
+        # 3.0: a check, never a gate (a catalog may lag the game, a mod may add a category)
+        extra["checks"] = [("wrong-category", f"{machine} doesn't craft {recipe}: it is a "
+                                              f"{category} recipe, and {machine} crafts "
+                                              f"{', '.join(cats)}")]
+    return MSpec(local, machine, recipe, needs, makes, frozenset(needs), extra=extra)
 
 
 def _fuel_rate(machine, fuel):

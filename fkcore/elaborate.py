@@ -867,6 +867,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                 raise ElabError(src, inst.line, f"{path} = {inst.kind}: {exc}") from None
             keys = []
             for spec in specs:
+                for code, msg in spec.extra.pop("checks", ()):
+                    flat.checks.append(Check(code, path, msg, inst.line))
                 m = _machine(spec, path, inst.kind, d)
                 if dn:
                     m.extra["dnp"] = True

@@ -591,6 +591,18 @@ def main(argv):
         push(cfg)
         footer(cfg)
         return code
+    if cmd == "catalog":
+        # 3.0: the run's own catalog (game\learned.json): `learn` reads buildings from the game,
+        # on the host; `show` and `forget` are reads and edits of the file, here
+        if rest[:1] == ["learn"]:
+            push(cfg)
+            code = remote(cfg, ["catalog", "."] + rest)
+            pull(cfg)
+            return code
+        code = local(cfg, ["catalog", "."] + (rest or ["show"]))
+        push(cfg)
+        footer(cfg)
+        return code
     if cmd in STEP_CMDS:
         # 3.0: one step of the build script alone, here: `fk route coal,fe3p` lays those nets
         # again and keeps every other route; nothing is pasted

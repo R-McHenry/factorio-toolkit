@@ -36,6 +36,7 @@ import os
 from collections import namedtuple
 
 from . import facts as _facts
+from . import learned as _learned
 from . import pack as _pack
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
@@ -108,15 +109,20 @@ class Catalog:
 
     # -- construction ---------------------------------------------------------------------
     @classmethod
-    def load(cls, path=DEFAULT_PATH) -> "Catalog":
-        """The fixture at ``path``, with the fluid boxes beside it (``fluidboxes.json``) if any."""
+    def load(cls, path=None) -> "Catalog":
+        """The fixture at ``path``, with the fluid boxes beside it (``fluidboxes.json``) if any.
+        3.0: the default path (the base game's, or the pack's) also takes the run's learned
+        overlay (``learned.json``, :mod:`fkcore.learned`): the machines its player read from the
+        game with ``fk catalog learn``."""
+        ov = _learned.load() if path is None else None
+        path = path or DEFAULT_PATH
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         fluid = os.path.join(os.path.dirname(os.path.abspath(path)), "fluidboxes.json")
         if os.path.exists(fluid):
             with open(fluid, encoding="utf-8") as fh:
                 data = dict(data, fluidboxes=json.load(fh))
-        return cls.from_dict(data)
+        return cls.from_dict(_learned.merge_catalog(data, ov))
 
     @classmethod
     def from_dict(cls, data: dict) -> "Catalog":
