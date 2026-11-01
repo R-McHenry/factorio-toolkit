@@ -1,4 +1,4 @@
-# Toolkit 2.1 (ribbon tunnels): each belt under on its own, and deeper
+# Toolkit 2.1.16: ribbon tunnels (each belt under on its own, reach by tier)
 
 Until now a ribbon crossed anything by taking every belt under together, all the same length,
 and no tunnel reached past yellow's 5 tiles. Now:
