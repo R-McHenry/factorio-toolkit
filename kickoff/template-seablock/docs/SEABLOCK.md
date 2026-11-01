@@ -77,14 +77,14 @@ circuits and bricks. Those 1200 plates and 200 circuits are the budget for the f
 ## Robots
 
 - **Early robots** (`fk-early-construction-robot`, `fk-early-logistic-robot`):
-  - half a vanilla robot's speed (0.03; speed 1 research adds 35%);
+  - three quarters of a vanilla robot's speed (0.045; speed research adds to it);
   - cargo 1, which cargo 1 research raises to 2;
-  - a 0.5 MJ battery.
+  - a 1.2 MJ battery.
   - Their recipe is open from the start, in an assembler: 4 iron plates, 2 gears and 3 basic
     circuits.
 - **The early roboport:**
-  - logistics radius 15 and construction radius 32 (a vanilla roboport has 25 and 55);
-  - 2 charging pads at 250 kW;
+  - logistics radius 20 and construction radius 44 (a vanilla roboport has 25 and 55);
+  - 4 charging pads at 400 kW, 5 robot and 5 repair slots;
   - recipe: 30 iron, 15 gears, 20 circuits and 20 stone bricks;
   - it upgrades in place to a roboport.
 - The kit has 30 early construction robots, 20 early logistic robots and 4 more early roboports.
@@ -96,6 +96,56 @@ circuits and bricks. Those 1200 plates and 200 circuits are the budget for the f
     roboport; from ring 3 it also holds real construction robots.
   - They're yours: reach one with roboport coverage (landfill and poles out to it), then
     `fk decon` it, and the robots bring its contents home.
+
+## Huge chests: buffers that feed many machines
+
+Angel's storage adds big plain chests, both with an inventory bar:
+- `angels-silo`, 4x4 with 256 slots: tech `angels-ore-silos`, red science after steel and
+  advanced ore crushing; recipe 20 stone bricks, 20 iron plates, 10 steel;
+- `angels-warehouse`, 6x6 with 768 slots: tech `angels-warehouses`, red, after the silo; recipe
+  100 bricks, 100 iron, 50 steel.
+
+Their logistic versions need logistic system 3, so they come much later.
+
+A huge chest is a `Buffer` with another chest. It has 16 (silo) or 24 (warehouse) edge tiles for
+inserters, so many machines can take from it directly, each taking only what its recipe uses:
+
+```
+module Hub size 24x24 {
+  qf  = Chest<requester, item=iron-plate, request=50>   @(1, 1)
+  qc  = Chest<requester, item=copper-plate, request=50> @(22, 1)
+  hub = Buffer<chest=angels-silo, bar=60>               @(10, 10)
+  g1  = Assembler<recipe=iron-gear-wheel> @(3, 7)
+  ...                                     # g2..g4, and k1..k4 making copper-cable
+  box = Chest<provider> @(22, 22)
+  wire hw red: hub                                       # the silo's contents on a wire
+  net fe: qf -> hub when hw.iron-plate < 400             # top up iron to 400
+  net cu: qc -> hub when hw.copper-plate < 400
+  net fd items iron-plate:   hub -> g1, g2, g3, g4
+  net cd items copper-plate: hub -> k1, k2, k3, k4
+  net out: g1, g2, g3, g4, k1, k2, k3, k4 -> box
+}
+```
+
+This routes on paper: 5 nets, every machine reached. Notes on it:
+- **Name each out net's items** (`net fd items iron-plate:`). With two items in the chest and no
+  `items`, both go on both nets (`two-nets`, `CLOG`).
+- **Without circuits, use `bar=` for the limit.** `bar=60` lets the silo fill 60 of its 256 slots;
+  when it is full, what feeds it stops. Circuit network is a green tech (and bio paper), and only
+  then do `wire` and `when` gates work in the game.
+- **With circuits, a gated hub is a smart chest.** Each source tops up its own item to an amount
+  (`when hw.ITEM < N`), and each machine takes what it needs from the shared chest. That is the
+  sushi pattern "sources gated on what the buffer holds" (LANGUAGE.md "Sushi patterns") with a
+  bigger box.
+- **Put machines right against the chest** for direct insertion: one inserter from chest to
+  machine, no belt, and it takes only what the recipe uses. Machines further out get a belt
+  from the chest, and the inserter loading that belt must filter, or it loads everything the
+  chest holds. Basic and long-handed inserters can't filter; fast and bulk inserters can. Until
+  you have them, hold one item per chest where a belt leaves it. The build says `unfiltered`
+  when it lays a hand that can't filter.
+- **As a buffer belt:** a silo between a slow, steady maker (a crystallizer line, crushers) and
+  users that come and go holds 256 stacks (25,600 plates at 100 a stack) without a bar, enough
+  to keep them running through a gap.
 
 ## What carries over from vanilla play, and what doesn't
 

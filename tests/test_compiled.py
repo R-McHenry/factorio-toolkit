@@ -2,6 +2,7 @@
 a sealed instance's routed inside, keyed by what it is laid to, and lays it from the store
 wherever the instance stands next. A world of two sealed modules routes their insides on the first
 build; a second build, and a move of one module, search none of them."""
+import json
 import os
 import re
 import shutil
@@ -134,6 +135,20 @@ class CompiledTest(unittest.TestCase):
             text = fh.read()
         self.assertIn("t: 2 routed, 4 kept (0 pinned from the committed .fkp, 4 from compiled "
                       "modules)", text)
+
+    def test_an_inside_the_force_cannot_build_is_routed_again(self):
+        # 2026-11-01, Sea Block: a module compiled on the lab (every research) kept long-handed
+        # inserters the run's force had not researched, and robots waited on 5 ghosts
+        self.build()
+        with open(os.path.join(self.dir, "out", "avail.json"), "w", encoding="utf-8") as fh:
+            json.dump({"tick": 1, "force": "player", "surface": "nauvis", "networks": 1,
+                       "entities": [{"entity": "fast-inserter", "item": "fast-inserter", "stock": 0,
+                                     "known": True, "enabled": False}],
+                       "recipes": [], "research": {}}, fh)
+        route_txt, _ = self.build()
+        self.assertIn("a: its stored inside (Gears) holds fast-inserter, not researched here: routed "
+                      "again", route_txt)
+        self.assertNotIn("inner nets from its stored inside", route_txt)
 
     def test_compiled_no_turns_it_off(self):
         self.build(["route --only stale --compiled no"])

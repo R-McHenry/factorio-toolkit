@@ -1059,13 +1059,16 @@ def s_route(ctx, args):
             # module); what the player pinned, held, seeded or asked for again stays theirs
             keep_out = set(held) | set(seeds) | set(inside) | set(stood) | asked
             keep_out |= {n for n, why in again.items() if "by you" in why}
-            comp, used = compiledmod.reuse(_compiled_dirs(ctx, o["reuse_lab"]), flat, lay,
-                                           ctx.cat, skip=keep_out)
+            comp, used, refused = compiledmod.reuse(_compiled_dirs(ctx, o["reuse_lab"]), flat,
+                                                    lay, ctx.cat, skip=keep_out,
+                                                    locked=availmod.locked)
             for net, ents in comp.items():
                 pinned[net] = ents
                 again.pop(net, None)
             lines += [f"{factory}: compiled  {p}: {k} inner nets from its stored inside ({m} {key})"
                       for p, (m, key, k) in sorted(used.items()) if k]
+            lines += [f"{factory}: compiled  {p}: its stored inside ({m}) holds {', '.join(bad)}, "
+                      f"not researched here: routed again" for p, (m, bad) in sorted(refused.items())]
         blocked = _frame_blocked(ctx, factory, lay.size)
         # 2.1.19: a long route says how far it is, every route.PROGRESS_EVERY seconds
         saved = route.PROGRESS
@@ -1981,7 +1984,12 @@ def _bom_live(ctx):
                    and ctx.cat.kind(e.name) == "assembling-machine"})
     # the availability families too: this is the read the next (linkless) build's inserter=any,
     # --hand any and --pole any choose from (out/avail.json, beside out/force.json)
-    sup = supply.read(r, _force(ctx), ctx.surface.name, list(need) + list(availmod.CANDIDATES),
+    # 3.0: and every entity laid, and every one read before (it stays read): a compiled inside is
+    # only reused when none of its entities needs research (compiled.reuse, avail.locked)
+    laid = sorted({e.name for e in ctx.composed.entities.values()}) if ctx.composed else []
+    before = list(availmod.snapshot().sup.entities) if availmod.snapshot().sup else []
+    sup = supply.read(r, _force(ctx), ctx.surface.name,
+                      list(dict.fromkeys(list(need) + list(availmod.CANDIDATES) + laid + before)),
                       used)
     availmod.save(ctx.root, sup, "report_bom --stock live")
     lines, checks = supply.bom(need, sup, used)

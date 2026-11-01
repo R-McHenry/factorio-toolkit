@@ -148,16 +148,22 @@ def load(dirs, module, key):
     return None
 
 
-def reuse(dirs, flat, lay, cat, skip=()):
+def reuse(dirs, flat, lay, cat, skip=(), locked=None):
     """{net: carriers} of every sealed instance of ``lay`` whose inside a store in ``dirs`` holds,
-    translated to its frame now; ``skip``: nets left out (held, pinned, asked for again). ->
-    ({net: [Entity]}, {instance: (module, key, how many nets)})."""
+    translated to its frame now; ``skip``: nets left out (held, pinned, asked for again);
+    ``locked(name)``: True for an entity the force can't build yet, and a stored inside holding
+    one is not reused (the router lays it again with what the force has). ->
+    ({net: [Entity]}, {instance: (module, key, how many nets)}, {instance: (module, [names])})."""
     from .expand import frame_of
-    nets, used = {}, {}
+    nets, used, refused = {}, {}, {}
     for path in sealed_roots(flat, lay):
         key = inside_key(flat, lay, cat, path)
         got = load(dirs, _module(flat, path), key) if key else None
         if not got:
+            continue
+        bad = sorted({e.name for e in got if locked and locked(e.name)})
+        if bad:
+            refused[path] = (_module(flat, path), bad)
             continue
         x0, y0, _x1, _y1 = frame_of(flat, lay, path, cat)
         mine = {}
@@ -169,7 +175,7 @@ def reuse(dirs, flat, lay, cat, skip=()):
         mine = {n: ents for n, ents in mine.items() if n not in skip}
         nets.update(mine)
         used[path] = (_module(flat, path), key, len(mine))
-    return nets, used
+    return nets, used, refused
 
 
 def _clean(v):
