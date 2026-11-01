@@ -88,6 +88,10 @@ LINES = {
         col = Stack<cell=DrillPair, n=4> @(10, 8)
         box = Chest<provider> @(30, 20)
         net p: col.ore_out -> box""",
+    "WrappedDrillCell": """
+        col = Stack<cell=WrappedDrillCell, n=4> @(10, 8)
+        box = Chest<provider> @(30, 20)
+        net p: col.ore_out -> box""",
 }
 
 
@@ -96,6 +100,7 @@ class StarterCellsTest(unittest.TestCase):
     def setUpClass(cls):
         cls.dir = tempfile.mkdtemp(prefix="fkcells-")
         shutil.copy(CELLS, cls.dir)
+        shutil.copy(os.path.join(os.path.dirname(CELLS), "drill.json"), cls.dir)
 
     @classmethod
     def tearDownClass(cls):

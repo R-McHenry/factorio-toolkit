@@ -90,6 +90,7 @@ for name, p in pairs(prototypes.entity) do
     r.crafting_speed = m(p, 'get_crafting_speed')
     r.crafting_categories = g(p, 'crafting_categories') and keys(p.crafting_categories)
     r.mining_speed = g(p, 'mining_speed') r.mining_drill_radius = g(p, 'mining_drill_radius')
+    local dv = g(p, 'vector_to_place_result') if dv then r.drop_vector = {dv.x or dv[1], dv.y or dv[2]} end
     r.resource_categories = g(p, 'resource_categories') and keys(p.resource_categories)
     r.belt_speed = g(p, 'belt_speed') r.max_distance = g(p, 'max_underground_distance')
     if p.type == 'electric-pole' then r.supply_area_distance = m(p, 'get_supply_area_distance')
@@ -393,6 +394,8 @@ def build_facts(ents, things, conns, sset, sread):
             row["allowed_effects"] = _list(e.get("allowed_effects"))
         if e.get("fluid_usage_per_tick"):
             row["fluid_per_s"] = clean(e["fluid_usage_per_tick"] * 60)
+        if e.get("drop_vector"):
+            row["drop_vector"] = [clean(v) for v in e["drop_vector"]]
         entities[name] = row
     # steam: a boiler (or an exchanger) heats water to its target with its energy, at the steam's
     # heat capacity; an engine or a turbine takes its fluid usage

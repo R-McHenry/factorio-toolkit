@@ -230,6 +230,17 @@ module DrillPair<resource=iron-ore> size 3x7 {
   net o: ore_in, d -> ore_out
 }
 
+# A DrillCell built from a wrapped machine: drill.json is one drill facing north, named d, and the
+# belt the router lays through the cell passes its drop tile. The same way, wrap any machine you
+# captured (its inserters too) and build cells of it. 3x4.
+module WrappedDrillCell<resource=iron-ore> size 3x4 {
+  port ore_in  : in  $resource @w0
+  port ore_out : out $resource @e0
+  stack ore_in -> ore_out
+  m = Literal<file="drill.json", resource=$resource> @(0, 1)
+  net o: ore_in, m.d -> ore_out
+}
+
 # One electric drill on uranium, its sulfuric acid through the cell on a pipe (a fluid port pair)
 # and its ore out along the foot. Stacked east, the cells share one pipe and one ore belt; feed
 # the acid at the head (`net acid: pump -> cells.acid_in`). 7x7.

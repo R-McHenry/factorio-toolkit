@@ -1146,13 +1146,20 @@ def _literal_entities(flat, path, params, cat, src):
     """A Literal's entities: imported from ``file=`` (-> the import tuple), else pinned in the .fkp.
     2.1: the file's ``names`` ({name: entity key}) go to ``flat._lit_names[path]``."""
     from . import literal
-    extra = sorted(set(params) - {"file", "box"})
+    extra = sorted(set(params) - {"file", "box", "resource"})
     if extra:
-        raise TemplateError(f"a Literal takes file=, box=, duty= and dnp, not {', '.join(extra)}")
+        raise TemplateError(f"a Literal takes file=, box=, resource=, duty= and dnp, not "
+                            f"{', '.join(extra)}")
     if "file" in params:
         try:
             ents, size, origin = literal.import_entities(literal.resolve(src, params["file"]),
                                                          path, cat, params.get("box"))
+            if params.get("resource"):
+                # 3.0: what its drills mine (the ground's, so no blueprint says): a named drill is
+                # then a net end, as a MinerRow's is
+                for e in ents:
+                    if cat.kind(e.name) == "mining-drill" and e.name != "pumpjack":
+                        e.attrs.setdefault("resource", params["resource"])
             names = literal.names_of(literal.resolve(src, params["file"]), ents,
                                      params.get("box"))
         except (literal.LiteralError, OSError) as exc:

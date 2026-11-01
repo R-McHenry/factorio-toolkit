@@ -7,7 +7,8 @@ machines a row may use (the prelude's ``tiers`` lines, 2.1) and the default furn
 
 What the file holds:
 - ``entities``: every placeable entity's energy (source, W, drain, burner fuel categories), mining
-  speed and radius, crafting speed, module slots and allowed effects, steam and heat values;
+  speed and radius, crafting speed, module slots and allowed effects, steam and heat values, and
+  ``drop_vector`` (3.0: where a drill or a recycler puts its output down);
 - ``resources`` (mining time, category, results), ``fuels`` (fuel value, category), ``modules``
   (category, tier, effects), ``fluids`` (heat capacity, temperatures), ``recipes`` (allowed
   effects: which take productivity);
@@ -22,7 +23,7 @@ from __future__ import annotations
 import json
 import os
 
-__all__ = ["PATH", "load", "entity", "energy_w", "is_burner", "burns", "mining_radius",
+__all__ = ["PATH", "load", "entity", "energy_w", "is_burner", "burns", "mining_radius", "drop_vector",
            "mining_time", "mines", "solid_resources", "fuel_value", "fuels", "module_slots",
            "module_effects", "productive", "steam_per_s", "heat_w", "wire_reach", "signals",
            "never_transmit", "electric_consumer", "signal_type", "is_signal", "never_sent",
@@ -72,6 +73,13 @@ def electric_consumer(name) -> bool:
 
 def mining_radius(name):
     return entity(name).get("mining_drill_radius")
+
+
+def drop_vector(name):
+    """(x, y) from the entity's centre, facing north, where it puts its output down itself (the
+    game's ``vector_to_place_result``: drills, recyclers), or None (none, or a pumpjack's 0,0)."""
+    v = entity(name).get("drop_vector")
+    return (float(v[0]), float(v[1])) if v and any(v) else None
 
 
 def mining_time(resource):

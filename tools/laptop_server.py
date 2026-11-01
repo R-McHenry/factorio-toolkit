@@ -2120,6 +2120,94 @@ def check_powershed():
     return 0 if ok and all(ok.values()) else 1
 
 
+def check_drops(seconds=20):
+    """3.0: what drops its output on a tile, and on which lane of a belt.
+
+    - every prototype's ``vector_to_place_result`` (drills, recyclers): printed as JSON for
+      ``fkcore.facts``;
+    - an electric drill facing north onto a belt across (east), in line heading away (north) and
+      in line heading toward it (south), and one facing east onto a belt across (south): the
+      items on each lane after ``seconds``; and a drill dropping straight into a chest."""
+    import json as jsonmod
+    from fkcore import link as linkmod
+    s, f = "lab", "lab"
+    ok = {}
+    with LaptopServer("drops", scenario="fk-play") as srv:
+        with srv.rcon() as r:
+            vec = r.lua("local o = {} for name, p in pairs(prototypes.entity) do "
+                        "local v = p.vector_to_place_result if v then o[#o + 1] = name .. '=' .. "
+                        "(v.x or v[1]) .. ',' .. (v.y or v[2]) .. ',' .. p.tile_width .. 'x' .. "
+                        "p.tile_height .. ',' .. p.type end end "
+                        "rcon.print(table.concat(o, ';'))").strip()
+            vectors = {}
+            for row in filter(None, vec.split(";")):
+                name, rest = row.split("=", 1)
+                vx, vy, size, kind = rest.split(",")
+                vectors[name] = {"vector": [float(vx), float(vy)], "size": size, "type": kind}
+            print("VECTORS " + jsonmod.dumps(vectors, sort_keys=True))
+            r.lua(linkmod.lua_generate_area(s, f, (-40, -40, 80, 40)))
+            # drill centre, direction, belt tiles (x, y, direction), or a chest at the drop tile
+            cases = {
+                "across": ((0.5, 0.5), 0, [(x + 0.5, -1.5, 4) for x in range(0, 4)]),
+                "in line, away": ((10.5, 0.5), 0, [(10.5, -y - 0.5, 0) for y in range(1, 5)]),
+                "in line, toward": ((20.5, 0.5), 0, [(20.5, -y - 0.5, 8) for y in range(1, 5)]),
+                "east, across": ((30.5, 0.5), 4, [(32.5, y + 0.5, 8) for y in range(0, 4)]),
+                "chest": ((40.5, 0.5), 0, "chest"),
+            }
+            lua = [f"local s = game.get_surface('{s}')"]
+            for (cx, cy), d, what in cases.values():
+                lua.append(f"for x = -2, 2 do for y = -2, 2 do s.create_entity{{name = 'iron-ore', "
+                           f"position = {{{cx} + x, {cy} + y}}, amount = 5000}} end end")
+                lua.append(f"s.create_entity{{name = 'electric-mining-drill', position = {{{cx}, "
+                           f"{cy}}}, direction = {d}, force = '{f}'}}")
+                if what == "chest":
+                    lua.append(f"s.create_entity{{name = 'wooden-chest', position = {{{cx}, "
+                               f"{cy - 2}}}, force = '{f}'}}")
+                else:
+                    for bx, by, bd in what:
+                        lua.append(f"s.create_entity{{name = 'transport-belt', position = "
+                                   f"{{{bx}, {by}}}, direction = {bd}, force = '{f}'}}")
+            lua.append(f"local e = s.create_entity{{name = 'electric-energy-interface', position = "
+                       f"{{20, 6}}, force = '{f}'}} e.power_production = 5000000 "
+                       "e.electric_buffer_size = 5000000")
+            for x in range(-4, 48, 6):
+                lua.append(f"s.create_entity{{name = 'medium-electric-pole', position = {{{x}.5, "
+                           f"3.5}}, force = '{f}'}}")
+            lua.append("rcon.print(1)")
+            r.lua(" ".join(lua))
+            time.sleep(seconds)
+            got = {}
+            for name, ((cx, cy), d, what) in cases.items():
+                if what == "chest":
+                    got[name] = r.lua(f"local c = game.get_surface('{s}').find_entity('wooden-"
+                                      f"chest', {{{cx}, {cy - 2}}}) rcon.print(c and "
+                                      "c.get_item_count('iron-ore') or -1)").strip()
+                    continue
+                q = " ".join(f"local b = s.find_entity('transport-belt', {{{bx}, {by}}}) if b then "
+                             "l = l + b.get_transport_line(1).get_item_count() r = r + "
+                             "b.get_transport_line(2).get_item_count() end"
+                             for bx, by, _bd in what)
+                got[name] = r.lua(f"local s = game.get_surface('{s}') local l, r = 0, 0 {q} "
+                                  "rcon.print(l .. ' L, ' .. r .. ' R')").strip()
+            for name, ((cx, cy), _d, what) in cases.items():
+                got[name] += " | " + r.lua(
+                    f"local s = game.get_surface('{s}') local d = s.find_entity("
+                    f"'electric-mining-drill', {{{cx}, {cy}}}) local n = 0 "
+                    + ("" if what == "chest" else " ".join(
+                        f"if s.find_entity('transport-belt', {{{bx}, {by}}}) then n = n + 1 end"
+                        for bx, by, _bd in what))
+                    + " local st = '' if d then for k, v in pairs(defines.entity_status) do if v == "
+                    "d.status then st = k end end end rcon.print((d and 'drill ' .. st or 'no drill')"
+                    " .. ', ' .. n .. ' belts')").strip()
+            for name, v in got.items():
+                print(f"{name}: {v}")
+            ok["drills mined"] = all(v.split(" | ")[0] not in ("0 L, 0 R", "0", "-1")
+                                      for v in got.values())
+    for k, v in ok.items():
+        print(f"{k}: {'OK' if v else 'NOT as designed'}")
+    return 0 if ok and all(ok.values()) else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
@@ -2130,4 +2218,4 @@ if __name__ == "__main__":
                       "vision": check_vision, "stats": check_stats,
                       "circuits": check_circuits,
                       "fluidports": check_fluidports, "domains": check_domains,
-                      "powershed": check_powershed}[what]())
+                      "powershed": check_powershed, "drops": check_drops}[what]())

@@ -323,6 +323,19 @@ class Catalog:
         row = self.entity(name)
         return (row["tile_width"], row["tile_height"])
 
+    def drop_tile(self, name, x, y, direction=None):
+        """3.0: the tile an entity of ``name`` centred at (x, y) facing ``direction`` (0..15, a
+        cardinal) puts its output down on itself (``facts.drop_vector``: a drill, a recycler), or
+        None (it has none, or faces no cardinal)."""
+        v = _facts.drop_vector(name)
+        d = int(direction or 0) % 16
+        if v is None or d % 4:
+            return None
+        vx, vy = v
+        for _ in range(d // 4):
+            vx, vy = -vy, vx                                       # a quarter turn clockwise
+        return math.floor(float(x) + vx), math.floor(float(y) + vy)
+
     def tiles(self, name, x, y, direction=None) -> set[tuple[int, int]]:
         """Tiles occupied by an entity of `name` centred at (x, y).
 

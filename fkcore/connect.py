@@ -23,6 +23,7 @@ Every entity is a node; an edge is one way items move from one entity into anoth
   belt surface (v4 B-120).
 - ``mine``: a mining drill drops just past its front edge (the game's vector_to_place_result:
   centred, half a tile to its left on an even width) onto a carrier or straight into a machine.
+  3.0: so does anything else with a drop vector (``Catalog.drop_tile``: a recycler).
 
 Fluids are a second graph over **fluid boxes** (``Graph.fluid``), one node per live box
 (``(key, box)``: a pipe has one, a boiler two, a chemical plant what its recipe makes live), with
@@ -284,8 +285,9 @@ def graph(ents, cat, ports=None) -> Graph:
                 _edge(g, src, key, "pickup")
             if dst is not None and _takes(g.nodes[dst]):
                 _edge(g, key, dst, "drop")
-        elif n.kind == "mining-drill" and n.name not in _FLUID_DRILLS and n.dir in _STEP:
-            dst = g.at.get(_drill_drop(n, cat))
+        elif n.name not in _FLUID_DRILLS and n.dir in _STEP and hasattr(cat, "drop_tile") \
+                and cat.drop_tile(n.name, n.x, n.y, n.dir) is not None:
+            dst = g.at.get(cat.drop_tile(n.name, n.x, n.y, n.dir))
             if dst is not None and dst != key and _takes(g.nodes[dst]):
                 _edge(g, key, dst, "mine")
     if ports:
@@ -575,14 +577,6 @@ def _takes(m):
     if m.kind in _BELTS:
         return m.kind != "underground-belt" or m.ug == "in"
     return m.kind in HOLDER_TYPES
-
-
-def _drill_drop(n, cat):
-    w, h = cat.size(n.name)
-    vx, vy = (-0.5 if w % 2 == 0 else 0.0), -(h / 2 + 0.3)     # facing north
-    for _ in range(n.dir // 4):
-        vx, vy = -vy, vx                                       # a quarter turn clockwise
-    return math.floor(n.x + vx), math.floor(n.y + vy)
 
 
 # -- the checks -----------------------------------------------------------------------------------

@@ -169,6 +169,10 @@
     "productivity",
     "quality",
     "speed"
+   ],
+   "drop_vector": [
+    0.0,
+    -2.85
    ]
   },
   "biochamber": {
@@ -269,6 +273,10 @@
    "mining_drill_radius": 0.99,
    "resource_categories": [
     "basic-solid"
+   ],
+   "drop_vector": [
+    -0.5,
+    -1.3
    ]
   },
   "captive-biter-spawner": {
@@ -457,6 +465,10 @@
     "productivity",
     "quality",
     "speed"
+   ],
+   "drop_vector": [
+    0.0,
+    -1.85
    ]
   },
   "electromagnetic-plant": {
@@ -796,6 +808,10 @@
     "pollution",
     "productivity",
     "speed"
+   ],
+   "drop_vector": [
+    0.0,
+    0.0
    ]
   },
   "radar": {
@@ -842,6 +858,10 @@
     "pollution",
     "quality",
     "speed"
+   ],
+   "drop_vector": [
+    -0.5,
+    -2.3
    ]
   },
   "requester-chest": {

@@ -22,8 +22,9 @@ docs/LAB-LANES-20261020.md (2.0.77):
   lane) and the outside lane from its inner sides, over the belts that meet there (long-handed;
   2.1.25, all measured on 2.0.77). Onto a splitter half and both underground ends alike: an exit takes drops from
   every side, though V1's connect gives it no drop edge (v4 B-120), so this module adds them.
-- ``mine``: a drill drops onto the near lane (in line: the right lane, by the inserter rule;
-  not measured).
+- ``mine``: a drill drops onto the near lane of a belt across; in line, heading away from it or
+  towards it, onto the right lane (measured: 2.0.77, ``tools/laptop_server.py drops``: 11, 13, 12
+  and 3 ores, every one on that lane). A recycler drops by the same rule (not measured).
 - a splitter's **priorities** (its game settings, ``config``; Rory's bus staircases): with an
   input priority, the edges into its preferred half rank before the other half's (it takes
   what comes there first); with an output priority, the edges out of its preferred half are

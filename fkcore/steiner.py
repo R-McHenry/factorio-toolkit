@@ -209,9 +209,9 @@ class TapSink:
 
 
 class DropSink:
-    """3.0 (drills in cells): a machine that drops its output on one fixed tile (a mining drill's
-    drop tile), reached by a belt of the net standing on that tile, any heading, no inserter. The
-    tree may run on through it: a through-belt passes the drill and takes its ore."""
+    """3.0 (drills in cells): a machine that drops its output on one fixed tile (a drill's or a
+    recycler's drop tile), reached by a belt of the net standing on that tile, any heading, no
+    inserter. The tree may run on through it: a through-belt passes the drill and takes its ore."""
     terminal = False
 
     def __init__(self, name, tile):

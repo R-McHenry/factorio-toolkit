@@ -34,10 +34,13 @@ connected graph joining every driver to every consumer); a net is laid in one of
 A consumer that is a single machine (a chest, an assembler cell: its role has no attach tile) is
 reached by direct insertion: a fast (or long-handed) inserter beside the belt picks into it
 (``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver works the same way on a
-reversed tree, so its inserter turns round to pick from the machine. A mining drill as a driver
-(3.0: a drill in a cell, or a Literal's named drill) is reached by a belt over its drop tile, any
-heading and no inserter (``steiner.DropSink``, ``NetJob.drops``); the tile is its net's end, so
-the through-belt of a cell may pass it.
+reversed tree, so its inserter turns round to pick from the machine. A driver that puts its output
+down itself (3.0: a drill, a recycler; ``Catalog.drop_tile``, the game's drop vector) is reached
+by a belt over its drop tile, any heading and no inserter (``steiner.DropSink``,
+``NetJob.drops``); the tile is its net's end, so the through-belt of a cell may pass it. A
+recycler no belt reaches that way is emptied by an inserter. One whose drop tile lies in a
+consumer of its net (a drill into a furnace or a chest) feeds it straight: nothing to lay
+(``NetJob.direct``).
 
 Two nets that share a belt (``lanes A | B``, 2.0) are one job, ``A|B``: each net from its drivers
 to its side of a join, and one route of both lanes from the join to every consumer
@@ -194,6 +197,7 @@ class NetJob:
     drv: list = field(default_factory=list)        # [(start or source, instance path)]
     m2m: dict | None = None                        # 2.1 route --m2m: fkcore.m2m.spec_of
     drops: dict = field(default_factory=dict)      # 3.0: {source key: tile} a drill drops onto
+    direct: list = field(default_factory=list)     # 3.0: [(driver, consumer)] dropped straight in
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved) \
@@ -342,7 +346,7 @@ def jobs(flat, lay, cat) -> dict:
         _mark_m2m(flat, cat, out)
     _widen(flat, cat, out)
     for net, job in out.items():
-        if job.skip is not None or job.fluid:
+        if job.skip is not None or job.fluid or _abuts(job):
             continue
         if not job.drivers():
             job.skip = "no driver role is placed"
@@ -352,26 +356,50 @@ def jobs(flat, lay, cat) -> dict:
 
 
 def _drop_tile(cat, e):
-    """The tile a mining drill drops its output on (the game's vector_to_place_result, as
-    fkcore.connect has it), or None for a pumpjack or an undirected drill."""
-    if not cat.has_entity(e.name) or cat.kind(e.name) != "mining-drill" or e.name == "pumpjack" \
-            or _heading(e) is None:
+    """The tile an entity puts its output down on itself (``Catalog.drop_tile``: a drill, a
+    recycler), or None (none, a pumpjack, or an undirected one)."""
+    if not cat.has_entity(e.name) or _heading(e) is None:
         return None
-    w, hh = cat.size(e.name)
-    vx, vy = (-0.5 if w % 2 == 0 else 0.0), -(hh / 2 + 0.3)
-    for _ in range(_heading(e)):
-        vx, vy = -vy, vx
-    return math.floor(float(e.x) + vx), math.floor(float(e.y) + vy)
+    return cat.drop_tile(e.name, e.x, e.y, _heading(e) * 4)
+
+
+class _Drop(tuple):
+    """A drop tile; ``hand``: an inserter may take the output instead (a recycler)."""
+    hand = False
 
 
 def _drill_drops(lay, cat, out):
-    """3.0: every machine driver that is a mining drill drops on its tile, no inserter."""
+    """3.0: every machine driver with a drop tile (a drill, a recycler) puts its output down
+    there, no inserter. One whose drop tile lies in a consumer of its net feeds that consumer
+    straight (a drill into a furnace or a chest): nothing to lay between them. A recycler whose
+    drop tile something else stands on is emptied by an inserter."""
+    taken = None
     for job in out.values():
         for key, _rect in job.sources:
             e = lay.entities.get(key)
             t = None if e is None else _drop_tile(cat, e)
-            if t is not None:
-                job.drops[key] = t
+            if t is None:
+                continue
+            into = [k for k, (x0, y0, x1, y1) in job.taps if x0 <= t[0] < x1 and y0 <= t[1] < y1]
+            hand = cat.kind(e.name) != "mining-drill"   # an inserter may empty a recycler
+            if into:
+                job.direct.append((key, into[0]))
+                continue
+            if hand:
+                if taken is None:
+                    taken = {u for x in lay.entities.values() for u in fkpmod.tiles_of(cat, x)}
+                if t in taken:
+                    continue
+            job.drops[key] = _Drop(t)
+            job.drops[key].hand = hand
+        if not job.direct:
+            continue
+        gone = {d for d, _c in job.direct}
+        job.sources = [s for s in job.sources if s[0] not in gone]
+        job.drv = [d for d in job.drv if d[0][0] not in gone]
+        if not job.sources and not job.starts:
+            fed = {c for _d, c in job.direct}
+            job.taps = [t for t in job.taps if t[0] not in fed]
 
 
 def _literal_ends(flat, lay, cat, out, fluids):
@@ -496,9 +524,9 @@ def _hand_tiles(cat, ents):
             (tx, ty), = fkpmod.tiles_of(cat, e)
             for s in (r, -r):
                 out.setdefault((tx + _DX[h] * s, ty + _DY[h] * s), e.net)
-        elif kind == "mining-drill":
+        else:
             t = _drop_tile(cat, e)
-            if t is not None:          # the drill's own net may still lay on it: it is that net's end
+            if t is not None:          # its own net may still lay on it: it is that net's end
                 out.setdefault(t, None)
     return out
 
@@ -736,6 +764,10 @@ def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
             break
+    if res["problems"] and any(getattr(t, "hand", False) for t in drops.values()):
+        # 3.0: a recycler whose drop tile no belt reaches is emptied by an inserter instead
+        return _grow(grid, root, fixed, machines, limit, sources, tap,
+                     {k: t for k, t in drops.items() if not getattr(t, "hand", False)})
     return res, sinks
 
 
@@ -2859,8 +2891,13 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for net in sorted(js, key=fkpmod.natural_key):
         job = js[net]
         if net in abut:
-            lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, nothing to lay "
-                         "(its ports meet on one edge)")
+            if job.direct:
+                lines.append(f"routed    {net}: {len(job.direct)} -> "
+                             f"{len({c for _d, c in job.direct})}, nothing to lay "
+                             "(dropped straight in)")
+            else:
+                lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, nothing "
+                             "to lay (its ports meet on one edge)")
         elif net in kept:
             lines.append(f"kept      {net}: its carriers are already laid (pinned)")
         elif net in patched:
@@ -3014,6 +3051,8 @@ def _crossings(flat):
 def _abuts(job):
     """A net whose one driver's belt points straight into its one consumer's first belt: two
     ports meeting on one edge (2.0.48, a stack's cells). It is connected and lays nothing."""
+    if job.direct and not (job.taps or job.sources or job.starts or job.goals):
+        return True                     # 3.0: every driver drops straight into its consumer
     if job.taps or job.sources or len(job.starts) != 1 or len(job.goals) != 1:
         return False
     (st, sh), (gt, gh) = job.starts[0], job.goals[0]

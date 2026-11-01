@@ -200,6 +200,7 @@ you use: `import SmelterPair, AsmCell from "cells.fk"`.
 | `LabColumn<packs>` | six LabCells and a header of one belt a pack; stacked east, a lab field | `r_*`, `g_*` |
 | `DrillCell<resource>` | an electric drill dropping its ore onto the belt through the cell: one lane, 15 drills to a yellow lane | `ore_in`/`ore_out` |
 | `DrillPair<resource>` | two drills facing each other across the ore belt: both lanes | `ore_in`/`ore_out` |
+| `WrappedDrillCell<resource>` | a DrillCell built from a wrapped machine (`drill.json`, one drill named `d`): the way to build cells of any machine you captured | `ore_in`/`ore_out` |
 | `AcidDrillCell` | an electric drill on uranium, its acid through the cell on a pipe | `acid_*`, `ore_*` |
 | `GateCell<item, items, amount=auto>`, `GateCellR` | a sushi loop's source: loads its item while the loop holds less than `amount` (`GateCellR` on the right lane) | `s_in`/`s_out` |
 | `MallCell<recipe, items>` | a maker on a sushi loop, and its provider chest | `s_in`/`s_out` |
@@ -730,7 +731,11 @@ net out: line.g_out -> box
   fluid. The library's `AcidDrillCell` is one, and `docs\examples\plastic-cell.fk` another.
 - A drill drops its ore on the tile in front of it, so a cell's through-belt that passes that tile
   takes the ore with no inserter (`DrillCell`, 3x4). Two drills facing one belt tile fill both
-  lanes (`DrillPair`, 3x7).
+  lanes (`DrillPair`, 3x7). A belt across takes the ore on its near lane; one in line, heading
+  away from the drill or towards it, on its right lane (measured). A recycler drops its output the
+  same way, and one whose drop tile no belt can reach is emptied by an inserter. A drill (or a
+  recycler) whose drop tile is a chest or a machine of its net feeds it straight: the net lays
+  nothing.
 - Reports list a stack's cells as `line/0`, `line/1` ...: each cell is an instance of its own.
 - On a short line the cells nearest the feed run full and the last ones get what is left, as on
   the belt: `fk rates` says so cell by cell. Off a Stack's chain, a short net is shared evenly.
@@ -1022,6 +1027,12 @@ that a hand-written blueprint can get wrong (measured 2026-10-30):
 - a requester takes its requests from the circuit with `"control_behavior":
   {"circuit_mode_of_operation": 1}`; `"set_requests": true` is ignored;
 - a decider outputs `each` only when one of its conditions reads `each`.
+
+**Wrapped machines.** A Literal of one machine, with its own inserters, and a name for it is a
+wrapped machine: a cell places it and names it in its nets (`net i: in_in -> w.a, in_out`), and
+the router lays the cell's belts past its inserters' hands, or past a drill's drop tile. A
+blueprint holds no ore, so a Literal's drills mine what `resource=` says
+(`Literal<file="drill.json", resource=$resource>`). The library's `WrappedDrillCell` is one.
 
 **Names inside a Literal.** A JSON Literal file may name its machines: `"names": {"asm10": 37}`, a
 name (no dashes) to the index of an entity in the file (from 0; the blueprint's entity order when
