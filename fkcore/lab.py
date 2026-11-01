@@ -346,9 +346,10 @@ rcon.print(helpers.table_to_json(out))
 # -- sources and sinks at the open ports (2.2, Rory 2026-10-31) -----------------------------------
 #: Rory: "lab: should have infinity fluid source, and infinity chest source using loaders, loaders
 #: should also not be placed on half cells". A port of a sealed module that no net of the lab
-#: design binds from outside gets the lab's free materials at its edge: an infinity chest and a
-#: 1x1 loader (one whole tile each, outside every frame) for a belt port, an infinity pipe for a
-#: fluid port. An ``out`` port empties into a chest (or pipe) that deletes what it gets.
+#: design binds from outside gets the lab's free materials at its edge: an infinity chest and the
+#: 2x1 loader (on two whole tiles, outside every frame; 2.1.20, the 1x1 loader drew as half a
+#: loader) for a belt port, an infinity pipe for a fluid port. An ``out`` port empties into a
+#: chest (or pipe) that deletes what it gets.
 _VEC = {(0, -1): "north", (1, 0): "east", (0, 1): "south", (-1, 0): "west"}
 _LEFTV = {(0, -1): (-1, 0), (1, 0): (0, -1), (0, 1): (1, 0), (-1, 0): (0, 1)}
 
@@ -394,26 +395,36 @@ def feeds(flat, lay, cat, ox=0, oy=0):
         o = pe.outside
 
         def at(t, k, **kw):
-            return dict(k=k, at=[t[0] + ox + 0.5, t[1] + oy + 0.5], port=key, **kw)
+            return dict(k=k, at=[t[0] + ox + 0.5, t[1] + oy + 0.5], port=key, tiles=[t], **kw)
+
+        def loader(belt, v, **kw):
+            # 2.1.20 (Rory: "loaders placed on half cells ... keeps the 2x1 aligned"): the game's
+            # 2x1 loader on two whole tiles, its belt half on ``belt`` and its container half the
+            # next tile along ``v``; its centre is the edge between them. Read from the game
+            # (2.0.77): an output loader facing d has its belt half in front (the d side), an
+            # input one facing d its container half in front
+            box = (belt[0] + v[0], belt[1] + v[1])
+            return dict(k="loader", at=[(belt[0] + box[0]) / 2 + ox + 0.5,
+                                        (belt[1] + box[1]) / 2 + oy + 0.5],
+                        port=key, tiles=[belt, box], **kw)
 
         if pe.fluid:
             want = [at(o, "pipe", fluid=pe.fluid, out=port.dir == "out")]
         elif port.dir == "out":
-            beyond = (o[0] + d[0], o[1] + d[1])
-            want = [at(beyond, "chest", items=[]),
-                    at(o, "loader", dir=_VEC[d], type="input")]
+            want = [at((o[0] + 2 * d[0], o[1] + 2 * d[1]), "chest", items=[]),
+                    loader(o, d, dir=_VEC[d], type="input")]
         elif port.right is None or list(port.right) == list(port.items):
-            behind = (o[0] - d[0], o[1] - d[1])
-            want = [at(behind, "chest", items=sorted(set(port.all_items))),
-                    at(o, "loader", dir=_VEC[d], type="output")]
+            want = [at((o[0] - 2 * d[0], o[1] - 2 * d[1]), "chest",
+                       items=sorted(set(port.all_items))),
+                    loader(o, (-d[0], -d[1]), dir=_VEC[d], type="output")]
         else:                     # a pair: a belt at the edge, a loader side-loading each lane
             want = [at(o, "belt", dir=_VEC[d])]
             for sign, items in ((1, port.items), (-1, port.right)):
                 lx, ly = _LEFTV[d][0] * sign, _LEFTV[d][1] * sign
-                side, far = (o[0] + lx, o[1] + ly), (o[0] + 2 * lx, o[1] + 2 * ly)
+                side, far = (o[0] + lx, o[1] + ly), (o[0] + 3 * lx, o[1] + 3 * ly)
                 want += [at(far, "chest", items=sorted(set(items))),
-                         at(side, "loader", dir=_VEC[(-lx, -ly)], type="output")]
-        tiles = [(int(e["at"][0] - ox - 0.5), int(e["at"][1] - oy - 0.5)) for e in want]
+                         loader(side, (lx, ly), dir=_VEC[(-lx, -ly)], type="output")]
+        tiles = [t for e in want for t in e.pop("tiles")]
         if any(inside(t) or t in taken for t in tiles):
             skipped.append((key, "its source would stand inside a frame or on another port's"))
             continue
@@ -438,7 +449,7 @@ def lua_feed(ents):
         rows.append("{" + ", ".join(parts) + "}")
     return f"""
 local s, f = game.get_surface('{SURFACE}'), '{FORCE}'
-local NAME = {{chest = 'infinity-chest', loader = 'loader-1x1', belt = 'transport-belt',
+local NAME = {{chest = 'infinity-chest', loader = 'loader', belt = 'transport-belt',
               pipe = 'infinity-pipe'}}
 local out = {{placed = 0, blocked = {{}}}}
 for _, x in pairs({{{', '.join(rows)}}}) do
