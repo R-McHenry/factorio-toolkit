@@ -381,7 +381,7 @@ class _Ctx:
             n, d = _tile(p), _head(p)
             swaps.append((i, _splitter(n, m, d)))
             adds += _path_plan(path, d)
-            taken |= {m}
+            taken |= {m, (m[0] + DX[d], m[1] + DY[d])}     # its spare output points there
             cost += COSTS["split"] - COSTS["belt"]
         else:
             got = sink.pick(path, tree, taken)
