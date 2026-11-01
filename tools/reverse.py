@@ -246,6 +246,7 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
     W, H = size
     frame = (MARGIN, MARGIN, MARGIN + W, MARGIN + H)
     body, inst, outer, held = [], {}, [], {}
+    on_belts = {m for n in w.nets.values() if not n.fluid for m in n.drivers + n.consumers}
     k = 0
     for key, e in w.ents.items():
         kind = e.row["t"]
@@ -261,17 +262,26 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
                 rc = furnace_recipe
                 notes.append(f"{name}: a blueprint furnace has no recipe; took {rc}")
             if not rc:
-                notes.append(f"{name} {e.name}: no recipe in the blueprint, left out")
+                notes.append(f"{name} {e.name}: no recipe in the blueprint, in the rest Literal")
+                continue
+            if not CAT.has_fluid_boxes(e.name) and any(
+                    CAT.is_fluid(i) for i in list(walk._ingredients(e, {}, CAT))
+                    + list(walk._products(e, {}, CAT))):
+                # Space Age machines: the catalog has no fluid boxes for them (read_facts)
+                notes.append(f"{name} {e.name} {rc}: fluids, but no fluid boxes in the catalog; "
+                             f"in the rest Literal")
                 continue
             body.append(f"  {name} = Machine<entity={e.name}, recipe={rc}> @({tx}, {ty})")
         elif kind == "lab":
             body.append(f"  {name} = Lab @({tx}, {ty})")
         elif kind in ("container", "logistic-container"):
+            if key not in on_belts:
+                continue           # a chest no belt touches (a buffer by a tower): kept as is
             body.append(f"  {name} = Chest<plain> @({tx}, {ty})")
             if e.name != "iron-chest":
                 notes.append(f"{name}: {e.name} as Chest<plain> (an iron chest)")
         else:
-            notes.append(f"{name}: {e.name} ({kind}) has no kind here, left out")
+            notes.append(f"{name}: {e.name} ({kind}) has no kind here, in the rest Literal")
             continue
         inst[key] = name
     g = w.graph
@@ -366,13 +376,14 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
         con = [inst[c] for c in net.consumers if c in inst]
         made_here = {p for k_ in inst for p in walk._products(w.ents[k_], {}, CAT)}
         items = sorted(set(net.wanted) - made_here) or sorted(net.made) or sorted(net.items)
+        items = [it for it in items if not CAT.is_fluid(it)]    # a belt carries no fluid
         if any((CAT.entity(w.ents[c].name).get("energy") or {}).get("source") == "burner"
                for c in net.consumers if c in inst):
             items = sorted(set(items) | {"coal"})      # a burner's fuel: a blueprint can't say
         # every belt end on the frame's edge is a port, whatever else the net has (a tileable
         # piece passes its belts through); an end inside the frame is just an end
         heads = [hk for hk in net.carriers if not g.pred.get(hk)]
-        every = sorted(set(items) | net.made)
+        every = sorted(set(items) | {it for it in net.made if not CAT.is_fluid(it)})
         # what reaches each tail: an item goes on at the heads (what comes in) or at its makers'
         # drops, and runs along the belts (a blueprint has no contents to say)
         reach = {}
@@ -469,9 +480,9 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
         nets.append(f"  net {hn}: {inst[m]} -> {', '.join(dict.fromkeys(inst[t] for t, _ in lst))}")
         held[f"blk/{hn}"] = [_entity(w, v, f"blk/{hn}", i) for i, (_, v) in enumerate(lst)]
         used.update(v for _, v in lst)
-    # everything else (poles, lamps, combinators, hands and belts of no net) as one Literal
-    rest = [e for key, e in w.ents.items() if key not in inst and key not in used
-            and e.row["t"] not in MACHINES]
+    # everything else (poles, lamps, combinators, hands and belts of no net, machines of no
+    # kind here: turrets, heating towers, fluid machines the catalog can't plumb) as one Literal
+    rest = [e for key, e in w.ents.items() if key not in inst and key not in used]
     if rest:
         x0 = min(math.floor(e.row["box"][0] + 0.01) for e in rest)
         y0 = min(math.floor(e.row["box"][1] + 0.01) for e in rest)

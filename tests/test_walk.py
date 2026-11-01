@@ -94,6 +94,19 @@ class TestWorldMode(unittest.TestCase):
         # a frame through the assembler: it stands across the edge
         self.assertIn("1 entities across it", walk.crossings(self.w, (2, 2, 5, 5))[0])
 
+    def test_space_age_rows(self):
+        # a silo's rocket shadow is never built; a frozen or unset machine gets a loud mark
+        dump = line()
+        dump["rows"].append(_row("rocket-silo-rocket-shadow", "rocket-silo-rocket-shadow",
+                                 2.5, 3.5, w=3, h=3, u=40))
+        asm = next(r for r in dump["rows"] if r["n"] == "assembling-machine-2")
+        asm["st"] = "frozen"
+        w = walk.infer(dump, CAT)
+        self.assertFalse(w.graph.problems)
+        self.assertEqual(walk.marks(w)["asm@2.5,3.5"], "FROZEN")
+        asm["st"] = "no_recipe"
+        self.assertEqual(walk.marks(walk.infer(dump, CAT))["asm@2.5,3.5"], "NO RECIPE")
+
     def test_net_root(self):
         text = walk.tree(self.w, "n1", up=1, down=1)
         self.assertTrue(text[0].startswith("net n1 iron-plate"))
