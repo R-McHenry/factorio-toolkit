@@ -1,4 +1,4 @@
-# Toolkit 2.1 m2m: the many-to-many router, baseline (`route --m2m`)
+# Toolkit 2.1.18: many-to-many routing, the baseline (route --m2m, MAXFLOW, the hourglass bench)
 
 The design is `assessment-20261031\DESIGN-M2M.md`. This builds its releases 1 and 2: the hourglass
 bench, the `MAXFLOW` line, and the baseline router (the hub without side-loads, then augmenting
