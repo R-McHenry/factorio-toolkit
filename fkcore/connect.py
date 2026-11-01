@@ -795,6 +795,11 @@ def _leak(g, a, b, via, table, cat=None):
             out = [None] if nb.nets else []
         if not out or _joint(a, b, na, nb, table):
             return None
+        if table is not None and (all(x in table and b in table[x][1] for x in out)
+                                  or (nb.nets and all(y in table and a in table[y][0]
+                                                      for y in nb.nets))):
+            return None     # 2.1.19: into the belt its net ends at, or out of the one it starts
+                            # at (a Literal's named belt)
         if via == "pickup":
             return Leak(out[0], a, b, via, f"{b} ({_net_word(nb)}) picks from {a}")
         return Leak(out[0], a, b, via, f"{a} {_VERB[via]} {b} ({_net_word(nb)})")

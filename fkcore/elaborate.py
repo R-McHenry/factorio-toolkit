@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from . import facts as _facts
 from . import lang
 from . import snapshot
-from .templates import (CONTACT, SINGLE, TEMPLATES, MSpec, TemplateError, literal_machines,
+from .templates import (CONTACT, INF, SINGLE, TEMPLATES, MSpec, TemplateError, literal_machines,
                         machines as template_machines)
 
 __all__ = ["ElabError", "Machine", "FlatNet", "PortInst", "Check", "Flat", "load", "elaborate",
@@ -863,7 +863,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             if core == "Chest" and any(flat.machines[k].extra.get("buffer") for k in keys):
                 flat.buffers[path] = "chest"
             if imported is not None and path in getattr(flat, "_lit_names", {}):
-                _literal_names(flat, path, imported, keys, inst, src)
+                _literal_names(flat, path, imported, keys, inst, src, d)
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
                         inst.line, imported, conns=inst.conns)
             if auto is not None:
@@ -1062,17 +1062,31 @@ def _buffer_module(flat, mod, path, inst, src):
     flat.buffers[path] = "module"
 
 
-def _literal_names(flat, path, imported, keys, inst, src):
+def _literal_names(flat, path, imported, keys, inst, src, duty=1.0):
     """A Literal's ``names`` (2.1, PLAN-2.1 H): ``{name: entity key}`` from its file, each name of
     a machine a net end like any machine's (``automall.asm10``). A name of an entity that is no
-    machine of the netlist (a belt, a pole, a crafter without a recipe, a chest without a role) is
-    kept apart, so a ref to it is refused with what it names."""
+    machine of the netlist (a pole, a crafter without a recipe, a chest without a role) is kept
+    apart, so a ref to it is refused with what it names.
+
+    2.1.19 (Rory's 42-lab block, ~4115k): a named belt is a **belt end**, a machine whose key is
+    the belt's own: a net that ends at it is routed into the belt from behind (name the first belt
+    of the Literal's line), and one that starts at it leaves from its front (the last). As a
+    consumer it takes what reaches it, like a chest; what the Literal does with it is its own."""
     names, other = {}, {}
     for name, ekey in flat._lit_names[path].items():
         if ekey in keys:
             names[name] = ekey
+            continue
+        ent = next((e for e in imported[0] if e.key == ekey), None)
+        if ent is not None and ent.name.endswith("transport-belt") \
+                and _join(path, ekey.rsplit("/", 1)[-1]) == ekey:
+            spec = MSpec(ekey.rsplit("/", 1)[-1], ent.name, None, {}, {}, None, sink=True,
+                         extra={"belt_end": True})
+            flat.machines[ekey] = _machine(spec, path, inst.kind, duty)
+            keys.append(ekey)
+            names[name] = ekey
         else:
-            other[name] = next((e.name for e in imported[0] if e.key == ekey), "?")
+            other[name] = ent.name if ent is not None else "?"
     flat.literal_names[path] = names
     if other:
         flat._lit_other = getattr(flat, "_lit_other", {})
@@ -1904,7 +1918,12 @@ def _resolve_nets(flat, cat):
         added = 0
         keys = machines_of(p, ref, "driver")
         for key in keys:
-            for item in flat.machines[key].makes:
+            m = flat.machines[key]
+            if m.extra.get("belt_end") and not m.makes and w["items"]:
+                # 2.1.19: a Literal's named belt drives what its net says it carries, without
+                # bound, as a requester does (what the Literal puts on it is its own)
+                m.makes, m.source = {i: INF for i in w["items"]}, True
+            for item in m.makes:
                 if w["items"] is not None and item not in w["items"]:
                     continue
                 if free_only and (key, item) in out_hold:

@@ -993,8 +993,12 @@ that a hand-written blueprint can get wrong (measured 2026-10-30):
 name (no dashes) to the index of an entity in the file (from 0; the blueprint's entity order when
 the file holds only `"bp"`). `automall.asm10` is then a net end like any machine's: `net out:
 automall.asm10 -> box`, and the router reaches it from outside the Literal. `fk explain` lists the
-names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order). A name of an
-entity that is no machine is refused when a net uses it. A blueprint Literal keeps its circuit
+names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order). A named
+**belt** is a belt end: a net into it (`net r: rr -> labs.r_in`) is routed into the belt from
+behind, so name the first belt of the Literal's own line; a net out of it starts in front of it
+(name the last), and carries what the net declares (`net out items iron-plate: blk.last -> box`).
+The Literal's inserters pick from its own belts as built. A name of any other entity that is no
+machine is refused when a net uses it. A blueprint Literal keeps its circuit
 settings (`if=`, `read=`, ...) and its wires; a wire longer than the game's 9 tiles is dropped by
 the game.
 

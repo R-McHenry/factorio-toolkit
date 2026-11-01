@@ -323,6 +323,10 @@ def _literal_ends(flat, lay, cat, out, fluids):
         for name, key in sorted(names.items()):
             if key not in lay.entities:
                 continue
+            m = flat.machines.get(key)
+            if m is not None and m.extra.get("belt_end"):
+                _belt_end(flat, lay, out, fluids, path, name, key)
+                continue
             ts = fkpmod.tiles_of(cat, lay.entities[key])
             rect = (min(t[0] for t in ts), min(t[1] for t in ts),
                     max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
@@ -339,6 +343,30 @@ def _literal_ends(flat, lay, cat, out, fluids):
                     mine.append((side, key, rect))
                     if owner not in job.owners:
                         job.owners.append(owner)
+
+
+def _belt_end(flat, lay, out, fluids, path, name, key):
+    """2.1.19: a Literal's named belt on a net, as a port's edge is: a net into it ends on the tile
+    behind it flowing its way, a net out of it starts on the tile in front."""
+    e = lay.entities[key]
+    h = _heading(e)
+    tile = (math.floor(float(e.x)), math.floor(float(e.y)))
+    for side, hold in (("out", flat._out_hold), ("in", flat._in_hold)):
+        for net in sorted({n for (k, _i), ns in hold.items() if k == key for n in ns}):
+            if net in fluids or net not in flat.nets:
+                continue
+            job = out.setdefault(net, NetJob(net))
+            owner = f"{path}.{name}"
+            mine = job.anchors.setdefault(owner, [])
+            if side == "out":
+                job.starts.append(((tile[0] + _DX[h], tile[1] + _DY[h]), h))
+                job.drv.append((job.starts[-1], path))
+                mine.append((side, job.starts[-1]))
+            else:
+                job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
+                mine.append((side, job.goals[-1]))
+            if owner not in job.owners:
+                job.owners.append(owner)
 
 
 # -- the ground -----------------------------------------------------------------------------------
@@ -2107,8 +2135,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             continue
         for key in flat.insts[path].machines:
             m = flat.machines.get(key)
-            if m is not None and m.extra.get("port") in ("load", "mouth"):
-                joints.add(key)
+            if m is not None and (m.extra.get("port") in ("load", "mouth")
+                                  or m.extra.get("belt_end")):
+                joints.add(key)         # 2.1.19: a Literal's named belt is one too
             if m is not None and m.extra.get("mouth"):
                 # a mouth is a belt end of the bus itself: its carrier is the bus's own belt
                 name = m.extra.get("at") or ""
