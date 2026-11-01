@@ -337,6 +337,12 @@ fk lab NAME --ore iron-ore --area 0,0,30,20 [--amount 50000]
 fk lab NAME --clear-ore          every ore tile of NAME's slot taken up
 ```
 
+- A sealed module needs no lab file of its own: when NAME.fk only defines it (no instances at the
+  top), `fk lab NAME` builds it alone with 4 tiles round it and feeds every port: an infinity
+  chest and a 1x1 loader outside a belt port (a pair `a | b` gets a loader on each lane), an
+  infinity pipe outside a fluid port, and an `out` port empties into a chest or pipe that deletes
+  what it gets. Nothing stands inside the frame. In a lab file of your own, a sealed instance's
+  port that no net binds is fed the same way; a port you wire to your own chests is left alone.
 - The lab has no edge, and a factory of any size fits. Each factory gets its own slot, sized to
   it in 200-tile cells, and keeps it while it fits; building it again empties the slot first,
   and `fk lab` generates the ground under it. Its workspace is `lab\NAME` in the run

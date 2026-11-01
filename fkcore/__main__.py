@@ -1110,7 +1110,9 @@ def _adopt(a, cat):
     if not net:
         print("error: --into FACTORY/NET", file=sys.stderr)
         return 2
-    tiles = [tuple(int(float(v)) for v in t.split(",")) for t in a.tiles.replace(";", " ").split()]
+    # 2.2 (FRICTION ~4480k): a tile is the floor of a position, so -128.5 is tile -129 (int()
+    # truncated it to -128, the tile beside it)
+    tiles = [tuple(math.floor(float(v)) for v in t.split(",")) for t in a.tiles.replace(";", " ").split()]
     sf, surface_lay, lay_path, s = _composed(a.game, cat)
     place = next((p for p in sf.places.values() if p.factory == factory), None)
     if place is None or factory not in surface_lay.plots:
