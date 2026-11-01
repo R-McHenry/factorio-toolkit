@@ -213,11 +213,11 @@ def _line(e):
 
 
 def assign(flat, lay, cat, mode="minimize", allow=TIERS, budgets=None, hand=1, bulk_hand=1,
-           downgrade=False):
+           downgrade=False, model=None):
     """-> (new layout, report lines, {key: (old name, new name)}). A Literal's entities are
-    ``fixed``."""
+    ``fixed``. ``model``: ``flat``'s rates.solve, if the caller has it."""
     from . import routed
-    lg, res = routed.required(flat, lay, cat, hand=hand, bulk_hand=bulk_hand)
+    lg, res = routed.required(flat, lay, cat, model, hand=hand, bulk_hand=bulk_hand)
     fixed = {k for k, e in lay.entities.items()
              if e.owner in flat.insts and flat.insts[e.owner].kind == "Literal"}
     tiers, notes = choose(lg, res.required, cat, lay.entities, mode, allow, budgets, fixed,

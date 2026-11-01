@@ -62,7 +62,7 @@ def choose(need, onto, hands=HANDS, hand=1, bulk_hand=1, cat=None):
 
 
 def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk_hand=1,
-           downgrade=False, fixed=(), buildable=None):
+           downgrade=False, fixed=(), buildable=None, model=None):
     """Every short hand of ``lay`` by what its connector carries: -> (new layout, report lines,
     {key: (old name, new name)}).
 
@@ -70,14 +70,14 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
     ``fixed``: keys the design itself names (a row's ``inserter=fast-inserter``, or every tap when
     the route step was given a concrete hand): left alone. ``buildable(name, n)``: whether robots
     can build ``n`` of a prototype now (``fkcore.avail``); a rung they cannot is skipped, and the
-    hands that would have taken it say so.
+    hands that would have taken it say so. ``model``: ``flat``'s rates.solve, if the caller has it.
     """
     if mode not in ("minimize", "maximize"):
         raise ValueError(f"hands mode is minimize or maximize, got {mode!r}")
     hands = [n for n in allow if n]
     if not hands:
         raise ValueError("hands: --allow names at least one inserter")
-    lg, res = routedmod.required(flat, lay, cat, hand=hand, bulk_hand=bulk_hand)
+    lg, res = routedmod.required(flat, lay, cat, model, hand=hand, bulk_hand=bulk_hand)
     g = lg.graph
     short = set(hands) | set(availmod.HANDS)
     onto, need = {}, {}

@@ -65,6 +65,10 @@ DAMPING = 0.5
 #: smaller step. The 20261030-2352 world's belt mall (gears -> yellow belt -> fast belt) swung
 #: by 0.16 at 0.5 for all 50000 passes (~5 min, twice a build); at 0.25 it settles in ~250.
 RESTARTS = ((1000, 0.25), (3000, 0.1))
+#: 2.1.27: a solve whose largest change over the last SWING_WINDOW passes is not below SWING_DROP
+#: of the window's before is swinging: it restarts then, not at its RESTARTS mark. The live world
+#: swung by 0.05-0.2 at 0.5 all its 1000 passes; at 0.25 it fell tenfold every 25.
+SWING_WINDOW, SWING_DROP = 100, 0.5
 
 
 @dataclass
@@ -512,12 +516,19 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
     restarts = list(RESTARTS)
     damping, since = DAMPING, 0
     residual, done = INF, 0
+    window, before = 0.0, None          # the largest change this window, and in the one before
     for done in range(1, passes + 1):
         since += 1
-        if restarts and since > restarts[0][0]:
+        if since % SWING_WINDOW == 1 and since > 1:
+            swings = before is not None and window >= before * SWING_DROP
+            before, window = window, 0.0
+        else:
+            swings = False
+        if restarts and (since > restarts[0][0] or swings):
             damping = restarts.pop(0)[1]
             grants.update(first)
             since = 1
+            window, before = 0.0, None
         new = {}
         for ni, e in ends.items():
             n, item = ni
@@ -555,6 +566,7 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
             change = max(change, abs(nv - grants[g]))
             grants[g] = nv
         residual = change
+        window = max(window, change)
         if change < tol:
             break
 

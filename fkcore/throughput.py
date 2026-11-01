@@ -302,9 +302,13 @@ def _prepare(lg, order, item, takes, gives, sources, sinks):
     return mine, ins, outs, split, back
 
 
-def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True):
+def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True, start=None, state=None):
     """-> (admitted into each node, flow on each edge, consumed per node, left per node,
-    rounds, residual). Without ``prio`` a splitter's preferred output is one of its two again:
+    rounds, residual). ``start``: the (offers, acceptances) another solve of this item ended
+    on, to begin from (2.1.27: the machine coupling solves every item again each outer round,
+    from little changed); it runs two rounds at least, so a start that already fits the old
+    supply and demand cannot stop it at once. ``state``: a dict that gets the ones this ends on.
+    Without ``prio`` a splitter's preferred output is one of its two again:
     the required flows (no capacities) spread evenly, since a priority only decides where items
     go when the preferred side is full (Rory's bus staircases would heap a whole load on its far
     belt, and that belt would read as binding while the others stand empty). Nor do the required
@@ -319,8 +323,11 @@ def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True):
                     for v, rows in outs.items()}
             split = {v: tuple([e for e in g if (e.src, e.dst) not in back] for g in groups)
                      for v, groups in split.items()}
-    acc, accept = {}, {}
-    offer = {}
+    warm = start is not None
+    if warm:
+        offer, acc, accept = dict(start[0]), dict(start[1]), dict(start[2])
+    else:
+        acc, accept, offer = {}, {}, {}
     residual, done = INF, 0
     got = eat = left = {}
     for done in range(1, rounds + 1):
@@ -367,8 +374,10 @@ def _solve_item(prep, sup, dem, cap, ecap, rounds, tol, prio=True):
         residual = max((abs(new.get(k, 0.0) - offer.get(k, 0.0)) for k in set(new) | set(offer)),
                        default=0.0)
         offer = new
-        if residual < tol:
+        if residual < tol and (done > 1 or not warm):
             break
+    if state is not None:
+        state["end"] = (offer, acc, accept)
     return got, offer, eat, left, done, residual
 
 
@@ -412,10 +421,12 @@ def _solve_all(lg, preps, supply, demand, caps_on, shares, rounds, tol, memo=Non
         if memo is not None and key in memo and memo[key][0] == inputs:
             got, off, eat, lft, n, res = memo[key][1]
         else:
+            state = {}
+            start = memo[key][2] if memo is not None and key in memo else None
             got, off, eat, lft, n, res = _solve_item(prep, sup, dem, cap, ecap, rounds, tol,
-                                                     prio=caps_on)
+                                                     prio=caps_on, start=start, state=state)
             if memo is not None:
-                memo[key] = (inputs, (got, off, eat, lft, n, res))
+                memo[key] = (inputs, (got, off, eat, lft, n, res), state["end"])
         for v, x in got.items():
             if x > EPS:
                 flow.setdefault(v, {})[item] = x

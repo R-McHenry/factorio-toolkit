@@ -33,6 +33,8 @@ class SolverSettlesTest(unittest.TestCase):
         self.assertLess(time.monotonic() - t, 60)
         self.assertLess(model.residual, 1e-9)
         self.assertLess(model.passes, rates.RESTARTS[0][0] + 1000)
+        # 2.1.27: it stops swinging at the first windows that show it, not at pass 1000
+        self.assertLess(model.passes, 3 * rates.SWING_WINDOW + 400)
         self.assertEqual(model.damping, rates.RESTARTS[0][1])
         text = rates.report(model, "world")
         self.assertIn("damping 0.25: it swung at 0.5", text)

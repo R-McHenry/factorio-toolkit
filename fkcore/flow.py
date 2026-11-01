@@ -110,6 +110,16 @@ class Ctx:
     steps: list = field(default_factory=list)        # the script's step names, in order
     source: dict = field(default_factory=dict)       # {source file: sha1} as the run began
     echo: object = None                              # the run's echo, for a long step's progress
+    models: dict = field(default_factory=dict)       # factory -> (flat, its rates.solve), reused
+
+    def model(self, factory):
+        """The nominal rate model of ``flats[factory]``, solved once per flat (2.1.27: hands, tier
+        and both report_rates each solved it again, ~3 s apiece on the live world)."""
+        flat = self.flats[factory]
+        got = self.models.get(factory)
+        if got is None or got[0] is not flat:
+            got = self.models[factory] = (flat, rates.solve(flat))
+        return got[1]
 
 
 def parse(text, path="<fkb>") -> list:
@@ -530,7 +540,7 @@ def s_report_rates(ctx, args):
     lines, checks, made, routed_made = [], [], {}, None
     hands = None
     for factory, flat in ctx.flats.items():
-        model = rates.solve(flat)
+        model = ctx.model(factory)
         lines += rates.report(model, factory).splitlines() + [""]
         lines += _dnp_lines(flat, factory)
         for text, ok, value, target, op in model.asserts:
@@ -1014,7 +1024,8 @@ def s_hands(ctx, args):
     for factory, lay in list(ctx.layouts.items()):
         new, hlines, _changed = handsmod.assign(lay, ctx.flats[factory], ctx.cat,
                                                 ctx.previous.get(factory), mode, allow, hand, bulk,
-                                                o.get("downgrade") is True, fixed, gate)
+                                                o.get("downgrade") is True, fixed, gate,
+                                                model=ctx.model(factory))
         ctx.layouts[factory] = new
         lines += [f"{factory}: {hlines[0]}"] + hlines[1:]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
@@ -1043,7 +1054,8 @@ def s_tier(ctx, args):
     for factory, lay in list(ctx.layouts.items()):
         new, tlines, _changed = tiers.assign(ctx.flats[factory], lay, ctx.cat, mode, allow,
                                              budgets, hand=hand, bulk_hand=bulk,
-                                             downgrade=o.get("downgrade") is True)
+                                             downgrade=o.get("downgrade") is True,
+                                             model=ctx.model(factory))
         ctx.layouts[factory] = new
         lines += [f"{factory}: {tlines[0]}"] + tlines[1:]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
@@ -1092,10 +1104,11 @@ def s_cover_power(ctx, args):
             checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
             continue
         pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
-        _poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
-                                        pinned=pinned, standing=standing)
+        poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
+                                       pinned=pinned, standing=standing)
+        # 2.1.26: the poles just laid, not a second cover_power (the live world's took ~30 s each)
         new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
-                                standing=standing)
+                                standing=standing, poles=poles)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}"
                      + (f"; {len(keep_out)} terrain tiles kept out" if ctx.ground is not None

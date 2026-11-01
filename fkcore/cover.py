@@ -170,12 +170,22 @@ def _groups(nodes):
             a = parent[a]
         return a
 
-    for i in range(len(nodes)):
-        for j in range(i + 1, len(nodes)):
-            if nodes[i].dom == nodes[j].dom and _wired(nodes[i], nodes[j]):
-                ri, rj = find(i), find(j)
-                if ri != rj:
-                    parent[max(ri, rj)] = min(ri, rj)
+    # 2.1.26: only poles in neighbouring cells of a grid as wide as the longest reach can wire,
+    # so each pole is checked against those, not every other pole. The live 20261030-2352 world's
+    # cover_power called this once per pole it tried to prune: 30 s and more. The same pairs
+    # join, and a root is always its component's smallest index, so the groups are the same
+    cell = max([n.reach for n in nodes] + [1.0]) + _EPS
+    grid = {}
+    for i, n in enumerate(nodes):
+        grid.setdefault((math.floor(n.x / cell), math.floor(n.y / cell)), []).append(i)
+    for (cx, cy), here in grid.items():
+        near = [j for dx in (-1, 0, 1) for dy in (-1, 0, 1) for j in grid.get((cx + dx, cy + dy), ())]
+        for i in here:
+            for j in near:
+                if j > i and nodes[i].dom == nodes[j].dom and _wired(nodes[i], nodes[j]):
+                    ri, rj = find(i), find(j)
+                    if ri != rj:
+                        parent[max(ri, rj)] = min(ri, rj)
     grouped = {}
     for i in range(len(nodes)):
         grouped.setdefault(find(i), []).append(i)
@@ -225,7 +235,25 @@ class _Ground:
         return None
 
     def free(self, spot):
-        return self.why(spot) is None
+        """``why(spot) is None``, in one pass (2.1.26: the bridge search asks it of every spot
+        within wire reach of every pole it walks from, and ``why`` built the tiles four times)."""
+        i, j = spot
+        pw, ph = self.pw, self.ph
+        if self.size is not None:
+            w, h = self.size
+            if i < 0 or j < 0 or i + pw > w or j + ph > h:
+                return False
+        taken, keep_out, placed = self.taken, self.keep_out, self.placed
+        for y in range(j, j + ph):
+            for x in range(i, i + pw):
+                t = (x, y)
+                if t in taken or t in keep_out or t in placed:
+                    return False
+        if self.deny:
+            cx, cy = i + pw / 2, j + ph / 2
+            if any(_overlap(r, cx, cy, self.supply) for r in self.deny):
+                return False
+        return True
 
     def place(self, spot):
         self.placed.update(self.tiles(spot))
