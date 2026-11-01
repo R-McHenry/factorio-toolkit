@@ -232,6 +232,10 @@ A design doesn't have to start as `.fk`. Build it in the lab, the planner or by 
 - can you afford the next piece → `out\report_bom.txt` after a build
 - how many machines for a rate → `fk plan ITEM 1/s`, or `n=auto` and `out\size.txt`
 - a machine is not running → `fk look` around it; `fk measure X0,Y0,X1,Y1` for what it really makes
+- a line starved or backed up → `fk walk X,Y` on a machine of it: up its belts to the first
+  machine that is short, with what it is short of
+- turning a hand-built area into a module → `fk walk X,Y --frame X0,Y0,X1,Y1` gives its port
+  lines and says when the frame seals
 - old items jamming a rebuilt belt or a switched crafter → `fk fresh X0,Y0,X1,Y1`
 - a factory makes less than its numbers on paper → `out\report_rates.txt`: a `too-thin` line names
   the lane or inserter that is too thin

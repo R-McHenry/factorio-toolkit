@@ -75,6 +75,9 @@ with the starter base still running beside it until the new one carries the load
 - **Leave room for the next size.** Frame each line for its next doubling (a Stack's `built=K`)
   without moving its ports, so growing it re-routes nothing outside.
 - **Paste one region at a time.** Change a module, build, look, then the next one.
+- **A hand-built area becomes a module** by drawing its frame: `fk walk X,Y --frame
+  X0,Y0,X1,Y1` lists every belt over the edge as a ready `port` line and says when the frame
+  seals (only belts cross it).
 - **A new consumer gets its own branch.** Adding a far consumer to a main net re-lays the main
   (the coal belt by the boilers, once): give it a tap, a hub requester, or a net of its own.
 - A sealed module's inside routes once: the build (or `fk compile MODULE`) stores it, and every
@@ -91,6 +94,11 @@ has a cell that replaces it (on the lab, 12 SmelterPair cells made 450 plates/mi
 SmelterArray's 445). A `Stack<cell=DrillPair, n=8>` on a patch is a drill line you can read and
 change. A cell you write earns a place in your library once it has built and measured clean in
 the lab; until then it lives in the one module that needs it.
+
+A machine the library has no cell for goes in one the same way: wrap it (a Literal of the
+machine and its own inserters, the machine named; LANGUAGE.md, "Wrapped machines"), place it in
+a cell whose nets the router lays, and stack the cell. `WrappedDrillCell` is the pattern. Stack
+cells, not machines: a cell is the small unit that routes on its own.
 
 ## Bootstrap
 

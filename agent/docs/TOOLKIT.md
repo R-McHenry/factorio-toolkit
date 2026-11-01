@@ -28,6 +28,10 @@ fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 fk look AREA --zoom 16 --layers all --image
                                  zoomed out, with every layer, as a PNG ("What `fk look` says")
+fk walk X,Y [--up 3] [--down 2]  what the machine there waits on, up and down its belts, and where
+                                 the flow stops ("What a line waits on: `fk walk`")
+fk walk X,Y --frame X0,Y0,X1,Y1  a module frame drawn on the base: every belt over its edge as a
+                                 ready `port` line, and whether it seals as drawn
 ```
 
 Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, `fk wait built
@@ -234,7 +238,14 @@ How route works through the nets is yours to set, on its line in the build scrip
   through the seed: each driver into its nearest way in, each consumer from its nearest way
   out, and every way out of a splitter gets a consumer when there are enough. The seed stays
   in the net file (`# seed:`), so a later build that routes the net again keeps it.
-  `fk unroute NET` drops it. One belt only: not lane pairs, m2m nets or pipes.
+  `fk unroute NET` drops it. One belt only: not lane pairs, m2m nets or pipes. A seed may hold
+  the net's inserters too (`'inserter 12.5,8.5 S'`): one between a machine and a seed belt
+  stands as written, and the router lays no hand of its own there.
+- Seed little. A short run of plain belt where you want the line to pass helps; a seed of
+  splitters and undergrounds boxes the router in. On three real blueprints, seeding their
+  splitters and undergrounds gave fewer exact belts than plain routing and 2-3 nets with no
+  way through, where plain routing failed none. To keep a whole net as it is, `fk hold` it; to
+  keep a dense piece, make it a sealed module and `fk compile` it.
 - A net the router can't find a way for can be sent through a piece from `game\routing.fk`,
   placed where you want it to pass. `import Waypoint, Merge, Split from "routing.fk"`, then
   `wp = Waypoint<item=iron-gear-wheel> @(8, 28)` and `net gear: gears -> wp -> red, belts`. It
@@ -567,6 +578,24 @@ collect without you tracking them.
   round starts in a part of the map picked at random, and its manifest is a step `--rise` up V
   in a direction picked the same way. `--pick track` leans the starts toward the best path.
 - **Starting over.** `fk sim explore reset`.
+
+## What a line waits on: `fk walk`
+
+`fk walk X,Y` reads the area around a machine (or belt) in the game and walks its belts: each
+net in and out, its items and how full each lane is, the machines that feed it and take from
+it and their state, then one level further, as deep as `--up` and `--down` say. It marks where
+the flow stops: a machine short of an input or with its output full or no power, a belt empty
+or backed up, a lane that never fills. The first starved machine upstream whose own inputs are
+fine is the place to look. It works on any base, hand-built ones included: the nets are found
+from the belts and inserters as they stand (made-up names, `n17`), not from your design.
+`fk walk X0,Y0,X1,Y1` lists every net in an area. A requester or provider chest ends the walk:
+that is the logistic network, and `fk stock` says what it holds.
+
+`fk walk X,Y --frame X0,Y0,X1,Y1` checks a module frame before you draw it: every belt that
+crosses the edge comes out as a ready `port` line (side, position, items), and every
+underground under the edge, inserter reaching over it, pipe through it or entity standing
+across it is listed. "sealable as drawn" means only belts cross: grow the frame until it says
+so, then the area can become a sealed module.
 
 ## What `fk look` says
 

@@ -162,8 +162,12 @@ def _box(text):
     return x0, y0, x1, y1
 
 
-def import_entities(path, inst, cat, box=None):
-    """-> (entities in the Literal's own frame, frame size, frame origin in file coordinates)."""
+def import_entities(path, inst, cat, box=None, notes=None):
+    """-> (entities in the Literal's own frame, frame size, frame origin in file coordinates).
+
+    3.0 (the walker's blueprints): an entity whose centre doesn't fit its size (old blueprint
+    formats put some half a tile off) is snapped to the nearest centre that fits, and ``notes``
+    gets a line naming it, instead of the build stopping on a ValueError."""
     rows, wires = read_entities(path)
     kept = list(range(len(rows)))
     if box is not None:
@@ -178,7 +182,18 @@ def import_entities(path, inst, cat, box=None):
     unknown = sorted({r[0] for r in rows if not cat.has_entity(r[0])})
     if unknown:
         raise LiteralError(f"{path}: prototypes the catalog lacks: {', '.join(unknown)}")
-    tiles = [(r, cat.tiles(r[0], r[1], r[2], r[3] if r[3] is not None else 0)) for r in rows]
+    tiles = []
+    for r in rows:
+        try:
+            tiles.append((r, cat.tiles(r[0], r[1], r[2], r[3] if r[3] is not None else 0)))
+        except ValueError:
+            name, x, y, d, settings = r
+            sx, sy = _snap(cat, name, x, y, d)
+            if notes is not None:
+                notes.append(f"{path}: {name} at ({x}, {y}) doesn't fit its size; placed at "
+                             f"({sx}, {sy})")
+            r = (name, sx, sy, d, settings)
+            tiles.append((r, cat.tiles(name, sx, sy, d if d is not None else 0)))
     if box is None:
         x0 = min(t[0] for _r, ts in tiles for t in ts)
         y0 = min(t[1] for _r, ts in tiles for t in ts)
@@ -194,6 +209,18 @@ def import_entities(path, inst, cat, box=None):
         out[n].attrs["wire"] = text
     _name_nets(out, inst, cat)
     return out, (x1 - x0, y1 - y0), (x0, y0)
+
+
+def _snap(cat, name, x, y, d):
+    """The centre nearest (x, y) that fits the entity's size: a whole number on an even side, a
+    half on an odd one."""
+    w, h = cat.size(name)
+    if d is not None and int(d) % 8 == 4:
+        w, h = h, w
+
+    def fit(v, n):
+        return round(v) if n % 2 == 0 else math.floor(v) + 0.5
+    return fit(x, w), fit(y, h)
 
 
 def _name_nets(ents, inst, cat):

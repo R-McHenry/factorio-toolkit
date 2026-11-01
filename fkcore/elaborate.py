@@ -1085,6 +1085,10 @@ def _buffer_module(flat, mod, path, inst, src):
     flat.buffers[path] = "module"
 
 
+#: 3.0: the entities a Literal's name can make a belt end of
+_BELT_ENDS = ("transport-belt", "underground-belt", "splitter")
+
+
 def _literal_names(flat, path, imported, keys, inst, src, duty=1.0, cat=None):
     """A Literal's ``names`` (2.1, PLAN-2.1 H): ``{name: entity key}`` from its file, each name of
     a machine a net end like any machine's (``automall.asm10``). A name of an entity that is no
@@ -1101,7 +1105,11 @@ def _literal_names(flat, path, imported, keys, inst, src, duty=1.0, cat=None):
     net of another item at it is ``cannot-carry``, and a net that names no items takes the
     port's. It drives what the machines behind it make, at their rate, and stands in for them on
     its net (``lit_gives``, ``lit_takes``). A port nothing in the file explains carries what its
-    net says, without bound."""
+    net says, without bound.
+
+    3.0 (the walker's blueprints): a named splitter or underground is a belt end too. An
+    underground's entry takes a net in and its exit gives one out; the other way round is not
+    laid, and the net shows unconnected."""
     from . import literal
     names, other = {}, {}
     for name, (ekey, side) in getattr(flat, "_lit_ports", {}).get(path, {}).items():
@@ -1130,10 +1138,13 @@ def _literal_names(flat, path, imported, keys, inst, src, duty=1.0, cat=None):
             names[name] = ekey
             continue
         ent = next((e for e in imported[0] if e.key == ekey), None)
-        if ent is not None and ent.name.endswith("transport-belt") \
+        if ent is not None and ent.name.endswith(_BELT_ENDS) \
                 and _join(path, ekey.rsplit("/", 1)[-1]) == ekey:
+            extra = {"belt_end": True}
+            if ent.name.endswith("underground-belt"):
+                extra["ug"] = ent.attrs.get("ug")
             spec = MSpec(ekey.rsplit("/", 1)[-1], ent.name, None, {}, {}, None, sink=True,
-                         extra={"belt_end": True})
+                         extra=extra)
             flat.machines[ekey] = _machine(spec, path, inst.kind, duty)
             keys.append(ekey)
             names[name] = ekey
@@ -1154,9 +1165,11 @@ def _literal_entities(flat, path, params, cat, src):
         raise TemplateError(f"a Literal takes file=, box=, resource=, duty= and dnp, not "
                             f"{', '.join(extra)}")
     if "file" in params:
+        notes = []
         try:
             ents, size, origin = literal.import_entities(literal.resolve(src, params["file"]),
-                                                         path, cat, params.get("box"))
+                                                         path, cat, params.get("box"), notes)
+            flat.checks.extend(Check("literal-snap", path, n) for n in notes)
             if params.get("resource"):
                 # 3.0: what its drills mine (the ground's, so no blueprint says): a named drill is
                 # then a net end, as a MinerRow's is

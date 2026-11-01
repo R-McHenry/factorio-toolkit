@@ -1048,8 +1048,12 @@ names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order
 **belt** is a belt end: a net into it (`net r: rr -> labs.r_in`) is routed into the belt from
 behind, so name the first belt of the Literal's own line; a net out of it starts in front of it
 (name the last), and carries what the net declares (`net out items iron-plate: blk.last -> box`).
+A named splitter or underground is a belt end too: an underground's entry takes a net in and its
+exit gives one out (named the other way round, the net is not laid and shows unconnected).
 The Literal's inserters pick from its own belts as built. A name of any other entity that is no
-machine is refused when a net uses it.
+machine is refused when a net uses it. An entity whose centre doesn't fit its size (old
+blueprints put some half a tile off) is moved to the nearest centre that does, with a
+`literal-snap` line naming it.
 
 **Ports of a Literal.** A JSON Literal file may also name its ports, the way a module declares
 them: `"ports": {"heavy": {"carrier": 12, "side": "e"}}`, a pipe, pipe-to-ground or belt of the

@@ -286,7 +286,8 @@ both.
 - **Keep something running.** Every round should place something that runs. Planning that leaves
   nothing going is lost time.
 - **Look around instead of pausing.** Check several parts of the factory: idle robots, stock
-  levels, starving machines. They suggest what to do next.
+  levels, starving machines. They suggest what to do next. For a starved line, `fk walk X,Y` on
+  one of its machines goes up the belts to where the flow stops.
 - **Some things that look wrong are fine:** an idle machine, a hot reactor with no fuel cell,
   ghosts waiting for a robot trip. Ghosts that wait on missing items or locked recipes are a
   blocked build.

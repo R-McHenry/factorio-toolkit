@@ -443,7 +443,10 @@ def _belt_end(flat, lay, out, fluids, path, name, key):
     h = _heading(e)
     tile = (math.floor(float(e.x)), math.floor(float(e.y)))
     edge = port_side(flat, lay, key)
+    ug = flat.machines[key].extra.get("ug") if key in flat.machines else None
     for side, hold in (("out", flat._out_hold), ("in", flat._in_hold)):
+        if ug is not None and edge is None and (ug == "in") == (side == "out"):
+            continue      # 3.0: an underground's entry only takes, its exit only gives
         for net in sorted({n for (k, _i), ns in hold.items() if k == key for n in ns}):
             if net in fluids or net not in flat.nets:
                 continue
@@ -1366,15 +1369,38 @@ def _route_seeded(cat, job, ents, frames, js, box, limit, terrain, avoid, seed,
     a short run), the rest of it the router's (Rory, 2026-11-01: "a manual way to just pin the
     splitter in"). Each driver goes to the seed's nearest way in, each consumer comes from its
     nearest way out, a piece of the router's own search each, laid on the seed and the pieces
-    before it. -> (carriers, report text) or (None, reason)."""
+    before it. -> (carriers, report text) or (None, reason).
+
+    3.0 (the walker's blueprints): a seed may hold inserters too. One that picks from a machine
+    and drops on a seed belt feeds it from that driver, one that picks from a seed belt and drops
+    into a machine feeds that consumer, so the router lays no hand of its own for them."""
     if job.parts or job.m2m is not None or job.fluid:
         return None, "a seed takes a net on one belt (not a lane pair, an m2m net or a pipe)"
+    hands = [e for e in seed if cat.has_entity(e.name) and cat.kind(e.name) == "inserter"
+             and _heading(e) is not None]
     for e in seed:
-        if not _is_belt(cat, e) or _heading(e) is None:
-            return None, f"seed {e.key} ({e.name}) is no belt, underground or splitter"
-    seed = [fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs, net=job.net))
-            for e in seed]
-    ins, outs = _seed_ends(cat, seed)
+        if e not in hands and (not _is_belt(cat, e) or _heading(e) is None):
+            return None, f"seed {e.key} ({e.name}) is no belt, underground, splitter or inserter"
+    belts = [fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs, net=job.net))
+             for e in seed if e not in hands]
+    if not belts:
+        return None, "a seed of inserters alone has no belt for them to stand on"
+    hands = [fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs, net=job.net))
+             for e in hands]
+    seed = belts + hands
+    on = {t for e in belts for t in fkpmod.tiles_of(cat, e)}
+    reach = []                                          # (pickup tile, drop tile) per hand
+    for e in hands:
+        h, r = _heading(e), connectmod.REACH.get(e.name, 1)
+        (tx, ty), = fkpmod.tiles_of(cat, e)
+        reach.append(((tx + _DX[h] * r, ty + _DY[h] * r), (tx - _DX[h] * r, ty - _DY[h] * r)))
+
+    def inside(t, rect):
+        return rect[0] <= t[0] < rect[2] and rect[1] <= t[1] < rect[3]
+    sources = [m for m in job.sources
+               if not any(inside(p, m[1]) and d in on for p, d in reach)]
+    taps = [m for m in job.taps if not any(p in on and inside(d, m[1]) for p, d in reach)]
+    ins, outs = _seed_ends(cat, belts)
     if not ins or not outs:
         return None, f"the seed has no way {'in' if not ins else 'out'}: every end of it is " \
                      "another of its carriers"
@@ -1405,8 +1431,8 @@ def _route_seeded(cat, job, ents, frames, js, box, limit, terrain, avoid, seed,
             got[k][0 if kind == "b" else 1].append(x)
         return got
 
-    into = share(ins, job.starts, job.sources)          # per way in: (starts, sources)
-    out_of = share(outs, job.goals, job.taps)           # per way out: (goals, taps)
+    into = share(ins, job.starts, sources)              # per way in: (starts, sources)
+    out_of = share(outs, job.goals, taps)               # per way out: (goals, taps)
     laid, words = list(seed), [f"your seed, {len(seed)} carriers"]
     for k, (starts, sources) in enumerate(into):
         if not starts and not sources:
