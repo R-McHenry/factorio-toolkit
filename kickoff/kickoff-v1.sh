@@ -8,7 +8,8 @@
 #     --dry  print every step, change nothing
 #     --pack seablock  a mod pack (2026-11-01): setup_v1.py --pack (its kit: landfill, early
 #            roboport and robots, no plant), the game codebase gets kickoff/template-PACK over
-#            the template, and there is no plant to wait for. The server must already run the
+#            the template, `fk catalog learn --all-mods` writes game/learned.json from the game,
+#            and there is no plant to wait for. The server must already run the
 #            pack's mods: factorio.service does not (see SEABLOCK.md for what it would take).
 #     --instance sb  the Sea Block test server instead of factorio.service: /home/computah/sb
 #            (its own write dir and mods, game port 34198, RCON 27016, start.sh). Steps 1-3 and 6
@@ -198,6 +199,9 @@ if [ $INST = sb ]; then   # fkcore.link reads it: fk on the host reaches this se
 fi
 run chown -R computah:computah $F/v1-runs/$RUN
 run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 60 python3 -m fkcore read-terrain . --surface nauvis --area=-192,-192,192,192 --name map'"
+if [ -n "$PACK" ]; then   # 3.0: every modded building read from this game into game/learned.json
+  run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 120 python3 -m fkcore catalog . learn --all-mods'"
+fi
 run su computah -c "'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 120 python3 -m fkcore build nauvis.build.fkb'"
 if [ -z "$PACK" ]; then
   run su computah -c "'cd $G && PYTHONPATH=$TK $AS timeout 300 python3 $TK/kickoff/wait_built.py nauvis -36,-41,24,24 240'" \

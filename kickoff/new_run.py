@@ -165,6 +165,10 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     for name in ("GOAL.md", "FRICTION.md", "REMINDER.md"):
         if os.path.exists(os.path.join(agent, "run", name)):
             shutil.copy(os.path.join(agent, "run", name), os.path.join(run, name))
+    over_run = os.path.join(src, "kickoff", f"template-{pack}", "run") if pack else None
+    if over_run and os.path.isdir(over_run):   # the pack's own GOAL/REMINDER over the toolkit's
+        for name in os.listdir(over_run):
+            shutil.copy(os.path.join(over_run, name), os.path.join(run, name))
     if notes:
         shutil.copy(notes, os.path.join(run, "NOTES.md"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))

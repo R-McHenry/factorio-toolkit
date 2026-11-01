@@ -21,7 +21,7 @@ bobpower_2.1.0
 bobrevamp_2.1.1
 bobtech_2.1.0
 CircuitProcessing_2.0.0
-fk-early-bots_0.2.0
+fk-early-bots_0.2.1
 LandfillPainting_2.0.0
 mod-list.json
 mod-settings.dat
