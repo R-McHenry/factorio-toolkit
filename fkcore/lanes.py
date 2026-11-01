@@ -18,7 +18,9 @@ docs/LAB-LANES-20261020.md (2.0.77):
   routed rates' ``WRONG-LANE`` line).
 - ``pickup``: an inserter picks from both lanes of a belt tile, or from a machine.
 - ``drop``: an inserter across a belt fills the far lane; along it (in line), always the right
-  lane. Onto a turn, a splitter half and both underground ends alike: an exit takes drops from
+  lane; onto a turning belt, the inside lane from either of its outer sides (a left turn's left
+  lane) and the outside lane from its inner sides, over the belts that meet there (long-handed;
+  2.1.25, all measured on 2.0.77). Onto a splitter half and both underground ends alike: an exit takes drops from
   every side, though V1's connect gives it no drop edge (v4 B-120), so this module adds them.
 - ``mine``: a drill drops onto the near lane (in line: the right lane, by the inserter rule;
   not measured).
@@ -297,10 +299,27 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
     return lg
 
 
+def _turn(g, b, side):
+    """The lane a drop from ``side`` of belt ``b`` fills when ``b`` turns, or None when it runs
+    straight: from an outer side the inside lane (a left turn's left lane), from an inner side,
+    where the belt comes in or goes out, the outside lane."""
+    for a, via in g.pred.get(b, ()):
+        if via == "curve":
+            come, go = g.nodes[a].dir, g.nodes[b].dir
+            inside = "L" if go == _left(come) else "R"
+            if side in ((come + 8) % 16, go):
+                return "R" if inside == "L" else "L"
+            return inside
+    return None
+
+
 def _drop(lg, g, belts, a, b):
     na, nb = g.nodes[a], g.nodes[b]
     if b in belts:
-        lane = _drop_lane((na.dir + 8) % 16, nb.dir)    # an inserter faces its pickup side
+        # onto a turn by its sides (2.1.25, measured: 2.0.77); an inserter faces its pickup, on
+        # its side of the belt
+        lane = _turn(g, b, na.dir) if nb.kind == "transport-belt" else None
+        lane = lane or _drop_lane((na.dir + 8) % 16, nb.dir)    # an inserter faces its pickup
         lg.add((a, ""), (b, lane), "drop", 3)
     else:
         lg.add((a, ""), (b, ""), "drop", 0)

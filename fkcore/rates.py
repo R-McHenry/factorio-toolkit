@@ -61,7 +61,7 @@ __all__ = ["Model", "solve", "report", "buffer_lines"]
 
 INF = float("inf")
 DAMPING = 0.5
-#: 2.1.25: (passes, damping) when a solve still swings: start again from the first grants with the
+#: 2.1.26: (passes, damping) when a solve still swings: start again from the first grants with the
 #: smaller step. The 20261030-2352 world's belt mall (gears -> yellow belt -> fast belt) swung
 #: by 0.16 at 0.5 for all 50000 passes (~5 min, twice a build); at 0.25 it settles in ~250.
 RESTARTS = ((1000, 0.25), (3000, 0.1))
@@ -92,7 +92,7 @@ class Model:
     nets: dict                         # (net, item) -> NetItem
     passes: int
     residual: float
-    damping: float = DAMPING            # 2.1.25: the step the last restart used
+    damping: float = DAMPING            # 2.1.26: the step the last restart used
     asserts: list = field(default_factory=list)   # [(text, ok, value, target, unit)]
     sink_share: dict = field(default_factory=dict)  # (sink key, net, item) -> its cap there
     pools: dict = field(default_factory=dict)     # (net, item) -> its bus pool's (net, item)

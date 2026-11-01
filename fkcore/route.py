@@ -128,7 +128,7 @@ _M2M = False
 PROGRESS = None
 PROGRESS_EVERY = 30.0
 _progress_at = [0.0, 0.0]                  # [the last line, the route's start] (monotonic)
-#: 2.1.25: [the net routing now, when it began]. The line used to name only the net starting, so
+#: 2.1.26: [the net routing now, when it began]. The line used to name only the net starting, so
 #: the 20261030-2352 run's 300 s on coal read as "net 2 of 43 (larea/b)", the net after it
 _progress_net = [None, 0.0]
 
@@ -1117,7 +1117,7 @@ def _near_box(job, box, margin=None):
     return None if near == tuple(box) else near
 
 
-#: 2.1.25: what a search box may cost, in tile visits: its area times the walks the search floods
+#: 2.1.26: what a search box may cost, in tile visits: its area times the walks the search floods
 #: (``_seeds_of``). The 20261030-2352 world's coal (a pair net, dozens of drills and furnaces)
 #: failed near its ends in ~1 s, then flooded the whole 1554x1246 frame once per end (28 ends,
 #: 54M visits) for ~250 s, in every pass, and failed there too. ~0.2M visits/s: 3M is ~15 s.
@@ -1151,7 +1151,7 @@ def _ladder(near, box):
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
                allow=frozenset(), promoted=frozenset()):
     """One net's route in ``box``: first in its own neighbourhood (``_near_box``), then, if that
-    fails, in the whole box, so bounding the search never loses a route the box allowed. 2.1.25:
+    fails, in the whole box, so bounding the search never loses a route the box allowed. 2.1.26:
     when the whole box would cost more than ``WALK_BUDGET``, in boxes twice as big in turn, as far
     as the budget allows; then it fails, saying how far it looked. ``promoted``: tiles freed for it
     (``_route_promoted``)."""
@@ -1160,7 +1160,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
     if near is None:
         boxes = [box]
     elif seeds * _area(box) <= WALK_BUDGET:
-        boxes = [near, box]                       # as before 2.1.25: the same routes
+        boxes = [near, box]                       # as before 2.1.26: the same routes
     else:
         boxes = [near] + _ladder(near, box)
     got = how = None
@@ -2333,7 +2333,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             break
         reordered = [n for n in order if unrouted(n, failed)] + \
             [n for n in order if not unrouted(n, failed)]
-        # 2.1.25: the same order on the same ground lays the same routes, and the score keeps the
+        # 2.1.26: the same order on the same ground lays the same routes, and the score keeps the
         # first of equal passes: go on to the promoting pass. The 20261030-2352 world's coal
         # failed first in order, so each of its 45 passes (~13 s) repeated the one before
         repeats = reordered == order

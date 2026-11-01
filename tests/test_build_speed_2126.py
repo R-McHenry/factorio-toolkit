@@ -1,4 +1,4 @@
-"""2.1.25: the 20261030-2352 run's dry builds took 20+ min.
+"""2.1.26: the 20261030-2352 run's dry builds took 20+ min.
 
 - The nominal rate model swung on its world for all 50000 passes at damping 0.5 (BeltMall2's
   gear -> yellow belt -> fast belt chain), ~5 min and twice a build, and reported a snapshot of the

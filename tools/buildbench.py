@@ -9,7 +9,7 @@ took ``--slow`` seconds or more (default 2). At ``--cap`` seconds (default 120) 
 says which step and net it was in, so a slow build costs the cap, not its length. Exit 0 when
 it reached STEP, 3 when the cap stopped it.
 
-2.1.25: the 20261030-2352 run's dry builds ran 20+ min (a rate model that never settled, ~5 min
+2.1.26: the 20261030-2352 run's dry builds ran 20+ min (a rate model that never settled, ~5 min
 twice; coal's route flooding the whole frame, ~250 s a pass) and nothing said where.
 """
 from __future__ import annotations

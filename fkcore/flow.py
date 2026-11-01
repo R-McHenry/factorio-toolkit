@@ -2140,7 +2140,7 @@ def _run(script, frm, to, cat, echo, link, extra):
         STEPS["floorplan"](ctx, lines[plans[-1]].args)
     width = len(lines)
     written = set()
-    # 2.1.25: each step's time, in out/timings.txt and on its summary line when it is slow (the
+    # 2.1.26: each step's time, in out/timings.txt and on its summary line when it is slow (the
     # 20261030-2352 run's dry builds ran 20+ min, and nothing said where the time went)
     timings = open(os.path.join(ctx.out, "timings.txt"), "w", encoding="utf-8", newline="\n")
     try:
