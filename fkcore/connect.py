@@ -590,7 +590,8 @@ def endpoints(flat, surface=None, factory=None):
     ``main/gear``)."""
     pre = f"{surface}:{factory}/" if surface and factory else ""
     netpre = f"{factory}/" if surface and factory else ""
-    table = {netpre + name: (Dealt if getattr(n, "width", 1) > 2 else tuple)(
+    table = {netpre + name: (Dealt if getattr(n, "width", 1) > 2 or getattr(n, "any", False)
+                             else tuple)(
                  ([(pre + k, i) for k, i in n.drivers], [(pre + k, i) for k, i in n.consumers]))
              for name, n in flat.nets.items()}
     # A bus's mouth has no entity of its own: the bus's own belt under the mouth is its carrier.
@@ -618,8 +619,9 @@ def endpoints(flat, surface=None, factory=None):
 
 class Dealt(tuple):
     """(drivers, consumers) of a wide net (2.1, ``width`` above 2: a ribbon of belts, its drivers
-    and consumers dealt out to them, ``fkcore.ribbons``): it is connected when every driver reaches
-    a consumer and every consumer is reached, not every driver every consumer."""
+    and consumers dealt out to them, ``fkcore.ribbons``) or an ``any`` net (3.0: a pass-through,
+    a split output): it is connected when every driver reaches a consumer and every consumer is
+    reached, not every driver every consumer."""
     dealt = True
 
 
