@@ -851,7 +851,8 @@ def _ribbon_ug(word):
 
 
 def s_route(ctx, args):
-    o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any")
+    o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
+              m2m=False)
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -877,7 +878,7 @@ def s_route(ctx, args):
                 lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
-                               hand=hand, patch=pinned, ug=ug)
+                               hand=hand, patch=pinned, ug=ug, m2m=o["m2m"] not in (False, "no"))
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
@@ -899,6 +900,7 @@ def s_route(ctx, args):
         lines += [f"  {l}" for l in r.lines]
         lines += _one_inserter(ctx, factory, flat, r.layout)
         checks += [Check("no-route", f"{factory} net {n}", why) for n, why in r.failed.items()]
+        checks += [Check("maxflow", f"{factory} net {n}", why) for n, why in r.maxflow.items()]
         checks += [Check("no-route", f"{factory} net {l.split(':')[0].split()[-1]}",
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]
         checks += _invariant_checks(factory, fkp.invariants(r.layout, ctx.cat, nets=flat.nets))
