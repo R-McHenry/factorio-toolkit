@@ -140,6 +140,19 @@ class TerrainFlowTest(unittest.TestCase):
         self.assertEqual(sum(c.where.startswith("nauvis:iron/smelt/") for c in on), 20)
         self.assertIn("on-water-or-cliff", self.read("report_checks.txt"))
 
+    def test_ground_the_terrain_has_not_read_is_named(self):
+        # 2.1.19 (the live run, ~4245k): the terrain stopped at x480 and cu2p ran on over cliffs
+        t = self.t
+        t.area = (-10, -10, 70, 90)                           # the chest at 72,46 is past it
+        terrain.save(t, os.path.join(self.dir, "map.terrain.json"))
+        code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        blind = [c for s, c in ctx.checks if c.code == "no-terrain" and s == "floorplan"]
+        self.assertEqual(len(blind), 1, [str(c) for _s, c in ctx.checks])
+        self.assertIn("stand on ground the terrain has not read", blind[0].msg)
+        self.assertIn("nauvis:iron/out", blind[0].msg)
+        self.assertIn("fk read-terrain --area 62,", blind[0].msg)
+
     def test_off_water_fires_for_a_pump_on_dry_ground(self):
         # 1.4.2: the lead world's plant pump stood where world 3 had a lake
         for at, dry in (("@(45, 40, rot 3)", False), ("@(50, 40, rot 3)", True)):
