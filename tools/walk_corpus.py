@@ -1,7 +1,7 @@
 """walk_corpus: the net walker (fkcore.walk) on real bases, each on its own laptop server (3.0).
 
     python tools/walk_corpus.py SAVE.zip OUT_DIR [--mods space-age,quality,elevated-rails]
-                                [--surface nauvis] [--radius 32] [--at X,Y ...]
+                                [--surface nauvis] [--radius 32] [--at=X,Y ...]
 
 Loads the save on a laptop server (never the host), reads where the machines are and what state
 they are in (one census call), picks roots: a smelter, a circuit build, a science assembler, a
@@ -127,7 +127,8 @@ def main(argv=None):
     ap.add_argument("--mods", default="", help="space-age,quality,elevated-rails (default none)")
     ap.add_argument("--surface", default="nauvis")
     ap.add_argument("--radius", type=int, default=32)
-    ap.add_argument("--at", nargs="*", default=[])
+    ap.add_argument("--at", action="append", default=[],
+                    help="a root, repeated: --at=X,Y (the = keeps a negative X off the options)")
     ap.add_argument("--settle", type=float, default=3.0, help="seconds to let the map run first")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)

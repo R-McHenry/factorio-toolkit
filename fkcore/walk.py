@@ -62,13 +62,15 @@ WORKING = frozenset({"working", "normal", "low_temperature", "preparing_rocket_f
                      "waiting_to_launch_rocket", "launching_rocket"})
 LANE_CAP = 4          # items a lane of one belt tile holds (2.0)
 FULL = 0.85           # a lane this full is backed up
+#: rows a silo or a landing pad spawns: never built, never inserter targets
+UNBUILT = ("rocket-silo-rocket", "rocket-silo-rocket-shadow", "cargo-pod")
 _SKIP = ("resource", "fish", "character", "corpse", "character-corpse", "item-entity",
          "item-request-proxy", "construction-robot", "logistic-robot", "combat-robot",
          "highlight-box", "speech-bubble", "explosion", "smoke-with-trigger", "particle-source",
          "projectile", "beam", "stream", "sticker", "fire", "deconstructible-tile-proxy",
          "tile-ghost", "entity-ghost", "tree", "simple-entity", "cliff", "unit", "unit-spawner",
          "turret", "spider-unit", "segmented-unit", "segment", "asteroid", "rail-remnants",
-         "lightning", "fluid-turret", "plant")
+         "lightning", "fluid-turret", "plant") + UNBUILT
 
 
 def _q(text):
@@ -217,7 +219,7 @@ def entities(dump):
     """[Ent] of a read, keyed ``asm@12.5,30.5`` style (type, then position), in read order."""
     out = []
     for row in dump.get("rows") or ():
-        if row.get("t") in ("entity-ghost",):
+        if row.get("t") in ("entity-ghost",) + UNBUILT:      # reads kept before the skip
             continue
         attrs = {}
         if row.get("ug"):
@@ -519,6 +521,8 @@ def machine_mark(w, key):
         return "BLOCKED " + st.replace("_", " ")
     if st in NO_POWER:
         return "POWER " + st.replace("_", " ")
+    if st in ("frozen", "no_recipe"):            # Aquilo's cold; a crusher left unset
+        return st.replace("_", " ").upper()
     if st and st not in WORKING:
         return st.replace("_", " ")
     return ""

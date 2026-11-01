@@ -99,7 +99,11 @@ _GIVES_FLUID = frozenset({"output", "input-output"})
 _TAKES_FLUID = frozenset({"input", "input-output"})
 #: Entity types an inserter drops into or picks from: the machine endpoints.
 HOLDER_TYPES = frozenset({"assembling-machine", "furnace", "mining-drill", "lab", "container",
-                          "logistic-container", "boiler", "reactor", "ammo-turret", "roboport"})
+                          "logistic-container", "boiler", "reactor", "ammo-turret", "roboport",
+                          # Space Age: inserters take from and drop into these too
+                          "rocket-silo", "asteroid-collector", "fusion-reactor",
+                          "cargo-landing-pad", "space-platform-hub", "cargo-bay",
+                          "agricultural-tower"})
 #: Tiles from an inserter to its pickup and drop tile; every other inserter reaches 1.
 REACH = {"long-handed-inserter": 2}
 _FLUID_DRILLS = frozenset({"pumpjack"})
