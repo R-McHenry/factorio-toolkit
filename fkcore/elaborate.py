@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 
 from . import facts as _facts
 from . import lang
+from . import snapshot
 from .templates import (CONTACT, SINGLE, TEMPLATES, MSpec, TemplateError, literal_machines,
                         machines as template_machines)
 
@@ -250,8 +251,7 @@ def load(path):
     """Parse ``path`` and the modules it imports (relative to its folder). -> (File, modules).
     2.1: the kinds and tiers of every file it loads come with them (``f.kinds``, ``f.tiers``, its
     own first), so a module from another file finds the kinds it was written with."""
-    with open(path, encoding="utf-8") as fh:
-        f = lang.parse(fh.read(), path)
+    f = lang.parse(snapshot.read(path), path)
     modules = dict(f.modules)
     _imports(f, os.path.dirname(os.path.abspath(path)), modules, {os.path.abspath(path)},
              f.kinds, f.tiers)
@@ -265,8 +265,7 @@ def _imports(f, folder, modules, seen, kinds=None, tiers=None):
         target = os.path.abspath(os.path.join(folder, rel))
         if not os.path.exists(target):
             raise ElabError(f.path, line, f"import: no file {rel}")
-        with open(target, encoding="utf-8") as fh:
-            g = lang.parse(fh.read(), target)
+        g = lang.parse(snapshot.read(target), target)
         if target not in seen:
             seen.add(target)
             _imports(g, os.path.dirname(target), modules, seen, kinds, tiers)

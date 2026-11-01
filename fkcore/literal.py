@@ -47,6 +47,7 @@ import re
 
 from . import codec
 from . import fkp as fkpmod
+from . import snapshot
 
 __all__ = ["LiteralError", "read_entities", "import_entities", "signature", "names_of",
            "machine_names"]
@@ -73,8 +74,7 @@ def read_entities(path):
     not say what the chest asks for in an entity list at all, so every player hand-wrote a
     blueprint string; the 0928 player generated one from the toolkit's source, over ssh). The
     blueprint, if the file also holds one, sets what the list leaves unset."""
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read()
+    text = snapshot.read(path)
     data = None
     if path.lower().endswith(".json"):
         try:
@@ -257,11 +257,10 @@ def names_of(path, ents, box=None):
     after ``box``). {} when the file names nothing."""
     if not path.lower().endswith(".json"):
         return {}
-    with open(path, encoding="utf-8") as fh:
-        try:
-            data = json.load(fh)
-        except ValueError:
-            return {}
+    try:
+        data = json.loads(snapshot.read(path))
+    except ValueError:
+        return {}
     if not isinstance(data, dict) or not data.get("names"):
         return {}
     names = data["names"]

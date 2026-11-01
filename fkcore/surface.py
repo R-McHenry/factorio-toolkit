@@ -39,6 +39,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
+from . import snapshot
 from .sense import duration_ticks
 
 __all__ = ["SurfaceError", "Place", "SurfaceFile", "loads", "load", "load_game", "floorplan",
@@ -199,8 +200,7 @@ def loads(text, path="<surface>") -> SurfaceFile:
 
 def load(path, derive=True) -> SurfaceFile:
     """A surface file, with its plot list derived from its ``design`` (2.0.43)."""
-    with open(path, encoding="utf-8") as fh:
-        sf = loads(fh.read(), path)
+    sf = loads(snapshot.read(path), path)
     return derive_places(sf, os.path.dirname(os.path.abspath(path))) if derive else sf
 
 
@@ -215,8 +215,7 @@ def load_game(game_dir, derive=True) -> SurfaceFile:
     files = []
     for n in names:
         path = os.path.join(game_dir, n)
-        with open(path, encoding="utf-8") as fh:
-            files.append(loads(fh.read(), path))
+        files.append(loads(snapshot.read(path), path))
     sf = next((sf for sf in files if sf.mode == "play"), files[0])
     return derive_places(sf, game_dir) if derive else sf
 

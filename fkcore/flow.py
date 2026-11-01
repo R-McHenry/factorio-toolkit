@@ -58,7 +58,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import avail as availmod
-from . import compose, connect, expand, fkp, placer, rates, route
+from . import compose, connect, expand, fkp, placer, rates, route, snapshot
 from . import own as ownmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
@@ -200,10 +200,8 @@ def _source_files(root):
     for name in sorted(os.listdir(root)):
         full = os.path.join(root, name)
         if name.endswith(_SOURCE_EXT) and os.path.isfile(full):
-            h = hashlib.sha1()
-            with open(full, "rb") as fh:
-                h.update(fh.read())
-            out[name] = h.hexdigest()
+            # inside a build, the bytes it holds (fkcore.snapshot): what it is laid from
+            out[name] = hashlib.sha1(snapshot.read_bytes(full)).hexdigest()
     return out
 
 
@@ -2043,7 +2041,23 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) 
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
     stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
     steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes.
-    ``extra``: options for this build only (``with_options``)."""
+    ``extra``: options for this build only (``with_options``).
+
+    2.1.19: the whole build reads the source as it began (``fkcore.snapshot``). A file edited
+    while it runs is left for the next build, and the build says which ones were."""
+    with snapshot.held() as snap:
+        try:
+            return _run(script, frm, to, cat, echo, link, extra)
+        finally:
+            moved = snapshot.changed(snap)
+            if moved:
+                names = ", ".join(os.path.relpath(p, os.path.dirname(os.path.abspath(script)))
+                                  for p in moved)
+                echo(f"changed while this build ran: {names}. It was laid from them as the "
+                     "build began; build again to lay the new source")
+
+
+def _run(script, frm, to, cat, echo, link, extra):
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
         lines = with_options(parse(fh.read(), script), extra)
