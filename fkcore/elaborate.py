@@ -97,6 +97,9 @@ class FlatNet:
     #: 2.1, `net each NAME`: the group's path-qualified name (``flat.each`` lists its nets in
     #: cell order), None for any other net
     group: str | None = None
+    #: 3.0, a chained net's segment: the chain's path-qualified name (its first segment's), None
+    #: for any other net. ``gear``, ``gear@wp``, ``gear@sp.a`` are one chain, ``gear``.
+    chain: str | None = None
 
     @property
     def sushi(self):
@@ -171,6 +174,7 @@ class PortInst:
     src: str
     lane: str | None = None    # "L" | "R" of a one-lane port as pinned, or None: chosen at layout
     right: list | None = None  # the right lane's items: the port is the pair `A | B`
+    inout: bool = False  # 3.0: declared inout, ``dir`` the way its nets run (_settle_inout)
 
     @property
     def all_items(self):
@@ -900,6 +904,16 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                 group.append(name)
             flat.each[full] = group
             continue
+        if getattr(net, "stages", None):
+            # 3.0 chained nets: one segment net per stretch between pieces, linked as one chain
+            for one in _chain_nets(flat, net, scope, src):
+                name = _join(prefix, one.name)
+                if name in flat.nets:
+                    raise ElabError(src, net.line, f"net {net.name}: its segment {one.name} is "
+                                                   "defined twice")
+                flat.nets[name] = _Pending(_net_refs(flat, one, prefix, src), prefix, src,
+                                           chain=full)
+            continue
         flat.nets[full] = _Pending(_net_refs(flat, net, prefix, src), prefix, src)
     for a in mod.asserts:
         flat.asserts.append((a, prefix))
@@ -1132,6 +1146,7 @@ class _Pending:
     scope: str
     src: str
     group: str | None = None     # 2.1: the `net each` group it is one cell's net of
+    chain: str | None = None     # 3.0: the chained net it is a segment of
 
 
 @dataclass
@@ -1303,6 +1318,108 @@ def _net_refs(flat, net, scope, src):
     if drivers == net.drivers and consumers == net.consumers:
         return net
     return dataclasses.replace(net, drivers=drivers, consumers=consumers)
+
+
+def _chain_nets(flat, net, names, src):
+    """A chained net -> [lang.Net], its segments (3.0, PLAN-3.0 §3e).
+
+    ``net gear: gears -> wp -> red`` goes through piece ``wp``, an instance whose module has inout
+    ports: the first one declared is its way in, the rest its ways out. The segments are ``gear``
+    (gears -> the way in) and ``gear@wp`` (the way out -> red); a piece with several ways out
+    gives ``gear@sp.a``, ``gear@sp.b``. A branch line ``sp.a -> wp2 -> cable`` takes way a on to
+    its own consumers; the ways no branch takes share the next stage, consumer k to way k (in
+    their written order), unless that stage is a piece, which takes one way only."""
+    what = f"net {net.name}"
+
+    def ways(ref):
+        node = names.get(ref.parts[0])
+        if node is None:
+            raise ElabError(src, ref.line, f"{what}: {ref} is a chain's piece, and no instance is "
+                                           f"named {ref.parts[0]}")
+        ports = [p for p in flat.ports.values() if p.scope == node.path]
+        keys = [p.name for p in ports if p.dir == "inout"]
+        if len(keys) < 2:
+            raise ElabError(src, ref.line,
+                            f"{what}: {ref} is in a chain, so its module ({node.kind}) needs "
+                            f"inout ports, a way in and at least one way out: its ports are "
+                            f"{_ports_text(flat, node)}")
+        return node.path, keys[0], keys[1:]
+
+    def port(piece, name, line):
+        return lang.Ref([piece, name], False, line)
+
+    taken = {}                                   # piece -> {way out: branch}
+    for b in net.branches:
+        head = b[0][0]
+        piece, _in, outs = ways(lang.Ref(head.parts[:1], False, head.line))
+        if head.parts[1] not in outs:
+            raise ElabError(src, head.line, f"{what}: branch {head}: {head.parts[0]}'s ways out "
+                                            f"are {', '.join(outs)} (its first inout port, "
+                                            f"{_in}, is its way in)")
+        if head.parts[1] in taken.setdefault(head.parts[0], {}):
+            raise ElabError(src, head.line, f"{what}: branch {head} is written twice")
+        taken[head.parts[0]][head.parts[1]] = b
+    out, seen = [], set()
+
+    def segment(name, drivers, consumers, line):
+        out.append(dataclasses.replace(net, name=name, drivers=drivers, consumers=consumers,
+                                       line=line, stages=None, branches=[]))
+
+    def run(name, drivers, stages, line):
+        """Segments from ``drivers`` through ``stages`` (pieces, then the consumers)."""
+        if not stages:
+            return
+        nxt = stages[0]
+        last_piece = (len(stages) == 1 and len(nxt) == 1 and len(nxt[0].parts) == 1
+                      and nxt[0].parts[0] in taken)  # `net gear: gears -> sp` and branches
+        if len(stages) == 1 and not last_piece:  # the consumers
+            segment(name, drivers, nxt, line)
+            return
+        ref = nxt[0]
+        piece = ref.parts[0]
+        if piece in seen:
+            raise ElabError(src, ref.line, f"{what}: {piece} is in the chain twice")
+        seen.add(piece)
+        _path, way_in, outs = ways(ref)
+        segment(name, drivers, [port(piece, way_in, ref.line)], line)
+        free = [o for o in outs if o not in taken.get(piece, {})]
+        for o, b in taken.get(piece, {}).items():
+            run(f"{net.name}@{piece}.{o}", [port(piece, o, b[0][0].line)], b[1:], b[0][0].line)
+        rest = stages[1:]
+        if not free:
+            if rest:
+                raise ElabError(src, ref.line, f"{what}: every way out of {piece} has a branch "
+                                               "line, so nothing is left for the stage after it")
+            return
+        if not rest:
+            raise ElabError(src, ref.line, f"{what}: {piece}'s ways out {', '.join(free)} go "
+                                           f"nowhere: take each on with a branch line "
+                                           f"({piece}.{free[0]} -> ...)")
+        if len(free) == 1:
+            run(f"{net.name}@{piece}" if len(outs) == 1 else f"{net.name}@{piece}.{free[0]}",
+                [port(piece, free[0], ref.line)], rest, ref.line)
+            return
+        if len(rest) > 1:
+            raise ElabError(src, ref.line,
+                            f"{what}: {piece} has {len(free)} ways out ({', '.join(free)}) and "
+                            f"the next stage is a piece, which takes one: name each way with a "
+                            f"branch line ({piece}.{free[0]} -> ...)")
+        consumers = rest[0]
+        if len(consumers) < len(free):
+            raise ElabError(src, ref.line,
+                            f"{what}: {piece} has {len(free)} ways out ({', '.join(free)}) and "
+                            f"{len(consumers)} consumers after it: give every way one, or take a "
+                            f"way on with a branch line ({piece}.{free[-1]} -> ...)")
+        for k, o in enumerate(free):
+            run(f"{net.name}@{piece}.{o}", [port(piece, o, ref.line)],
+                [consumers[k::len(free)]], ref.line)
+
+    run(net.name, net.stages[0], net.stages[1:], net.line)
+    for piece, ways_taken in taken.items():
+        if piece not in seen:
+            raise ElabError(src, net.line, f"{what}: branch {piece}.{next(iter(ways_taken))}: "
+                                           f"{piece} is not a piece of this chain")
+    return out
 
 
 def _each_nets(flat, net, scope, src):
@@ -2002,8 +2119,29 @@ def _resolve_nets(flat, cat):
                                   getattr(p.net, "limited", False),
                                   None if when is None else (when, p.scope), p.scope,
                                   getattr(p.net, "width", 1), getattr(p.net, "lane", None),
-                                  getattr(p.net, "why", None), group=p.group)
+                                  getattr(p.net, "why", None), group=p.group, chain=p.chain)
     flat._out_hold, flat._in_hold = out_hold, in_hold
+    _settle_inout(flat)
+
+
+def _settle_inout(flat):
+    """An inout port takes the way its nets run (3.0, chained nets): ``in`` when the nets outside
+    its module only feed it, ``out`` when they only take from it. The router and the frame see an
+    in or an out port like any other; ``inout`` stays true, so reports show the piece's ways. A
+    port used both ways, or not at all, stays inout."""
+    for key, port in flat.ports.items():
+        if port.dir != "inout":
+            continue
+        feeds = takes = False
+        for item in port.all_items:
+            for n in flat._in_hold.get((key, item), []):
+                if n in flat.nets and flat.nets[n].scope != port.scope:
+                    feeds = True
+            for n in flat._out_hold.get((key, item), []):
+                if n in flat.nets and flat.nets[n].scope != port.scope:
+                    takes = True
+        if feeds != takes:
+            port.dir, port.inout = ("in" if feeds else "out"), True
 
 
 def _buffer_items(flat, pending, cat):

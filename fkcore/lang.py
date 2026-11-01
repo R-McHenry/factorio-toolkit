@@ -14,7 +14,8 @@
     place   := 'size' WxH | 'gap' num | 'retired' | 'temporary' [until ...] | hint   # its own line
     hint    := '@' '(' num ',' num (',' 'rot' num)? ')' | '@' 'patch' '(' word | STRING ')'
     net     := 'net' 'each'? name ('items' item (',' item)*)? ('width' num)? ('lane' ('L' | 'R'))?
-               'split'? ('limited' STRING?)? ':' refs '->' refs ('when' cond)?
+               'split'? ('limited' STRING?)? ':' refs ('->' refs)+ ('when' cond)? branch*
+    branch  := name '.' name ('->' refs)+    # on a line of its own: one way out of a piece (3.0)
     lanes   := 'lanes' name '|' name    # two nets share every belt: left lane | right lane
     bundle  := 'bundle' name ':' name (',' name)*    # nets routed as one ribbon, in order (2.1)
     refs    := ref (',' ref)*          ref := name index? ('.' name index?)* ('.' '*')?
@@ -288,6 +289,11 @@ class Net:
     split: bool = False    # 2.0.76: one net per item, two to a belt (a lane each)
     why: str | None = None     # 2.1: `limited "..."`, what limits the net (shown, not checked)
     each: bool = False     # 2.1: `net each`: one net per Stack cell, cell k with cell k
+    # 3.0 chained nets: `net gear: gears -> wp -> red`, every stage's refs in order (the middle
+    # ones are pieces, instances with inout ports), and the branch lines `sp.a -> wp2 -> cable`,
+    # each a list of stages starting with [piece.port]. None for a plain net.
+    stages: list | None = None
+    branches: list = field(default_factory=list)
 
 
 @dataclass
@@ -1052,12 +1058,46 @@ class _P:
             if not why:
                 self.err("limited \"\": say what limits the net, or write a bare limited", tok)
         self.expect(":")
-        drivers = self.refs()
+        stages = [self.refs()]
         self.expect("->")
-        consumers = self.refs()
+        stages.append(self.refs())
+        while self.accept("->"):
+            stages.append(self.refs())
         when = self.cond() if self.accept("when") else None
-        return Net(name, items, drivers, consumers, line, limited, when, width, lane, split, why,
-                   each=each)
+        net = Net(name, items, stages[0], stages[-1], line, limited, when, width, lane, split, why,
+                  each=each)
+        if len(stages) > 2:
+            # 3.0 chained nets: the middle stages are pieces, one instance each
+            if each:
+                self.err(f"net each {name}: a chain goes through pieces one net at a time; "
+                         "chain the cells' nets inside the cell")
+            for stage in stages[1:-1]:
+                if len(stage) != 1 or len(stage[0].parts) != 1 or stage[0].star:
+                    self.err(f"net {name}: a chain's middle stage is one piece, an instance with "
+                             f"inout ports (like wp in gears -> wp -> red), got "
+                             f"{', '.join(str(r) for r in stage)}")
+            net.stages = stages
+        pieces = {s[0].parts[0] for s in stages[1:-1]}
+        while (self.peek().kind == "word" and self.peek().line > line
+               and self.peek().text in pieces and self.peek(1).text == "."
+               and self.peek(2).kind == "word" and self.peek(3).text == "->"):
+            # a branch line: one way out of a piece of this chain, on to its own consumers
+            branch = [[self.ref()]]
+            while self.accept("->"):
+                stage = self.refs()
+                branch.append(stage)
+            for stage in branch[1:-1]:
+                if len(stage) != 1 or len(stage[0].parts) != 1 or stage[0].star:
+                    self.err(f"net {name}: a branch's middle stage is one piece, got "
+                             f"{', '.join(str(r) for r in stage)}")
+                pieces.add(stage[0].parts[0])
+            if len(branch) < 2:
+                self.err(f"net {name}: a branch line is PIECE.PORT -> ... (a way out of a piece, on "
+                         "to its consumers)")
+            net.branches.append(branch)
+            if net.stages is None:
+                net.stages = stages
+        return net
 
     def lanes(self):
         line = self.expect("lanes").line

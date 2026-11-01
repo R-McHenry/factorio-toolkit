@@ -211,17 +211,27 @@ attach.
 
 ### Your `game\routing.fk`
 
-Small pieces for steering the router: place one where a belt must go, and split the net at it.
-Each is a sealed module (ports and one net), so the router lays each half of the net on its own.
+Small pieces for steering the router: place one where a belt must go, and run the net through
+it. Each is a sealed module (ports and one net), so the router lays each stretch on its own.
 `import Waypoint, Merge, Split from "routing.fk"`.
 
 | piece | what | ports |
 |---|---|---|
-| `Waypoint<item>` | one belt, 1x3: the net passes here (`net a: x -> wp.i`, `net b: wp.o -> y`) | `i`, `o` |
-| `Merge<a, b>` | two belts into one by a splitter; each item stays on the lane it came in on | `a`, `b`, `o` |
-| `Split<item>` | one belt into two, by a splitter | `i`, `a`, `b` |
+| `Waypoint<item>` | one belt, 1x3: the net passes here | `i`, `o` (inout) |
+| `Merge<a, b>` | two belts into one by a splitter; each item stays on the lane it came in on | `a`, `b` in, `o` out |
+| `Split<item>` | one belt into two, by a splitter | `i`, `a`, `b` (inout) |
 
 They run north to south; `rot 1` turns one to run east to west, `rot 3` west to east.
+
+**Chained nets.** `net gear: gears -> wp -> red, belts` runs gear through the piece `wp`. A
+chain's middle stages are pieces, one instance each, whose modules have `inout` ports: the first
+one declared is the way in, the rest are ways out. The chain is one net laid in segments: `gear`
+(to the way in) and `gear@wp` (from the way out); a piece with several ways out gives
+`gear@sp.a`, `gear@sp.b`. The consumers after such a piece are shared, the first to its first
+way out, and so on. A line under the net, `sp.b -> wp2 -> red`, takes one way out on to its own
+pieces and consumers (a branch). The route step's `chain` line and `fk status` show the segments
+together. Writing the segments as plain nets on the ports (`net a: x -> wp.i`, `net b: wp.o ->
+y`) works too. Merge is not a chain piece: it joins two nets.
 
 ## Other kinds
 
@@ -586,7 +596,8 @@ module GearRib size 16x10 {
 - `port NAME : in|out|inout ITEM [| ITEM2] [@side[pos][L|R]]`. A port is a **lane** of one belt
   end. `item | item2` is the two lanes of the pair; the same item twice is one item on both. A net
   may name a port only in the module that declares it: naming one from outside the module is an
-  error that says which `port` line to add.
+  error that says which `port` line to add. `inout` marks a pass-through port, for a piece a net
+  can run through (chained nets, under routing.fk above): it takes the way its outside net runs.
 - `size WxH` is the module's frame, and a port is a place on that frame's **edge**: it takes no
   tile. The belt crosses the edge there, from the tile just outside to the tile just inside (the
   other way for an `out` port): the module's own route reaches the tile inside, the parent's the

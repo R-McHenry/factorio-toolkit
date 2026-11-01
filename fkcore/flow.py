@@ -1118,6 +1118,7 @@ def s_route(ctx, args):
             lines.append(f"  rehanded  {rehanded} standing inserter"
                          f"{'s' if rehanded != 1 else ''} robots cannot build, to {hand}")
         lines += [f"  {l}" for l in r.lines]
+        lines += _chain_lines(flat, r)
         lines += _one_inserter(ctx, factory, flat, r.layout)
         checks += [Check("no-route", f"{factory} net {n}", why) for n, why in r.failed.items()]
         checks += [Check("maxflow", f"{factory} net {n}", why) for n, why in r.maxflow.items()]
@@ -1171,6 +1172,21 @@ def _nets_in_area(ctx, flat, lay, old, area):
             if e is not None and hit(e):
                 out.add(name)
                 break
+    return out
+
+
+def _chain_lines(flat, r):
+    """3.0 chained nets: one line per chain, its segments and how they stand, so the chain reads
+    as the one net it is written as."""
+    chains = {}
+    for name, net in flat.nets.items():
+        if net.chain:
+            chains.setdefault(net.chain, []).append(name)
+    out = []
+    for chain, segs in sorted(chains.items()):
+        failed = [s for s in segs if s in r.failed]
+        out.append(f"  chain     {chain}: {len(segs)} segments ({', '.join(segs)}), "
+                   + (f"{len(failed)} unrouted: {', '.join(failed)}" if failed else "all laid"))
     return out
 
 
@@ -1736,6 +1752,8 @@ def _bootstrap_checks(ctx, factory, flat, lay):
                                in zip(rows, clauses))
             msg = (f"its route needs {needs}: {detail}: stock what the route needs first, or "
                    "build those makers first")
+        if getattr(net, "chain", None):
+            msg += f" ({net.name} is a stretch of chain {net.chain})"
         out.append(Check("bootstrap", f"net {factory}/{net.name}", msg))
     return out
 

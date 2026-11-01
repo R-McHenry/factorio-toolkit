@@ -216,6 +216,9 @@ def status_lines(out, factory, net=None):
                 + f", {len(rec['ents'])} carriers"]
         if rec["why"]:
             out_.append(f"  why: {rec['why']}")
+        segs = chain_of(recs, net)
+        if len(segs) > 1:
+            out_.append("  chain: " + ", ".join(f"{s} ({recs[s]['status']})" for s in segs))
         out_.append(f"  file: {net_path(out, factory, net)}")
         return out_
     count = {}
@@ -234,7 +237,19 @@ def status_lines(out, factory, net=None):
     held = sorted(r["net"] for r in recs.values() if r["status"] == "held")
     if held:
         lines.append(f"  held: {', '.join(held)}")
+    roots = sorted({n.split("@")[0] for n in recs if "@" in n})
+    if roots:
+        lines.append("  chains: " + ", ".join(f"{c} ({len(chain_of(recs, c))} segments)"
+                                             for c in roots))
     return lines
+
+
+def chain_of(recs, net):
+    """3.0 chained nets: the segments of the chain ``net`` is in, its first segment first (a
+    segment is ``CHAIN@PIECE`` or ``CHAIN@PIECE.WAY``; ``@`` is in no net name you write)."""
+    root = net.split("@")[0]
+    return [n for n in sorted(recs, key=lambda n: (n != root, n))
+            if n == root or n.startswith(root + "@")]
 
 
 def set_status(out, factory, net, status, why=""):

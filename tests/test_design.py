@@ -126,6 +126,56 @@ class DesignFlowTest(unittest.TestCase):
         self.assertRegex(route_txt, r"routed    sp/p: 1 -> 2, .*1 splitters")
         self.assertIn("main: 20 nets: 20 connected", self.read("out/report_checks.txt"))
 
+    def pieces(self, *swaps):
+        shutil.copy(os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game",
+                                 "routing.fk"), self.dir)
+        fk = 'import Waypoint, Merge, Split from "routing.fk"\n' + self.read("main.fk")
+        for old, new in (("labs  = LabRow<n=10>",
+                          "wp    = Waypoint<item=iron-gear-wheel>  @(8, 28)\n"
+                          "mg    = Merge<a=automation-science-pack, b=logistic-science-pack>  "
+                          "@(4, 40)\n"
+                          "sp    = Split<item=copper-plate>  @(4, 16)\n"
+                          "labs  = LabRow<n=10>"),) + swaps:
+            self.assertIn(old, fk)
+            fk = fk.replace(old, new)
+        with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8") as fh:
+            fh.write(fk)
+
+    def test_a_chained_net_goes_through_its_pieces(self):
+        # 3.0 chained nets (Rory, 11-01): `net gear: gears -> wp -> red` is one net, laid as linked
+        # segments; a branch line takes one way out of a split on to its own consumers
+        self.pieces(("net gear:   gears -> red, belts, ins", "net gear:   gears -> wp -> red, belts, ins"),
+                    ("net copper: copper_smelt -> cable, red",
+                     "net copper: copper_smelt -> sp -> cable\n  sp.b -> red"))
+        self.build(to="report_checks")
+        route_txt = self.read("out/route.txt")
+        self.assertIn("chain     gear: 2 segments (gear, gear@wp), all laid", route_txt)
+        self.assertIn("chain     copper: 3 segments (copper, copper@sp.b, copper@sp.a), all laid",
+                      route_txt)
+        self.assertRegex(route_txt, r"routed    copper@sp.b: 1 -> 1, ")
+        self.assertIn("main: 18 nets: 18 connected", self.read("out/report_checks.txt"))
+        lines = design.status_lines(self.out, "main")
+        self.assertIn("  chains: copper (3 segments), gear (2 segments)", lines)
+        self.assertIn("  chain: gear (routed), gear@wp (routed)",
+                      design.status_lines(self.out, "main", "gear@wp"))
+
+    def test_a_chain_says_what_its_pieces_need(self):
+        for swap, want in (
+                (("net packs:  red, green -> labs", "net packs:  red, green -> mg -> labs"),
+                 "mg is in a chain, so its module (Merge) needs inout ports"),
+                (("net copper: copper_smelt -> cable, red", "net copper: copper_smelt -> sp -> wp -> cable, red"),
+                 "sp has 2 ways out (a, b) and the next stage is a piece"),
+                (("net copper: copper_smelt -> cable, red",
+                  "net copper: copper_smelt -> sp -> cable, red\n  sp.i -> red"),
+                 "branch sp.i: sp's ways out are a, b")):
+            with self.subTest(want=want):
+                shutil.copy(os.path.join(GAME, "main.fk"), self.dir)
+                self.pieces(swap)
+                said = []
+                code, _ctx = flow.run(self.script, cat=CAT, echo=said.append, to="elaborate")
+                self.assertNotEqual(code, 0)
+                self.assertIn(want, " ".join(said))
+
     def test_a_net_routed_through_its_seed(self):
         # 3.0 `fk seed NET 'splitter X,Y S'`: the player pins a splitter of gear's; the router lays
         # the rest of gear through it, and later builds keep the seed

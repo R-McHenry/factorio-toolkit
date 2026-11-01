@@ -225,12 +225,14 @@ How route works through the nets is yours to set, on its line in the build scrip
   out, and every way out of a splitter gets a consumer when there are enough. The seed stays
   in the net file (`# seed:`), so a later build that routes the net again keeps it.
   `fk unroute NET` drops it. One belt only: not lane pairs, m2m nets or pipes.
-- A net the router can't find a way for can be broken up: place a piece from `game\routing.fk`
-  where you want it to pass, and split the net there. `import Waypoint, Merge, Split from
-  "routing.fk"`, then `wp = Waypoint<item=iron-gear-wheel> @(8, 28)`, `net gear: gears -> wp.i`
-  and `net gear2: wp.o -> red, belts`: two ordinary nets, each routed on its own. `Merge` joins
-  two belts where you choose, `Split` divides one. Each is a small sealed module; open the file
-  to see how, and copy one to make your own.
+- A net the router can't find a way for can be sent through a piece from `game\routing.fk`,
+  placed where you want it to pass. `import Waypoint, Merge, Split from "routing.fk"`, then
+  `wp = Waypoint<item=iron-gear-wheel> @(8, 28)` and `net gear: gears -> wp -> red, belts`. It
+  is still one net, gear, laid in stretches (`gear`, then `gear@wp`) that the route step and
+  `fk status` show together. `Split` divides a belt: `net copper: smelt -> sp -> cable, red`
+  puts cable on way a and red on way b, and a line under it like `sp.b -> wp2 -> red` takes way
+  b on by its own path. `Merge` joins two nets where you choose (`mg.a`, `mg.b`, `mg.o`). Each
+  is a small sealed module; open the file to see how, and copy one to make your own.
 - `fk route --try X,Y X,Y` asks the router how a belt would run from tile A to tile B on the
   design as it stands (its routed nets included), every heading tried at both ends. It prints
   the carriers, or why there is no way, and lays nothing: a quick check before you move a
