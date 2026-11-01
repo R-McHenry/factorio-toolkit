@@ -1,6 +1,6 @@
 """hourglass: the many-to-many router's bench (DESIGN-M2M.md, "The main test case"). Stdlib only.
 
-    python tools/hourglass.py [--today] [--draw] [--lines] [--only NAME[,NAME]] [--gap N]
+    python tools/hourglass.py [--today] [--balancer] [--draw] [--lines] [--only NAME[,NAME]]
 
 A column of producers on the left, a column of consumers on the right, a gap between them, one net
 from every producer to every consumer. A producer is a requester chest at a rate (it puts its
@@ -13,7 +13,8 @@ SPILL), the waist (the runs crossing the vertical line midway between the column
 across any vertical line of the gap), belts, underground ends, splitters, inserters, the runs the
 router added, its belt cost (steiner's costs) and the route time. ``--today`` adds a row per case
 routed without ``--m2m`` (the router as it was: one trunk, both lanes by a side-load above one
-lane), its max-flow counted on both lanes.
+lane), its max-flow counted on both lanes. ``--balancer`` adds a row per case laid through a
+balancer at the waist (``lay_balancer``: Rory's layers of splitters alternating by one).
 
 Keep the table as it is printed: later versions of the router are compared on it.
 """
@@ -96,11 +97,17 @@ def _crossing(g, nodes, x):
     return n
 
 
-def measure(name, cat, m2m=True, gap=GAP):
-    """One row of the table, as a dict."""
+def measure(name, cat, m2m=True, gap=GAP, router=None):
+    """One row of the table, as a dict. ``router``: "m2m" (default with ``m2m``), "today" or
+    "balancer" (``lay_balancer``)."""
+    router = router or ("m2m" if m2m else "today")
     flat, lay, bounds, blocked, mid = build(name, cat, gap)
     t0 = time.time()
-    r = route.route_layout(flat, lay, cat, bounds=bounds, blocked=sorted(blocked), m2m=m2m)
+    if router == "balancer":
+        r = lay_balancer(flat, lay, cat, bounds, blocked, mid)
+    else:
+        r = route.route_layout(flat, lay, cat, bounds=bounds, blocked=sorted(blocked),
+                               m2m=router == "m2m")
     secs = time.time() - t0
     ends = {n: tuple(v) for n, v in connect.endpoints(flat).items()}      # every pair, not dealt
     rep = connect.connect(r.layout, cat, ends)
@@ -108,7 +115,7 @@ def measure(name, cat, m2m=True, gap=GAP):
     reach = bool(nr and nr.connected and not nr.leaks)
     mine = [e for e in r.layout.entities.values() if e.owner == f"~{NET}"]
     flow = maxflow.of_net(flat, r.layout, cat, NET)
-    if not m2m:
+    if router == "today":
         # the router as it was may put the net on both lanes: count both
         from fkcore import lanes as lanesmod
         supply, take = maxflow.rates_of(flat, NET)
@@ -130,13 +137,192 @@ def measure(name, cat, m2m=True, gap=GAP):
     runs = 0
     if "m2m: " in how:
         runs = int(how.split("m2m: ", 1)[1].split()[0])
-    return {"case": name, "router": "m2m" if m2m else "today", "pc": f"{len(rates)}->{consumers}",
+    if router == "balancer":
+        runs = r.width                       # the balancer's belts
+    return {"case": name, "router": router, "pc": f"{len(rates)}->{consumers}",
             "demand": flow.demand, "maxflow": flow.value, "reach": reach,
             "failed": NET in r.failed, "waist": waist, "narrow": narrow,
             "belts": count["transport-belt"], "ug": count["underground-belt"],
             "splitters": count["splitter"], "inserters": count["inserter"], "runs": runs,
             "cost": round(cost, 1), "secs": round(secs, 1), "line": how, "lines": r.lines,
             "layout": r.layout, "flat": flat}
+
+
+# -- the balancer comparison -----------------------------------------------------------------------
+def balancer_plan(n, x0, y0, layers=None):
+    """A balancer of ``n`` belts heading east, belt k on row y0 + k (Rory, 2026-10-31): an input
+    column at x0, then ``layers`` columns of splitters alternating by one, the first pairing belts
+    (0, 1), (2, 3) ..., the next (1, 2), (3, 4) ..., then an output column. Default n - 1 layers.
+    -> (plan entities, input tiles, output tiles)."""
+    layers = n - 1 if layers is None else layers
+
+    def belt(x, y):
+        return {"name": "transport-belt", "x": x + 0.5, "y": y + 0.5, "direction": 4}
+
+    plan = [belt(x0, y0 + k) for k in range(n)]
+    for j in range(layers):
+        x, paired = x0 + 1 + j, set()
+        for a in range(j % 2, n - 1, 2):
+            plan.append({"name": "splitter", "x": x + 0.5, "y": y0 + a + 1.0, "direction": 4})
+            paired |= {a, a + 1}
+        plan += [belt(x, y0 + k) for k in range(n) if k not in paired]
+    xo = x0 + 1 + layers
+    plan += [belt(xo, y0 + k) for k in range(n)]
+    return plan, [(x0, y0 + k) for k in range(n)], [(xo, y0 + k) for k in range(n)]
+
+
+def balancer_reach(n, layers=None):
+    """{input: outputs it reaches} through ``balancer_plan``'s splitters alone."""
+    layers = n - 1 if layers is None else layers
+    out = {}
+    for i in range(n):
+        at = {i}
+        for j in range(layers):
+            nxt = set(at)
+            for a in range(j % 2, n - 1, 2):
+                if a in at or a + 1 in at:
+                    nxt |= {a, a + 1}
+            at = nxt
+        out[i] = at
+    return out
+
+
+def balancer_layers(n):
+    """The fewest layers of ``balancer_plan`` that join every input to every output: n - 1 for an
+    even n; an odd n needs n (with n - 1 its last input never meets the first layer's pairs)."""
+    for layers in range(max(0, n - 1), n + 2):
+        if all(len(v) == n for v in balancer_reach(n, layers).values()):
+            return layers
+    return n
+
+
+def _groups(rates, n=None, cap=7.5):
+    """``rates`` (in column order) in contiguous groups, each at most ``cap``: the fewest, or
+    exactly ``n``, balanced (the largest group as small as it can be). -> [[index]] or None."""
+    m = len(rates)
+    want = range(1, m + 1) if n is None else [n]
+    for k in want:
+        if k > m:
+            return None
+        # best[i][j]: the smallest max group sum splitting the first i into j groups
+        best = [[float("inf")] * (k + 1) for _ in range(m + 1)]
+        cut = [[0] * (k + 1) for _ in range(m + 1)]
+        best[0][0] = 0.0
+        for i in range(1, m + 1):
+            for j in range(1, min(i, k) + 1):
+                for s in range(j - 1, i):
+                    v = max(best[s][j - 1], sum(rates[s:i]))
+                    if v < best[i][j]:
+                        best[i][j], cut[i][j] = v, s
+        if best[m][k] <= cap + 1e-9:
+            out, i = [], m
+            for j in range(k, 0, -1):
+                s = cut[i][j]
+                out.append(list(range(s, i)))
+                i = s
+            return out[::-1]
+    return None
+
+
+class _Laid:
+    def __init__(self, layout, lines, failed, width):
+        self.layout, self.lines, self.failed, self.width = layout, lines, failed, width
+
+
+def lay_balancer(flat, lay, cat, bounds, blocked, mid, limit=60000):
+    """The comparison: a balancer of n belts (``balancer_plan``, ``balancer_layers``) laid across
+    the waist, n the fewest contiguous producer groups (and consumer groups) of a lane each; each
+    producer group merged into one input by a tree laid reversed, each output split to one
+    consumer group by a tree. Producers drop on the left lane. Grouping by position, as a
+    balancer is fed: the thing the m2m router doesn't need."""
+    from fkcore import fkp, m2m as m2mmod
+    supply, take = maxflow.rates_of(flat, NET)
+    pk = sorted(supply, key=lambda k: lay.entities[k].y)
+    ck = sorted(take, key=lambda k: lay.entities[k].y)
+    pg, cg = _groups([supply[k] for k in pk]), _groups([take[k] for k in ck])
+    if pg is None or cg is None:
+        return _Laid(lay.copy(), [f"FAILED    {NET}: a producer or consumer above a lane"],
+                     {NET: "above a lane"}, 0)
+    n = max(len(pg), len(cg))
+    pg, cg = _groups([supply[k] for k in pk], n), _groups([take[k] for k in ck], n)
+    layers = balancer_layers(n)
+    length = layers + 2
+    ys = [e.y for e in lay.entities.values()]
+    y0 = int((min(ys) + max(ys)) / 2) - n // 2
+    x0 = mid - length // 2
+    while any((x, y0 + k) in blocked for x in range(x0 - 1, x0 + length + 1)
+              for k in range(n)) and x0 > bounds[0] + 2:
+        x0 -= 1                                    # off the wall, towards the producers
+    plan, ins, outs = balancer_plan(n, x0, y0, layers)
+    ents, count = [], [0]
+
+    def keyed(plans):
+        out = []
+        for p in plans:
+            letter = {"transport-belt": "b", "underground-belt": "u",
+                      "splitter": "s"}.get(p["name"], "i")
+            attrs = {"net": NET}
+            if p.get("belt_to_ground_type"):
+                attrs["ug"] = "in" if p["belt_to_ground_type"] == "input" else "out"
+            x, y = p["x"], p["y"]
+            out.append(fkp.Entity(f"~{NET}/{letter}{count[0]}", p["name"],
+                                  int(x) if float(x).is_integer() else x,
+                                  int(y) if float(y).is_integer() else y,
+                                  int(p["direction"]), attrs))
+            count[0] += 1
+        return out
+
+    frame = keyed(plan)
+    goals = [(x - 1, y) for x, y in ins]           # the tile behind each input belt, heading E
+    starts = [(x + 1, y) for x, y in outs]          # the tile each output belt points into
+    base = set(blocked)
+    for e in lay.entities.values():
+        base |= fkp.tiles_of(cat, e)
+    lines, failed = [], {}
+    jobs = [("in", k, goals[k], [(key, _rect(cat, lay.entities[key])) for key in
+                                  (pk[i] for i in pg[k])]) for k in range(n)]
+    jobs += [("out", k, starts[k], [(key, _rect(cat, lay.entities[key])) for key in
+                                    (ck[i] for i in cg[k])]) for k in range(n)]
+    # the trees one at a time, each on the ground the ones before left; a tree that finds no way
+    # moves to the front and the pass starts again, as the router does with its nets
+    for _pass in range(len(jobs)):
+        ents, failed = list(frame), {}
+        for job in jobs:
+            side, k, tile, machines = job
+            own = set(goals) | set(starts)
+            occ = base | {t for e in ents for t in fkp.tiles_of(cat, e)} | \
+                (set(route._belt_fronts(cat, ents)) | own) - {tile}
+            spans = route._ug_spans(cat, ents)
+            reverse = side == "in"
+            clear = route._belt_tiles(cat, ents)
+            grid = route._Bounded(occ, bounds, spans, clear if reverse else None)
+            root = (tile[0], tile[1], 3 if reverse else 1, 0)
+            res, sinks = route._grow(grid, root, [], machines, limit, sources=reverse,
+                                     tap=m2mmod.LeftTap if reverse else route.TapSink)
+            if res["problems"]:
+                failed[NET] = f"{side} {k}: " + "; ".join(res["problems"][:2])
+                jobs = [job] + [j for j in jobs if j is not job]
+                break
+            ents += keyed(res["tree"].entities(sinks, net=NET, reverse=reverse))
+        if not failed:
+            break
+    new = lay.copy()
+    for e in ents:
+        new.add(e)
+    c = {"transport-belt": 0, "splitter": 0}
+    for e in ents:
+        if e.name in c:
+            c[e.name] += 1
+    lines.append((f"FAILED    {NET}: {failed[NET]}; " if failed else f"routed    {NET}: ")
+                 + f"balancer of {n} belts, {layers} layers, {c['splitter']} splitters")
+    return _Laid(new, lines, failed, n)
+
+
+def _rect(cat, e):
+    from fkcore import fkp
+    ts = fkp.tiles_of(cat, e)
+    return (min(t[0] for t in ts), min(t[1] for t in ts), max(t[0] for t in ts) + 1,
+            max(t[1] for t in ts) + 1)
 
 
 def _two_lane(lanesmod, ents, cat, supply, take, demand):
@@ -243,6 +429,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--only", default="", help="case names, comma separated")
     ap.add_argument("--today", action="store_true", help="also route each case without --m2m")
+    ap.add_argument("--balancer", action="store_true",
+                    help="also lay each case through a balancer at the waist")
     ap.add_argument("--gap", type=int, default=GAP)
     ap.add_argument("--lines", action="store_true", help="print each case's route lines")
     ap.add_argument("--draw", action="store_true", help="draw each case as laid")
@@ -251,8 +439,9 @@ def main(argv=None):
     names = [n for n in CASES if not a.only or n in a.only.split(",")]
     rows = []
     for name in names:
-        for m2m in ((True, False) if a.today else (True,)):
-            m = measure(name, cat, m2m, a.gap)
+        routers = ["m2m"] + (["today"] if a.today else []) + (["balancer"] if a.balancer else [])
+        for router in routers:
+            m = measure(name, cat, gap=a.gap, router=router)
             rows.append(m)
             if a.lines:
                 print(f"-- {name} ({m['router']})")

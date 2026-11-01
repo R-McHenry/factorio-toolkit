@@ -76,6 +76,33 @@ class HourglassTest(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 2 + len(hourglass.CASES))
 
 
+class BalancerTest(unittest.TestCase):
+    """The comparison: Rory's balancer (n belts, layers of splitters alternating by one) at the
+    waist, fed by a merge tree per producer group and feeding a split tree per consumer group."""
+
+    def test_n_minus_one_layers_reach_for_even_n_only(self):
+        for n in range(2, 10):
+            full = all(len(v) == n for v in hourglass.balancer_reach(n).values())
+            with self.subTest(n=n):
+                self.assertEqual(full, n % 2 == 0)
+                self.assertEqual(hourglass.balancer_layers(n), n - 1 if n % 2 == 0 else n)
+        # n = 3, two layers: the last input never meets the pair (0, 1)
+        self.assertEqual(hourglass.balancer_reach(3)[2], {1, 2})
+
+    def test_the_plan(self):
+        plan, ins, outs = hourglass.balancer_plan(4, 0, 0)
+        self.assertEqual(sum(p["name"] == "splitter" for p in plan), 2 + 1 + 2)
+        self.assertEqual((len(ins), len(outs)), (4, 4))
+        self.assertEqual(outs[0], (4, 0))
+
+    def test_every_case_through_a_balancer(self):
+        for name in hourglass.CASES:
+            m = hourglass.measure(name, CAT, router="balancer")
+            with self.subTest(case=name):
+                self.assertTrue(m["reach"], m["line"])
+                self.assertGreaterEqual(m["maxflow"], m["demand"] - 1e-6)
+
+
 class GateTest(unittest.TestCase):
     """Without --m2m the router is as it was; with it, only many-to-many nets above a lane."""
 

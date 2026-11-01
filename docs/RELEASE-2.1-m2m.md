@@ -68,24 +68,31 @@ Each case prints one row:
 - belts, underground ends, splitters and inserters;
 - the runs added, the belt cost (steiner's costs) and the route time.
 
-`--today` adds the router without `--m2m`, its max-flow counted on both lanes. `--draw` draws each
-case as text. The baseline, on the laptop:
+`--today` adds the router without `--m2m`, its max-flow counted on both lanes. `--balancer` adds
+the balancer comparison (below). `--draw` draws each case as text. The baseline, on the laptop
+(`python tools/hourglass.py --today --balancer`; for a balancer row, `runs` is its belts):
 
 ```
-case    router    P->C  demand  maxflow  reach  waist  narrow  belts  ug  splitters  inserters  runs   cost  secs
-------  ------  ------  ------  -------  -----  -----  ------  -----  --  ---------  ---------  ----  -----  ----
-8to8    m2m       8->8     6.4      6.4    yes      1       1     43   0          2         16     0   81.0   0.2
-8to8    today     8->8     6.4      6.4    yes      1       1     43   0          2         16     0   81.0   0.1
-16to16  m2m     16->16    22.4     22.4    yes      3       3    119   0         17         33     7  236.0   3.0
-16to16  today   16->16    22.4     15.0    yes      1       1     78   0          1         32     0  145.0   0.5
-16to4   m2m      16->4     8.8      8.8    yes      2       2     82   2          5         20     1  143.0   0.4
-16to4   today    16->4     8.8      8.8    yes      1       1     68   4          1         20     0  123.0   0.3
-4to16   m2m      4->16     8.8      8.8    yes      2       2     76   2          5         20     2  137.0   0.4
-4to16   today    4->16     8.8      8.8    yes      2       2     89   2          1         20     0  138.0   0.3
-uneven  m2m       8->8     9.2      9.2    yes      2       2     64   0          4         16     1  108.0   1.2
-uneven  today     8->8     9.2      9.2    yes      1       1     61   0          1         16     0   96.0   0.2
-wall    m2m     12->12    12.0     12.0    yes      2       2     68   4          4         24     1  140.0   0.6
-wall    today   12->12    12.0     12.0    yes      1       1     62   0          1         24     0  113.0   0.2
+case    router      P->C  demand  maxflow  reach  waist  narrow  belts  ug  splitters  inserters  runs   cost  secs
+------  --------  ------  ------  -------  -----  -----  ------  -----  --  ---------  ---------  ----  -----  ----
+8to8    m2m         8->8     6.4      6.4    yes      1       1     43   0          2         16     0   81.0   0.1
+8to8    today       8->8     6.4      6.4    yes      1       1     43   0          2         16     0   81.0   0.1
+8to8    balancer    8->8     6.4      6.4    yes      1       1     55   0          4         16     1   99.0   0.0
+16to16  m2m       16->16    22.4     22.4    yes      3       3    119   0         17         33     7  236.0   1.8
+16to16  today     16->16    22.4     15.0    yes      1       1     78   0          1         32     0  145.0   0.3
+16to16  balancer  16->16    22.4     22.4    yes      4       4    155   4          6         32     4  249.0   0.2
+16to4   m2m        16->4     8.8      8.8    yes      2       2     82   2          5         20     1  143.0   0.3
+16to4   today      16->4     8.8      8.8    yes      1       1     68   4          1         20     0  123.0   0.2
+16to4   balancer   16->4     8.8      8.8    yes      2       2     99   2          2         20     2  151.0   0.0
+4to16   m2m        4->16     8.8      8.8    yes      2       2     76   2          5         20     2  137.0   0.3
+4to16   today      4->16     8.8      8.8    yes      2       2     89   2          1         20     0  138.0   0.2
+4to16   balancer   4->16     8.8      8.8    yes      2       2     96   0          1         20     2  139.0   0.1
+uneven  m2m         8->8     9.2      9.2    yes      2       2     64   0          4         16     1  108.0   0.9
+uneven  today       8->8     9.2      9.2    yes      1       1     61   0          1         16     0   96.0   0.1
+uneven  balancer    8->8     9.2      9.2    yes      2       2     72   0          4         16     2  116.0   0.2
+wall    m2m       12->12    12.0     12.0    yes      2       2     68   4          4         24     1  140.0   0.5
+wall    today     12->12    12.0     12.0    yes      1       1     62   0          1         24     0  113.0   0.2
+wall    balancer  12->12    12.0     12.0    yes      2       2     92   2          1         24     2  149.0   0.1
 ```
 
 The cases: 8 to 8 at 6.4/s (under a lane), 16 to 16 at 22.4/s (three lanes), 16 to 4 and 4 to 16
@@ -106,14 +113,37 @@ tiles thick across the gap and one free tile in it.
   12-24% more than today's trunk on both lanes; 4 to 16 costs the same. That is the price of
   the left lane only.
 
+## The balancer comparison
+
+Rory's balancer is n belts side by side and layers of splitters, alternating by one: one layer
+pairs belts (0, 1), (2, 3) ..., the next pairs (1, 2), (3, 4) ..., and so on. It is built for any
+n (`balancer_plan`, `--balancer`).
+
+- **Odd n needs n layers, not n - 1.** With n - 1 layers, an odd n leaves its last input short of
+  output 0. The last input misses the first layer's pairs, so it spreads one belt fewer. For n = 3
+  with two layers, input 2 reaches outputs 1 and 2 only. An even n is full with n - 1 layers.
+  `balancer_layers` gives the fewest layers that join every input to every output, so an odd n
+  gets n; a test checks n = 2 to 9.
+- **How it is laid:** across the waist, n belts heading east. n is the fewest contiguous
+  producer groups (and consumer groups) of at most one lane each. Each producer group is merged
+  into one input by a tree laid reversed, with drivers on the left lane. Each output is split to
+  one consumer group by a tree. The trees are laid one at a time; one that finds no way moves to
+  the front and the pass starts again, as the router does with its nets. This is grouping by
+  position, the thing the m2m router doesn't need.
+- **What it gave:** full reach and the demand met in every case. It cost more than the m2m
+  baseline in all six (m2m against balancer): 81 against 99, 236 against 249, 143 against 151,
+  137 against 139, 108 against 116, and 140 against 149. In 16 to 16 the groups need 4 belts, not 3: five producers
+  at 1.4/s make 7.0, and a sixth would pass a lane. On the first pass, the top group's collector
+  took the next group's tap tiles; the retry laid it.
+
 ## What is not in it
 
 - **Side-loads, both lanes and lane balancing** (version 1 is left lane only). Below two lanes
   the baseline needs two runs where today's side-loaded trunk needs one.
 - **The even split of a splitter.** A real network can carry less than its max-flow, because a
   splitter divides evenly. The lab measures that gap; it is the next release.
-- **The balancer comparison** (a standard 2x2, 4x4 or 8x8 module dropped at the waist) is not
-  built.
+- **The balancer as a sealed module.** The comparison lays it in the bench (`tools/hourglass.py`),
+  not as a module of the language or a router move.
 - **Belt ends.** The router takes a driver or consumer belt end (a port) as a source or sink of
   its own rate. Only machines get new inserters, so a port with spare flow can be split from but
   not given a second run of its own.
@@ -133,10 +163,13 @@ tiles thick across the gap and one free tile in it.
   - `_grow`, `_hub_trees` and `_hub_search` take `tap=` (the driver sink kind; default
     `TapSink`, as before).
 - `fkcore/flow.py`: `route --m2m`, and a `maxflow` check for a net that falls short.
-- `tools/hourglass.py`: the bench.
+- `tools/hourglass.py`: the bench, with the balancer comparison (`balancer_plan`,
+  `balancer_reach`, `balancer_layers`, `lay_balancer`).
 - Tests: `tests/test_m2m.py` checks:
   - reach on every case, max-flow meets demand, the 8 to 8 waist of 1, and the 16 to 16 waist of 3;
   - left-lane drops, the `MAXFLOW` line, and the table;
   - nothing changes without `--m2m`, and one lane lays as today;
   - `width 4` gives four lanes, not a ribbon;
-  - the max-flow on hand-laid belts, and the cut when short.
+  - the max-flow on hand-laid belts, and the cut when short;
+  - the balancer: n - 1 layers are full for even n only, and every case laid through one has
+    full reach and meets the demand.
