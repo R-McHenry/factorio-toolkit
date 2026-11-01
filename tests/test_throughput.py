@@ -66,6 +66,36 @@ class LaneRulesTest(unittest.TestCase):
         self.assertIn((("a/i0", ""), ("a/b0", "R")), drops)
         self.assertIn((("a/i1", ""), ("a/b1", "R")), drops)
 
+    def test_drop_onto_a_turn_fills_the_inside_lane(self):
+        # 2.1.25, measured on 2.0.77: from either outer side of a turn, the inside lane (the m2m
+        # 4to16 hub's last producer dropped onto its corner, the lab saw it on the full lane)
+        left = ["e a/b0 transport-belt 0.5,-0.5 S net=a",       # south, then east: a left turn
+                "e a/b1 transport-belt 0.5,0.5 E net=a",
+                "e a/b2 transport-belt 1.5,0.5 E net=a",
+                "e a/i0 fast-inserter -0.5,0.5 W net=a",        # behind the turn's way out
+                "e a/i1 fast-inserter 0.5,1.5 S net=a"]         # below it
+        drops = self.edges(left, "drop")
+        self.assertIn((("a/i0", ""), ("a/b1", "L")), drops)
+        self.assertIn((("a/i1", ""), ("a/b1", "L")), drops)
+        right = ["e a/b0 transport-belt 0.5,-0.5 S net=a",      # south, then west: a right turn
+                 "e a/b1 transport-belt 0.5,0.5 W net=a",
+                 "e a/b2 transport-belt -0.5,0.5 W net=a",
+                 "e a/i0 fast-inserter 1.5,0.5 E net=a",
+                 "e a/i1 fast-inserter 0.5,1.5 S net=a"]
+        drops = self.edges(right, "drop")
+        self.assertIn((("a/i0", ""), ("a/b1", "R")), drops)
+        self.assertIn((("a/i1", ""), ("a/b1", "R")), drops)
+        # from its inner sides, over the belt coming in or going out: the outside lane (the
+        # m2m hub's corner producer, a long-handed inserter over the belt coming in)
+        inner = ["e a/b0 transport-belt -0.5,0.5 E net=a",      # east, then south: a right turn
+                 "e a/b1 transport-belt 0.5,0.5 S net=a",
+                 "e a/b2 transport-belt 0.5,1.5 S net=a",
+                 "e a/i0 long-handed-inserter -1.5,0.5 W net=a",
+                 "e a/i1 long-handed-inserter 0.5,2.5 S net=a"]
+        drops = self.edges(inner, "drop")
+        self.assertIn((("a/i0", ""), ("a/b1", "L")), drops)
+        self.assertIn((("a/i1", ""), ("a/b1", "L")), drops)
+
     def test_an_underground_exit_takes_a_drop(self):
         rows = ["e a/u0 underground-belt 0.5,0.5 E net=a ug=in",
                 "e a/u1 underground-belt 3.5,0.5 E net=a ug=out",
