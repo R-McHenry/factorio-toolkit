@@ -881,6 +881,7 @@ def s_route(ctx, args):
         if ctx.echo is not None:
             import time
             route._progress_at[:] = [time.monotonic()] * 2
+            route._progress_net[:] = [None, 0.0]
             route.PROGRESS = lambda msg, f=factory: ctx.echo(f"      {f}: {msg}")
         try:
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
@@ -2139,9 +2140,29 @@ def _run(script, frm, to, cat, echo, link, extra):
         STEPS["floorplan"](ctx, lines[plans[-1]].args)
     width = len(lines)
     written = set()
+    # 2.1.25: each step's time, in out/timings.txt and on its summary line when it is slow (the
+    # 20261030-2352 run's dry builds ran 20+ min, and nothing said where the time went)
+    timings = open(os.path.join(ctx.out, "timings.txt"), "w", encoding="utf-8", newline="\n")
+    try:
+        return _steps(ctx, script, lines, first, last, width, written, notes, timings)
+    finally:
+        timings.close()
+
+
+#: a step this slow (s) says its time on its summary line
+SLOW_STEP = 10.0
+
+
+def _steps(ctx, script, lines, first, last, width, written, notes, timings):
+    echo = ctx.echo
+    began = time.monotonic()
     for i in range(first, last + 1):
         ln = lines[i]
+        t0 = time.monotonic()
         report, checks = STEPS[ln.cmd](ctx, ln.args)
+        took = time.monotonic() - t0
+        timings.write(f"{ln.cmd:<14} line {ln.n:>3}  {took:8.1f} s  (at {t0 - began:7.1f} s)\n")
+        timings.flush()
         report = report + availmod.drain()      # what inserter=any / --hand any / --pole any chose
         if i == first:
             report = report + notes
@@ -2159,7 +2180,8 @@ def _run(script, frm, to, cat, echo, link, extra):
         stops = _stopping(ctx, checks)
         head = report[0] if report else ""
         summary = (f"[{i + 1:>2}/{width}] {ln.text:<44} {head[:70]}"
-                   + (f"  ({len(checks)} check lines)" if checks else ""))
+                   + (f"  ({len(checks)} check lines)" if checks else "")
+                   + (f"  [{took:.0f} s]" if took >= SLOW_STEP else ""))
         ctx.log.append(summary)
         echo(summary)
         if stops:

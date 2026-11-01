@@ -1,0 +1,13 @@
+
+# One electric steel furnace (~4005k, P5b): iron up the west belt, steel back down the east one.
+# A GearCell with a furnace: Stack<cell=SteelCell, n=4> = 30 steel/min (8 s a plate at speed 2).
+module SteelCell size 7x3 {
+  port in_in   : in  iron-plate  @s0
+  port in_out  : out iron-plate  @n0
+  port out_in  : in  steel-plate @n6
+  port out_out : out steel-plate @s6
+  stack in_in -> in_out, out_out -> out_in
+  f = Furnace<recipe=steel-plate, machine=electric-furnace> @(2, 0)
+  net i: in_in -> f, in_out
+  net s: out_in, f -> out_out
+}

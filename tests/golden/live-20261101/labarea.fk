@@ -1,0 +1,16 @@
+# labarea.fk (~4480k, Rory: labs in their own area, room for many more; "everything in the real
+# base should be extensively subdivided"): the LAB AREA as one sealed region. Two daisy-chain
+# stacks of LabRowB (Rory's design, labrowb.fk); labsW is his built sample (map 88..103,-104..-87).
+# Packs come in at the east edge and split in the band below the stacks (14 rows: his block A
+# starts at y-72 just south). More stacks: widen the frame east, one more Stack + its 3 branches.
+import LabRowB from "labrowb.fk"
+module LabArea size 34x32 {
+  port r_in : in automation-science-pack @e26
+  port g_in : in logistic-science-pack   @e23
+  port b_in : in chemical-science-pack   @e20
+  labsW = Stack<cell=LabRowB, n=6> @(0, 0)
+  labsE = Stack<cell=LabRowB, n=6> @(16, 0)
+  net r: r_in -> labsW.r_in, labsE.r_in
+  net g: g_in -> labsW.g_in, labsE.g_in
+  net b: b_in -> labsW.b_in, labsE.b_in
+}

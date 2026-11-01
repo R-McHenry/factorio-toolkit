@@ -1,0 +1,7 @@
+# The golden check's entry points in this frozen copy of the live run's design
+# (C:\fk-player\runs\20261030-2352-opus\game, 2026-11-01 01:20, toolkit 2.1.21).
+# The world whose rate model swung for all 50000 passes at damping 0.5 (BeltMall2's gear ->
+# yellow belt -> fast belt chain) and whose coal net flooded the whole frame for ~250 s a pass
+# (2.1.25). world.fk is the factory; the others are its imports. out/force.json and
+# out/avail.json come with it.
+world.fk

@@ -1,0 +1,71 @@
+# beltmall.fk (~3215k, Rory: "a 3x2 belt factory that settles you on tier 1 and 2 belts fully"):
+# a belted mall module for the stressful items. Iron plates and green circuits come in by belt at
+# the west edge; four asm2s make gears (two for each half); yellow row: belt, underground, splitter; red row: fast belt,
+# fast underground, fast splitter. Each product goes into its own provider (limit= caps it, so
+# a full chest just idles its maker), so the module sits in the hub zone.
+module BeltMall size 40x22 {
+  port fe : in iron-plate         @w4
+  port gc : in electronic-circuit @w15
+  g1 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(3, 2)
+  g2 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(3, 13)
+  g3 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(33, 13)   # gears for fu/fs: lab ~3220k, fb took all of g1+g2
+  g4 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(33, 7)
+  yb = Assembler<recipe=transport-belt, machine=assembling-machine-2>        @(11, 2)
+  yu = Assembler<recipe=underground-belt, machine=assembling-machine-2>      @(18, 2)
+  ys = Assembler<recipe=splitter, machine=assembling-machine-2>              @(25, 2)
+  fb = Assembler<recipe=fast-transport-belt, machine=assembling-machine-2>   @(11, 13)
+  fu = Assembler<recipe=fast-underground-belt, machine=assembling-machine-2> @(18, 13)
+  fs = Assembler<recipe=fast-splitter, machine=assembling-machine-2>         @(25, 13)
+  byb = Chest<provider, limit=4> @(12, 8)
+  byu = Chest<provider, limit=2> @(19, 8)
+  bys = Chest<provider, limit=1> @(26, 8)
+  bfb = Chest<provider, limit=2> @(12, 19)   # 200: until it fills, fb takes the gears fu/fs need
+  bfu = Chest<provider, limit=2> @(19, 19)
+  bfs = Chest<provider, limit=1> @(26, 19)
+  net fe: fe -> g1, g2, g3, g4, yb, yu, ys
+  net gr: g1, g2 -> yb, fb
+  net gr2: g3, g4 -> fu, fs
+  net y:  yb -> yu, ys, fb, byb
+  net u:  yu -> fu, byu
+  net s:  ys -> fs, bys
+  net c:  gc -> ys, fs
+  net f1: fb -> bfb
+  net f2: fu -> bfu
+  net f3: fs -> bfs
+}
+
+# BeltMall2 (~3410k, Rory's sample layout at map 7..19, 24..32: a tight 3x2 block; "gaps of all 1
+# or all 3"): the same 3x2 belt factory, 27x15. Five columns (gears | belt | underground |
+# splitter | gears) x two rows (yellow on top, red below), 3-tile gaps everywhere, so a belt and
+# its inserters fit between machines; products into providers on the outside (above the top row,
+# below the bottom one). Iron and circuits in at the west edge, in the middle gap.
+module BeltMall2 size 27x15 {
+  port fe : in iron-plate         @w6   # top of the middle gap (epl comes from the north)
+  port gc : in electronic-circuit @w8   # bottom: 2 apart, or bci side-loads onto epl (dry run ~3415k)
+  ga1 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(0, 3)
+  yb  = Assembler<recipe=transport-belt, machine=assembling-machine-2>        @(6, 3)
+  yu  = Assembler<recipe=underground-belt, machine=assembling-machine-2>      @(12, 3)
+  ys  = Assembler<recipe=splitter, machine=assembling-machine-2>              @(18, 3)
+  gb1 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(24, 3)
+  ga2 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(0, 9)
+  fb  = Assembler<recipe=fast-transport-belt, machine=assembling-machine-2>   @(6, 9)
+  fu  = Assembler<recipe=fast-underground-belt, machine=assembling-machine-2> @(12, 9)
+  fs  = Assembler<recipe=fast-splitter, machine=assembling-machine-2>         @(18, 9)
+  gb2 = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2>       @(24, 9)
+  byb = Chest<provider, limit=4> @(7, 1)
+  byu = Chest<provider, limit=2> @(13, 1)
+  bys = Chest<provider, limit=1> @(19, 1)
+  bfb = Chest<provider, limit=2> @(7, 13)
+  bfu = Chest<provider, limit=2> @(13, 13)
+  bfs = Chest<provider, limit=1> @(19, 13)
+  net fe:  fe -> ga1, ga2, gb1, gb2, yb, yu, ys
+  net gr:  ga1, ga2 -> yb, fb
+  net gr2: gb1, gb2 -> fu, fs
+  net y:   yb -> yu, ys, fb, byb
+  net u:   yu -> fu, byu
+  net s:   ys -> fs, bys
+  net c:   gc -> ys, fs
+  net f1:  fb -> bfb
+  net f2:  fu -> bfu
+  net f3:  fs -> bfs
+}

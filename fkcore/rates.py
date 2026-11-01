@@ -61,6 +61,10 @@ __all__ = ["Model", "solve", "report", "buffer_lines"]
 
 INF = float("inf")
 DAMPING = 0.5
+#: 2.1.25: (passes, damping) when a solve still swings: start again from the first grants with the
+#: smaller step. The 20261030-2352 world's belt mall (gears -> yellow belt -> fast belt) swung
+#: by 0.16 at 0.5 for all 50000 passes (~5 min, twice a build); at 0.25 it settles in ~250.
+RESTARTS = ((1000, 0.25), (3000, 0.1))
 
 
 @dataclass
@@ -88,6 +92,7 @@ class Model:
     nets: dict                         # (net, item) -> NetItem
     passes: int
     residual: float
+    damping: float = DAMPING            # 2.1.25: the step the last restart used
     asserts: list = field(default_factory=list)   # [(text, ok, value, target, unit)]
     sink_share: dict = field(default_factory=dict)  # (sink key, net, item) -> its cap there
     pools: dict = field(default_factory=dict)     # (net, item) -> its bus pool's (net, item)
@@ -503,8 +508,16 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
         sink_caps[ni] = sum(sink_share.get((k,) + ni, 0.0) for k in e["consumers"]
                             if machines[k].sink and machines[k].needs.get(ni[1], 0.0) <= 0)
 
+    first = dict(grants)
+    restarts = list(RESTARTS)
+    damping, since = DAMPING, 0
     residual, done = INF, 0
     for done in range(1, passes + 1):
+        since += 1
+        if restarts and since > restarts[0][0]:
+            damping = restarts.pop(0)[1]
+            grants.update(first)
+            since = 1
         new = {}
         for ni, e in ends.items():
             n, item = ni
@@ -538,7 +551,7 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
                 new[(row[0], "out", n, item)] = g
         change = 0.0
         for g, v in new.items():
-            nv = grants[g] + (v - grants[g]) * DAMPING
+            nv = grants[g] + (v - grants[g]) * damping
             change = max(change, abs(nv - grants[g]))
             grants[g] = nv
         residual = change
@@ -571,8 +584,8 @@ def solve(flat, passes=50000, tol=1e-12, share="appetite", unbounded=()) -> Mode
             else:
                 nets[ni] = _absorbed(flat, ni, stats[pk], ends[pk], util, feeds, outs,
                                      sink_share, potential, name in unbounded, machines)
-    model = Model(flat, util, binding, nets, done, residual, sink_share=sink_share,
-                  pools=pools, ends=ends)
+    model = Model(flat, util, binding, nets, done, residual, damping=damping,
+                  sink_share=sink_share, pools=pools, ends=ends)
     model.buffers, model.buffer_out, model.buffer_gated = _buffer_flows(
         flat, machines, ends, stats, util, outs, feeds, sink_share)
     model.asserts = _asserts(model)
@@ -921,7 +934,11 @@ def _bus_row(model, path):
 def report(model, title=None) -> str:
     flat = model.flat
     lines = [f"rates {title or flat.name} (nominal V1 model: logical nets, no capacity)",
-             f"  solved in {model.passes} passes, last change {model.residual:.1e}", ""]
+             f"  solved in {model.passes} passes, last change {model.residual:.1e}"
+             + (f" (damping {model.damping:g}: it swung at {DAMPING:g})"
+                if model.damping != DAMPING else "")
+             + (" NOT SETTLED: these rates are a snapshot of a swing"
+                if model.residual > 1e-6 else ""), ""]
     lines.append(f"  {'instance':<18} {'kind':<12} {'n':>3} {'util':>6}  {'makes /min':<38} binding")
     for path, inst in flat.insts.items():
         if inst.module is not None:

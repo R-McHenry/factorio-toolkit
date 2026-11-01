@@ -30,7 +30,8 @@ class GoldenTest(unittest.TestCase):
         self.assertIn("kickoff/template/game/world.fk", rels)
         # the frozen live design: its ENTRY names world.fk alone (cells, kit, plant are imports)
         frozen = [r for r in rels if r.startswith("tests/golden/")]
-        self.assertEqual(frozen, ["tests/golden/live-20261030/world.fk"])
+        self.assertEqual(frozen, ["tests/golden/live-20261030/world.fk",
+                                  "tests/golden/live-20261101/world.fk"])
         self.assertFalse(any("/out/" in r for r in rels))
 
     def test_a_snapshot_is_stable_and_has_no_path(self):

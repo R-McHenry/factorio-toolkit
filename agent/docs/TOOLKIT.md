@@ -1007,6 +1007,10 @@ the `n=auto` rows (`fk build --to size` stops there). `fk build --from route --t
 report_checks` runs part of it (`report_rates:2` names the second `report_rates`). It starts
 from the layout the last build left, or lays it out again when a source file changed since (and
 says so); `fk look` says when the source has moved on from the `.fkp` files it judges.
+`out\timings.txt` gives each step's time, and a step of 10 s or more says it on its line. A
+route net that took 30 s or more is named when it ends (`route: 310s in, pass 1: coal took 304 s;
+next net 2 of 43 (larea/b)`). A net that cannot route near its ends looks further out only as
+far as a time budget allows, and its `out\route.txt` line says where it stopped.
 `tier minimize --allow yellow,red` lays red belts where a yellow lane is too thin for what the
 design asks (`--red 20` caps how many; `tier maximize` uses the fastest allowed everywhere; the
 default `--allow yellow` keeps every belt yellow). A belt never goes down a tier unless you add

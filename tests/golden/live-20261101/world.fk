@@ -1,0 +1,594 @@
+# world.fk: your base, one plot: 2000x2000 tiles (nauvis.fk places it; 2000,2000 here is the map
+# corner at 999,999, so a map tile x,y is this file's x+1000, y+1000).
+#
+# The reactor and its pole line (plant.fk) and the starter kit the kickoff puts down (kit.fk) stand
+# inside this plot from the start, as the world's own furniture: the design declares them, so they
+# are yours to build around, extend or take up. Everything else you add here is your base.
+#
+# Build each factory as a sealed module: `module NAME size WxH { ... }` with `port` lines on its
+# edges. Its own belts stay inside its frame; the belts between factories are nets written here,
+# from one factory's port to the next one's. A change inside one factory never moves another.
+#   docs\LANGUAGE.md "Modules with ports"   the module, its ports, its contract
+#   docs\EXAMPLES.md busbase.fk             a whole base built this way: smelting, a bus,
+#                                          circuits, a mall and science
+# Two items into one row share a belt, a lane each: `lanes A | B` (the build's could-pair check names
+# the pair when you leave them on two belts).
+# A factory used in several places (or a big one) can live in a file of its own:
+#   import Smelting from "smelting.fk"
+import Plant from "plant.fk"
+import Kit from "kit.fk"
+import FurnacePair, CopperPair, GearCell, CircuitCell, RedCell2, GreenCell, LabCell3, AdvCircuitCell2, EngineCell, ChemCell2 from "cells.fk"
+import SteelCell from "steelcell.fk"
+import LabArea from "labarea.fk"
+import BeltMall2 from "beltmall.fk"
+
+plant = Plant @(966, 961)      # the reactor and its poles, at map -34,-39
+kit   = Kit @(1000, 1000)      # the kit: chests, roboport, panels, accumulators, poles at map 0,0
+
+# ---- A0 (10-31, scaffolding first: Rory "build scaffolding and modularity early") ----
+# BACKBONE: a pinned roboport grid, 48 apart so the logistic areas overlap into one network, off
+# the ore; construction (+-55) covers coal, stone, copper and iron. Never moved by a route.
+#   G1/G2 (Rory 10-31: links are square, L-inf; ore in the corners of the grid, roboports on
+#   free ground): kit (8,8); r1 (-12,26) -> r3 (-14,74); r2 (50,26) -> r4 (36,74).
+#   All four moved in one paste (~101k): every new spot is in the kit's or new r1/r2's reach.
+r1 = Roboport @(988, 1026)    # G1 (Rory 10-31: shift ~20 W, 30 N); ~585k a plain roboport again (the auto mall moved to the kit roboport)
+r2 = Roboport @(1050, 1026)   # G1: was 56,56 (x 50, not 36: cl_cl at x72 stays in its logistic square)
+r3 = Roboport @(986, 1076)    # G1: was 6,104; ~196k 2 S: fe_pl4's first belt (8.5,130.5) was 54.5 out, past reach
+r4 = Roboport @(1036, 1074)   # G1: was 56,104
+r5 = Roboport @(1048, 960)    # R2 (~1334k): map 50,-38, inside the kit roboport's reach (r0 @45,-55 was out of every construction area, so never built); covers R1 east
+e1 = Roboport @(1098, 962)   # E1 (~2150k, Rory: this base is the starter; the real base goes east): corridor east along map y -38
+e2 = Roboport @(1148, 962)   # E1: 50 apart so the logistic squares touch
+e3 = Roboport @(1198, 962)   # E2 (~2240k)
+e4 = Roboport @(1248, 962)   # E2: ~70 from the spitter spawners at map 300..314, 14..26
+e5 = Roboport @(1263, 978)   # E3a (~2290k): map 265,-20: construction reach x210..320, y-75..35 covers the 3 spitter spawners (300..314, 14..26) for the mine wave; ~49 from the nearest
+e6 = Roboport @(1313, 1008)  # U0 corridor (~2370k): map 315,10 (L-inf <= 50 from e5)
+e7 = Roboport @(1363, 1043)  # map 365,45
+e8 = Roboport @(1408, 1083)  # map 410,85: its logistic square 385..435, 60..110 holds u0
+e9 = Roboport @(1363, 978)    # E4 (~2770k): map 365,-20 (L-inf 50 from e6): the chain toward the nest cluster at x480..497, y-46..-35
+e10 = Roboport @(1413, 958)   # E4: map 415,-40
+e11 = Roboport @(1443, 960)   # E4: map 445,-38: construction reach x390..500 covers the cluster for mine wave 2 (35 from the nearest spawner)
+e12 = Roboport @(1493, 938)   # E5 (~2835k): map 495,-60, W of the 7M iron (x520..568, y-100..-44; wave 2 cleared its nests)
+e13 = Roboport @(1493, 888)   # E5: map 495,-110
+e14 = Roboport @(1543, 888)   # E5: map 545,-110, between the iron and the copper (x520..560, y-172..-124); off the ore
+e15 = Roboport @(1493, 838)   # E6b (~2925k): map 495,-160: cu2_col reaches y-170, past e13/e14's construction reach (y-165): 26 ghosts sat uncovered
+u0 = Literal<file="captured/u0.json"> @(1424, 1100)   # lab-built uranium trigger outpost (FRICTION: MinerRow takes no fluid)
+
+# boot (map 12..28, -8..1), the hub seed by the kit's roboport. A0: gears -> belts (the fields
+# need 253, the kit has 200) and stone furnaces, from the kit's plates and stone. B: cable,
+# circuits, labs (gears banked in gbx). The 3 kit asm1 are all there is until automation.
+# ~655k (Rory: retire the old sources, the passive provider chests): the Boot module retired
+# (fbx, cbx, cix providers; bq2 + the brick furnace: the network holds the 50 bricks O1 needs).
+
+
+
+
+
+
+
+
+# burner fields (the kit's 10 burner drills). Fuel by ONE coal belt from the coal row, not a
+# requester per field (Rory: belts over requesters); cl_cl gives the coal row its first fuel.
+fe_dr  = MinerRow<n=4, resource=iron-ore, drill=burner-mining-drill, fuel=coal, inserter=inserter> @(1024, 1105)
+fe_sm  = SmelterRow<n=4, recipe=iron-plate, inserter=inserter>      @(1024, 1088)
+net fe_ore:  fe_dr -> fe_sm
+net fe_pl:   fe_sm -> hub.fe2_in    # S2 (~1029k): st_sm -> fe_pl4 (steel 3.3/min made vs 9.9 used; 2 of 4 burner drills dry); H2b: fe_box -> the hub;  # J1: + the steel row; H0 (~225k): the mall moved to fe_pl4 (electric); burner iron to the network
+
+cu_dr  = MinerRow<n=3, resource=copper-ore, drill=burner-mining-drill, fuel=coal, inserter=inserter> @(1052, 1085)
+cu_sm  = SmelterRow<n=2, recipe=copper-plate, inserter=inserter>    @(1054, 1074)
+net cu_ore:  cu_dr -> cu_sm
+net cu_pl:   cu_sm -> hub.cu2_in    # H2a: cu_box -> the hub;  # I: the makers moved to cu_pl4 (electric)
+
+cl_dr  = MinerRow<n=3, resource=coal, drill=burner-mining-drill, fuel=coal, inserter=inserter> @(1076, 1046)
+cl_cl  = Chest<requester, item=coal, request=10> @(1072, 1050)
+cl_el  = MinerRow<n=4, resource=coal>   @(1084, 1038)   # C1 (~745k): coal 38/min mined vs 68 burnt; 4 electric drills (+120/min) NE of the burner row
+cl_el2 = MinerRow<n=6, resource=coal>   @(1078, 1051)   # C2 (~2460k): 5 of 7 coal drills dry, plastic + boilers short; dense coal x78..88, y50..56
+cl_el3 = MinerRow<n=4, resource=coal>   @(1074, 1037)   # C2: coal x74..79, y37..43 W of cl_el
+net cl_fuel: cl_cl -> cl_dr
+net coal:    cl_dr, cl_el, cl_el2, cl_el3 -> hub.cl_in, cu_dr, cu_sm, fe_dr, fe_sm, fe_sm4, cu_sm4, pl, sb1, sb2
+st_cl  = Chest<requester, item=coal, request=20>  @(1013, 1075)   # J1: 1 of the last 4 requesters (adding st_sm to the coal net re-routed all of it: 78 new, 66 taken up; a provider cannot drive a net)
+net st_coal: st_cl -> st_sm
+
+# Smelt0 (B: the kit's ore -> plates by the kit roboport) retired ~320k: its 2 requesters freed
+
+# D2: the mall, belt-fed (iron from fe_sm, copper from cu_sm), map 13..33, 58..72, in r1's area.
+# The boot's asm1 maker built its 6 machines. Outputs into storage chests with limits.
+# S1 (~701k, Rory): outputs into passive providers (they only give to the network; a storage
+# chest, even filtered, takes robots' drop-offs, so the auto mall's belts would fly out here).
+module Mall size 20x14 {
+  port fe_in : in iron-plate   @w6
+  port cu_in : in copper-plate @e3
+  bx1 = Chest<provider>                         @(6, 0)
+  g1  = Assembler<recipe=iron-gear-wheel>       @(1, 2)
+  bl  = Assembler<recipe=transport-belt>        @(5, 2)
+  ci  = Assembler<recipe=electronic-circuit>    @(10, 2)
+  cb  = Assembler<recipe=copper-cable>          @(14, 2)
+  ins = Assembler<recipe=inserter>              @(10, 9)
+  am  = Assembler<recipe=assembling-machine-1>  @(14, 9)   # H1: asm1 again (the boot was 1 short; 10 drills banked); E: drills; D2: asm1
+  bx3 = Chest<provider>                         @(11, 13)
+  bx4 = Chest<provider>                         @(15, 13)
+  cbx = Chest<provider>                         @(15, 0)
+  net fe:   fe_in -> g1, bl, ci, ins, am
+  net cu:   cu_in -> cb
+  net g1o:  g1 -> bl, ins, am
+  net cbo:  cb -> ci
+  net cio:  ci -> cbx, ins, am
+  net blo:  bl -> bx1
+  net ino:  ins -> bx3
+  net amo:  am -> bx4
+  set bl.out -> bx1:  logistic=transport-belt<300
+  set ins.out -> bx3: logistic=inserter<100
+  set am.out -> bx4:  logistic=assembling-machine-1<12   # ~372k 4 -> 12: K lays 8 (MilH 5, poles 2, red2)
+  set ci.out -> cbx:  logistic=electronic-circuit<100
+}
+mall = Mall @(1013, 1058)
+
+# E1 (~142k): science, belt-fed beside the mall (map -16..10, 58..72): a gear maker between two
+# red makers, red into the 3 spare labs. Room on the east half for green (inserter + belt) later.
+module Sci0 size 26x14 {
+  port fe_in : in iron-plate   @e2
+  port cu_in : in copper-plate @e8
+  port rd_out : out automation-science-pack @n3   # K: red to Lab2 (the labs moved there; at w5 it opened onto fe_pl4)
+  g1   = Assembler<recipe=iron-gear-wheel>         @(14, 2)
+  red1 = Assembler<recipe=automation-science-pack, machine=assembling-machine-2> @(10, 0)
+  red2 = Assembler<recipe=automation-science-pack, machine=assembling-machine-2> @(17, 6)   # K: into the freed east half; at (10,4) the copper route never reached it (half-rate red)
+  net fe:   fe_in -> g1
+  net cu:   cu_in -> red1, red2
+  net gm:   g1 -> red1, red2
+  net reds: red1, red2 -> rd_out
+}
+sci = Sci0 @(984, 1058)
+
+# E: electric iron on the field's south half (the old run's D5 spot), its own row into Sci0
+# (a new consumer gets its own row). Drills from the mall's am, furnaces from the kit/boot.
+fe_el  = MinerRow<n=12, resource=iron-ore>                          @(1024, 1117)   # ~4290k Rory: reposition the starter drills onto the ore left: the south band x24..42, y118..123 (was @1012,1114, all dry)
+fe_sm4 = SmelterRow<n=16, recipe=iron-plate, inserter=inserter, machine=steel-furnace> @(1012, 1124)   # I5 (~2112k): steel furnaces, the ore belt backed up. I2 (~885k): 12 -> 16 for fe_el2   # 1122: a drill had no pole spot
+# I2 (~885k): a 2nd electric iron row on the field's rich east (x34..45, y99..105, ~75k): 4
+# drills (~120 ore/min) into fe_sm4, grown 12 -> 16 east along its coal belt (a new row's coal
+# couldn't branch, and x48..59 sat on the coal + copper-ore belts). Iron was 239 made / 227 used.
+fe_el2 = MinerRow<n=4, resource=iron-ore>                           @(1040, 1101)   # ~4290k: the east strip x40..46, y100..112 (was @1034,1099, dry)
+fe_el3 = MinerRow<n=6, resource=iron-ore>                           @(1012, 1102)   # ~4290k: the west strip x12..22, y102..112 (was @1024,1097, dry)   # I3 (~1357k): 4 of fe_el's 8 drills and all 4 burners ran dry; free ore x24..32, y97..103
+fe_el4 = MinerRow<n=10, resource=iron-ore>                          @(1025, 1110)   # I4 (~2096k): free ore x25..39, y110..116; 21 dead drills
+net fe_ore4:  fe_el, fe_el2, fe_el3, fe_el4 -> fe_sm4
+net fe_pl4:   fe_sm4 -> sci.fe_in, grn.fe_in, mall.fe_in, hub.fe_in, int.fe_in, blue.ir_in, st_sm, gw3, pp3, acid, bat, ci4, ci5   # ~4490k back as it stands (epl's branch to blue.ir_in didn't join; a forced epl reroute was the 40-min route): the moved fe_el* drills feed fe_sm4 again; ~655k: fe_box4 (a far provider) -> the hub;  # H0: + mall (the belt runs past its port at x10)
+
+# G (~184k): green science, its own makers (cable -> circuits -> inserters; gears -> belts), two
+# green makers, packs south to Sci0's labs. Map -6..24, 40..54 (north of Sci0 and the mall).
+module Grn0 size 30x14 {
+  port fe_in  : in iron-plate   @s3
+  port cu_in  : in copper-plate @s9
+  port gr_out : out logistic-science-pack @s26
+  cb  = Assembler<recipe=copper-cable>            @(1, 1)
+  ci  = Assembler<recipe=electronic-circuit>      @(5, 1)
+  im  = Assembler<recipe=inserter>                @(9, 1)
+  g2  = Assembler<recipe=iron-gear-wheel>         @(13, 1)
+  bm  = Assembler<recipe=transport-belt>          @(17, 1)
+  gn1 = Assembler<recipe=logistic-science-pack, machine=assembling-machine-2>   @(11, 6)
+  gn2 = Assembler<recipe=logistic-science-pack, machine=assembling-machine-2>   @(17, 6)
+  net fe:   fe_in -> ci, im, g2, bm
+  net cu:   cu_in -> cb
+  net cab:  cb -> ci
+  net cir:  ci -> im
+  net gr:   g2 -> im, bm
+  net insn: im -> gn1, gn2
+  net beln: bm -> gn1, gn2
+  lanes insn | beln
+  net out:  gn1, gn2 -> gr_out
+}
+grn = Grn0 @(994, 1040)
+net grn_s: grn.gr_out -> labs.gr_in, lab3   # K: green to Lab2
+
+# I (pasted ~274k; drafted to wait until >=4 splitters and ~150 belts are banked: taking up cu_pl cuts the
+# mall's copper until cu_pl4 stands, and the splitters need the mall's circuits): electric copper (the burners give ~45/min to three makers): 8 drills on the patch's
+# west half, 12 furnaces south of it, its own belt north to the mall, Sci0 and Grn0.
+cu_el  = MinerRow<n=8, resource=copper-ore>                          @(1048, 1091)
+cu_sm4 = SmelterRow<n=10, recipe=copper-plate, inserter=inserter>    @(1048, 1108)
+net cu_ore4: cu_el -> cu_sm4
+net cu_pl4:  cu_sm4 -> mall.cu_in, sci.cu_in, grn.cu_in, hub.cu_in, int.cu_in, blue.cu_in, bat, cb4, cb5   # ~655k H2b: the rest to the hub
+# stone (nothing mines it; furnaces need it): two electric drills into a box, for a furnace maker
+st_el  = MinerRow<n=2, resource=stone>   @(1044, 1055)
+# BR1 (~2220k): nothing put bricks in the network (bk feeds MilH's walls only), so the mall
+# could not make steel furnaces. A brick row by the hub, out to a provider in the hub zone.
+br_sm  = SmelterRow<n=6, recipe=stone-brick, inserter=inserter>   @(1050, 1006)
+brx    = Chest<provider, limit=4>                                 @(1040, 1000)
+net brko: br_sm -> brx
+brq    = Chest<requester, item=coal, request=50>                  @(1040, 1003)   # hub zone; adding br_sm to the coal net re-laid it whole (176 belts, by the boilers): J1's lesson
+net brc:  brq -> br_sm
+# BR2 (~2250k): 4 of 6 brick furnaces sat short of stone (st_el's 2 drills feed hub + MilH too):
+# more stone drills on the free ore between the x48 and x53 belts, on st_out (a SmelterRow takes 2 belts).
+st_el2 = MinerRow<n=2, resource=stone>   @(1049, 1053)
+st_el3 = MinerRow<n=2, resource=stone>   @(1049, 1061)
+set br_sm.out -> brx: logistic=stone-brick<1000
+net st_out: st_el, st_el2, st_el3 -> hub.st_in, mil.st_in, br_sm   # H2a: st_box -> the hub
+
+# J1 (~293k): steel off the burner iron (fe_pl, ~60/min: 4 furnaces), north of fe_sm in free
+# ground (map 18..26, 77..80), into a box for the network (poles, Mil's piercing rounds later).
+st_sm  = SmelterRow<n=7, recipe=steel-plate, inserter=inserter>   @(1015, 1074)   # S3 (~1101k): 4 -> 7: blue's 2nd engine maker sat short of steel (blue 3.8/min, labs missing packs)
+net stl_out: st_sm -> hub.sl_in, mil.sl_in, blue.sl_in, en3, frm   # H2a: st_bx -> the hub
+
+# K (~330k): military science by the hub's rule (requesters in one module, the rest by belt):
+# 3 requesters feed firearm mags + grenades (iron, coal), piercing rounds (copper, steel) and the
+# brick furnace (stone, coal: a furnace on its own requester, or it smelts the iron); packs go by
+# belt east into Sci0's labs (their 3rd input). Map -42..-19, 58..68.
+module MilH size 22x10 {
+  port mi_out : out military-science-pack @s3   # straight down into labs.mi_in (at e5 it sat on fe_pl4)
+  # H3a (~796k): steel + stone by belt from their furnaces/drills; iron, coal, copper stay requested
+  # (the iron/copper/coal mains won't branch here: the next step moves MilH by the hub)
+  rq1 = Chest<requester, item="iron-plate,coal", request=20>      @(4, 1)
+  rq2 = Chest<requester, item="copper-plate", request=20>         @(11, 1)
+  rq3 = Chest<requester, item="coal", request=20>                 @(18, 1)
+  port sl_in : in steel-plate  @n12
+  port st_in : in stone        @n19
+  fm  = Assembler<recipe=firearm-magazine>        @(0, 0)
+  gr  = Assembler<recipe=grenade, machine=assembling-machine-2, modules=speed-module> @(3, 3)   # ~504k: right under rq1 (direct); at (5,4) its iron+coal shared a belt that filled with coal
+  pr  = Assembler<recipe=piercing-rounds-magazine, machine=assembling-machine-2> @(7, 0)
+  bk  = Furnace<recipe=stone-brick, machine=steel-furnace> @(18, 3)   # M9 (~1909k): bricks capped walls -> mil packs (stone furnace 0.31/s, need ~0.75)   # ~452k: right under rq3 (direct); at (19,4) a belt took stone+coal, filled with stone, the furnace never got fuel
+  wl  = Assembler<recipe=stone-wall>              @(14, 4)   # ~452k: 1 W so bk -> wl and wl -> mx stay direct
+  mx  = Assembler<recipe=military-science-pack, machine=assembling-machine-2, modules=speed-module> @(10, 6)   # M8 (~1891k): lab3 used more mil packs than made
+  ab  = Chest<provider>                           @(8, 4)   # A1 (~706k, Rory): the turrets' ammo comes from here, not the hub
+  net r1:  rq1 -> fm, gr
+  net r2:  rq2 -> pr
+  net si:  sl_in -> pr
+  net r3:  rq3 -> bk
+  net ti:  st_in -> bk
+  net fmo: fm -> pr
+  net bko: bk -> wl
+  net pro: pr -> mx, ab
+  net gro: gr -> mx
+  net wlo: wl -> mx
+  net out: mx -> mi_out
+  set pr.out -> ab: logistic=piercing-rounds-magazine<150   # ~993k 50 -> 150: biters took 8 of 11 turrets
+}
+mil = MilH @(961, 1058)   # map -39..-18: rq1 inside r3's logistic square, clear of the x-17 belt
+# B1: net mi_s (mil.mi_out -> labs.mi_in) off until a 2nd lab row; MilH banks its packs
+
+# K: Lab2, every lab in one roomy module of its own on the free west ground (map -42..-20,
+# 71..87): red from Sci0, green from Grn0, military from MilH, each on its own belt.
+module Lab2 size 22x16 {
+  port rd_in : in automation-science-pack @e3
+  port gr_in : in logistic-science-pack   @e8
+  port bl_in : in chemical-science-pack   @n6    # B1 (~940k): blue in military's place (a LabRow takes 3 belts); military waits for a 2nd row
+  row = LabRow<n=6>                       @(2, 6)   # ~972k: 5 -> 6 (labs were the limit: 10 packs/min used of 18 red + 15 green)
+  net r: rd_in -> row
+  net g: gr_in -> row
+  net b: bl_in -> row
+}
+labs = Lab2 @(958, 1071)
+net red_s: sci.rd_out -> labs.rd_in, lab3
+
+# L (pole shop) retired ~533k: the auto mall keeps medium poles 40; its requester goes to O1
+
+
+# M2 (~506k): the AUTO MALL v0 (automall/gen_mall_v0.py: no selector, round-robin pick; tested
+# in fk sim ~480-520k: stocked gears, pipe, then circuits/cable by itself). Its roboport IS r1
+# (map -12,26): the mall's frame starts 9 tiles above it, on the free ground north of r1.
+automall = Literal<file="mall-v0.json"> @(1006, 997)   # H1 (~585k, Rory: all the logistic chests in one small area, where the storage chests are, off the ore): on the kit roboport (map 6,6), by the kit's 6 storage chests; was on r1 (map -12,17), 70-110 tiles from its plates
+
+# H2 (~603k, Rory: "the logistic chests that matter are all the provider chests scattered about
+# the base"; "any logistic chest not in the hub zone is clearly a high cost"): THE HUB, beside the
+# mall (kit roboport) and the kit's storage chests, off the ore (map 15..28, -3..2). Each line
+# belts in to a box of its own; the old boxes are taken up and their plates hauled here.
+# H2a: burner copper, stone, steel. H2b: the iron mains (fe_pl4, burner fe_pl) and cu_pl4.
+module Hub size 14x6 {
+  port fe_in  : in iron-plate   @s1
+  port fe2_in : in iron-plate   @s3
+  port cu_in  : in copper-plate @s5
+  port cu2_in : in copper-plate @s7
+  port st_in  : in stone        @s9
+  port sl_in  : in steel-plate  @s12
+  port cl_in  : in coal         @n11
+  fe = Chest<storage, item=iron-plate> @(2, 1)
+  cu = Chest<storage, item=copper-plate> @(6, 1)
+  st = Chest<storage, item=stone> @(9, 1)
+  sl = Chest<storage, item=steel-plate, limit=5> @(12, 1)   # L7 (~1406k): steel ate ~130 iron/min for ~7 used; the cap backs st_sm up so iron reaches int + blue
+  cl = Chest<storage, item=coal> @(11, 4)
+  net f1: fe_in -> fe
+  net f2: fe2_in -> fe
+  net c1: cu_in -> cu
+  net k1: cl_in -> cl
+  net c2: cu2_in -> cu
+  net s1: st_in -> st
+  net l1: sl_in -> sl
+}
+hub = Hub @(1015, 997)
+
+# I1 (~713k, Rory: supply gears and green circuits to the network so the mall's one assembler
+# makes buildings): belt-fed gear + circuit makers N of the hub (map 18..32, -14..-5, inside the kit roboport), their
+# products into filtered storage boxes (passive providers wait on construction-robotics).
+module Int size 15x10 {
+  port fe_in : in iron-plate   @s3
+  port cu_in : in copper-plate @s10
+  gw  = Assembler<recipe=iron-gear-wheel>    @(0, 1)
+  cb1 = Assembler<recipe=copper-cable>       @(5, 1)
+  cb2 = Assembler<recipe=copper-cable>       @(5, 5)
+  ci  = Assembler<recipe=electronic-circuit> @(9, 3)
+  gb  = Chest<storage, item=iron-gear-wheel>    @(1, 6)
+  cx  = Chest<storage, item=electronic-circuit> @(14, 4)
+  net fi: fe_in -> gw, ci
+  net ci2: cu_in -> cb1, cb2
+  net cbl: cb1, cb2 -> ci
+  port ci_out : out electronic-circuit @n12
+  net gwo: gw -> gb
+  net cio: ci -> cx, ci_out
+  set gw.out -> gb: logistic=iron-gear-wheel<300
+  set ci.out -> cx: logistic=electronic-circuit<300
+}
+int = Int @(1018, 986)   # map 18..32, -14..-5
+
+# O1a (~616k): the pumpjacks alone, ahead of the oil block: oil-processing is a TRIGGER tech (mine
+# 1 crude), and it gates sulfur -> explosives -> land mines (the biters hit the base from the
+# south now). No net yet: each fills its own tank, which is the mining that counts.
+pj1  = Pumpjack<n=1>                            @(1005, 989)
+pj2  = Pumpjack<n=1>                            @(1010, 989)
+pj3  = Pumpjack<n=1>                            @(1015, 989)
+
+
+# O1 (draft ~532k): the OIL BLOCK -> land mines (Rory: landmines are the defense). Wells at map
+# 6.5/11.5/16.5,-9.5; water's east shore at x -12 (y -53..-48). Inside the plant roboport's
+# logistic square (map -47..3, -51..-1). O1 (~780k): coal and steel by belt from HubO, two hub
+# requesters N of the mall (Rory: the hub rule), one belt per machine (no shared belt: MilH's lesson).
+module HubO size 8x4 {
+  port c_out : out coal        @n2
+  port s_out : out steel-plate @n6
+  hc = Chest<requester, item=coal, request=50>        @(2, 2)
+  hs = Chest<requester, item=steel-plate, request=50> @(6, 2)
+  net c: hc -> c_out
+  net s: hs -> s_out
+}
+hubo = HubO @(996, 992)   # map -4..3, -8..-5: by the mall and the kit's storage chests
+ref  = Refinery<recipe=advanced-oil-processing>    @(1003, 975)
+osp  = OffshorePump<rate=1200/s>                @(989, 950, rot 3)
+sul  = ChemPlant<recipe=sulfur>                 @(995, 965)
+exp  = ChemPlant<recipe=explosives>             @(991, 965)
+lm   = Assembler<recipe=land-mine, machine=assembling-machine-2> @(991, 969)   # ~3560k: asm1 was the campaign's limit (exp sat full); asm2 = 36/min
+mbx  = Chest<provider, limit=30>                @(995, 970)
+net crude: pj1, pj2, pj3 -> ref
+net petro: ref, lcr -> sul, pl
+net water: osp -> sul, exp, hcr, lcr, acid, ref   # R1b: advanced-oil-processing takes water too
+net sulf:  sul -> exp, blue.su_in, acid
+net expl:  exp -> lm
+net exc:   hubo.c_out -> exp
+net stl:   hubo.s_out -> lm
+net mines: lm -> mbx
+set lm.out -> mbx: logistic=land-mine<600   # ~3560k: was 200, which capped the campaign's stock
+
+# B1 (~940k): BLUE SCIENCE. One pack maker (asm2, ~9 packs/min) on 2 engine + 2 advanced-circuit
+# makers (asm2), its own plastic plant, cable and pipe makers. N of Int on clear ground (map
+# 12..37, -40..-27). Petroleum piped from the refinery, sulfur belted from O1's plant, gears and
+# circuits belted from Int; coal, steel, iron, copper off their main lines where they end at the
+# hub (requester chests are locked until construction-robotics); the packs on one belt to Lab2.
+module Blue size 32x16 {
+  port pb_in : in plastic-bar        @w3
+  port cu_in : in copper-plate       @w11
+  port ci_in : in electronic-circuit @s7
+  port ir_in : in iron-plate         @s15
+  port sl_in : in steel-plate        @s21
+  port su_in : in sulfur             @n27
+  port bl_out : out chemical-science-pack @e8
+  cb  = Assembler<recipe=copper-cable, machine=assembling-machine-2>          @(1, 9)   # B3: asm2, it feeds ci too
+  ci  = Assembler<recipe=electronic-circuit, machine=assembling-machine-2>    @(23, 11)  # B3 (~1496k): Blue's own green circuits (int's ci starved ac1/ac2)
+  ac1 = Assembler<recipe=advanced-circuit, machine=assembling-machine-2>      @(7, 2)
+  ac2 = Assembler<recipe=advanced-circuit, machine=assembling-machine-2>      @(7, 9)
+  gw  = Assembler<recipe=iron-gear-wheel>                                     @(14, 11)
+  pp  = Assembler<recipe=pipe>                                                @(18, 11)
+  en1 = Assembler<recipe=engine-unit, machine=assembling-machine-2>           @(15, 3)
+  en2 = Assembler<recipe=engine-unit, machine=assembling-machine-2>           @(20, 5)
+  bl  = Assembler<recipe=chemical-science-pack, machine=assembling-machine-2, modules=speed-module> @(27, 7)   # B5 (~2490k): nuclear-power takes 800 blue
+  bl2 = Assembler<recipe=chemical-science-pack, machine=assembling-machine-2, modules=speed-module> @(27, 2)   # B2 (~1120k): 1 pack maker capped blue at 3.75/min
+  net plo: pb_in -> ac1, ac2
+  net cu:  cu_in -> cb
+  net cbo: cb -> ac1, ac2, ci
+  net ci:  ci_in, ci -> ac1, ac2
+  net ir:  ir_in -> pp, gw, ci
+  net ppo: pp -> en1, en2
+  net gwo: gw -> en1, en2
+  net sl:  sl_in -> en1, en2
+  net aco: ac1, ac2 -> bl, bl2
+  net eno: en1, en2 -> bl, bl2
+  net su:  su_in -> bl, bl2
+  net out: bl, bl2 -> bl_out
+}
+blue = Blue @(1012, 958)   # map 12..43, -42..-27
+
+pl   = ChemPlant<recipe=plastic-bar>           @(1008, 968)   # B1: plastic beside the refinery (a module port takes no fluid)
+net bpl: pl -> blue.pb_in, ac4, ac5, ac6
+net bci: int.ci_out -> blue.ci_in, ee, frm, ac4, bm.gc   # P1: + the belt mall's splitters
+net bpk: blue.bl_out -> labs.bl_in
+
+# R1 (~1175k): ROBOT PARTS north of Blue (map 0..42, -53..-44), ~20 tiles from the refinery.
+hcr  = ChemPlant<recipe=heavy-oil-cracking>   @(1000, 947)
+lcr  = ChemPlant<recipe=light-oil-cracking>   @(1006, 947)
+lub  = ChemPlant<recipe=lubricant>            @(1012, 947)
+acid = ChemPlant<recipe=sulfuric-acid>        @(1018, 947)
+bat  = ChemPlant<recipe=battery>              @(1024, 947)
+gw3  = Assembler<recipe=iron-gear-wheel>      @(1030, 951)
+pp3  = Assembler<recipe=pipe>                 @(1034, 951)
+en3  = Assembler<recipe=engine-unit, machine=assembling-machine-2>          @(1030, 946)
+ee   = Assembler<recipe=electric-engine-unit, machine=assembling-machine-2> @(1035, 946)
+frm  = Assembler<recipe=flying-robot-frame, machine=assembling-machine-2>   @(1040, 946)
+fbx  = Chest<provider, limit=2>               @(1044, 947)
+net heavy: ref -> lub, hcr
+net light: ref, hcr -> lcr
+net acidn: acid -> bat, ab
+# U0 (~2370k): acid barrels for the uranium trigger. Empty barrels go into ab by an item-request
+# proxy (no requester chests: logistic-system needs space science); full ones out to abp.
+ab   = Assembler<recipe=sulfuric-acid-barrel, machine=assembling-machine-2> @(1032, 934)
+abp  = Chest<provider, limit=1>                                            @(1036, 935)
+net abo2: ab -> abp
+set ab.out -> abp: logistic=sulfuric-acid-barrel<20
+net lubn:  lub -> ee
+net gw3o:  gw3 -> en3
+net pp3o:  pp3 -> en3
+net en3o:  en3 -> ee
+net een:   ee -> frm
+net batn:  bat -> frm, bbx
+# P4 (~2035k): batteries to the network for accumulators (the mall)
+bbx  = Chest<provider, limit=1>               @(1024, 951)
+set bat.out -> bbx: logistic=battery<200
+net frms:  frm -> fbx
+set frm.out -> fbx: logistic=flying-robot-frame<100
+
+# A2 (~1604k): advanced circuits TO THE NETWORK for the mall (speed modules, roboports, beacons):
+# all of Blue's go to its pack makers. Map 37..45, -15..-8, beside Int (r5's logistic area).
+cb4  = Assembler<recipe=copper-cable, machine=assembling-machine-2>     @(1041, 985)
+ac4  = Assembler<recipe=advanced-circuit, machine=assembling-machine-2> @(1037, 985)
+abx  = Chest<provider, limit=6>                                         @(1038, 983)   # A2b: at y -17, inside r5's logistic area (y -13 was its edge; at -9.5 robots never saw it)
+net cb4o: cb4 -> ac4, ci4
+# A3 (~1802k): ac4 starved of green circuits (bci is shared with blue, ee, frm): its own maker.
+ci4  = Assembler<recipe=electronic-circuit, machine=assembling-machine-2> @(1045, 985)
+net ci4o: ci4 -> ac4
+# A4b (~2415k, Rory: lines, not single makers): ac4 alone (~7.5/min) starves roboports, provider
+# chests, bulk inserters. Plastic sits in surplus (54), so no 2nd plastic plant (A4's coal belt
+# to pl2 failed the route): ac5, ac6 share bpl; cb5 + ci5 feed them.
+ac5  = Assembler<recipe=advanced-circuit, machine=assembling-machine-2> @(1049, 985)
+ac6  = Assembler<recipe=advanced-circuit, machine=assembling-machine-2> @(1057, 985)
+cb5  = Assembler<recipe=copper-cable, machine=assembling-machine-2>     @(1061, 985)
+ci5  = Assembler<recipe=electronic-circuit, machine=assembling-machine-2> @(1053, 985)   # between ac5 and ac6: hands to both
+net cb5o: cb5 -> ac5, ac6, ci5
+net ci5o: ci5 -> ac5, ac6
+net abo:  ac4, ac5, ac6 -> abx
+set ac4.out -> abx: logistic=advanced-circuit<1000   # ~2175k Rory: 50 was one roboport; 1000 lets the mall batch 20
+
+# L3 (~1712k): a 2nd lab row for MILITARY packs (Lab2 takes red, green, blue: a LabRow takes 3
+# belts). Map -40..-23, 87..94, below Lab2. MilH has banked 153 packs; shooting-speed-3 and
+# physical-damage-3 need them.
+lab3 = LabRow<n=6>                          @(958, 1090)
+net mi_s: mil.mi_out -> lab3
+
+# P1 (~1730k): STEAM POWER. The kit's reactor runs 1 heat exchanger (10 MW) and the accumulators sat
+# empty (labs low_power). Nuclear-power is far (uranium); solar-energy queued first. 2 boilers + 4
+# engines (3.6 MW) on the lake's east shore (map -7..10, -79..-58), coal off the coal net.
+osp2 = OffshorePump<rate=1200/s>               @(993, 938, rot 3)
+sb1  = Boiler<fuel=coal>                       @(995, 934)
+sb2  = Boiler<fuel=coal>                       @(1003, 934)
+se1  = SteamEngine                             @(995, 921)
+se2  = SteamEngine                             @(995, 926)
+se3  = SteamEngine                             @(1003, 921)
+se4  = SteamEngine                             @(1003, 926)
+net swater: osp2 -> sb1, sb2
+net steam:  sb1, sb2 -> se1, se2, se3, se4
+
+# E3b (~2680k): the real base's first linear array on the east iron (patch x274..306, y-70..-40;
+# lab game/eiron.fk 96% of 900/min). Two 16-drill rows on the dense core, 12 FurnacePair cells
+# (24 electric furnaces) west of it; the plates belt west into the hub zone until the east has
+# its own makers (then re-point epl). Power: ~7 MW (N1 gave 30 MW more).
+ei_a   = MinerRow<n=16, resource=iron-ore>   @(1278, 936)   # map 278,-64
+ei_b   = MinerRow<n=16, resource=iron-ore>   @(1278, 946)   # map 278,-54
+ei_col = Stack<cell=FurnacePair, n=12>       @(1258, 928)   # map 258..271, -72..-36
+ebx    = Chest<provider, limit=8>            @(1045, 998)   # hub zone, map 45,-2
+net eoa: ei_a -> ei_col.oa_in
+net eob: ei_b -> ei_col.ob_in
+net epl: ei_col.pl_out -> bm.fe, ebx   # ~4490k: back to the standing route; P1 (~3260k): the belt mall takes its iron on the way to ebx
+
+# P1 (~3260k, Rory: "a 3x2 belt factory that settles you on tier 1 and 2 belts fully"): BeltMall
+# (beltmall.fk, lab-tested ~3225k) on the open ground E of the dense base, map 68..108, -1..21, by
+# epl's belt (y-4). Its 6 providers extend the hub zone east (the east builds fetch belts here).
+# Circuits on int's belt (net bci; requester chests need logistic-system): P3 belts more later.
+bm     = BeltMall2                                                  @(1068, 999)   # P1b (~3415k): Rory's tight 3x2 pattern, 27x15 (map 68..95, -1..14)
+
+# E6 (~2870k): the REAL BASE's smelting on the big east field (wave 2 cleared it; e12..e14 cover
+# it). Iron: two 16-drill rows on the dense core (x530..556, y-84..-54) + 12 FurnacePair W of the
+# patch; copper: the same with CopperPair (lab ecopper.fk ~870/min). Plates go W into plain chests
+# in the factory district (x440..500) until the blue line there takes the belts.
+fe2_a   = MinerRow<n=16, resource=iron-ore>     @(1530, 918)   # map 530,-82
+fe2_b   = MinerRow<n=16, resource=iron-ore>     @(1530, 928)   # map 530,-72
+fe2_col = Stack<cell=FurnacePair, n=12>         @(1507, 900)   # map 507..520, -100..-64
+fe2_box = Chest<plain>                          @(1480, 960)   # map 480,-40 (district)
+net fe2a: fe2_a -> fe2_col.oa_in
+net fe2b: fe2_b -> fe2_col.ob_in
+net fe2p: fe2_col.pl_out -> s5_gear.in_in, s5_circ.wi_in, s5_circ.ei_in, s5_grn.fe_in, b5_st.in_in, b5_gear, b5_pipe, b5_circ.wi_in, b5_circ.ei_in, fe2_box   # P5a; P5b: + the blue line: through the science district
+cu2_a   = MinerRow<n=16, resource=copper-ore>   @(1528, 848)   # map 528,-152
+cu2_b   = MinerRow<n=16, resource=copper-ore>   @(1528, 858)   # map 528,-142
+cu2_col = Stack<cell=CopperPair, n=12>          @(1505, 830)   # map 505..518, -170..-134
+net cu2a: cu2_a -> cu2_col.oa_in
+net cu2b: cu2_b -> cu2_col.ob_in
+net cu2p: cu2_col.pl_out -> s5_circ.cu_in, s5_red.c_in, b5_circ.cu_in, b5_cabl   # P5a; P5b: + the blue line. ~4480k cu2_box gone: its corner (480,-130) is cliffs; the row runs south at x499 and along y-128.5 (helpers/cu2detour.lua, fk adopt)
+
+# P4 (~3740k, Rory: "belt in coal from the north east huge patch, and pipe in oil, both to a location
+# somewhere in the middle"): the CHEM BLOCK on the lake's W shore (map 392..435, 168..188; the
+# middle ~290,40 has no water). Crude from the SE wells (8 pumpjacks, x167..193, y218..245,
+# ~3.5M) piped ~230 tiles; coal from a 4-drill row on the east coal (map 386,-152, 5.3M) belted
+# ~330 tiles south; water from the lake. Basic oil processing (no water, no cracking): 4
+# refineries ~36 petroleum/s -> 2 plastic plants (~150/min with 75 coal/min) + 1 sulfur plant.
+# Plastic + sulfur into providers for now (TEMPORARY: P5's science line belts them later).
+c4_pj1 = Pumpjack<n=1> @(1182, 1218)
+c4_pj2 = Pumpjack<n=1> @(1185, 1233)
+c4_pj3 = Pumpjack<n=1> @(1175, 1235)
+c4_pj4 = Pumpjack<n=1> @(1167, 1238)
+c4_pj5 = Pumpjack<n=1> @(1191, 1237)
+c4_pj6 = Pumpjack<n=1> @(1175, 1240)
+c4_pj7 = Pumpjack<n=1> @(1185, 1239)
+c4_pj8 = Pumpjack<n=1> @(1172, 1243)
+c4_r1  = Refinery<recipe=basic-oil-processing>   @(1392, 1170)
+c4_r2  = Refinery<recipe=basic-oil-processing>   @(1399, 1170)
+c4_r3  = Refinery<recipe=basic-oil-processing>   @(1406, 1170)
+c4_r4  = Refinery<recipe=basic-oil-processing>   @(1413, 1170)
+c4_pl1 = ChemPlant<recipe=plastic-bar>           @(1394, 1180)
+c4_pl2 = ChemPlant<recipe=plastic-bar>           @(1400, 1180)
+c4_su  = ChemPlant<recipe=sulfur>                @(1410, 1180)
+c4_osp = OffshorePump<rate=1200/s>               @(1435, 1177, rot 1)   # ~4470k Rory moved it one tile onto the water's edge
+c4_cm  = MinerRow<n=4, resource=coal>            @(1386, 848)    # map 386,-152
+c4_pb  = Chest<provider, limit=4>                @(1396, 1186)
+c4_sb  = Chest<provider, limit=2>                @(1412, 1186)
+net c4_crude: c4_pj1, c4_pj2, c4_pj3, c4_pj4, c4_pj5, c4_pj6, c4_pj7, c4_pj8 -> c4_r1, c4_r2, c4_r3, c4_r4
+net c4_pet:   c4_r1, c4_r2, c4_r3, c4_r4 -> c4_pl1, c4_pl2, c4_su
+net c4_wat:   c4_osp -> c4_su
+net c4_coal:  c4_cm -> c4_pl1, c4_pl2
+net c4_plo:   c4_pl1, c4_pl2 -> c4_pb, b5_adv.p_in   # P5b
+net c4_suo:   c4_su -> c4_sb, b5_chem.su_in   # P5b
+
+# P5a (~3900k, Rory: "get your new base red green blue science up, so you can really push towards
+# space"): the SCIENCE DISTRICT on the open ground W of fe2_col (map 446..483, -104..-60), cells
+# lab-tested in game/scilab.fk (~3895k: red 36/min, green 31/min). Iron from fe2p, copper from cu2p
+# (their boxes stay as the ends). North row: gears + circuits; south row: red, green, labs. Blue
+# packs (labs.b_in) come with P5b's blue line.
+s5_gear = Stack<cell=GearCell, n=4>     @(1446, 896)    # map 446,-104
+s5_circ = CircuitCell                   @(1456, 896)    # map 456..479, -104..-96
+s5_red  = Stack<cell=RedCell2, n=4>     @(1446, 920)    # map 446,-80
+s5_grn  = Stack<cell=GreenCell, n=4>    @(1458, 916)    # map 458,-84
+s5_labs = Stack<cell=LabCell3, n=6>     @(1476, 916)    # map 476,-84
+net s5_gw: s5_gear.out_out -> s5_red.g_in, s5_grn.g_in
+net s5_gc: s5_circ.wo_out, s5_circ.eo_out -> s5_grn.c_in
+net s5_rp: s5_red.p_out -> larea.r_in   # ~4240k: to the lab area (was s5_labs.r_in)
+net s5_gp: s5_grn.p_out -> larea.g_in   # ~4240k: to the lab area (was s5_labs.g_in)
+
+# P5b (~4005k, Rory: new-base red green BLUE science): the lab-tested blue line (blueline.fk, 174/174
+# nets) south of the science district, map 400..496, -34..12, on fe2's spare iron, cu2's copper, P4's plastic and sulfur by belt; the packs go north to s5_labs.
+# fe3 (an own iron column, 24 electric furnaces = 120 adv circuits) waits for b5_acb's circuits;
+# until then the line runs on fe2p's spare iron (fe2p is re-pointed through b5 below).
+
+b5_circ = CircuitCell                                                     @(1400, 978)
+b5_gear = Assembler<recipe=iron-gear-wheel, machine=assembling-machine-2> @(1484, 970)
+b5_pipe = Assembler<recipe=pipe, machine=assembling-machine-2>            @(1488, 970)
+b5_cabl = Assembler<recipe=copper-cable, machine=assembling-machine-2>    @(1492, 970)
+b5_adv  = Stack<cell=AdvCircuitCell2, n=8>      @(1430, 988)   # 8 not 6: the spare goes to b5_acb (roboports)
+b5_eng  = Stack<cell=EngineCell, n=7>           @(1446, 988)
+b5_chem = Stack<cell=ChemCell2, n=8>            @(1462, 988)
+b5_st   = Stack<cell=SteelCell, n=4>            @(1477, 988)
+b5_acb  = Chest<provider, limit=5>              @(1466, 983)   # north of b5_chem, where the a lane leaves; adv circuits for the mall's roboports (temporary, outside the hub)
+
+net b5_gc: b5_circ.wo_out, b5_circ.eo_out -> b5_adv.g_in
+net b5_cb: b5_cabl -> b5_adv.cb_in
+net b5_st2 items steel-plate:     b5_st.out_out -> b5_eng.sg_in
+net b5_gw  items iron-gear-wheel: b5_gear -> b5_eng.sg_in
+lanes b5_st2 | b5_gw
+net b5_pi: b5_pipe -> b5_eng.pi_in
+net b5_en: b5_eng.en_out -> b5_chem.e_in
+net b5_ac: b5_adv.ac_out -> b5_chem.a_in, b5_acb
+net b5_bp: b5_chem.bp_out -> larea.b_in   # ~4240k: to the lab area (was s5_labs.b_in)
+dnp c4_pb, c4_sb, b5_acb, s5_labs   # do not populate: laid out, not built
+
+# LAB AREA (~4240k, Rory: labs apart from any factory, room for many more than 6): his second
+# daisy-chain design (game/labrowb.fk, lab-tested: a 6-row stack, all 18 labs got red, green and
+# blue). ~4480k (Rory: "everything in the real base should be extensively subdivided"): a SEALED
+# region, game/labarea.fk (lab-tested: 72/72 nets in 12 s, all 36 labs got 3 packs): his sample
+# (88..103,-104..-87) is labsW, labsE beside it (6 rows each); packs in at the east edge (e20 b,
+# e23 g, e26 r), split in the 14-row band above his block A (y-72). Frame map 88..121, -104..-73.
+larea = LabArea @(1088, 896)
+
+# (the POLE SHOP drafted ~4285k is dropped ~4480k: the skip mall keeps 150 poles by itself)
+e16 = Roboport @(1458, 1034)   # map 460,36: the P4 -> b5 plastic/sulfur belts (L-inf 50 to e8)
+e17 = Roboport @(1123, 918)    # map 125,-80: labsE's east edge (44 to 100,-36)
+e18 = Roboport @(1128, 1148)   # map 130,150: the SE-well pole line (50 to 80,150)
+e19 = Roboport @(1160, 1188)   # map 162,190: the same, to 210,225
+e20 = Roboport @(1398, 1160)   # map 400,162: round the chem lake's W side (37 to 440,130)
+e21 = Roboport @(1414, 1204)   # map 416,206: joins the chem block's island (24 to 440,215)

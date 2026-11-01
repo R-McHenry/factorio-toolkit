@@ -1,0 +1,18 @@
+# labrowb.fk (~4235k): one row of Rory's second lab design (his sample at map 88..103,-104..-87):
+# three labs; the east one takes red, green and blue off three straight belts (x7 by a long-handed
+# inserter, x14 fast, x15 long-handed), and passes them west: over the x7 belt by a long-handed
+# inserter, then by a fast one. Stack<cell=LabRowB, n=K> stacks rows edge to edge (3 tall each).
+module LabRowB size 16x3 {
+  port r_in  : in  automation-science-pack @s7
+  port r_out : out automation-science-pack @n7
+  port g_in  : in  logistic-science-pack   @s14
+  port g_out : out logistic-science-pack   @n14
+  port b_in  : in  chemical-science-pack   @s15
+  port b_out : out chemical-science-pack   @n15
+  stack r_in -> r_out, g_in -> g_out, b_in -> b_out
+  west = Literal<file="labrowb.json"> @(0, 0)
+  east = Lab @(10, 0)
+  net r: r_in -> east, r_out
+  net g: g_in -> east, g_out
+  net b: b_in -> east, b_out
+}

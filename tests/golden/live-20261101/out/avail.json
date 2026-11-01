@@ -1,0 +1,345 @@
+{
+"entities": [
+{
+"enabled": true,
+"entity": "arithmetic-combinator",
+"item": "arithmetic-combinator",
+"known": true,
+"stock": 4
+},
+{
+"enabled": true,
+"entity": "assembling-machine-2",
+"item": "assembling-machine-2",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "decider-combinator",
+"item": "decider-combinator",
+"known": true,
+"stock": 2
+},
+{
+"enabled": true,
+"entity": "fast-inserter",
+"item": "fast-inserter",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "inserter",
+"item": "inserter",
+"known": true,
+"stock": 31
+},
+{
+"enabled": true,
+"entity": "iron-chest",
+"item": "iron-chest",
+"known": true,
+"stock": 12
+},
+{
+"enabled": true,
+"entity": "long-handed-inserter",
+"item": "long-handed-inserter",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "medium-electric-pole",
+"item": "medium-electric-pole",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "oil-refinery",
+"item": "oil-refinery",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "pumpjack",
+"item": "pumpjack",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "small-electric-pole",
+"item": "small-electric-pole",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "splitter",
+"item": "splitter",
+"known": true,
+"stock": 7
+},
+{
+"enabled": true,
+"entity": "storage-chest",
+"item": "storage-chest",
+"known": true,
+"stock": 0
+},
+{
+"enabled": true,
+"entity": "transport-belt",
+"item": "transport-belt",
+"known": true,
+"stock": 1295
+},
+{
+"enabled": true,
+"entity": "underground-belt",
+"item": "underground-belt",
+"known": true,
+"stock": 307
+}
+],
+"force": "player",
+"networks": 2,
+"recipes": [
+{
+"enabled": true,
+"known": true,
+"recipe": "advanced-circuit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "advanced-oil-processing"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "assembling-machine-1"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "automation-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "basic-oil-processing"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "battery"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "chemical-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "copper-cable"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "electric-engine-unit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "electronic-circuit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "empty-sulfuric-acid-barrel"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "engine-unit"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "explosives"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "fast-splitter"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "fast-transport-belt"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "fast-underground-belt"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "firearm-magazine"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "flying-robot-frame"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "grenade"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "heavy-oil-cracking"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "inserter"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "iron-gear-wheel"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "land-mine"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "light-oil-cracking"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "logistic-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "lubricant"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "military-science-pack"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "piercing-rounds-magazine"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "pipe"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "plastic-bar"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "splitter"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "stone-wall"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "sulfur"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "sulfuric-acid"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "sulfuric-acid-barrel"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "transport-belt"
+},
+{
+"enabled": true,
+"known": true,
+"recipe": "underground-belt"
+}
+],
+"research": {
+"current": "research-speed-3",
+"ingredients": [
+{
+"amount": 1,
+"held": 12,
+"min1": 0,
+"min10": 23,
+"name": "automation-science-pack"
+},
+{
+"amount": 1,
+"held": 11,
+"min1": 1,
+"min10": 21,
+"name": "logistic-science-pack"
+},
+{
+"amount": 1,
+"held": 1,
+"min1": 1,
+"min10": 23,
+"name": "chemical-science-pack"
+}
+],
+"lab_states": {
+"missing_science_packs": 18,
+"no_power": 42
+},
+"labs": 60,
+"labs_all": 0,
+"progress": 0.3817210983958597,
+"queue": [
+"research-speed-3",
+"flammables",
+"rocket-fuel",
+"rocket-silo",
+"toolbelt",
+"lamp"
+],
+"researched": 79,
+"tick": 4189879,
+"units": 250
+},
+"surface": "nauvis",
+"tick": 4189879,
+"when": "report_bom --stock live"
+}

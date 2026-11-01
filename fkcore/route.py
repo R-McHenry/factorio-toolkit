@@ -128,6 +128,9 @@ _M2M = False
 PROGRESS = None
 PROGRESS_EVERY = 30.0
 _progress_at = [0.0, 0.0]                  # [the last line, the route's start] (monotonic)
+#: 2.1.25: [the net routing now, when it began]. The line used to name only the net starting, so
+#: the 20261030-2352 run's 300 s on coal read as "net 2 of 43 (larea/b)", the net after it
+_progress_net = [None, 0.0]
 
 
 def _progress(attempt, k, order, net):
@@ -135,6 +138,13 @@ def _progress(attempt, k, order, net):
         return
     import time
     now = time.monotonic()
+    last, since = _progress_net
+    _progress_net[0], _progress_net[1] = net, now
+    if last is not None and now - since >= PROGRESS_EVERY:
+        _progress_at[0] = now
+        PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, pass {attempt + 1}: {last} took "
+                 f"{now - since:.0f} s; next net {k + 1} of {len(order)} ({net})")
+        return
     if now - _progress_at[0] < PROGRESS_EVERY:
         return
     _progress_at[0] = now
@@ -1107,19 +1117,64 @@ def _near_box(job, box, margin=None):
     return None if near == tuple(box) else near
 
 
+#: 2.1.25: what a search box may cost, in tile visits: its area times the walks the search floods
+#: (``_seeds_of``). The 20261030-2352 world's coal (a pair net, dozens of drills and furnaces)
+#: failed near its ends in ~1 s, then flooded the whole 1554x1246 frame once per end (28 ends,
+#: 54M visits) for ~250 s, in every pass, and failed there too. ~0.2M visits/s: 3M is ~15 s.
+WALK_BUDGET = 3_000_000
+
+
+def _seeds_of(job):
+    """How many walks a search of ``job`` floods: one per end, source and tap, its parts' too."""
+    n = 0
+    for j in (job,) + tuple(job.parts or ()):
+        n += len(j.ends()) + len(j.sources) + len(j.taps)
+    return max(n, 1)
+
+
+def _area(b):
+    return max(b[2] - b[0], 0) * max(b[3] - b[1], 0)
+
+
+def _ladder(near, box):
+    """The boxes after ``near``: each twice as wide and tall about the same middle, inside
+    ``box``, the last ``box`` itself."""
+    out, b = [], near
+    while tuple(b) != tuple(box):
+        w, h = b[2] - b[0], b[3] - b[1]
+        b = (max(box[0], b[0] - (w + 1) // 2), max(box[1], b[1] - (h + 1) // 2),
+             min(box[2], b[2] + (w + 1) // 2), min(box[3], b[3] + (h + 1) // 2))
+        out.append(b)
+    return out
+
+
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
                allow=frozenset(), promoted=frozenset()):
     """One net's route in ``box``: first in its own neighbourhood (``_near_box``), then, if that
-    fails, in the whole box, so bounding the search never loses a route the box allowed.
-    ``promoted``: tiles freed for it (``_route_promoted``)."""
+    fails, in the whole box, so bounding the search never loses a route the box allowed. 2.1.25:
+    when the whole box would cost more than ``WALK_BUDGET``, in boxes twice as big in turn, as far
+    as the budget allows; then it fails, saying how far it looked. ``promoted``: tiles freed for it
+    (``_route_promoted``)."""
     near = _near_box(job, box)
-    if near is not None:
-        got, how = _route_in(cat, job, ents, frames, js, near, limit, terrain, avoid, spans, allow,
+    seeds = _seeds_of(job)
+    if near is None:
+        boxes = [box]
+    elif seeds * _area(box) <= WALK_BUDGET:
+        boxes = [near, box]                       # as before 2.1.25: the same routes
+    else:
+        boxes = [near] + _ladder(near, box)
+    got = how = None
+    for k, b in enumerate(boxes):
+        if k and seeds * _area(b) > WALK_BUDGET:
+            last = boxes[k - 1]
+            how = (f"{how}; not searched past {last[2] - last[0]}x{last[3] - last[1]} tiles: the next "
+                   f"box ({b[2] - b[0]}x{b[3] - b[1]}, {seeds} ends to walk from) costs more than "
+                   f"the route's walk budget")
+            break
+        got, how = _route_in(cat, job, ents, frames, js, b, limit, terrain, avoid, spans, allow,
                              promoted)
         if got is not None:
-            return got, how
-    got, how = _route_in(cat, job, ents, frames, js, box, limit, terrain, avoid, spans, allow,
-                         promoted)
+            break
     if got is not None or not (job.wide or job.pin):
         return got, how
     # 2.0.54: no join routes, so the net goes on as one lane, the way it went before
@@ -2214,11 +2269,14 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             return any(n in failed for n in ribs[key].nets)
         return key in failed
 
+    repeats = False
     for attempt in range(retries + 2):
         # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
         promo = attempt == retries + 1
         if promo and (best is None or not best[2]):
             break
+        if repeats and not promo:
+            continue
         ents = list(base.entities.values())
         added, failed, how, swaps, rlines = {}, {}, {}, [], {}
         for k, net in enumerate(order):
@@ -2273,8 +2331,13 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             best = (score, added, failed, how, attempt + 1, list(order), swaps, rlines)
         if not failed:
             break
-        order = [n for n in order if unrouted(n, failed)] + \
+        reordered = [n for n in order if unrouted(n, failed)] + \
             [n for n in order if not unrouted(n, failed)]
+        # 2.1.25: the same order on the same ground lays the same routes, and the score keeps the
+        # first of equal passes: go on to the promoting pass. The 20261030-2352 world's coal
+        # failed first in order, so each of its 45 passes (~13 s) repeated the one before
+        repeats = reordered == order
+        order = reordered
     _score, added, failed, how, passes, order, swaps, rlines = best
     added, failed, how, rib_lines = dict(added), dict(failed), dict(how), dict(rlines)
     order = [m for n in order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
