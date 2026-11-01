@@ -10,7 +10,9 @@
 #            roboport and robots, no plant), the game codebase gets kickoff/template-PACK over
 #            the template, `fk catalog learn --all-mods` writes game/learned.json from the game,
 #            and there is no plant to wait for. The server must already run the
-#            pack's mods: factorio.service does not (see SEABLOCK.md for what it would take).
+#            pack's mods: on factorio.service (no --instance) the map starts with
+#            --mod-directory /home/computah/factorio/mods-PACK (copy the test server's mods there
+#            first) and the pack's own map-gen instead of world-3's.
 #     --instance sb  the Sea Block test server instead of factorio.service: /home/computah/sb
 #            (its own write dir and mods, game port 34198, RCON 27016, start.sh). Steps 1-3 and 6
 #            become: save and stop it, start a new map from fk-play there (its own scenarios
@@ -68,6 +70,13 @@ if [ $INST = sb ]; then
   AS="env FK_RCON_PORT=27016 FK_RCON_PW_FILE=$SB/rcon.pw FK_SCRIPT_OUTPUT=$SB/script-output"
 fi
 SETUP="$TK/kickoff/setup_v1.py${PACK:+ --pack $PACK}"
+# factorio.service with a pack: the pack's own mod directory ($F/mods-PACK, a copy of the test
+# server's mods) and its own map-gen, so the vanilla saves and their mods stay as they are
+MODS="" MAPGEN="--map-gen-settings $K/map-gen-w3.json"
+if [ -n "$PACK" ] && [ $INST = live ]; then
+  MODS="--mod-directory $F/mods-$PACK" MAPGEN=""
+  [ "$DRY" = "--dry" ] || [ -f $F/mods-$PACK/mod-list.json ] || { echo "kickoff-v1: no $F/mods-$PACK (copy $SB/mods there first)"; exit 1; }
+fi
 stamp=$(date -u +%Y%m%d-%H%M)
 OLD=$F/_retired/v1-kickoff-$stamp
 
@@ -82,7 +91,7 @@ conf() {   # $1 = the factorio arguments that pick the map
 [Service]
 ExecStart=
 ExecStart=/bin/bash -c '$BIN \\
-  $1 \\
+  $1 $MODS \\
   --server-settings server-settings.json \\
   --rcon-bind 127.0.0.1:27015 \\
   --rcon-password "\$(cat $I/rcon.pw)" \\
@@ -122,9 +131,9 @@ run mkdir -p "$OLD"
 [ -f $D/lab.conf ] && run mv $D/lab.conf "$OLD/lab.conf"
 [ -f $D/v1.conf ] && run mv $D/v1.conf "$OLD/v1.conf.before"
 if [ "$DRY" = "--dry" ]; then
-  echo "  would write $D/v1.conf:"; conf "--start-server-load-scenario fk-play --map-gen-settings $K/map-gen-w3.json --map-settings $I/map-settings.json" | sed 's/^/    /'
+  echo "  would write $D/v1.conf:"; conf "--start-server-load-scenario fk-play $MAPGEN --map-settings $I/map-settings.json" | sed 's/^/    /'
 else
-  conf "--start-server-load-scenario fk-play --map-gen-settings $K/map-gen-w3.json --map-settings $I/map-settings.json" > $D/v1.conf
+  conf "--start-server-load-scenario fk-play $MAPGEN --map-settings $I/map-settings.json" > $D/v1.conf
 fi
 [ -d $F/server/factorio/scenarios/fk-play ] && run mv $F/server/factorio/scenarios/fk-play "$OLD/scenario-fk-play"
 run cp -r $TK/scenario/fk-play $F/server/factorio/scenarios/fk-play
@@ -187,7 +196,7 @@ up_wait "the Sea Block test server did not come back within 40 s"
 fi
 say "4. the starter world: bootstrap, kit, rules${PACK:+ (pack $PACK)}"
 run su computah -c "'$AS timeout 20 python3 $SETUP'"
-say "5. the run's game codebase $G, the bare ground${PACK:-, the plant}"
+say "5. the run's game codebase $G, the bare ground$([ -z "$PACK" ] && echo ", the plant")"
 run mkdir -p $(dirname $G)
 run cp -r $TK/kickoff/template/game $G
 if [ -n "$PACK" ]; then   # the pack's overlay: its game files over the template's, minus DROP

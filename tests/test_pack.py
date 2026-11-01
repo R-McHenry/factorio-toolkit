@@ -48,6 +48,20 @@ class PackTest(unittest.TestCase):
             finally:
                 os.chdir(here)
 
+    def test_link_json_in_the_game_codebase(self):
+        """kickoff-v1.sh --instance sb writes game/link.json: the link reads the server there
+        (the env vars win over it when set)."""
+        here = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            os.chdir(d)
+            try:
+                self.assertEqual(link._game_link(), {})
+                with open("link.json", "w") as fh:
+                    json.dump({"port": 27016, "pw_file": "/sb/rcon.pw"}, fh)
+                self.assertEqual(link._game_link(), {"port": 27016, "pw_file": "/sb/rcon.pw"})
+            finally:
+                os.chdir(here)
+
     def test_water_blocks_without_landfill(self):
         with mock.patch.dict(os.environ, {"FK_PACK": ""}):
             self.assertEqual(ground().blocked, {(1, 1), (2, 1), (5, 5), (9, 9)})
