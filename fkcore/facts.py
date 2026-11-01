@@ -23,24 +23,35 @@ from __future__ import annotations
 import json
 import os
 
+from . import learned as _learned
+from . import pack as _pack
+
 __all__ = ["PATH", "load", "entity", "energy_w", "is_burner", "burns", "mining_radius", "drop_vector",
            "mining_time", "mines", "solid_resources", "fuel_value", "fuels", "module_slots",
            "module_effects", "productive", "steam_per_s", "heat_w", "wire_reach", "signals",
            "never_transmit", "electric_consumer", "signal_type", "is_signal", "never_sent",
            "SIGNAL_TYPES"]
 
-PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "facts.json")
+#: the run's pack has its own (``tools/read_facts.py --attach``, :mod:`fkcore.pack`); else the base game's
+PATH = _pack.path("facts.json")
 
 _CACHE = {}
 
 
-def load(path=PATH) -> dict:
-    """The facts file as a dict (read once per path)."""
-    path = os.path.abspath(path)
+def load(path=None) -> dict:
+    """The facts file as a dict (read once per path). The default path also takes the run's
+    learned overlay (``learned.json``, :mod:`fkcore.learned`)."""
+    ov = _learned.path() if path is None else None
+    path = os.path.abspath(path or PATH)
     if path not in _CACHE:
         with open(path, encoding="utf-8") as fh:
             _CACHE[path] = json.load(fh)
-    return _CACHE[path]
+    if ov is None:
+        return _CACHE[path]
+    key = (path, ov)
+    if key not in _CACHE:
+        _CACHE[key] = _learned.merge_facts(_CACHE[path], _learned.load(ov))
+    return _CACHE[key]
 
 
 def entity(name) -> dict:

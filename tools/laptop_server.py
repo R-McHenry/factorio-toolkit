@@ -57,6 +57,12 @@ Checks it can run on its own (each starts a server, checks, stops it):
                                             uranium patch, acid in through a fluid port: acid
                                             in every drill, the ore rate against the model,
                                             the acid an ore takes
+    python tools/laptop_server.py machines
+                                            3.0: a player adds a machine. With Space Age on,
+                                            fk catalog learn foundry, then fk lab builds three
+                                            stacked cells of a wrapped foundry: every net
+                                            connected, molten iron in every foundry, the first
+                                            one's gears/s against the model (6/s)
 """
 from __future__ import annotations
 
@@ -2219,6 +2225,93 @@ def check_drops(seconds=20):
     return 0 if ok and all(ok.values()) else 1
 
 
+#: check_machines' design: a learned foundry wrapped as a Literal, in a cell, three stacked in a
+#: sealed line whose open ports the lab feeds (molten iron in, gears out)
+_FOUNDRY_LINE = """
+module FoundryCell size 5x8 {
+  port g_in   : in  iron-gear-wheel @w0
+  port g_out  : out iron-gear-wheel @e0
+  port mi_in  : in  molten-iron     @w7
+  port mi_out : out molten-iron     @e7
+  stack g_in -> g_out, mi_in -> mi_out
+  m = Literal<file="foundry.json"> @(0, 2)
+  net mi: mi_in -> m.f, mi_out
+  net g: g_in, m.f -> g_out
+}
+module FoundryLine size 17x8 {
+  port mi : in  molten-iron     @w7
+  port g  : out iron-gear-wheel @e0
+  s = Stack<cell=FoundryCell, n=3> @(1, 0)
+  net molten: mi -> s.mi_in
+  net gears: s.g_out -> g
+}
+line = FoundryLine @(4, 3)
+"""
+
+
+def check_machines(seconds=30):
+    """3.0 (Rory: the setup a player needs to implement a machine): a Space Age game, ``fk
+    catalog learn foundry`` into the game folder's learned.json, then ``fk lab`` builds three
+    stacked cells of a foundry wrapped as a Literal. Every net connected, molten iron in every
+    foundry, and the first foundry's gears/s against the model (4 crafts/s at speed 4, +50% built
+    in: 6/s); the two after it share its gear belt."""
+    import json as jsonmod
+    import tempfile
+    from fkcore import lab, learn, learned
+    run = tempfile.mkdtemp(prefix="fk-machines-")
+    game = os.path.join(run, "game")
+    os.makedirs(game)
+    files = {"foundries.fk": _FOUNDRY_LINE,
+             "foundry.json": jsonmod.dumps({"entities": [{"name": "foundry", "x": 2.5, "y": 2.5,
+                                                         "recipe": "casting-iron-gear-wheel"}],
+                                           "names": {"f": 0}}),
+             "nauvis.surface": "surface  nauvis\nmode     play\nterrain  none\ncatalog  base\n\n"
+                               "place line = foundries plot 0,0 24x12\n",
+             "nauvis.build.fkb": "read_surface nauvis\n"}
+    for name, text in files.items():
+        with open(os.path.join(game, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    here = os.getcwd()
+    os.chdir(game)                          # fkcore runs in the run's game folder
+    try:
+        with LaptopServer("machines", scenario="fk-play",
+                          mods=("space-age", "quality", "elevated-rails")) as srv:
+            with srv.rcon() as r:
+                t0 = time.time()
+                ov, lines = learn.learn(r, ["foundry"])
+                learn.write(ov, os.path.join(game, learned.NAME))
+                lines.append(f"learned in {time.time() - t0:.2f} s")
+                lines += lab.build(r, game, "line", size=(24, 12))
+                x, y, w, h = lab.slots(game)["line"]
+                q = (f"local o = {{}} for _, e in pairs(game.get_surface('lab').find_entities_filtered"
+                     f"{{area = {{{{{x}, {y}}}, {{{x + w}, {y + h}}}}}, name = 'foundry'}}) do "
+                     "local b = e.fluidbox[1] o[#o + 1] = {x = e.position.x, made = "
+                     "e.products_finished, fluid = b and b.name or 'none'} end "
+                     "rcon.print(helpers.table_to_json({tick = game.tick, f = o}))")
+                time.sleep(5)                         # the line fills
+                a = jsonmod.loads(r.lua(q))
+                time.sleep(seconds)
+                b = jsonmod.loads(r.lua(q))
+    finally:
+        os.chdir(here)
+    print("\n".join(lines))
+    s = (b["tick"] - a["tick"]) / 60.0
+    made = {f["x"]: f["made"] for f in a["f"]}
+    rates = sorted((f["x"], (f["made"] - made.get(f["x"], 0)) / s, f["fluid"]) for f in b["f"])
+    for fx, rate, fluid in rates:
+        print(f"foundry at x={fx}: {rate:.2f} gears/s over {s:.1f} s, box 1 holds {fluid}")
+    checks = next((ln for ln in lines if "report_checks" in ln), "")
+    got = {"learned": bool(ov) and "4 fluid boxes" in "\n".join(lines),
+           "connected": "12 connected, 0 open, 0 unrouted" in checks,
+           "three foundries": len(rates) == 3,
+           "molten iron in each": all(fl == "molten-iron" for _x, _r, fl in rates),
+           "first at the model's 6/s": bool(rates) and abs(rates[0][1] - 6.0) < 0.3}
+    for k, v in got.items():
+        print(f"{k}: {'OK' if v else 'NOT as designed'}")
+    shutil.rmtree(run, True)
+    return 0 if all(got.values()) else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
@@ -2229,4 +2322,5 @@ if __name__ == "__main__":
                       "vision": check_vision, "stats": check_stats,
                       "circuits": check_circuits,
                       "fluidports": check_fluidports, "domains": check_domains,
-                      "powershed": check_powershed, "drops": check_drops}[what]())
+                      "powershed": check_powershed, "drops": check_drops,
+                      "machines": check_machines}[what]())

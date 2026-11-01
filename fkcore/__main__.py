@@ -186,6 +186,30 @@ def _game_link(what):
     return r
 
 
+def _catalog(a):
+    """fk catalog learn|show|forget (3.0, fkcore.learn): the run's learned overlay."""
+    from . import learn, learned
+    path = learned.path() or os.path.join(os.path.abspath(a.game), learned.NAME)
+    if a.verb == "show":
+        print("\n".join(learn.show(a.names[0] if a.names else None, learned.path())))
+        return 0
+    if a.verb == "forget":
+        if len(a.names) != 1:
+            raise SystemExit("error: fk catalog forget NAME")
+        print("\n".join(learn.forget(a.names[0], path)))
+        return 0
+    if not (a.names or a.mod or a.all_mods):
+        raise SystemExit("error: fk catalog learn NAME... | --mod MOD | --all-mods")
+    how = "fk catalog learn " + (" ".join(a.names) or (f"--mod {a.mod}" if a.mod else "--all-mods"))
+
+    def body(r):
+        ov, lines = learn.learn(r, a.names, a.mod, a.all_mods, how=how)
+        if ov and not a.dry:
+            lines.append(f"wrote {learn.write(ov, path)}: every design step plans with it now")
+        return lines
+    return _world(a, None, "catalog learn", body)
+
+
 def _world(a, cat, what, body):
     """Run ``body(r)`` -> lines with the game link open; errors are one line, never a trace."""
     from . import link, look
@@ -1634,6 +1658,16 @@ def main(argv=None):
     sg = sub.add_parser("stage", add_help=False)
     sg.add_argument("game")
     sg.add_argument("rest", nargs=argparse.REMAINDER)
+    cl = sub.add_parser("catalog", description="the run's own catalog overlay (fkcore.learn): "
+                        "learn reads buildings from the game into learned.json, show says what "
+                        "it holds (or what the catalog knows of NAME), forget takes one out")
+    cl.add_argument("game")
+    cl.add_argument("verb", choices=("learn", "show", "forget"))
+    cl.add_argument("names", nargs="*", metavar="NAME", help="buildings (entity or item names)")
+    cl.add_argument("--mod", help="learn: every building this mod adds")
+    cl.add_argument("--all-mods", action="store_true",
+                    help="learn: every building a mod adds (not base)")
+    cl.add_argument("--dry", action="store_true", help="learn: say what it read, write nothing")
     a = ap.parse_args(_glue(sys.argv[1:] if argv is None else list(argv)))
     if a.cmd == "stage":
         from . import stage
@@ -1648,6 +1682,8 @@ def main(argv=None):
         return _lua(a)
     if a.cmd == "read-terrain":
         return _read_terrain(a)
+    if a.cmd == "catalog":
+        return _catalog(a)
     cat = Catalog.load()
     if a.cmd == "migrate-surface":
         return _migrate_surface(a)

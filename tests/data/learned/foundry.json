@@ -1,0 +1,706 @@
+{
+ "entities": [
+  {
+   "circuit": {
+    "connectors": [
+     1,
+     2
+    ],
+    "wire_reach": 9
+   },
+   "collision_box": [
+    -1.1992188,
+    -1.1992188,
+    1.1992188,
+    1.1992188
+   ],
+   "crafting_speed": 2,
+   "energy": {
+    "fuel_categories": [
+     "nutrients"
+    ],
+    "source": "burner",
+    "usage_w": 500000
+   },
+   "module_slots": 4,
+   "name": "biochamber",
+   "placed_by": [
+    "biochamber"
+   ],
+   "tile_height": 3,
+   "tile_width": 3,
+   "type": "assembling-machine"
+  },
+  {
+   "circuit": {
+    "connectors": [
+     1,
+     2
+    ],
+    "wire_reach": 9
+   },
+   "collision_box": [
+    -1.6992188,
+    -1.6992188,
+    1.6992188,
+    1.6992188
+   ],
+   "crafting_speed": 2,
+   "energy": {
+    "drain_w": 66666.667,
+    "priority": "secondary-input",
+    "source": "electric",
+    "usage_w": 2000000
+   },
+   "module_slots": 5,
+   "name": "electromagnetic-plant",
+   "placed_by": [
+    "electromagnetic-plant"
+   ],
+   "tile_height": 4,
+   "tile_width": 4,
+   "type": "assembling-machine"
+  },
+  {
+   "circuit": {
+    "connectors": [
+     1,
+     2
+    ],
+    "wire_reach": 9
+   },
+   "collision_box": [
+    -2.1992188,
+    -2.1992188,
+    2.1992188,
+    2.1992188
+   ],
+   "crafting_speed": 4,
+   "energy": {
+    "drain_w": 83333.333,
+    "priority": "secondary-input",
+    "source": "electric",
+    "usage_w": 2500000
+   },
+   "module_slots": 4,
+   "name": "foundry",
+   "placed_by": [
+    "foundry"
+   ],
+   "tile_height": 5,
+   "tile_width": 5,
+   "type": "assembling-machine"
+  },
+  {
+   "circuit": {
+    "connectors": [
+     1,
+     2
+    ],
+    "wire_reach": 9
+   },
+   "collision_box": [
+    -0.69921875,
+    -1.6992188,
+    0.69921875,
+    1.6992188
+   ],
+   "crafting_speed": 0.5,
+   "energy": {
+    "drain_w": 6000,
+    "priority": "secondary-input",
+    "source": "electric",
+    "usage_w": 180000
+   },
+   "module_slots": 4,
+   "name": "recycler",
+   "placed_by": [
+    "recycler"
+   ],
+   "tile_height": 4,
+   "tile_width": 2,
+   "type": "furnace"
+  }
+ ],
+ "facts": {
+  "entities": {
+   "biochamber": {
+    "allowed_effects": [
+     "consumption",
+     "pollution",
+     "productivity",
+     "quality",
+     "speed"
+    ],
+    "base_effect": {
+     "productivity": 0.5
+    },
+    "burner": true,
+    "crafting_categories": [
+     "organic",
+     "organic-or-assembling",
+     "organic-or-chemistry",
+     "organic-or-hand-crafting",
+     "parameters"
+    ],
+    "crafting_speed": 2,
+    "effectivity": 1,
+    "energy_source": "burner",
+    "energy_w": 500000,
+    "fuel_categories": [
+     "nutrients"
+    ],
+    "module_slots": 4,
+    "type": "assembling-machine"
+   },
+   "electromagnetic-plant": {
+    "allowed_effects": [
+     "consumption",
+     "pollution",
+     "productivity",
+     "quality",
+     "speed"
+    ],
+    "base_effect": {
+     "productivity": 0.5
+    },
+    "crafting_categories": [
+     "electromagnetics",
+     "electronics",
+     "electronics-or-assembling",
+     "electronics-with-fluid",
+     "parameters"
+    ],
+    "crafting_speed": 2,
+    "drain_w": 66666.667,
+    "energy_source": "electric",
+    "energy_w": 2000000,
+    "module_slots": 5,
+    "priority": "secondary-input",
+    "type": "assembling-machine"
+   },
+   "foundry": {
+    "allowed_effects": [
+     "consumption",
+     "pollution",
+     "productivity",
+     "quality",
+     "speed"
+    ],
+    "base_effect": {
+     "productivity": 0.5
+    },
+    "crafting_categories": [
+     "crafting-with-fluid-or-metallurgy",
+     "metallurgy",
+     "metallurgy-or-assembling",
+     "parameters",
+     "pressing"
+    ],
+    "crafting_speed": 4,
+    "drain_w": 83333.333,
+    "energy_source": "electric",
+    "energy_w": 2500000,
+    "module_slots": 4,
+    "priority": "secondary-input",
+    "type": "assembling-machine"
+   },
+   "recycler": {
+    "allowed_effects": [
+     "consumption",
+     "pollution",
+     "quality",
+     "speed"
+    ],
+    "crafting_categories": [
+     "recycling",
+     "recycling-or-hand-crafting"
+    ],
+    "crafting_speed": 0.5,
+    "drain_w": 6000,
+    "drop_vector": [
+     -0.5,
+     -2.3
+    ],
+    "energy_source": "electric",
+    "energy_w": 180000,
+    "module_slots": 4,
+    "priority": "secondary-input",
+    "type": "furnace"
+   }
+  },
+  "fluids": {
+   "molten-iron": {
+    "default_temperature": 1500,
+    "heat_capacity_j": 10,
+    "max_temperature": 2000
+   }
+  },
+  "fuels": {
+   "nutrients": {
+    "category": "nutrients",
+    "fuel_value_j": 2000000
+   }
+  },
+  "recipes": {
+   "casting-iron-gear-wheel": {
+    "effects": [
+     "consumption",
+     "pollution",
+     "productivity",
+     "quality",
+     "speed"
+    ],
+    "max_productivity": 3
+   },
+   "iron-gear-wheel-recycling": {
+    "effects": [
+     "consumption",
+     "pollution",
+     "quality",
+     "speed"
+    ],
+    "max_productivity": 3
+   }
+  },
+  "resources": {}
+ },
+ "fluidboxes": {
+  "entities": {
+   "biochamber": {
+    "boxes": [
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          -1,
+          -1
+         ],
+         [
+          1,
+          -1
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          -1,
+          1
+         ]
+        ],
+        "dir": 0,
+        "flow": "input",
+        "type": "normal"
+       }
+      ],
+      "index": 1,
+      "production": "input"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          1,
+          -1
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          -1,
+          1
+         ],
+         [
+          -1,
+          -1
+         ]
+        ],
+        "dir": 0,
+        "flow": "input",
+        "type": "normal"
+       }
+      ],
+      "index": 2,
+      "production": "input"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          1,
+          1
+         ],
+         [
+          -1,
+          1
+         ],
+         [
+          -1,
+          -1
+         ],
+         [
+          1,
+          -1
+         ]
+        ],
+        "dir": 8,
+        "flow": "output",
+        "type": "normal"
+       }
+      ],
+      "index": 3,
+      "production": "output"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          -1,
+          1
+         ],
+         [
+          -1,
+          -1
+         ],
+         [
+          1,
+          -1
+         ],
+         [
+          1,
+          1
+         ]
+        ],
+        "dir": 8,
+        "flow": "output",
+        "type": "normal"
+       }
+      ],
+      "index": 4,
+      "production": "output"
+     }
+    ],
+    "size": [
+     3,
+     3
+    ],
+    "type": "assembling-machine"
+   },
+   "electromagnetic-plant": {
+    "boxes": [
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          -1.5,
+          0.5
+         ],
+         [
+          -0.5,
+          -1.5
+         ],
+         [
+          1.5,
+          -0.5
+         ],
+         [
+          0.5,
+          1.5
+         ]
+        ],
+        "dir": 12,
+        "flow": "input-output",
+        "type": "normal"
+       }
+      ],
+      "index": 1,
+      "production": "input"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          1.5,
+          -0.5
+         ],
+         [
+          0.5,
+          1.5
+         ],
+         [
+          -1.5,
+          0.5
+         ],
+         [
+          -0.5,
+          -1.5
+         ]
+        ],
+        "dir": 4,
+        "flow": "input-output",
+        "type": "normal"
+       }
+      ],
+      "index": 2,
+      "production": "input"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          0.5,
+          1.5
+         ],
+         [
+          -1.5,
+          0.5
+         ],
+         [
+          -0.5,
+          -1.5
+         ],
+         [
+          1.5,
+          -0.5
+         ]
+        ],
+        "dir": 8,
+        "flow": "input-output",
+        "type": "normal"
+       }
+      ],
+      "index": 3,
+      "production": "output"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          -0.5,
+          -1.5
+         ],
+         [
+          1.5,
+          -0.5
+         ],
+         [
+          0.5,
+          1.5
+         ],
+         [
+          -1.5,
+          0.5
+         ]
+        ],
+        "dir": 0,
+        "flow": "input-output",
+        "type": "normal"
+       }
+      ],
+      "index": 4,
+      "production": "output"
+     }
+    ],
+    "size": [
+     4,
+     4
+    ],
+    "type": "assembling-machine"
+   },
+   "foundry": {
+    "boxes": [
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          -1,
+          2
+         ],
+         [
+          -2,
+          -1
+         ],
+         [
+          1,
+          -2
+         ],
+         [
+          2,
+          1
+         ]
+        ],
+        "dir": 8,
+        "flow": "input",
+        "type": "normal"
+       }
+      ],
+      "index": 1,
+      "production": "input"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          1,
+          2
+         ],
+         [
+          -2,
+          1
+         ],
+         [
+          -1,
+          -2
+         ],
+         [
+          2,
+          -1
+         ]
+        ],
+        "dir": 8,
+        "flow": "input",
+        "type": "normal"
+       }
+      ],
+      "index": 2,
+      "production": "input"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          -1,
+          -2
+         ],
+         [
+          2,
+          -1
+         ],
+         [
+          1,
+          2
+         ],
+         [
+          -2,
+          1
+         ]
+        ],
+        "dir": 0,
+        "flow": "output",
+        "type": "normal"
+       }
+      ],
+      "index": 3,
+      "production": "output"
+     },
+     {
+      "connections": [
+       {
+        "at": [
+         [
+          1,
+          -2
+         ],
+         [
+          2,
+          1
+         ],
+         [
+          -1,
+          2
+         ],
+         [
+          -2,
+          -1
+         ]
+        ],
+        "dir": 0,
+        "flow": "output",
+        "type": "normal"
+       }
+      ],
+      "index": 4,
+      "production": "output"
+     }
+    ],
+    "size": [
+     5,
+     5
+    ],
+    "type": "assembling-machine"
+   }
+  },
+  "recipes": {}
+ },
+ "learned": {
+  "biochamber": "fk catalog learn foundry electromagnetic-plant recycler biochamber",
+  "electromagnetic-plant": "fk catalog learn foundry electromagnetic-plant recycler biochamber",
+  "foundry": "fk catalog learn foundry electromagnetic-plant recycler biochamber",
+  "recycler": "fk catalog learn foundry electromagnetic-plant recycler biochamber"
+ },
+ "mods": [
+  "base 2.0.77",
+  "elevated-rails 2.0.77",
+  "quality 2.0.77",
+  "space-age 2.0.77"
+ ],
+ "recipes": [
+  {
+   "category": "metallurgy",
+   "enabled": false,
+   "energy": 1,
+   "ingredients": [
+    {
+     "amount": 10,
+     "name": "molten-iron",
+     "type": "fluid"
+    }
+   ],
+   "name": "casting-iron-gear-wheel",
+   "products": [
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    }
+   ]
+  },
+  {
+   "category": "recycling",
+   "enabled": true,
+   "energy": 0.03125,
+   "hidden": true,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    }
+   ],
+   "name": "iron-gear-wheel-recycling",
+   "products": [
+    {
+     "amount": 0,
+     "extra_count_fraction": 0.5,
+     "name": "iron-plate",
+     "type": "item"
+    }
+   ]
+  }
+ ],
+ "source": "fk catalog learn: the game's prototypes over RCON (fkcore.learn); tests: cut to four buildings and two recipes",
+ "version": "2.0.77"
+}

@@ -937,6 +937,12 @@ fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  X = Literal<file="captured/NAME.json"> @(x, y) puts it anywhere,
                                  inside a module too, and fk sim place takes the same file. The
                                  file names its machines (asm1, furnace1, ...): X.asm1 is a net end
+fk catalog learn NAME... | --mod MOD | --all-mods
+                                 a building the catalog lacks (Space Age, a mod), read from the
+                                 game into game\learned.json: size, energy, fluid boxes, recipes,
+                                 built-in effects, drop tile. Every step plans with it after
+fk catalog show [NAME]           what learned.json holds, or what the toolkit knows of NAME
+fk catalog forget NAME           NAME out of learned.json
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats                         the whole base in one report: research and its rate, capital and

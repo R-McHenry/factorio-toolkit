@@ -61,6 +61,7 @@ from . import avail as availmod
 from . import compiled as compiledmod
 from . import compose, connect, design, expand, fkp, placer, rates, route, snapshot
 from . import own as ownmod
+from . import pack as packmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
 from .catalog import Catalog
@@ -1728,10 +1729,12 @@ def _on_terrain(t, s, cat):
     stood where world 3 had a lake: no water, no power, and every look said ok). -> (report
     lines, checks); checks, never gates."""
     lines, checks, hits = [], [], 0
+    # a pack with landfill (Sea Block): water is ground that costs landfill, so it is no check
+    wet = frozenset() if packmod.landfill() else t.water
     for key in sorted(s.entities, key=fkp.natural_key):
         e = s.entities[key]
         tiles = set(e.tiles)
-        parts = [(len(tiles & t.water), "water"), (len(tiles & t.cliff_tiles), "cliff"),
+        parts = [(len(tiles & wet), "water"), (len(tiles & t.cliff_tiles), "cliff"),
                  (len(tiles & t.other), "other blocked")]
         if not any(n for n, _k in parts):
             continue
@@ -1742,6 +1745,11 @@ def _on_terrain(t, s, cat):
                             f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)} stands on {what} "
                             f"tile{'s' if sum(n for n, _k in parts) != 1 else ''} (first "
                             f"{first[0]},{first[1]})"))
+    if packmod.landfill():
+        n = len(landfill_tiles(s.entities.values(), t, cat))
+        if n:
+            lines.append(f"  landfill: {n} entity tiles stand on water; the paste lays "
+                         f"{packmod.landfill()} under them")
     x0, y0, x1, y1 = t.area
     unknown = {tuple(c) for c in t.ungenerated}
     # 2.1.19 (the live run, ~4245k): the terrain stopped at x480 and cu2p was routed on to x498,
@@ -1930,6 +1938,29 @@ def _to_build(ctx):
     return need, "the whole design (no diff before this step)"
 
 
+def _to_build_entities(ctx):
+    """The composed entities :func:`_to_build` counts: after a diff those it found missing,
+    ghosted or wrong (by name and position), else every one the design builds."""
+    es = [e for e in ctx.composed.entities.values() if not e.attrs.get("dnp")]
+    if ctx.last_diff is None:
+        return es
+    todo = {(v.name, float(v.x), float(v.y)) for v in ctx.last_diff.verdicts
+            if v.verdict.split()[0] in ("not-placed", "ghost", "other-entity")}
+    return [e for e in es if (e.name, float(e.x), float(e.y)) in todo]
+
+
+def landfill_tiles(entities, t, cat):
+    """The water tiles under ``entities`` that take landfill: each entity's own tiles, except an
+    offshore pump's water side (the tiles it pumps from stay water)."""
+    out = set()
+    for e in entities:
+        tiles = set(e.tiles) & t.water
+        if tiles and cat.has_entity(e.name):
+            tiles -= cat.water_tiles(e.name, e.x, e.y, e.dir)
+        out |= tiles
+    return out
+
+
 def _bom_live(ctx):
     """report_bom --stock live: what still has to be built against the network's stock, and every
     item and machine recipe against what is researched (short-stock, needs-research). The first V1 run
@@ -1939,6 +1970,12 @@ def _bom_live(ctx):
     if r is None:
         return [f"report_bom --stock live: skipped, no game link ({ctx.link_error})"], []
     need, what = _to_build(ctx)
+    # a pack with landfill: one landfill under each entity tile on water (the paste lays it)
+    if packmod.landfill() and ctx.ground is not None and ctx.composed is not None:
+        todo = _to_build_entities(ctx)
+        n = len(landfill_tiles(todo, ctx.ground, ctx.cat))
+        if n:
+            need[packmod.landfill()] = need.get(packmod.landfill(), 0) + n
     used = sorted({e.attrs["recipe"] for e in (ctx.composed.entities.values() if ctx.composed
                                                 else ()) if e.attrs.get("recipe")
                    and ctx.cat.kind(e.name) == "assembling-machine"})
