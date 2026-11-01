@@ -38,7 +38,7 @@ from collections import defaultdict
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from fkcore import design, fkp, flow, walk  # noqa: E402
+from fkcore import design, fkp, flow, lanes, walk  # noqa: E402
 from fkcore.catalog import Catalog  # noqa: E402
 
 CAT = Catalog.load()
@@ -58,6 +58,7 @@ elaborate
 place           --keep pinned
 route           --only stale --retry-failed changed --failed keep --effort normal --group-budget 10 --hand any
 report_checks
+report_rates
 write_layout
 stop_on         invariant
 """
@@ -327,20 +328,35 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
             its = (items + items)[:2] if items else ["iron-plate", "iron-plate"]
             ports.append(f"  port {pn} : {'in' if head else 'out'} {its[0]} | {its[1]} "
                          f"@{side}{pos}")
-            # the DNP chest: three tiles past the edge, in line (belt, hand, chest); a source is
-            # a requester, which can drive a net
-            cx, cy = x + 2 * dx, y + 2 * dy
-            xe = f"x{np_}"
-            if head:
-                want = ",".join(sorted(set(its)))
-                outer.append(f'{xe} = Chest<requester, item="{want}", dnp> @({cx}, {cy})')
-                outer.append(f"net o{np_} items {', '.join(sorted(set(its)))}: {xe} -> "
-                             f"blk.{pn}")
-            else:
-                outer.append(f"{xe} = Chest<plain, dnp> @({cx}, {cy})")
-                outer.append(f"net o{np_}: blk.{pn} -> {xe}")
+            # the DNP chest: three tiles past the edge, in line (belt, hand, chest)
+            pinfo[pn] = (head, its, x + 2 * dx, y + 2 * dy, dx, dy)
             return pn
         return None
+
+    pinfo = {}
+    lg = lanes.build(g, CAT)
+
+    def dnp_ends(pn):
+        """The outside of port ``pn``: a DNP chest past it as the end the language can name (a
+        requester for an in port: it can drive a net). A port of two items gets a net per lane
+        (`lanes`), and an in port a requester per item."""
+        head, its, cx, cy, dx, dy = pinfo[pn]
+        two = its[0] != its[1]
+        out = []
+        if not head:
+            out.append(f"x{pn} = Chest<plain, dnp> @({cx}, {cy})")
+            if not two:
+                return out + [f"net o{pn}: blk.{pn} -> x{pn}"]
+            return out + [f"net o{pn}{k} items {it}: blk.{pn} -> x{pn}"
+                          for k, it in zip("ab", its)] + [f"lanes o{pn}a | o{pn}b"]
+        if not two:
+            return [f'x{pn} = Chest<requester, item="{its[0]}", dnp> @({cx}, {cy})',
+                    f"net o{pn} items {its[0]}: x{pn} -> blk.{pn}"]
+        for k, it in zip("ab", its):
+            ox, oy = (cx + (dy != 0) * (k == "b"), cy + (dx != 0) * (k == "b"))
+            out += [f'x{pn}{k} = Chest<requester, item="{it}", dnp> @({ox}, {oy})',
+                    f"net o{pn}{k} items {it}: x{pn}{k} -> blk.{pn}"]
+        return out + [f"lanes o{pn}a | o{pn}b"]
 
     for nname, net in sorted(w.nets.items(), key=lambda kv: fkp._natural_key(kv[0])):
         if net.fluid:
@@ -355,27 +371,89 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
             items = sorted(set(items) | {"coal"})      # a burner's fuel: a blueprint can't say
         # every belt end on the frame's edge is a port, whatever else the net has (a tileable
         # piece passes its belts through); an end inside the frame is just an end
-        pin = [p for p in (port(nname, hk, True, items) for hk in net.carriers
-                           if not g.pred.get(hk)) if p]
-        pout = [p for p in (port(nname, tk, False, sorted(set(items) | net.made |
-                                                        set(net.items)))
+        heads = [hk for hk in net.carriers if not g.pred.get(hk)]
+        every = sorted(set(items) | net.made)
+        # what reaches each tail: an item goes on at the heads (what comes in) or at its makers'
+        # drops, and runs along the belts (a blueprint has no contents to say)
+        reach = {}
+        for it in every:
+            src = list(heads) if it in items else []
+            for d in net.drivers:
+                if d in inst and it in walk._products(w.ents[d], {}, CAT):
+                    for n_, v in w.outs.get(d, ()):
+                        if n_ == nname:
+                            src += [b for b, via in g.succ.get(v, ()) if via == "drop"]
+                    src += [b for b, via in g.succ.get(d, ()) if via == "mine"]
+            seen, todo = set(src), list(src)
+            while todo:
+                for b, via in g.succ.get(todo.pop(), ()):
+                    if via in walk._JOIN and b not in seen:
+                        seen.add(b)
+                        todo.append(b)
+            reach[it] = seen
+        pin = [p for p in (port(nname, hk, True, items) for hk in heads) if p]
+        pout = [p for p in (port(nname, tk, False, [it for it in every if tk in reach[it]]
+                                 or every)
                             for tk in net.carriers if not g.succ.get(tk)) if p]
         drv, con = pin + drv, con + pout
         if not drv or not con:
             notes.append(f"{nname}: no end on one side, left out")
             continue
-        itxt = f" items {', '.join(sorted(set(items) | net.made))}" if pin and items else ""
-        nets.append(f"  net {nname}{itxt}: {', '.join(dict.fromkeys(drv))} -> "
-                    f"{', '.join(dict.fromkeys(con))}")
+        # any: a pass-through (in and out ports) or a split output (two out ports) needs each
+        # driver to reach some end, not every end
+        anyw = " any" if pout and (pin or len(pout) > 1) else ""
         hands = sorted({v for m, lst in w.ins.items() for n_, v in lst if n_ == nname} |
                        {v for m, lst in w.outs.items() for n_, v in lst if n_ == nname})
+        if len(every) == 2 and (pin or pout):
+            # two items on a belt through a port: a net per item, a lane each (`lanes`), so a
+            # lane that backs up holds only its own item (no CLOG). The port's `a | b` is the
+            # lanes' order: a blueprint holds no belt contents to say which lane is which.
+            subs = []
+            for it in every:
+                sn = f"{nname}_{it.replace('-', '_')}"
+                sd = [p for p in pin if it in items] + [inst[d] for d in net.drivers if d in inst
+                                         and it in walk._products(w.ents[d], {}, CAT)]
+                sc = [inst[c] for c in net.consumers if c in inst
+                      and (it in walk._ingredients(w.ents[c], {}, CAT)
+                           or (it == "coal" and (CAT.entity(w.ents[c].name).get("energy")
+                                                 or {}).get("source") == "burner"))] + \
+                    [p for p in pout if it in pinfo[p][1]]
+                nets.append(f"  net {sn} items {it}{anyw}: {', '.join(dict.fromkeys(sd))} -> "
+                            f"{', '.join(dict.fromkeys(sc))}")
+                subs.append(f"blk/{sn}")
+            # the lane an item made here lands on (its maker's drop, fkcore.lanes) is its lane;
+            # two items that both come in keep the port's order (a blueprint says no more)
+            hint = {}
+            for k_, it in enumerate(every):
+                for d in net.drivers:
+                    if d not in inst or it not in walk._products(w.ents[d], {}, CAT):
+                        continue
+                    for n_, v in w.outs.get(d, ()):
+                        if n_ == nname:
+                            hint.update({it: e.dst[1] for e in lg.out.get((v, ""), ())
+                                         if e.via == "drop" and e.dst[1]})
+            if len(hint) == 1:
+                (it, ln), = hint.items()
+                if (ln == "L") != (it == every[0]):
+                    subs.reverse()
+            nets.append(f"  lanes {subs[0][4:]} | {subs[1][4:]}")
+            hkey = hnet = "|".join(subs)
+            notes.append(f"{nname}: {', '.join(every)} as two nets on one belt, "
+                         + ("lanes by where the maker drops" if hint
+                            else "lanes in the port's order (the blueprint says no more)"))
+        else:
+            itxt = f" items {', '.join(every)}" if pin and items else ""
+            nets.append(f"  net {nname}{itxt}{anyw}: {', '.join(dict.fromkeys(drv))} -> "
+                        f"{', '.join(dict.fromkeys(con))}")
+            hkey = hnet = f"blk/{nname}"
         mine = list(net.carriers) + hands
         used.update(mine)
-        held[f"blk/{nname}"] = [_entity(w, c, f"blk/{nname}", i) for i, c in enumerate(mine)]
+        # a shared belt is net=a|b, its inserters net=a+b (fkp)
+        held[hkey] = [_entity(w, c, hnet.replace("|", "+") if c in hands else hnet, i)
+                      for i, c in enumerate(mine)]
         for j, (dn, x, y, d, ug) in enumerate(drawn.get(nname, ())):
-            held[f"blk/{nname}"].append(fkp.Entity(
-                f"~blk/{nname}/d{j}", dn, x, y, d,
-                dict({"net": f"blk/{nname}"}, **({"ug": ug} if ug else {}))))
+            held[hkey].append(fkp.Entity(
+                f"~{hkey}/d{j}", dn, x, y, d, dict({"net": hnet}, **({"ug": ug} if ug else {}))))
         if drawn.get(nname):
             notes.append(f"{nname}: drew {len(drawn[nname])} carriers in to reach the frame")
     # hands machine -> machine: one net per giving machine, a hand to each taker
@@ -411,6 +489,8 @@ def module_rung(rows, w, furnace_recipe, gdir, size):
             kinds[e.name] += 1
         notes.append("in the rest Literal: " + ", ".join(f"{v} {k}" for k, v in
                                                           sorted(kinds.items())))
+    for pn in pinfo:
+        outer += dnp_ends(pn)
     text = (f"module Piece size {W}x{H} {{\n" + "\n".join(ports + body + nets) + "\n}\n\n"
             f"blk = Piece @({MARGIN}, {MARGIN})\n" + "\n".join(outer) + "\n")
     return text, held, notes, frame
