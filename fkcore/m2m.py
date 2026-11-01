@@ -49,7 +49,8 @@ from .steiner import COSTS, DX, DY, FixedSink, TapSink, Tree, _astar
 
 __all__ = ["LeftTap", "route", "spec_of", "report"]
 
-_RUNS = 24         # runs added at most
+_RUNS = 24         # runs added at most, or _RUNS_A_LANE a lane of the demand where that is more
+_RUNS_A_LANE = 5   # (2.1.23: a 64/s net took 33 runs; each adds a driver's worth or a lane)
 _BANS = 12         # runs passed over (they raised no flow) at most
 _TRIES = 6         # searches per run when a found run overlaps its own start or end
 _ROUNDS = 3        # improve rounds
@@ -506,7 +507,8 @@ def route(cat, job, blocked, spans, clear, box, limit, ents):
     ctx = _Ctx(cat, job, blocked, spans, clear, box, limit, ents, job.m2m)
     net = _Net(cat, job.net, plan)
     runs, why, before, banned, bans = [], None, ctx.flow(net), set(), 0
-    while len(runs) < _RUNS:
+    cap = max(_RUNS, _RUNS_A_LANE * math.ceil(job.m2m["demand"] / max(before.lane, 1e-9)))
+    while len(runs) < cap:
         want = ctx.need(net)
         if want is None:
             break

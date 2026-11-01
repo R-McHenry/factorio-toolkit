@@ -79,6 +79,18 @@ class HourglassTest(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 2 + len(hourglass.CASES))
 
 
+class BigTest(unittest.TestCase):
+    """A higher-throughput case (2.1.23): 48/s, several belts' worth, no run cap in the way."""
+
+    def test_twenty_four_to_twenty_four(self):
+        m = hourglass.measure("24to24", CAT)
+        self.assertTrue(m["reach"], m["line"])
+        self.assertGreaterEqual(m["maxflow"], m["demand"] - 1e-6, m["line"])
+        self.assertGreaterEqual(m["narrow"], 4)          # 48/s over 15 a belt, rounded up
+        lg = lanes.build(m["layout"], CAT)
+        self.assertFalse([e for e in lg.edges() if e.via in ("side", "ug_side")])
+
+
 class LeftTest(unittest.TestCase):
     """``route --m2m left``: version 1, every driver on the left lane, one lane a run."""
 

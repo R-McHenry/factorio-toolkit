@@ -16,6 +16,7 @@ router added, its belt cost (steiner's costs) and the route time. The m2m router
 ``--today`` adds a row per case routed without ``--m2m`` (the router as it was: one trunk, both
 lanes by a side-load above one lane). ``--balancer`` adds a row per case laid through a
 balancer at the waist (``lay_balancer``: Rory's layers of splitters alternating by one).
+``--big`` adds the higher-throughput cases (``BIG``: 48 and 64/s, several belts).
 
 Keep the table as it is printed: later versions of the router are compared on it.
 """
@@ -48,6 +49,18 @@ CASES = {
     "uneven": ([2.4, 2.0, 1.6, 1.2, 0.8, 0.4, 0.4, 0.4], 8, None),
     "wall": ([1.0] * 12, 12, "gap"),
 }
+#: higher throughput, several belts' worth (2.1.23, Rory: "more lanes"); ``--big`` runs them.
+#: A producer stays at one fast inserter's worth (2.5/s): a chest has one tile a side.
+BIG = {
+    "24to24": ([2.0] * 24, 24, None),
+    "32to16": ([2.0] * 32, 16, None),
+    "32to32": ([2.0] * 32, 32, None),
+}
+
+
+def spec(name):
+    """(producer rates, consumer count, wall) of a case, ordinary or big."""
+    return CASES[name] if name in CASES else BIG[name]
 
 
 def source(rates, consumers, gap=GAP):
@@ -66,7 +79,7 @@ def source(rates, consumers, gap=GAP):
 
 def build(name, cat, gap=GAP):
     """(flat, layout, bounds, blocked tiles, midline x) of a case."""
-    rates, consumers, wall = CASES[name]
+    rates, consumers, wall = spec(name)
     f = lang.parse(source(rates, consumers, gap), f"{name}.fk")
     flat = elaborate(f, dict(f.modules), cat, name)
     lay, _notes = expand.expand_factory(flat, cat)
@@ -126,7 +139,7 @@ def measure(name, cat, m2m=True, gap=GAP, router=None):
         count[e.name if e.name in count else "inserter"] += 1
     cost = (count["transport-belt"] * COSTS["belt"] + count["underground-belt"] / 2 * COSTS["ug"]
             + count["splitter"] * COSTS["split"] + count["inserter"] * COSTS["tap"])
-    rates, consumers, _wall = CASES[name]
+    rates, consumers, _wall = spec(name)
     how = next((ln for ln in r.lines if ln.startswith(("routed", "FAILED")) and f" {NET}:" in ln),
                "")
     runs = 0
@@ -379,12 +392,14 @@ def main(argv=None):
     ap.add_argument("--today", action="store_true", help="also route each case without --m2m")
     ap.add_argument("--balancer", action="store_true",
                     help="also lay each case through a balancer at the waist")
+    ap.add_argument("--big", action="store_true", help="also the higher-throughput cases (BIG)")
     ap.add_argument("--gap", type=int, default=GAP)
     ap.add_argument("--lines", action="store_true", help="print each case's route lines")
     ap.add_argument("--draw", action="store_true", help="draw each case as laid")
     a = ap.parse_args(argv)
     cat = Catalog.load()
-    names = [n for n in CASES if not a.only or n in a.only.split(",")]
+    pool = list(CASES) + (list(BIG) if a.big or a.only else [])
+    names = [n for n in pool if not a.only or n in a.only.split(",")]
     rows = []
     for name in names:
         routers = (["m2m"] + (["m2m-left"] if a.left else []) + (["today"] if a.today else [])

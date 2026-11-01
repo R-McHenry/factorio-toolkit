@@ -1,6 +1,6 @@
 """hourglass_png: the hourglass bench's cases as PNG images, and as blueprint strings.
 
-    python tools/hourglass_png.py OUT_DIR [--only NAME[,NAME]] [--scale PX]
+    python tools/hourglass_png.py OUT_DIR [--only NAME[,NAME]] [--scale PX] [--lanes] [--big]
 
 Per case one image, four panels side by side: the m2m router on both lanes and on the left lane
 only (version 1), today's router and Rory's balancer at the waist, each with its row of the
@@ -39,6 +39,8 @@ TEXT = (225, 225, 225)
 DIM = (150, 150, 160)
 
 ROUTERS = ("m2m", "m2m-left", "today", "balancer")
+#: the big cases: the balancer harness lays no more than a few belts, version 1 is slow
+BIG_ROUTERS = ("m2m", "today")
 
 
 def _arrow(cv, x, y, s, d, rgb):
@@ -110,6 +112,7 @@ def main(argv=None):
     ap.add_argument("out")
     ap.add_argument("--only", default="")
     ap.add_argument("--scale", type=int, default=0, help="pixels a tile (12; 20 with --lanes)")
+    ap.add_argument("--big", action="store_true", help="also the higher-throughput cases")
     ap.add_argument("--lanes", action="store_true",
                     help="draw every lane and its load (tools/lanes_png.py): CASE-lanes.png")
     a = ap.parse_args(argv)
@@ -118,19 +121,21 @@ def main(argv=None):
     s = a.scale or (20 if a.lanes else 12)
     if a.lanes:
         import lanes_png
-    names = [n for n in hourglass.CASES if not a.only or n in a.only.split(",")]
+    pool = list(hourglass.CASES) + (list(hourglass.BIG) if a.big or a.only else [])
+    names = [n for n in pool if not a.only or n in a.only.split(",")]
     for name in names:
-        ms = [hourglass.measure(name, cat, router=r) for r in ROUTERS]
+        routers = BIG_ROUTERS if name in hourglass.BIG else ROUTERS
+        ms = [hourglass.measure(name, cat, router=r) for r in routers]
         _f, _l, bounds, blocked, mid = hourglass.build(name, cat)
         if a.lanes:
             bounds = lanes_png.crop(bounds, [m["layout"] for m in ms], cat)
         pw, ph = (bounds[2] - bounds[0]) * s, (bounds[3] - bounds[1]) * s
         head = 3 * FONT_H + 8
         gap = 24
-        width = max(len(ROUTERS) * pw + (len(ROUTERS) - 1) * gap,
+        width = max(len(routers) * pw + (len(routers) - 1) * gap,
                     max(text_width(stats(m)) for m in ms)) + 32
         foot = 2 * FONT_H + 16 if a.lanes else 0
-        cv = Canvas(width, ph + head + 2 * FONT_H + 24 + len(ROUTERS) * (FONT_H + 3) + 8 + foot,
+        cv = Canvas(width, ph + head + 2 * FONT_H + 24 + len(routers) * (FONT_H + 3) + 8 + foot,
                     BG)
         cv.text(16, 8, f"hourglass {name}: {ms[0]['pc']}, demand {ms[0]['demand']:.1f}/s "
                        f"(one lane 7.5/s)", TEXT, scale=2)
@@ -148,7 +153,7 @@ def main(argv=None):
             with open(os.path.join(a.out, f"{name}-{m['router']}.txt"), "w") as fh:
                 fh.write(bp + "\n")
         if a.lanes:
-            lanes_png.legend(cv, 16, head + 2 * FONT_H + 22 + ph + len(ROUTERS) * (FONT_H + 3))
+            lanes_png.legend(cv, 16, head + 2 * FONT_H + 22 + ph + len(routers) * (FONT_H + 3))
         path = os.path.join(a.out, f"{name}{'-lanes' if a.lanes else ''}.png")
         cv.save(path)
         print(path)
