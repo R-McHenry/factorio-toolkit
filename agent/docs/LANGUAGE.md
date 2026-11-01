@@ -448,7 +448,12 @@ What the router keeps:
 
 - the belts stay adjacent and in order;
 - a turn is nested, the inner belt turning first, and no belt crosses another;
-- where the ribbon crosses another net, its belts go under it;
+- each belt goes under only what blocks its own line, with a tunnel of its own, and the rest stay
+  on the surface beside it, still in order (a crossing that blocks them all takes every belt
+  under together, side by side); a tunnel is straight, never through a turn;
+- a tunnel reaches as far as the fastest tier `route --ug` allows (yellow 5 tiles, red 7, blue 9,
+  turbo 11; `any`, the default, is the fastest the network can build, else yellow), and each one
+  is laid with the slowest tier that reaches it;
 - each belt joins the ribbon from the side, at its own place, and leaves it the same way: the
   outer belt first, at its own offset, and the rest don't close up.
 

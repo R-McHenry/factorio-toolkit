@@ -859,8 +859,8 @@ def dw(grid, root, sinks, costs=None, margin=6, iters=12, history_inc=3.0):
 # -- ribbons: several belts as one path (2.1) ------------------------------------------------------
 #: A ribbon of n belts is searched by its cross-section: n tiles side by side across its heading,
 #: belt k on the k-th tile to the right of belt 0 (looking along the heading), all pointing ahead.
-#: A state is (x, y, h, exited, live): belt 0's tile, the heading, whether the cross-section is the
-#: belts' underground exits, and the belts still in the ribbon (a bit each). Moves:
+#: A state is (x, y, h, exits, live): belt 0's tile, the heading, the belts whose tile there is an
+#: underground exit, and the belts still in the ribbon (a bit each). Moves:
 #:
 #:   step   every live belt one tile ahead;
 #:   turn   a bus turn: the n x n square ahead, each belt running on to its turning row and across;
@@ -868,13 +868,23 @@ def dw(grid, root, sinks, costs=None, margin=6, iters=12, history_inc=3.0):
 #:          belt 0 last; turning left, belt 0 first. The move ends on the cross-section beyond the
 #:          square, so every belt there runs straight again and the order is the same: belt k is
 #:          still k tiles right of belt 0;
-#:   jump   every live belt under what is ahead together: its entrance on the cross-section, its
-#:          exit j tiles on (2..max_ug), side by side and the same length.
+#:   tunnel the ribbon j tiles on, each belt under what blocks its own line and the rest on the
+#:          surface (2.1 ribbon tunnels): belt k's tunnel starts on the free tile before the first
+#:          blocked tile of its line and ends on the free tile after the last one, at most max_ug
+#:          apart (the reach of the fastest underground the ribbon may lay), clear of every other
+#:          tunnel on that line (``grid.spans``); its entrance is a fresh tile or the cross-section
+#:          it starts from, unless that is its exit. The move starts where some belt's line is
+#:          blocked one tile ahead and ends on the last exit, so a crossing that blocks every belt
+#:          is every belt under together, side by side and the same length. Straight only: no
+#:          belt tunnels through a turn's square.
 #:
 #: A belt leaves the ribbon at its fixed end (its tile and heading there; it costs nothing and the
 #: rest keep their offsets) or, every live belt at once, onto the tiles ahead of them (``walks``:
 #: loose belts from there on, at ``loose`` times their walking distance). The ribbon starts on any
 #: of ``sources`` (a cross-section and what reaching it costs).
+
+
+_YELLOW_REACH = 5
 
 
 def _turn_rel(n):
@@ -919,6 +929,8 @@ def ribbon(grid, n, sources, fixed=None, walks=None, costs=None, loose=2.0, limi
     full = (1 << n) - 1
     max_ug = int(k_["max_ug"])
     c_belt, c_turn, c_ug = k_["belt"], k_["turn"], k_["ug"]
+    c_far = 1.5             # a tile of tunnel beyond yellow's reach: a dearer underground, so a
+    #                         long tunnel is laid only where a yellow one doesn't reach
     rel = _turn_rel(n)
     turns = {(h, side, b): [_rot(dx, dy, h) for dx, dy in rel[side, b]]
              for h in range(4) for side in (1, 3) for b in range(n)}
@@ -1053,21 +1065,47 @@ def ribbon(grid, n, sources, fixed=None, walks=None, costs=None, loose=2.0, limi
                 sx, sy, sh = x + fx - DX[r], y + fy - DY[r], (h + 3) % 4
             push((sx, sy, sh, 0, settle(sx, sy, sh, mask)), st, ("turn", side),
                  gs + laid * c_belt + len(live) * c_turn)
-        # every live belt under what is ahead, together
-        if ex:
-            continue
+        # tunnels: each belt under what blocks its own line, the rest on the surface
+        if not any(blocked(_cross(nx, ny, h, b)) for b in live):
+            continue                    # nothing blocks a belt one tile ahead: a step comes first
         theirs = grid.spans[_axis(h)]
-        seen_block = False
-        for j in range(1, max_ug + 1):
-            hidden = [_cross(x + fx * j, y + fy * j, h, b) for b in live]
-            if any(t in theirs for t in hidden) or \
-                    any(_cross(x, y, h, b) in theirs for b in live):
-                break
-            if j >= 2 and seen_block and not any(taken(t, b, h) for t, b in zip(hidden, live)):
-                push((x + fx * j, y + fy * j, h, 1, settle(x + fx * j, y + fy * j, h, mask)),
-                     st, ("jump", j), gs + len(live) * c_ug)
-            if any(gblocked(t) for t in hidden):
-                seen_block = True
+        first, last = {}, {}
+        for j in range(1, 2 * max_ug + 2):
+            row = [_cross(x + fx * j, y + fy * j, h, b) for b in live]
+            if j >= 2 and first and not any(taken(t, b, h) for t, b in zip(row, live)):
+                # each belt out just past what blocks it, or every belt that went under out on
+                # row j together (its tunnel longer, the tiles under it saved)
+                ways = []
+                if any(last.get(b) == j - 1 for b in live):
+                    ways.append(False)
+                if any(last[b] != j - 1 for b in first):
+                    ways.append(True)
+                for stretch in ways:
+                    cost, tun, exits = 0.0, [], 0
+                    for b in live:
+                        if b not in first:
+                            cost += j * c_belt
+                            continue
+                        a, e = first[b] - 1, j if stretch else last[b] + 1
+                        if e - a > max_ug or (a == 0 and ex >> b & 1) or any(
+                                _cross(x + fx * i, y + fy * i, h, b) in theirs
+                                for i in range(a, e + 1)):
+                            break
+                        cost += (max(a - 1, 0) + j - e) * c_belt + c_ug + \
+                            c_far * max(0, e - a - _YELLOW_REACH)
+                        tun.append((b, a, e))
+                        if e == j:
+                            exits |= 1 << b
+                    else:
+                        sx, sy = x + fx * j, y + fy * j
+                        push((sx, sy, h, exits, settle(sx, sy, h, mask)), st,
+                             ("tunnel", j, tuple(tun)), gs + cost)
+            for t, b in zip(row, live):
+                if blocked(t):
+                    first.setdefault(b, j)
+                    last[b] = j
+            if any(last.get(b) == j and j + 1 - (first[b] - 1) > max_ug for b in live):
+                break                   # a belt's tunnel would end beyond its reach
     if end is None:
         return {"fail": "no path for the ribbon"}
     # the path, start first
@@ -1085,7 +1123,8 @@ def ribbon(grid, n, sources, fixed=None, walks=None, costs=None, loose=2.0, limi
     lines = [[[_cross(x0, y0, h0, b), "belt"]] for b in range(n)]
     heads = [h0] * n
     ends = [("fixed",) if not chain[0][0][4] >> b & 1 else None for b in range(n)]
-    counts = {"belts": 0, "undergrounds": 0, "turns": 0, "crossings": 0}
+    counts = {"belts": 0, "undergrounds": 0, "turns": 0, "crossings": 0, "under": 0}
+    tunnels = []
     for (prev, _pm), (st, move) in zip(chain, chain[1:]):
         x, y, h, _ex, mask = prev
         live = [b for b in range(n) if mask >> b & 1]
@@ -1105,9 +1144,24 @@ def ribbon(grid, n, sources, fixed=None, walks=None, costs=None, loose=2.0, limi
                     lines[b].append([(bx + dx, by + dy), "belt"])
         else:
             counts["crossings"] += 1
+            _tag, j, tun = move
+            under = {b: (a, e) for b, a, e in tun}
+            counts["under"] += len(under)
             for b in live:
-                lines[b][-1][1] = "in"
-                lines[b].append([_cross(st[0], st[1], h, b), "out"])
+                a, e = under.get(b, (j + 1, j + 1))
+                if a == 0:
+                    lines[b][-1][1] = "in"
+                for i in range(1, j + 1):
+                    t = _cross(x + DX[h] * i, y + DY[h] * i, h, b)
+                    if i == a:
+                        lines[b].append([t, "in"])
+                    elif i == e:
+                        lines[b].append([t, "out"])
+                    elif not a < i < e:
+                        lines[b].append([t, "belt"])
+                if b in under:
+                    tunnels.append((b, _cross(x + DX[h] * a, y + DY[h] * a, h, b),
+                                    _cross(x + DX[h] * e, y + DY[h] * e, h, b), e - a))
         for b in live:
             heads[b] = st[2]
             if not st[4] >> b & 1:
@@ -1124,5 +1178,5 @@ def ribbon(grid, n, sources, fixed=None, walks=None, costs=None, loose=2.0, limi
                 counts["undergrounds"] += 1
     cost = g[end]
     return {"lines": lines, "heads": heads, "ends": ends, "start": (x0, y0, h0),
-            "cost": round(cost, 3), "counts": counts, "seconds": round(time.time() - t0, 2),
-            "expanded": len(done)}
+            "cost": round(cost, 3), "counts": counts, "tunnels": tunnels,
+            "seconds": round(time.time() - t0, 2), "expanded": len(done)}

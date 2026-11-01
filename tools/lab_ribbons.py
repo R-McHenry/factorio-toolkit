@@ -1,7 +1,8 @@
 """lab_ribbons: the eight-belt smelter bus routed as a ribbon, built on a laptop server and
 measured (2.1 ribbons, PLAN-2.1 "Bus routing: ribbons").
 
-    python tools/lab_ribbons.py
+    python tools/lab_ribbons.py            # the bus as it is
+    python tools/lab_ribbons.py --rock     # a 2x2 rock on the last run's belts 2 and 3
 
 ``tests/nest/bus-ribbon.fk`` (its ore from three requesters here, 5/s each: one requester's
 inserter brings about 6/s, and the eight columns take 15/s): eight SmeltColumns side by side (2.1.12's bus), ``net each
@@ -18,6 +19,10 @@ every 30 game seconds (``lab.lua_supply``), and reads:
 - per chest: the plates it took in, plus what the belt into it holds more than before;
 - per chest, its belt traced back upstream in the game (belts, curves, undergrounds) to where it
   starts: which column it comes from, and the turns it takes on the way.
+
+``--rock`` (2.1 ribbon tunnels) puts a 2x2 module in the way of two of the eight belts where
+they run south to the chests: those two go under it on their own, and the others run on over the
+surface beside it.
 
 Belt k in order means chest k's belt traces back to column k, and chest k takes in what column k
 makes. Every game call is one RCON command with the link's 5 s timeout, and nothing is registered.
@@ -44,6 +49,13 @@ NEST = os.path.join(ROOT, "tests", "nest")
 NAME = "ribbon"
 SIZE = (112, 44)
 WARM, MEASURE = 240, 120          # game seconds
+ROCK = "--rock" in sys.argv[1:]
+ROCK_SRC = """
+rock = Rock @(102, 30)
+module Rock size 2x2 {
+  c = Chest<provider> @(0, 0)
+}
+"""
 ORE_ONE = "ore  = Chest<requester, item=iron-ore, rate=15/s> @(0, 4)"
 ORE_THREE = "\n".join(f"ore{k} = Chest<requester, item=iron-ore, rate=5/s> @(0, {1 + 3 * k})"
                       for k in range(3))
@@ -95,7 +107,7 @@ def _trace(belts, start):
         if b["t"] == "underground-belt" and b["u"] == "output":
             dx, dy = DIRS[d]
             nxt = None
-            for k in range(1, 6):
+            for k in range(1, 12):
                 q = (t[0] - dx * k, t[1] - dy * k)
                 o = at.get(q)
                 if o and o["t"] == "underground-belt" and o["u"] == "input" and o["d"] % 16 == d:
@@ -134,6 +146,8 @@ def main():
     # one requester's inserter brings about 6 ore/s: three of them, for the eight columns' 15/s
     src = src.replace(ORE_ONE, ORE_THREE).replace("net feed: ore ->", "net feed: ore0, ore1, ore2 ->")
     assert "ore2 ->" in src
+    if ROCK:
+        src += ROCK_SRC
     with open(os.path.join(game, f"{NAME}.fk"), "w", encoding="utf-8") as fh:
         fh.write(src)
     shutil.copy(os.path.join(NEST, "cells.fk"), os.path.join(game, "cells.fk"))
@@ -176,7 +190,8 @@ def main():
         k = int((f["x"] - col_x) // 11)
         if 0 <= k < 8:
             made[k] += (f["pf"] - pf0.get((f["x"], f["y"]), f["pf"])) / mins
-    chests = sorted(b["chests"], key=lambda c: c["x"])
+    low = max(c["y"] for c in b["chests"])              # the row of eight (not the rock's)
+    chests = sorted((c for c in b["chests"] if c["y"] == low), key=lambda c: c["x"])
     c0 = {(c["x"], c["y"]): c["n"] for c in a["chests"]}
     belts_a = {_tile(e): e["n"] for e in a["belts"]}
     ok = len(chests) == 8 and any(" ok " in ln and ln.strip().startswith("diff") for ln in lines)
@@ -210,6 +225,9 @@ def main():
         row = "".join(ARROW.get(at[(xx, yy)]["d"] % 16, "?") if (xx, yy) in at else "."
                       for xx in range(min(sx) - 14, max(sx) + 3))
         out.append("    " + row)
+    ugs = [e for e in b["belts"] if e["t"] == "underground-belt"]
+    out.append(f"underground ends in the slot: {len(ugs)} "
+               + ", ".join(f"{e['u']} {e['x']},{e['y']}" for e in sorted(ugs, key=lambda e: (e["x"], e["y"]))))
     out.append(f"chest k fed from column k for every k: {order == list(range(8))}")
     print("\n".join(out))
     print("ribbon lab:", "OK" if ok else "NOT as designed")

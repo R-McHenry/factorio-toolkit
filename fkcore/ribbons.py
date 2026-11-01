@@ -12,7 +12,12 @@ tiles from belt 0. Three things make one:
 
 **The route** (``route``) is one search, ``fkcore.steiner.ribbon``: the ribbon's cross-section
 moves as one footprint, straight, through bus turns (nested, the inner belt turning first) and
-under whatever it crosses (every belt's underground side by side, the same length). It starts
+over or under what it crosses: each belt goes under only what blocks its own line, with a tunnel
+of its own, and the rest stay on the surface (a crossing that blocks them all is every belt under
+together). A tunnel reaches as far as the fastest underground the ribbon may lay (``_UG``, set by
+``route.route_layout``'s ``ug``: yellow's 5 tiles unless a faster tier is allowed), and each one
+is laid with the slowest tier that reaches it, so the tier pass (``fkcore.tiers``) never gives it
+one that falls short. It starts
 where every belt's driver starts in one row (an aligned head), or, searched from the other end,
 where every consumer's first belt is in one row; with neither, anywhere the drivers' belts can
 reach, ranked by how far they walk to it. A belt ends where its one consumer's belt starts at its
@@ -36,6 +41,7 @@ from dataclasses import dataclass, field
 
 from . import fkp as fkpmod
 from .steiner import DX, DY, ribbon as _search, _cross
+from .tiers import TIERS, tier_of
 
 __all__ = ["Ribbon", "plan", "route"]
 
@@ -43,6 +49,26 @@ LOOSE = 2.0          # a loose belt's tile costs this much against a ribbon belt
 _HEADS = 4000        # head cross-sections a ribbon with no aligned end may start from, at most
 _LIMIT = 300000      # cross-sections the search looks at, at most
 _NESW = "NESW"
+#: the undergrounds a ribbon may lay, slowest first: [(name, reach)] (``ug_tiers``)
+_UG = (("underground-belt", 5),)
+
+
+def ug_tiers(cat, tier="yellow"):
+    """[(underground name, reach)] for every tier up to ``tier`` (a tier name, yellow red blue
+    turbo, or an underground's name), slowest first: what ``_UG`` holds."""
+    from .tiers import FAMILY, TIERS
+    names = FAMILY["underground-belt"]
+    top = names.index(tier) if tier in names else TIERS.index(tier)
+    return tuple((name, int(cat.entity(name).get("max_distance") or 5))
+                 for name in names[:top + 1] if cat.has_entity(name))
+
+
+def _ug_name(dist):
+    """The slowest underground of ``_UG`` that reaches ``dist`` tiles."""
+    for name, reach in _UG:
+        if reach >= dist:
+            return name
+    return _UG[-1][0]
 
 
 @dataclass
@@ -383,7 +409,8 @@ def route(cat, rib, ents, frames, js, box, limit, terrain=(), avoid=(), allow=fr
                     why = why or "no free row of tiles for its head is reached from every driver"
                     continue
             own = {f[0]: (o, f[1]) for o, f in enumerate(fixed) if f is not None}
-            got = _search(grid, n, sources, fixed, walks, loose=LOOSE, limit=_LIMIT, own=own)
+            got = _search(grid, n, sources, fixed, walks, loose=LOOSE, limit=_LIMIT, own=own,
+                          costs={"max_ug": max(r for _n, r in _UG)})
             if "fail" in got:
                 why = why or got["fail"]
                 continue
@@ -434,8 +461,8 @@ def _lay(cat, rib, mode, off, jobs, got, ents, frames, js, box, limit, terrain, 
     body, tiles = {}, set()
     for b in range(n):
         o = off[b]
-        flow = _flow_line(got["lines"][o], got["start"][2] if reverse else got["heads"][o],
-                          reverse)
+        flow = _tiered(_flow_line(got["lines"][o], got["start"][2] if reverse else
+                                  got["heads"][o], reverse))
         for t, _name, _h, _ug in flow:
             if t in tiles:
                 return f"ribbon {rib.name}: its path crosses itself at {t[0]},{t[1]}"
@@ -528,6 +555,42 @@ def _lay(cat, rib, mode, off, jobs, got, ents, frames, js, box, limit, terrain, 
     return out, texts, _summary(rib, body, off, got, parts, reverse)
 
 
+def _tiered(flow):
+    """``flow`` with each tunnel's two ends named the slowest underground of ``_UG`` that reaches
+    it (a yellow one up to 5 tiles)."""
+    out, at = list(flow), None
+    for i, (t, name, h, ug) in enumerate(out):
+        if ug == "in":
+            at = i
+        elif ug == "out" and at is not None:
+            a = out[at][0]
+            pick = _ug_name(abs(t[0] - a[0]) + abs(t[1] - a[1]))
+            out[at] = (a, pick, out[at][2], "in")
+            out[i] = (t, pick, h, "out")
+            at = None
+    return out
+
+
+def _tunnels(rib, body, off, reverse):
+    """The report's words for the belts that went under: "belt 2 13,10 to 18,10, ..."."""
+    rows = []
+    for b in range(rib.n):
+        flow, at = body[b], None
+        for t, name, _h, ug in flow:
+            if ug == "in":
+                at = t
+            elif ug == "out" and at is not None:
+                d = abs(t[0] - at[0]) + abs(t[1] - at[1])
+                tier = "" if name == "underground-belt" else \
+                    f" {TIERS[(tier_of(name) or (None, 0))[1]]}"
+                rows.append((off[b], at, f"belt {off[b]} {at[0]},{at[1]} to {t[0]},{t[1]}"
+                             + (f" ({d} tiles{tier})" if tier else "")))
+                at = None
+    rows.sort(key=lambda r: (r[1][0] + r[1][1], r[0]))
+    words = [w for _o, _a, w in rows]
+    return ", ".join(words[:8]) + (f" and {len(words) - 8} more" if len(words) > 8 else "")
+
+
 def _summary(rib, body, off, got, parts, reverse=False):
     """The route report's ``ribbon`` line."""
     n, c = rib.n, got["counts"]
@@ -545,8 +608,10 @@ def _summary(rib, body, off, got, parts, reverse=False):
     return (f"ribbon    {rib.name}: {n} belts side by side ({what}), belts {order} from left to "
             f"right looking along it; head {head[0][0]},{head[0][1]} {_NESW[head[2]]}, tail {tail[0][0]},"
             f"{tail[0][1]} {_NESW[tail[2]]}; {s(c['turns'], 'bus turn', 'bus turns')}, "
-            f"{s(c['crossings'], 'crossing', 'crossings')} (every belt under together), "
-            f"{c['belts']} belts, {c['undergrounds']} underground ends; "
+            f"{s(c['crossings'], 'crossing', 'crossings')}"
+            + (f" ({s(c['under'], 'belt', 'belts')} under: {_tunnels(rib, body, off, reverse)})"
+               if c.get("under") else "")
+            + f", {c['belts']} belts, {c['undergrounds']} underground ends; "
             f"{s(n - joined, 'belt starts', 'belts start')} where its driver's belt does, "
             f"{joined} from a belt laid to it; {s(n - left, 'belt ends', 'belts end')} where its "
             f"consumer's belt starts, {left} on in a belt of its own")
@@ -568,7 +633,8 @@ def _keyed(net, ents):
     count = {}
     out = []
     for e in ents:
-        letter = {"transport-belt": "b", "underground-belt": "u", "splitter": "s"}.get(e.name, "i")
+        letter = next((v for k, v in (("underground-belt", "u"), ("transport-belt", "b"),
+                                       ("splitter", "s")) if e.name.endswith(k)), "i")
         k = count.get(letter, 0)
         count[letter] = k + 1
         out.append(fkpmod.Entity(f"~{net}/{letter}{k}", e.name, _clean(e.x), _clean(e.y),

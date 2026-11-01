@@ -1,11 +1,12 @@
 """2.1 ribbons (PLAN-2.1 "Bus routing: ribbons"): several belts routed as one, side by side and in
 order. ``width N`` above 2, ``bundle NAME: a, b`` and ``net each`` as a ribbon; the search
 (``steiner.ribbon``): bus turns, every belt under a crossing together, belts that end one by one;
-and the refusals."""
+and the refusals. Ribbon tunnels: each belt under only what blocks its own line, and tunnels as
+long as the tier allowed (``route_layout(ug=...)``) reaches, laid at the slowest tier that does."""
 import os
 import unittest
 
-from fkcore import connect, expand, fkp, lang, route
+from fkcore import connect, expand, fkp, lang, route, tiers
 from fkcore.catalog import Catalog
 from fkcore.elaborate import ElabError, elaborate, elaborate_file
 from fkcore.steiner import Grid, ribbon
@@ -176,7 +177,7 @@ class BundleRouteTest(unittest.TestCase):
         self.assertEqual(rep.leaks, [])
         line = next(ln for ln in r.lines if ln.startswith("ribbon"))
         self.assertIn("ribbon    plates: 4 belts side by side", line)
-        self.assertIn("2 bus turns, 1 crossing (every belt under together)", line)
+        self.assertIn("2 bus turns, 1 crossing (4 belts under: ", line)
         # every belt under the crossing belt together: four entrances in one column, four exits
         # in another, each pair the same length, in the belts' order
         ins = {n: [at(e) for e in of(r, n, "underground-belt") if e.attrs.get("ug") == "in"]
@@ -318,3 +319,133 @@ class NetEachTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def ends8(n=8):
+    """Src8 (n requesters, ports south) and Dst8 (n providers, ports north), n belts apart."""
+    src = [f"module Src8 size {n}x4 {{"] + [f"  port o{k} : out iron-plate @s{k}" for k in range(n)] \
+        + [f"  c{k} = Chest<requester, item=iron-plate, rate=1/s> @({k}, 0)" for k in range(n)] \
+        + [f"  net a{k}: c{k} -> o{k}" for k in range(n)] + ["}"]
+    dst = [f"module Dst8 size {n}x4 {{"] + [f"  port i{k} : in iron-plate @n{k}" for k in range(n)] \
+        + [f"  c{k} = Chest<provider> @({k}, 3)" for k in range(n)] \
+        + [f"  net b{k}: i{k} -> c{k}" for k in range(n)] + ["}"]
+    nets = [f"net q{k}: src.o{k} -> dst.i{k}" for k in range(n)] \
+        + ["bundle plates: " + ", ".join(f"q{k}" for k in range(n))]
+    return "\n".join(src + dst + nets) + "\n"
+
+
+Q = tuple(f"q{k}" for k in range(8))
+
+
+def wall_across(rows, y=12):
+    """A module as wide as the box, ``rows`` tall at ``y``: no way round it, only under."""
+    return (f"module Wall size 30x{rows} {{\n  c = Chest<provider> @(0, 0)\n}}\n"
+            f"wall = Wall @(-6, {y})\n")
+
+
+class TunnelTest(unittest.TestCase):
+    """2.1 ribbon tunnels: each belt under on its own, and a reach that follows the tier."""
+
+    def route8(self, rows, ug):
+        text = ends8() + "src = Src8 @(2, 2)\ndst = Dst8 @(2, 30)\n" + wall_across(rows)
+        flat = flat_of(text)
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT, bounds=(-6, -4, 24, 40), ug=ug)
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat), flat._port_edges)
+        return flat, r, rep
+
+    def ugs(self, r, net):
+        return [e for e in r.layout.entities.values() if e.owner == f"~{net}"
+                and CAT.has_entity(e.name) and CAT.kind(e.name) == "underground-belt"]
+
+    def test_eight_belts_cross_six_rows_on_red(self):
+        # six rows of wall: entrance above it, exit below, 7 tiles apart, past yellow's 5
+        flat, r, rep = self.route8(6, "red")
+        self.assertEqual({n: r.failed.get(n) for n in Q}, dict.fromkeys(Q))
+        self.assertEqual({n for n in Q if rep.nets[n].status != "connected"}, set())
+        self.assertEqual(rep.leaks, [])
+        for n in Q:
+            ends = sorted(self.ugs(r, n), key=lambda e: e.y)
+            self.assertEqual([e.name for e in ends], ["fast-underground-belt"] * 2, n)
+            self.assertEqual([at(e)[1] for e in ends], [11, 18], n)
+            self.assertEqual([e.attrs.get("ug") for e in ends], ["in", "out"])
+        cols = [at(self.ugs(r, n)[0])[0] for n in Q]
+        self.assertEqual(sorted(cols), list(range(2, 10)))
+        line = next(ln for ln in r.lines if ln.startswith("ribbon"))
+        self.assertIn("1 crossing (8 belts under: ", line)
+        self.assertIn("(7 tiles red)", line)
+        # the tier pass never gives such a tunnel an underground that falls short
+        for mode, down in (("yellow", False), ("minimize", True)):
+            new, _lines, _changed = tiers.assign(flat, r.layout, CAT, mode=mode, downgrade=down)
+            names = {e.name for k, e in new.entities.items() if k.startswith("~q")
+                     and CAT.kind(e.name) == "underground-belt"}
+            self.assertEqual(names, {"fast-underground-belt"}, mode)
+
+    def test_on_yellow_six_rows_is_unrouted(self):
+        _flat, r, _rep = self.route8(6, None)
+        for n in Q:
+            self.assertIn("ribbon plates (8 belts)", r.failed.get(n, ""))
+            self.assertEqual(of(r, n), [])
+
+    def test_eight_rows_fit_blue_not_yellow_or_red(self):
+        for ug in ("yellow", "red"):
+            _flat, r, _rep = self.route8(8, ug)
+            self.assertTrue(all(n in r.failed for n in Q), ug)
+        _flat, r, rep = self.route8(8, "blue")
+        self.assertEqual({n for n in Q if rep.nets[n].status != "connected"}, set())
+        for n in Q:
+            ends = sorted(self.ugs(r, n), key=lambda e: e.y)
+            self.assertEqual([e.name for e in ends], ["express-underground-belt"] * 2, n)
+            self.assertEqual([at(e)[1] for e in ends], [11, 20], n)
+
+    def test_only_the_blocked_belts_go_under(self):
+        # a rock under the third and fourth columns: those two belts go under it, the others
+        # run on over the surface, and every belt keeps its column
+        text = SRC + DST + "src = Src @(2, 2)\ndst = Dst @(2, 30)\n" + NETS
+        flat = flat_of(text)
+        lay, _notes = expand.expand_factory(flat, CAT)
+        for i, (x, y) in enumerate([(4, 15), (5, 15), (4, 16), (5, 16)]):
+            lay.add(fkp.Entity(f"rock/{i}", "stone-wall", x + 0.5, y + 0.5, 0, {}))
+        r = route.route_layout(flat, lay, CAT, bounds=(0, -4, 8, 40))
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat), flat._port_edges)
+        self.assertEqual({n for n in P if rep.nets[n].status != "connected"}, set())
+        under = {n for n in P if of(r, n, "underground-belt")}
+        cols = {n: {at(e)[0] for e in of(r, n)} for n in P}
+        self.assertEqual({n for n in P if cols[n] & {4, 5}}, under)
+        self.assertEqual(len(under), 2)
+        for n in P:
+            self.assertEqual(len(cols[n]), 1, cols)            # straight down its own column
+            if n in under:
+                ys = sorted(at(e)[1] for e in of(r, n, "underground-belt"))
+                self.assertEqual(ys[0], 14)                     # just before the rock
+                self.assertTrue(17 <= ys[1] <= 19, ys)          # past it, within yellow's 5
+        line = next(ln for ln in r.lines if ln.startswith("ribbon"))
+        self.assertIn("1 crossing (2 belts under: ", line)
+
+    def test_search_tunnels_each_belt_on_its_own(self):
+        # steiner.ribbon alone: three belts east, a block on belt 1's line only, another on
+        # belt 2's two tiles later; each belt goes under its own, belt 0 never
+        grid = Grid({(5, 1), (8, 2), (9, 2)})
+        grid.blocked = lambda t, occ=grid.occ: t in occ or not (0 <= t[0] < 20 and 0 <= t[1] < 3)
+        res = ribbon(grid, 3, [((0, 0, 1), 0.0)], fixed=[((15, b), 1) for b in range(3)])
+        self.assertNotIn("fail", res)
+        kinds = [[k for _t, k in line] for line in res["lines"]]
+        self.assertNotIn("in", kinds[0])
+        ins = [[t for t, k in line if k == "in"] for line in res["lines"]]
+        outs = [[t for t, k in line if k == "out"] for line in res["lines"]]
+        self.assertEqual(ins[1], [(4, 1)])
+        self.assertEqual(ins[2], [(7, 2)])
+        self.assertTrue(outs[1][0][0] >= 6 and outs[2][0][0] >= 10, outs)
+        self.assertEqual(res["counts"]["under"], 2)
+
+    def test_route_ug_option(self):
+        from fkcore import avail, flow
+        saved = avail.snapshot()
+        avail.install(None)
+        try:
+            self.assertEqual(flow._ribbon_ug("red"), ("red", None))
+            self.assertEqual(flow._ribbon_ug("any"), ("yellow", None))    # nothing read: yellow
+            with self.assertRaises(flow.FlowError):
+                flow._ribbon_ug("purple")
+        finally:
+            avail.install(saved.sup, saved.when, saved.tick)

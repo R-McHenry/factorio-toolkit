@@ -1988,20 +1988,28 @@ def _filter_loads(flat, lay, cat):
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                 blocked=(), hand=None, patch=None) -> Routed:
+                 blocked=(), hand=None, patch=None, ug=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
-    fast one; long-handed ones still go where only they reach."""
+    fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
+    ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
+    as it, and lays each tunnel with the slowest tier that reaches it (2.1 ribbon tunnels)."""
     global _HANDS
-    if not hand or hand == "fast-inserter":
-        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
-    if _REACH.get(hand) != 1:
-        raise ValueError(f"hand is a short inserter (inserter, fast-inserter, burner-inserter), "
-                         f"got {hand!r}")
-    saved, _HANDS = _HANDS, ((hand,), (hand, "long-handed-inserter"))
+    from . import ribbons as ribmod
+    saved_ug = ribmod._UG
+    ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
     try:
-        return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+        if not hand or hand == "fast-inserter":
+            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+        if _REACH.get(hand) != 1:
+            raise ValueError(f"hand is a short inserter (inserter, fast-inserter, "
+                             f"burner-inserter), got {hand!r}")
+        saved, _HANDS = _HANDS, ((hand,), (hand, "long-handed-inserter"))
+        try:
+            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+        finally:
+            _HANDS = saved
     finally:
-        _HANDS = saved
+        ribmod._UG = saved_ug
 
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,

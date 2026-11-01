@@ -80,8 +80,12 @@ ribbon    plates: 4 belts side by side (plates_0, plates_1, plates_2, plates_3),
 
 The net's line says which belt of the ribbon it is and how it got on and off. The ribbon's line
 says where it starts and ends, its turns and crossings, and how its belts joined and left it. A
-ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates (4 belts): ...`
-with the reason, and lays none of its belts.
+crossing says which belts went under and where, since each goes under only what blocks it:
+`1 crossing (2 belts under: belt 2 102,27 to 102,32, belt 3 103,27 to 103,32)`, and a tunnel
+longer than yellow's 5 tiles adds its length and tier, `(7 tiles red)`. `route --ug red` (or
+`blue`, `turbo`; default `any`, the fastest tier the network can build) lets a ribbon's tunnels
+reach that far. A ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates
+(4 belts): ...` with the reason, and lays none of its belts.
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report

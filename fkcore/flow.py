@@ -828,12 +828,35 @@ def _need(ctx, kind):
     return max(n, 1)
 
 
+_RIBBON_UG_NEED = 16      # a ribbon of eight belts under one crossing: sixteen underground ends
+
+
+def _ribbon_ug(word):
+    """``route --ug``: the fastest tier a ribbon's tunnels may have (2.1 ribbon tunnels). A tier
+    (yellow, red, blue, turbo) as given; ``any``: the fastest whose underground robots can build
+    now, sixteen of them (out/avail.json), else yellow. -> (tier, a report line or None)."""
+    from . import tiers as tiersmod
+    word = word.strip().lower()
+    if not availmod.is_any(word):
+        if word not in tiersmod.TIERS:
+            raise FlowError(f"route --ug is yellow, red, blue, turbo or any, got {word!r}")
+        return word, None
+    for tier in reversed(tiersmod.TIERS[1:]):
+        if availmod.buildable(tiersmod.FAMILY["underground-belt"][tiersmod.TIERS.index(tier)],
+                              _RIBBON_UG_NEED):
+            return tier, (f"ribbon tunnels: up to {tier} (--ug any: the network can build "
+                          f"{_RIBBON_UG_NEED} of its undergrounds); a tunnel gets the slowest tier "
+                          "that reaches it")
+    return "yellow", None
+
+
 def s_route(ctx, args):
-    o = _opts(args, only="all", effort="normal", hand="any", module="", again="")
+    o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any")
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
     lines, checks = [], []
+    ug, ug_note = _ribbon_ug(str(o["ug"]))
     for factory, lay in list(ctx.layouts.items()):
         flat = ctx.flats[factory]
         pinned, again = {}, {}
@@ -854,7 +877,7 @@ def s_route(ctx, args):
                 lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
         blocked = _frame_blocked(ctx, factory, lay.size)
         r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
-                               hand=hand, patch=pinned)
+                               hand=hand, patch=pinned, ug=ug)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
@@ -879,6 +902,8 @@ def s_route(ctx, args):
         checks += [Check("no-route", f"{factory} net {l.split(':')[0].split()[-1]}",
                          l.split(": ", 1)[1]) for l in r.lines if l.startswith("skipped")]
         checks += _invariant_checks(factory, fkp.invariants(r.layout, ctx.cat, nets=flat.nets))
+    if ug_note and any(ln.lstrip().startswith("ribbon ") for ln in lines):
+        lines.append(f"  {ug_note}")
     return lines, checks
 
 
