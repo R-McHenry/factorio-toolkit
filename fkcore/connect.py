@@ -802,7 +802,7 @@ def _leak(g, a, b, via, table, cat=None):
             out = [x for x in na.nets if x not in nb.nets]
         else:
             out = [None] if nb.nets else []
-        if not out or _joint(a, b, na, nb, table):
+        if not out or _joint(a, b, na, nb, table) or _lit_inside(g, a, b, table):
             return None
         if table is not None and (all(x in table and b in table[x][1] for x in out)
                                   or (nb.nets and all(y in table and a in table[y][0]
@@ -826,6 +826,24 @@ def _leak(g, a, b, via, table, cat=None):
         return Leak(mine[0], a, b, via, f"{b} picks from {a}, which does not drive "
                                         f"{_either(mine)}")
     return None
+
+
+def _lit_inside(g, a, b, table):
+    """3.0: an edge inside one Literal between its port's belts and its own inserters: the port's
+    net ends at a carrier of the same instance (a Literal port's key is its carrier's), so what
+    its inserters take from or put on that belt is the Literal's inside."""
+    if table is None or "/" not in a or "/" not in b:
+        return False
+    inst = a.rsplit("/", 1)[0]
+    if b.rsplit("/", 1)[0] != inst:
+        return False
+    for k in (a, b):
+        for x in g.nodes[k].nets:
+            if x in table and any(isinstance(e, str) and e in g.nodes and g.nodes[e].carrier
+                                  and e.rsplit("/", 1)[0] == inst
+                                  for e in list(table[x][0]) + list(table[x][1])):
+                return True
+    return False
 
 
 def _relay(g, key, nets, table, cat):

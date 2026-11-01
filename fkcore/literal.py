@@ -349,6 +349,80 @@ def ports_of(path, ents, cat, box=None):
     return out
 
 
+_RUNS = {"pipe", "pipe-to-ground", "storage-tank"}
+_BELT_RUNS = {"transport-belt", "underground-belt", "splitter"}
+
+
+def port_items(ents, key, cat):
+    """(gives, takes), each {item: {entity key}}: the items the carrier ``key`` of a Literal's
+    entities ``ents`` carries and the machines that put them on it or take them off, as their
+    recipes say (3.0). A pipe: the fluid of every machine box its pipes reach (an output box
+    gives, an input box takes). A belt: what inserters put on its belts from a machine's recipe
+    or a drill's ore (gives), and the solid ingredients of the machines inserters feed from
+    them (takes). Both empty when nothing in the file says."""
+    from . import connect
+    g = connect.graph(ents, cat)
+    gives, takes = {}, {}
+    if key not in g.nodes:
+        return gives, takes
+    if g.nodes[key].kind in _RUNS:
+        near = {}
+        for a, b, _via in g.joins:
+            near.setdefault(a, []).append(b)
+            near.setdefault(b, []).append(a)
+        todo = [nid for nid in g.boxes if nid[0] == key]
+        seen = set(todo)
+        while todo:
+            nid = todo.pop()
+            for m in near.get(nid, ()):
+                if m in seen:
+                    continue
+                seen.add(m)
+                if g.nodes[m[0]].kind in _RUNS:
+                    todo.append(m)
+                    continue
+                b = g.boxes[m]
+                if b.fluid is None:
+                    continue
+                if b.production in ("output", "input-output"):
+                    gives.setdefault(b.fluid, set()).add(m[0])
+                if b.production in ("input", "input-output"):
+                    takes.setdefault(b.fluid, set()).add(m[0])
+        return gives, takes
+    run, todo = {key}, [key]
+    while todo:
+        k = todo.pop()
+        for adj in (g.succ, g.pred):
+            for m, _via in adj.get(k, ()):
+                if m not in run and g.nodes[m].kind in _BELT_RUNS:
+                    run.add(m)
+                    todo.append(m)
+
+    def solids(into, key, side):
+        recipe = g.nodes[key].recipe
+        if not recipe or not cat.has_recipe(recipe):
+            return
+        for r in cat.recipe(recipe).get(side) or ():
+            if r.get("type") != "fluid":
+                into.setdefault(r["name"], set()).add(key)
+
+    for k in run:
+        for m, via in g.pred.get(k, ()):
+            n = g.nodes[m]
+            if via == "mine" and n.resource:
+                gives.setdefault(n.resource, set()).add(m)
+            elif via == "drop":
+                for src, v in g.pred.get(m, ()):
+                    if v == "pickup":
+                        solids(gives, src, "products")
+        for m, via in g.succ.get(k, ()):
+            if via == "pickup":
+                for dst, v in g.succ.get(m, ()):
+                    if v == "drop":
+                        solids(takes, dst, "ingredients")
+    return gives, takes
+
+
 def signature(ents, size):
     """Over keys, positions, directions, attrs (nets and game settings) and the frame: a file
     edit that changes any of them makes the instance stale."""

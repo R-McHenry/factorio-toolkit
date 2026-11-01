@@ -32,6 +32,15 @@ REFINERY_PORTS = {"heavy": {"carrier": 2, "side": "n"}, "light": {"carrier": 4, 
                   "gas": {"carrier": 6, "side": "n"}}
 
 
+#: plates in on a belt from the west edge, an assembler making gears, gears out on the east edge
+GEAR = [{"name": "transport-belt", "x": 0.5, "y": 1.5, "direction": 4},
+        {"name": "inserter", "x": 1.5, "y": 1.5, "direction": 12},
+        {"name": "assembling-machine-2", "x": 3.5, "y": 1.5, "recipe": "iron-gear-wheel"},
+        {"name": "inserter", "x": 5.5, "y": 1.5, "direction": 12},
+        {"name": "transport-belt", "x": 6.5, "y": 1.5, "direction": 4},
+        {"name": "small-electric-pole", "x": 1.5, "y": 0.5}]
+
+
 class LiteralPortsTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="fklitports-")
@@ -159,6 +168,68 @@ net gas: plant.gas_out -> c3
             "c3 = Machine<entity=chemical-plant, recipe=plastic-bar> @(32, 4)\n"
             "net gas items petroleum-gas: ref.n3 -> c3\n")
         self.assertEqual((r.failed, rep.nets["gas"].status, rep.leaks), ({}, "connected", []))
+
+    def test_capture_names_say_where_the_port_is(self):
+        from fkcore import capture
+        rows = [(e["name"], e["x"], e["y"], e.get("direction")) for e in REFINERY]
+        back = list(reversed(rows))
+        # n1 is the westmost pipe on the north edge, whatever the file's order
+        self.assertEqual({n: back[p["carrier"]][1] for n, p in capture.ports(back, CAT).items()},
+                         {"n1": 0.5, "n2": 2.5, "n3": 4.5})
+        # a refinery turned east: its corner pipe opens east, so all three are e ports
+        east = [("oil-refinery", 4.5, 2.5, 4)] + [("pipe", x, y, None) for y in (0.5, 2.5, 4.5)
+                                                  for x in (7.5, 8.5)]
+        self.assertEqual(sorted(capture.ports(east, CAT)), ["e1", "e2", "e3"])
+
+    def test_a_port_carries_what_the_recipe_inside_puts_on_it(self):
+        import copy
+        from fkcore import capture
+
+        def carried(recipe, cat=CAT):
+            ents = [dict(REFINERY[0], recipe=recipe)] + REFINERY[1:]
+            ports = capture.ports([(e["name"], e["x"], e["y"], e.get("direction")) for e in ents],
+                                  cat)
+            self.write({"entities": ents, "ports": ports})
+            got, _s, _o = literal.import_entities(os.path.join(self.dir, "lit.json"), "x", cat)
+            return {n: sorted(literal.port_items(got, got[p["carrier"]].key, cat)[0])
+                    for n, p in ports.items()}
+
+        self.assertEqual(carried("advanced-oil-processing"),
+                         {"n1": ["heavy-oil"], "n2": ["light-oil"], "n3": ["petroleum-gas"]})
+        self.assertEqual(carried("basic-oil-processing"), {"n1": [], "n2": [],
+                                                           "n3": ["petroleum-gas"]})
+        # a recipe the game never measured: its products in order, one box each
+        cat = Catalog.load()
+        rec = copy.deepcopy(cat.recipe("advanced-oil-processing"))
+        rec["name"], rec["products"] = "reverse-oil", rec["products"][::-1]
+        cat._recipes["reverse-oil"] = rec
+        self.assertEqual(carried("reverse-oil", cat),
+                         {"n1": ["petroleum-gas"], "n2": ["light-oil"], "n3": ["heavy-oil"]})
+
+    def test_a_net_of_another_item_at_a_port_is_cannot_carry(self):
+        self.write({"entities": REFINERY, "ports": REFINERY_PORTS})
+        path = os.path.join(self.dir, "main.fk")
+        f = lang.parse('ref = Literal<file="lit.json"> @(20, 20)\n'
+                       "c1 = Machine<entity=chemical-plant, recipe=heavy-oil-cracking> @(8, 4)\n"
+                       "net heavy items heavy-oil: ref.gas -> c1\n", path)
+        flat = elaborate(f, dict(f.modules), CAT)
+        self.assertIn(("cannot-carry", "driver ref.gas makes no heavy-oil"),
+                      [(c.code, c.msg) for c in flat.checks])
+
+    def test_a_belt_port_takes_its_items_and_rate_from_the_machine_behind_it(self):
+        self.write({"entities": GEAR, "ports": {"w1": {"carrier": 0, "side": "w"},
+                                                "e1": {"carrier": 4, "side": "e"}}})
+        flat, _lay, r, rep = self.build(
+            'g = Literal<file="lit.json"> @(10, 10)\n'
+            "src = Chest<requester, item=iron-plate, rate=1/s> @(0, 11)\n"
+            "out = Chest<provider, limit=100> @(24, 11)\n"
+            "net p: src -> g.w1\nnet q: g.e1 -> out\n")
+        self.assertEqual((flat.nets["p"].items, flat.nets["q"].items),
+                         (["iron-plate"], ["iron-gear-wheel"]))
+        self.assertEqual(flat.machines["g/transport-belt1"].makes, {"iron-gear-wheel": 1.5})
+        self.assertEqual(r.failed, {})
+        self.assertEqual(rep.leaks, [])         # its own inserters on its port belts: its inside
+        self.assertEqual([c.code for c in flat.checks if c.where.startswith("g")], [])
 
     def test_ports_of_reads_the_file(self):
         self.write({"entities": PIPES, "ports": {"gas": {"carrier": 2, "side": "E"}}})

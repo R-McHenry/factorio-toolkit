@@ -873,7 +873,7 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                 flat.buffers[path] = "chest"
             if imported is not None and (path in getattr(flat, "_lit_names", {})
                                          or path in getattr(flat, "_lit_ports", {})):
-                _literal_names(flat, path, imported, keys, inst, src, d)
+                _literal_names(flat, path, imported, keys, inst, src, d, cat)
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
                         inst.line, imported, conns=inst.conns)
             if auto is not None:
@@ -1082,7 +1082,7 @@ def _buffer_module(flat, mod, path, inst, src):
     flat.buffers[path] = "module"
 
 
-def _literal_names(flat, path, imported, keys, inst, src, duty=1.0):
+def _literal_names(flat, path, imported, keys, inst, src, duty=1.0, cat=None):
     """A Literal's ``names`` (2.1, PLAN-2.1 H): ``{name: entity key}`` from its file, each name of
     a machine a net end like any machine's (``automall.asm10``). A name of an entity that is no
     machine of the netlist (a pole, a crafter without a recipe, a chest without a role) is kept
@@ -1091,16 +1091,34 @@ def _literal_names(flat, path, imported, keys, inst, src, duty=1.0):
     2.1.19 (Rory's 42-lab block, ~4115k): a named belt is a **belt end**, a machine whose key is
     the belt's own: a net that ends at it is routed into the belt from behind (name the first belt
     of the Literal's line), and one that starts at it leaves from its front (the last). As a
-    consumer it takes what reaches it, like a chest; what the Literal does with it is its own."""
+    consumer it takes what reaches it, like a chest; what the Literal does with it is its own.
+
+    3.0: a port (``"ports"``) is a carrier end on one edge of the frame, a belt or pipe end. It
+    carries what the Literal's own recipes put on it or take from it (``literal.port_items``): a
+    net of another item at it is ``cannot-carry``, and a net that names no items takes the
+    port's. It drives what the machines behind it make, at their rate, and stands in for them on
+    its net (``lit_gives``, ``lit_takes``). A port nothing in the file explains carries what its
+    net says, without bound."""
+    from . import literal
     names, other = {}, {}
-    # 3.0: a port (``"ports"``) is a carrier end on one edge of the frame: a belt or pipe end
     for name, (ekey, side) in getattr(flat, "_lit_ports", {}).get(path, {}).items():
         ent = next(e for e in imported[0] if e.key == ekey)
         pipe = not ent.name.endswith("belt") and "splitter" not in ent.name \
             and "loader" not in ent.name
         extra = {"lit_port": side, ("pipe_end" if pipe else "belt_end"): True}
-        spec = MSpec(ekey.rsplit("/", 1)[-1], ent.name, None, {}, {}, None, sink=True,
-                     extra=extra)
+        gives, takes = literal.port_items(imported[0], ekey, cat) if cat is not None \
+            else ({}, {})
+        makes = {}
+        for item, behind in sorted(gives.items()):
+            rate = sum(flat.machines[k].makes.get(item, 0) for k in behind if k in flat.machines)
+            makes[item] = rate if rate > 0 else INF
+        if gives:
+            extra["lit_gives"] = {i: sorted(ks) for i, ks in gives.items()}
+        if takes:
+            extra["lit_takes"] = {i: sorted(ks) for i, ks in takes.items()}
+        spec = MSpec(ekey.rsplit("/", 1)[-1], ent.name, None, {}, makes,
+                     frozenset(takes) if takes else None, sink=True,
+                     source=any(v == INF for v in makes.values()), extra=extra)
         flat.machines[ekey] = _machine(spec, path, inst.kind, duty)
         keys.append(ekey)
         names[name] = ekey
@@ -2854,18 +2872,27 @@ def _endpoint_checks(flat, cat):
                                          "nets: " + ", ".join(nets) + f". Name each net's items "
                                          f"(`net {nets[0]} items {item}: ...`) so one carries it"))
     fed = {key for key, _item in in_hold}
+    # 3.0: a Literal's machine behind a port its net names is on that net
+    by_port = {"out": set(), "in": set()}
+    for side, field_, hold in (("out", "lit_gives", out_hold), ("in", "lit_takes", in_hold)):
+        for pkey, pm in flat.machines.items():
+            for item, behind in (pm.extra.get(field_) or {}).items():
+                if (pkey, item) in hold:
+                    by_port[side] |= {(k, item) for k in behind}
     unfed, unconsumed = [], []
     for key, m in flat.machines.items():
-        if m.extra.get("port"):
-            continue                    # a bus port: one no net names is a spare, not a fault
+        if m.extra.get("port") or m.extra.get("lit_port"):
+            continue                    # a bus port: one no net names is a spare, not a fault;
+                                        # a Literal's port as well (its machines say the rest)
         for item in m.needs:
-            if (key, item) not in in_hold:
+            if (key, item) not in in_hold and (key, item) not in by_port["in"]:
                 unfed.append((m.inst, item, key))
         # a roboport with no robot net is a coverage roboport: it takes robots when it needs them
         if m.sink and key not in fed and cat.kind(m.prototype) != "roboport":
             unfed.append((m.inst, "anything", key))
         for item in m.makes:
-            if (key, item) not in out_hold and not m.extra.get("buffer"):
+            if (key, item) not in out_hold and not m.extra.get("buffer") \
+                    and (key, item) not in by_port["out"]:
                 unconsumed.append((m.inst, item, key))     # 2.1: a buffer may only fill
     for inst, item, n in _group(unfed):
         flat.checks.append(Check("no-feed", inst, f"{item} has no net"

@@ -1043,7 +1043,16 @@ net into a port ends there, flowing in. The carrier's whole group of touching pi
 carries the net, so the router lays no other net beside it: a refinery's three outputs, each a
 port, never short. With ports a Literal is a sealed piece, and a module around it (a wrapper, a
 buffer) routes like any other. `fk capture` writes a port for each belt and pipe that crosses the
-edge of what it captures (`e1`, `n2`, ...); rename them in the file.
+edge of what it captures, named by where it is: `n1` the westmost on the north edge, `e1` the
+northmost on the east. The names describe the piece, not a recipe, so they hold when the recipe
+inside changes; keep them.
+
+A port carries what the Literal's own machines put on it or take off it, as their recipes say:
+a pipe the fluid of the machine box it reaches (advanced oil's `n1` heavy oil; basic oil's `n1`
+nothing), a belt what inserters put on it or take from it. So a net needs no `items`
+(`net q: g.e1 -> out` carries the gears), a net of another item there is `cannot-carry`, and the
+port drives at the rate of the machines behind it. A port nothing inside explains carries what
+its net says.
 
 A blueprint Literal keeps its circuit settings (`if=`, `read=`, ...) and its wires; a wire longer
 than the game's 9 tiles is dropped by the game.

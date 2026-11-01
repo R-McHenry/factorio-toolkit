@@ -151,12 +151,16 @@ def names_of_bp(bp, cat):
     return names([r["name"] for r in rows], cat)
 
 
+_OPEN = {"n": (0, -1), "e": (1, 0), "s": (0, 1), "w": (-1, 0)}
+
+
 def ports(rows, cat):
     """3.0, Literal ports: ``{name: {"carrier": index, "side": s}}`` for the carriers on the edge of
     the captured frame (the box of every entity's tiles) that cross it: a belt heading out over the
     edge or in from it, a pipe that ends on the edge (one fluid neighbour inside: a pipe beside a
-    machine is no end), a pipe-to-ground whose open side faces it. Named by
-    side and order, ``e1``, ``e2``, ``n1`` ...; rename them in the file (``heavy``). ``rows``:
+    machine is no end), a pipe-to-ground whose open side faces it. Named by side and place along
+    it, ``n1`` the westmost on the north edge, ``e1`` the northmost on the east: a name says where
+    the port is on the frame, whatever the file's order or the recipes inside. ``rows``:
     (name, x, y, direction) in file order."""
     from .literal import SIDES
     tiles, wet = [], set()
@@ -170,7 +174,7 @@ def ports(rows, cat):
     every = [t for ts in tiles for t in ts]
     x0, y0 = min(t[0] for t in every), min(t[1] for t in every)
     x1, y1 = max(t[0] for t in every), max(t[1] for t in every)
-    out, count = {}, {}
+    found = []
     for k, (name, x, y, d) in enumerate(rows):
         if not cat.has_entity(name):
             continue
@@ -187,14 +191,20 @@ def ports(rows, cat):
             s = SIDES[side]
             if belt and h not in (s, (s + 2) % 4):
                 continue          # a belt along the edge crosses nothing
-            if kind == "pipe" and sum((tx + dx, ty + dy) in wet for dx, dy in
-                                       ((0, 1), (0, -1), (1, 0), (-1, 0))) > 1:
+            inner = [(dx, dy) for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0))
+                     if (tx + dx, ty + dy) in wet]
+            if kind == "pipe" and len(inner) > 1:
                 continue          # a pipe that runs on inside: no end
+            if kind == "pipe" and inner and _OPEN[side] != (-inner[0][0], -inner[0][1]):
+                continue          # a corner pipe opens on the other edge
             if kind == "pipe-to-ground" and h != s:
                 continue          # its open side faces inside
-            count[side] = count.get(side, 0) + 1
-            out[f"{side}{count[side]}"] = {"carrier": k, "side": side}
+            found.append((side, tx if side in "ns" else ty, k))
             break
+    out, count = {}, {}
+    for side, _along, k in sorted(found):
+        count[side] = count.get(side, 0) + 1
+        out[f"{side}{count[side]}"] = {"carrier": k, "side": side}
     return out
 
 
