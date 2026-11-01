@@ -743,8 +743,66 @@ def _clean(v):
 #: fast inserters first (``_route_layout`` sets it)
 _FILTERED = frozenset()
 
+#: 3.0 (Rory, 11-01: "a net needs two or 3 inserters on the same machine, a common case in seablock
+#: earlygame"): {(net, machine): k} for a machine one hand can't keep up with, the best hand the
+#: force can build at what the design asks of it (``_tap_counts``); ``_grow`` asks the tree for k
+#: inserters there, and one where k don't fit
+_TAPS = {}
+TAPS_MAX = 3
+INF_RATE = float("inf")
 
-def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None):
+
+def _tap_counts(flat, cat):
+    """{(net, machine): k} for every machine on a belt net whose take (a consumer) or put (a
+    driver) is more than one inserter of the best hand the force can build carries: k of them, at
+    most TAPS_MAX. Nothing read (a lab, a paper game): {} (one hand each; ``hands`` raises it)."""
+    from . import avail as availmod
+    from . import lanes as lanesmod
+    from . import routed as routedmod
+    if availmod.snapshot().sup is None:
+        return {}
+    rungs = [h for h in availmod.HANDS if availmod.buildable(h)]
+    best = rungs[-1] if rungs else availmod.HANDS[0]
+    take = lanesmod.inserter_rate(best, cat=cat)
+    put = lanesmod.inserter_rate(best, onto_belt=True, cat=cat)
+    if not take or not put:
+        return {}
+    model = routedmod.sizing_model(flat)
+    out = {}
+    for name, net in flat.nets.items():
+        want = {}
+        for key, item in net.consumers:
+            m = flat.machines.get(key)
+            if m is None or cat.is_fluid(item):
+                continue
+            r = m.needs.get(item, 0.0) * model.util.get(key, 1.0)
+            if not r and m.sink:         # a chest at a net's end: its share of what reaches sinks
+                st = model.nets.get((name, item))
+                n = sum(1 for k, i in net.consumers if i == item and flat.machines[k].sink)
+                r = st.to_sinks / max(1, n) if st is not None and st.to_sinks < INF_RATE else 0.0
+            if 0 < r < INF_RATE:
+                want[(key, "in")] = want.get((key, "in"), 0.0) + r
+        for key, item in net.drivers:
+            m = flat.machines.get(key)
+            if m is None or cat.is_fluid(item):
+                continue
+            r = m.makes.get(item, 0.0)
+            if r >= INF_RATE:
+                st = model.nets.get((name, item))
+                n = sum(1 for _k, i in net.drivers if i == item)
+                r = st.delivered / max(1, n) if st is not None and st.delivered < INF_RATE else 0.0
+            else:
+                r *= model.util.get(key, 1.0)
+            if r > 0:
+                want[(key, "out")] = want.get((key, "out"), 0.0) + r
+        for (key, side), r in want.items():
+            k = min(TAPS_MAX, math.ceil(r / (take if side == "in" else put) - 1e-9))
+            if k > 1:
+                out[(name, key)] = k
+    return out
+
+
+def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None, net=None):
     """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
     inserters, or long-handed ones where only those reach. ``sources``: the machines are drivers,
     and one in ``_FILTERED`` is tried with fast inserters alone before a long-handed one may load
@@ -762,15 +820,19 @@ def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=
     machines = [(k, r) for k, r in machines if k not in drops or first[drops[k]] == k]
     for hands in passes:
         sinks = fixed + [DropSink(key, drops[key]) if key in drops else
-                         tap(key, rect, 1, _HANDS[0] if hands is None and key in _FILTERED
+                         tap(key, rect, _TAPS.get((net, key), 1),
+                             _HANDS[0] if hands is None and key in _FILTERED
                              else hands or _HANDS[-1]) for key, rect in machines]
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
             break
+    if res["problems"] and net is not None and any((net, k) in _TAPS for k, _r in machines):
+        # 3.0: k inserters into a machine don't fit here: one each, as before (too-thin says so)
+        return _grow(grid, root, fixed, machines, limit, sources, tap, drops)
     if res["problems"] and any(getattr(t, "hand", False) for t in drops.values()):
         # 3.0: a recycler whose drop tile no belt reaches is emptied by an inserter instead
         return _grow(grid, root, fixed, machines, limit, sources, tap,
-                     {k: t for k, t in drops.items() if not getattr(t, "hand", False)})
+                     {k: t for k, t in drops.items() if not getattr(t, "hand", False)}, net)
     return res, sinks
 
 
@@ -791,7 +853,7 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
     if grid.blocked((root[0], root[1])):
         return None, f"its {'end' if reverse else 'start'} tile {root[0]},{root[1]} is taken"
     res, sinks = _grow(grid, root, fixed, machines, limit, sources=reverse,
-                       drops=job.drops if reverse else None)
+                       drops=job.drops if reverse else None, net=job.net)
     if res["problems"]:
         return None, "; ".join(res["problems"][:3])
     c = res["counts"]
@@ -875,7 +937,7 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink)
     rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
     fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
     rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit,
-                         sources=True, tap=tap, drops=job.drops)
+                         sources=True, tap=tap, drops=job.drops, net=job.net)
     if rres["problems"]:
         return "drivers: " + "; ".join(rres["problems"][:2])
     rtree = rres["tree"]
@@ -888,7 +950,7 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink)
     rs = rtree.spans()
     fgrid = _Bounded(fb, box, {a: set(spans[a]) | rs[a] for a in (0, 1)})
     fixed = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
-    fres, fsinks = _grow(fgrid, (fx, fy, f, 0), fixed, job.taps, limit)
+    fres, fsinks = _grow(fgrid, (fx, fy, f, 0), fixed, job.taps, limit, net=job.net)
     if fres["problems"]:
         return "consumers: " + "; ".join(fres["problems"][:2])
     ftree = fres["tree"]
@@ -2513,10 +2575,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     3.0: each net is laid once, in order, and keeps what it laid; a net that fails gets its group
     try (GROUP_BUDGET), then one promoting search of its own. ``retries`` is not used any more
     (kept for callers)."""
-    global _FILTERED
+    global _FILTERED, _TAPS
     _FILTERED = frozenset(k for net in flat.nets.values() for k, _i in net.drivers
                           if k in flat.machines
                           and not set(flat.machines[k].makes) <= set(net.items))
+    _TAPS = _tap_counts(flat, cat)
     js = jobs(flat, lay, cat)
     flat._port_edges = port_edges(flat, lay, cat)   # 2.0.48: a port is an edge of its frame
     for name, job in js.items():                      # 2.0.49: a stack cell's nets go straight first

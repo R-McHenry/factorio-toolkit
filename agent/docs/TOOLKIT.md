@@ -1171,7 +1171,10 @@ the design's demand through every connector with no capacities (`routed.required
 depend on the hand laid: a stone furnace (0.33/s all in) keeps plain hands, a gear assembler (2
 plates/s in) gets fast ones. `hands maximize` takes the top rung everywhere; `hands minimize
 --downgrade` may also take a standing fast hand back to plain; a rung the network cannot build now
-is skipped and the line says so. A route that already
+is skipped and the line says so. Where even the best hand the network can build is too slow for a
+machine (a cable assembler's 2 cable/s against a plain inserter's 1.2/s), the router lays 2 or 3
+inserters between that machine and its belt, into it or out of it, where they fit. A 1x1 chest at
+one end of a net keeps one inserter: give it more chests, or a bigger one. A route that already
 stands keeps its carriers, so `--hand any` renames the standing hands robots cannot build to the one
 they can (`out\route.txt`: `rehanded 2 standing inserters robots cannot build, to inserter`), and
 leaves a hand that stands built alone. `cover power --pole

@@ -97,6 +97,19 @@ circuits and bricks. Those 1200 plates and 200 circuits are the budget for the f
   - They're yours: reach one with roboport coverage (landfill and poles out to it), then
     `fk decon` it, and the robots bring its contents home.
 
+## Several inserters on one machine
+
+Early on, only plain inserters (1.2/s) are available, and many Sea Block machines need more than
+that. Where the best inserter the network can build is too slow for a machine on a belt, the
+router lays 2 or 3 of them into or out of it. A cable assembler gets two out of it, and a liquifier
+eating 10 stone/s gets three in (still short: `too-thin` says by how much).
+
+Two things it can't fix:
+- A 1x1 chest at the end of a net keeps one inserter. Use two requesters, or a silo, where a
+  feed needs more.
+- A route that already stands keeps its inserters. `fk route NET` (or `route --again NET`) lays a
+  net again with the extra ones.
+
 ## Huge chests: buffers that feed many machines
 
 Angel's storage adds big plain chests, both with an inventory bar:
