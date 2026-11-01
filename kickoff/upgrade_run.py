@@ -273,7 +273,9 @@ def upgrade(run, sha, dry=False):
         return plan
     src = os.path.join(run, f".kit-{sha}")
     claude = cfg.get("player") == "claude"
+    pack = cfg.get("pack")
     _archive(sha, src, ("agent", "fkcore")
+             + ((f"kickoff/template-{pack}/docs",) if pack else ())
              + (tuple(f"kickoff/{name}" for name in LOOP) if claude else ())
              + (("kickoff/template/helpers",) if helpers else ())
              + (("kickoff/template/game/cells.fk",) if cells else ())
@@ -295,6 +297,10 @@ def upgrade(run, sha, dry=False):
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
     shutil.copy(os.path.join(agent, "bin", "fk.cmd"), os.path.join(run, "bin", "fk.cmd"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))
+    pack_docs = os.path.join(src, "kickoff", f"template-{pack}", "docs") if pack else None
+    if pack_docs and os.path.isdir(pack_docs):
+        # 3.0: the pack's own guide (SEABLOCK.md) over the toolkit's docs, as new_run lays it
+        shutil.copytree(pack_docs, os.path.join(run, "docs"), dirs_exist_ok=True)
     workers = cfg.get("workers")
     if workers and workers.get("backend") == "claude":
         old_worker = os.path.join(run, ".claude", "agents", "worker.md")

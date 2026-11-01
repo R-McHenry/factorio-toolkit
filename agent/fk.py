@@ -485,7 +485,9 @@ def background(argv):
     os.makedirs(os.path.dirname(log), exist_ok=True)
     flags = {}
     if os.name == "nt":
-        flags["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS, NEW_PROCESS_GROUP
+        # CREATE_NO_WINDOW, NEW_PROCESS_GROUP: a hidden console of its own, which its ssh and
+        # python children share (11-01: DETACHED_PROCESS gave each of them a console window)
+        flags["creationflags"] = 0x08000000 | 0x00000200
     else:
         flags["start_new_session"] = True
     with open(log, "a", encoding="utf-8") as fh:          # a build still queued keeps its lines

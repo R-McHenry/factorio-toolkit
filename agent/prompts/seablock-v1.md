@@ -50,8 +50,7 @@ Two things: learning Sea Block, and the three habits the toolkit's 3.0 is built 
 1. **Modules all the way down** (`docs\BUILDING.md`). `world.fk` places sealed modules and the
    trunks between their ports. Every line lives inside a module, and every module builds clean
    in the lab first.
-2. **Staying on the ramp** (`docs\STRATEGY.md`, "Growing"). Paste the step that comes next, and
-   the one after once this one runs. Plan and lab as far ahead as you like.
+2. **Staying on the ramp** (`docs\STRATEGY.md`, "Growing"). Keep your actual run on track following your lab plan, rather then getting ahead of it. Plan and lab as far ahead as you like.
 3. **Stacks of cells, not rows** (`docs\BUILDING.md`). A cell is one slice of a line, and a Stack
    lines them up. Sea Block's machines (crushers, crystallizers, liquifiers, sorters) each go in
    a cell, wrapped when the library has none for them.
@@ -71,8 +70,7 @@ From the vanilla runs, in their players' words and numbers:
 - **Belts between modules, requesters only in the hub.** The run that never built a belt between
   plots made 12 techs in 6 hours.
 - **Sealed regions, labbed alone.** Three of the last run's routed on the first try.
-- **A new consumer gets its own branch:** adding it to a main net re-lays the main.
-- **Keep a long research queue.** Three long runs lost hours to idle labs. The research line
+- **Make sure useful researches are active** Three long runs lost hours to idle labs. The research line
   every command ends with says `QUEUE EMPTY after this` in time.
 - **Build the makers of roboports, poles and robots next to their inputs.** Robots became the
   wall once a base was big. Here, early robots are slow and their roboports reach less far, so
@@ -98,6 +96,7 @@ hours, and Sea Block's opening is new ground.
     the design steps plan with them.
 - **Read what the last run learned.** `C:\fk-player\runs\20261030-2352-opus` played vanilla on
   this toolkit's 2.1 line for two days, up to production and utility science.
+  - It played on a previous version of the toolkit, so a lot of the stuff it encountered in friction is fixed, so make use of the solutions you find using the new tools rather then following the same struggle or solution the previous run presents.
   - Its `NOTES.md` and `FRICTION.md` say what worked and what cost it hours.
   - Its `game\` has designs that built.
   - Its big mistake was a flat world of 660 instances, which took minutes a build and pasted all
@@ -113,7 +112,7 @@ hours, and Sea Block's opening is new ground.
   (`docs\BUILDING.md`, "Adding a machine").
 - **Lab every module.** `fk lab NAME`, let it run, `fk lab NAME --measure 60`, and compare with
   `fk rates`. The lab is free and runs this game's mods.
-- **Play the opening on the planner.** `fk sim fetch`, `fk sim start` (it loads Sea Block's
+- **Play on the planner.** `fk sim fetch`, `fk sim start` (it loads Sea Block's
   mods), then `paste` the first stages as ghosts and `run` them at speed. You'll see how long the
   early robots take, where the kit runs short and how fast the wood goes. Fix the plan there,
   where it's free.
@@ -143,6 +142,8 @@ anything under `C:\fk-player\dsh-home`. A DeepSeek player's notes, board and des
 read.
 
 ## The speedrun planner
+
+The speedrun planner teaches the game and provides a birds eye understanding of the game. Rather then a mistake appearing as debt that needs to be unwound, it serves as a clear map of the trail that informs your future path. You can try to build better process and bet practices for design.
 
 `fk sim` is a second game of this same map on this machine, with the same mods, the same seed
 and the same first tick. It's never the live game. Try a plan there before the live game does it.
