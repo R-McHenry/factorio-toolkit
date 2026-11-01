@@ -250,7 +250,7 @@ def main(argv=None):
         local = {"FK_RCON_PORT": a.rcon_port, "FK_RCON_PW_FILE": a.pw_file,
                  "FK_SCRIPT_OUTPUT": a.script_output}
     cfg = make(a.run, prompt, a.sha, a.host, a.host_root, local, a.player, a.notes, workers,
-               a.worker_model, a.effort, a.pack)
+               a.worker_model, a.effort, **({"pack": a.pack} if a.pack else {}))
     print(json.dumps(cfg, indent=1))
     return 0
 
