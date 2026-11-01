@@ -35,17 +35,40 @@ run keeps its lanes from end to end, so it is searched lane by lane: its start u
 on that lane (a split belt's lane, or the lane its new inserter drops on), its end downstream of
 the cut on it (a merge belt's lane; a consumer picks from both); the cheaper of the two is laid.
 A run that does not raise the flow is banned and the search tried again, so the router picks the
-lanes that help. Still out: side-loads, lane balancing, a splitter's even split. Pure, stdlib
-only, deterministic.
+lanes that help.
+
+**Lanes filled, and the game's split** (2.1.24):
+
+- *A side-load fills a lane.* A splitter keeps the lanes, and a column of drivers on one side of
+  its belt fills one lane, so before this every run carried one. A run may now also end by
+  side-loading a plain belt (one fed from behind) on a lane that nothing feeds yet, so one belt
+  carries both. No splitter goes on a side-loaded belt (``_straights``), and the run leans on the
+  belt and the one behind it (``_improve`` rips neither from under it). A later run may feed that
+  lane upstream: a merge, which the max-flow counts like any other.
+- *A run comes first out of its split.* The game's splitter splits evenly until an output backs
+  up, while the max-flow sends a run what it needs. So the splitter a run leaves by gets the
+  output priority on the run's side, and passes on only what the run can't take. Without it, the
+  big cases delivered 73-85% of their demand under the game's rules; with it, 93-97%.
+- *The game's rules check the result.* Once the max-flow is met, the net is solved as the game
+  runs it (``fkcore.throughput``: even splits, back-pressure, a lane serving its first inserters
+  first; ``tools/hourglass_lab.py`` measured the same in a real game). While its consumers get
+  less than the demand, runs are added from the drivers held back, and the carriers backed up
+  behind a node that binds, to the consumers short and the lanes with room down to them. A run
+  is kept only when what they get rises.
+
+Still out: an exact balance (a real network can still deliver a few percent less than its
+max-flow; the router reports both). Pure, stdlib only, deterministic.
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 
 from . import fkp as fkpmod
 from . import lanes as lanesmod
 from . import maxflow as mfmod
+from . import throughput as tp
 from .steiner import COSTS, DX, DY, FixedSink, TapSink, Tree, _astar
 
 __all__ = ["LeftTap", "route", "spec_of", "report"]
@@ -56,6 +79,7 @@ _BANS = 12         # runs passed over (they raised no flow) at most
 _TRIES = 6         # searches per run when a found run overlaps its own start or end
 _ROUNDS = 3        # improve rounds
 _BELT_NAMES = ("transport-belt", "underground-belt", "splitter")
+_ITEM = "item"     # the one item of the net, for the game's rules (its lanes don't tell items apart)
 
 
 class LeftTap(TapSink):
@@ -167,6 +191,8 @@ class _Net:
         attrs = {"net": self.net}
         if p.get("belt_to_ground_type"):
             attrs["ug"] = "in" if p["belt_to_ground_type"] == "input" else "out"
+        if p.get("config"):
+            attrs["config"] = p["config"]
         x, y = p["x"], p["y"]
         return fkpmod.Entity(self.key(i), p["name"], _clean(x), _clean(y), int(p["direction"]),
                              attrs)
@@ -257,9 +283,14 @@ def _fed(lg):
     return seen
 
 
-def _splitter(n, m, d):
-    return {"name": "splitter", "x": (n[0] + m[0]) / 2 + 0.5, "y": (n[1] + m[1]) / 2 + 0.5,
-            "direction": d * 4, "role": "spine"}
+def _splitter(n, m, d, first=None):
+    """A splitter over tiles ``n`` and ``m`` heading ``d``; ``first``: its output priority (the
+    half looking along it, "left" or "right")."""
+    p = {"name": "splitter", "x": (n[0] + m[0]) / 2 + 0.5, "y": (n[1] + m[1]) / 2 + 0.5,
+         "direction": d * 4, "role": "spine"}
+    if first:
+        p["config"] = json.dumps({"output_priority": first}, sort_keys=True)
+    return p
 
 
 def _belt(t, d, ug=None):
@@ -309,6 +340,30 @@ class _Ctx:
         return mfmod.solve(net.entities() + self.machines, self.cat, supply, take,
                            demand=self.spec["demand"], unbounded=unbounded,
                            lanes=self.spec.get("both", False))
+
+    def played(self, net):
+        """The net under the game's rules (``fkcore.throughput``: a splitter splits evenly, what
+        an output can't take backs up): (items/s its consumers get, the ``_Played`` sides)."""
+        ents = net.entities() + self.machines
+        lg = lanesmod.build(ents, self.cat)
+        at = net.at()
+
+        def nodes(k):
+            if isinstance(k, tuple):
+                if k[1] not in at:
+                    return []
+                return [(net.key(at[k[1]]), "L"), (net.key(at[k[1]]), "R")]
+            return [(k, "")]
+
+        supply, demand = {}, {}
+        for table, out in ((self.spec["supply"], supply), (self.spec["take"], demand)):
+            for k, r in table.items():
+                ns = [v for v in nodes(k) if v in lg.nodes]
+                for v in ns:
+                    out[v] = {_ITEM: out.get(v, {}).get(_ITEM, 0.0) + r / len(ns)}
+        res = tp.solve(lg, supply=supply, demand=demand)
+        got = sum(res.delivered.get(v, {}).get(_ITEM, 0.0) for v in demand)
+        return min(got, self.spec["demand"]), _Played(lg, res, supply, demand)
 
     def need(self, net):
         """(the flow to raise, unbounded?) or None when the net meets its demand and its lanes."""
@@ -443,7 +498,9 @@ class _Ctx:
             n, d = _tile(p), _head(p)
             sh = (d + side) % 4
             m = (n[0] + DX[sh], n[1] + DY[sh])
-            swaps.append((i, _splitter(n, m, d)))
+            # the run first: a splitter splits evenly, and the run is there to take what the
+            # belt on can't (the max-flow's way); it passes on only what the run can't take
+            swaps.append((i, _splitter(n, m, d, "right" if side == 1 else "left")))
             taken |= {m}
         else:
             _k, key, q, b, h, r = how
@@ -509,6 +566,44 @@ class _Ctx:
             net.items[i] = p
         for i, (_old, new) in run.swaps.items():
             net.items[i] = new
+
+
+class _Played:
+    """The two sides of a net short under the game's rules, shaped as a max-flow's (``Flow``) for
+    ``_Ctx.search``: the source side is the drivers held back (what they offer backs up) and the
+    lanes they put on; the sink side the consumers short of what they ask and the lanes with room
+    that reach one."""
+
+    def __init__(self, lg, res, supply, demand):
+        blocked = [v for v, t in supply.items()
+                   if res.supplied.get(v, {}).get(_ITEM, 0.0) < t[_ITEM] - 1e-6]
+        starved = [v for v, t in demand.items()
+                   if res.delivered.get(v, {}).get(_ITEM, 0.0) < t[_ITEM] - 1e-6]
+        self.S = {(v[0], 1) for v in blocked}
+        self.T = {(v[0], 0) for v in starved}
+        # the sink side: what reaches a consumer short through nodes with room all the way
+        down = _reach(lg, starved, back=True, room=lambda v: res.load(v) < 1 - 1e-6)
+        # the source side: what the drivers held back put on, up to where it binds (at capacity
+        # while more is asked of it)
+        binds = [v for v in lg.nodes if res.binds(v)]
+        up = (_reach(lg, blocked) & _reach(lg, binds, back=True)) - down
+        lane = {v for v in lg.nodes if lg.nodes[v].kind == "lane"}
+        self.lane_S = {(v, s) for v in up & lane for s in (0, 1)}
+        self.lane_T = {(v, s) for v in down & lane for s in (0, 1)}
+
+
+def _reach(lg, start, back=False, room=None):
+    """The nodes reached from ``start`` along the lane graph (against it with ``back``), not
+    through a machine, and only through nodes ``room`` passes."""
+    seen, todo = set(start), list(start)
+    while todo:
+        v = todo.pop()
+        for e in (lg.inn if back else lg.out).get(v, ()):
+            w = e.src if back else e.dst
+            if w not in seen and lg.nodes[w].kind != "machine" and (room is None or room(w)):
+                seen.add(w)
+                todo.append(w)
+    return seen
 
 
 def rt_hand():
@@ -584,6 +679,28 @@ def route(cat, job, blocked, spans, clear, box, limit, ents):
         banned.clear()
         runs.append(run)
     _improve(ctx, net, runs)
+    # under the game's rules: a splitter splits evenly until an output backs up, so the max-flow
+    # can be met while the drivers back up behind a run that takes more than its share; add runs
+    # from the drivers held back to the consumers short while that raises what they get
+    played, sides = ctx.played(net)
+    first, banned, bans = played, set(), 0
+    while len(runs) < 2 * cap and played < job.m2m["demand"] - 1e-6 and ctx.flow(net).met:
+        found, w = ctx.search(net, sides, banned)
+        if found is None:
+            why = why or w
+            break
+        run = ctx.lay(net, found)
+        now, now_sides = ctx.played(net)
+        if now <= played + 1e-6:
+            ctx.rip(net, run)
+            banned.add(found[3])
+            bans += 1
+            if bans > _BANS:
+                break
+            continue
+        banned.clear()
+        runs.append(run)
+        played, sides = now, now_sides
     after = ctx.flow(net)
     c = {"transport-belt": 0, "underground-belt": 0, "splitter": 0, "ins": 0}
     for p in net.items.values():
@@ -591,7 +708,8 @@ def route(cat, job, blocked, spans, clear, box, limit, ents):
     text = (f"{c['transport-belt']} belts, {c['underground-belt']} underground ends, "
             f"{c['splitter']} splitters, {c['ins']} inserters, hub {hub}; m2m: "
             f"{len(runs)} run{'s' if len(runs) != 1 else ''} added, max-flow "
-            f"{_num(before.value)} -> {_num(after.value)} of {_num(after.demand)}/s"
+            f"{_num(before.value)} -> {_num(after.value)} of {_num(after.demand)}/s, by the game's "
+            f"rules {_num(first)} -> {_num(played)}"
             + ("; both lanes" if both else "" if left
                else "; drivers on either lane (no hub with left-lane taps)")
             + (f"; short: {why}" if not after.met and why else "")

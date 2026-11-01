@@ -614,6 +614,8 @@ def _carriers(job, tree_ents, net):
         attrs = {"net": net}
         if p.get("belt_to_ground_type"):
             attrs["ug"] = "in" if p["belt_to_ground_type"] == "input" else "out"
+        if p.get("config"):                        # 2.1.24: an m2m split's output priority
+            attrs["config"] = p["config"]
         x, y = p["x"], p["y"]
         out.append(fkpmod.Entity(key, p["name"], _clean(x), _clean(y), int(p["direction"]), attrs))
     return out

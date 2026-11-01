@@ -8,7 +8,9 @@ items on the net's belt by an inserter), a consumer a provider chest at a rate (
 one). Everything is generated here, offline: no game, no committed file.
 
 Per case it prints one row: the net's flow (demand), the max-flow of what was laid on the lane
-graph as it is (``fkcore.maxflow``, ``lanes=True``), reach (``fkcore.connect``'s verdict: every
+graph as it is (``fkcore.maxflow``, ``lanes=True``), what the consumers get under the game's rules
+(``rules``: ``fkcore.routed``, the splitters splitting evenly; 2.1.24, which the real game in
+``tools/hourglass_lab.py`` agrees with to a few percent), reach (``fkcore.connect``'s verdict: every
 producer reaches every consumer, no SPILL), the waist (the runs crossing the vertical line midway between the columns, and the fewest
 across any vertical line of the gap), belts, underground ends, splitters, inserters, the runs the
 router added, its belt cost (steiner's costs) and the route time. The m2m router fills both lanes
@@ -147,13 +149,24 @@ def measure(name, cat, m2m=True, gap=GAP, router=None):
         runs = int(how.split("m2m: ", 1)[1].split()[0])
     if router == "balancer":
         runs = r.width                       # the balancer's belts
+    played = rules(flat, r.layout, cat)
     return {"case": name, "router": router, "pc": f"{len(rates)}->{consumers}",
-            "demand": flow.demand, "maxflow": flow.value, "reach": reach,
+            "demand": flow.demand, "maxflow": flow.value, "played": played, "reach": reach,
             "failed": NET in r.failed, "waist": waist, "narrow": narrow,
             "belts": count["transport-belt"], "ug": count["underground-belt"],
             "splitters": count["splitter"], "inserters": count["inserter"], "runs": runs,
             "cost": round(cost, 1), "secs": round(secs, 1), "line": how, "lines": r.lines,
             "layout": r.layout, "flat": flat}
+
+
+def rules(flat, layout, cat):
+    """What the consumers get under the game's rules (``fkcore.routed``: a splitter splits
+    evenly until an output backs up; a lane serves its first inserters first): the lab measures
+    the same (``tools/hourglass_lab.py``, 2.1.24)."""
+    from fkcore import routed
+    r = routed.solve(flat, layout, cat)
+    return sum(sum(r.res.delivered.get((k, ""), {}).values()) for k in flat.machines
+               if k.startswith("c"))
 
 
 # -- the balancer comparison -----------------------------------------------------------------------
@@ -363,14 +376,14 @@ def draw(m, cat):
     return "\n".join(rows)
 
 
-HEAD = ("case", "router", "P->C", "demand", "maxflow", "reach", "waist", "narrow", "belts", "ug",
-        "splitters", "inserters", "runs", "cost", "secs")
+HEAD = ("case", "router", "P->C", "demand", "maxflow", "rules", "reach", "waist", "narrow",
+        "belts", "ug", "splitters", "inserters", "runs", "cost", "secs")
 
 
 def row(m):
     return (m["case"], m["router"], m["pc"], f"{m['demand']:.1f}", f"{m['maxflow']:.1f}",
-            ("FAILED" if m["failed"] else "yes" if m["reach"] else "NO"), str(m["waist"]),
-            str(m["narrow"]), str(m["belts"]), str(m["ug"]), str(m["splitters"]),
+            f"{m['played']:.1f}", ("FAILED" if m["failed"] else "yes" if m["reach"] else "NO"),
+            str(m["waist"]), str(m["narrow"]), str(m["belts"]), str(m["ug"]), str(m["splitters"]),
             str(m["inserters"]), str(m["runs"]), f"{m['cost']:.1f}", f"{m['secs']:.1f}")
 
 

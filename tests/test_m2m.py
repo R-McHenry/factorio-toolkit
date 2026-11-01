@@ -95,6 +95,23 @@ class HourglassTest(unittest.TestCase):
                     self.assertEqual(ents[b].name, "transport-belt")
                 self.assertEqual(into_splitter_sides(m["layout"]), [])
 
+    def test_under_the_games_rules(self):
+        # 2.1.24: what the consumers get as the game splits (fkcore.routed; the lab agrees):
+        # every case but 16to16 in full, 16to16 short of its max-flow by one consumer's worth
+        for name, m in self.rows.items():
+            with self.subTest(case=name):
+                want = m["demand"] - (1.5 if name == "16to16" else 0.0)
+                self.assertGreaterEqual(m["played"], want - 1e-6, m["line"])
+        self.assertIn("by the game's rules", self.rows["16to16"]["line"])
+
+    def test_a_run_comes_first_out_of_its_split(self):
+        # a run that leaves a belt by a splitter gets its output priority: the splitter passes on
+        # what the run can't take (an even split starves the run, 2.1.24's lab)
+        ents = self.rows["16to16"]["layout"].entities.values()
+        firsts = [e for e in ents if e.name == "splitter" and "output_priority" in
+                  (e.attrs.get("config") or "")]
+        self.assertTrue(firsts)
+
     def test_maxflow_line(self):
         m = self.rows["16to16"]
         line = next(ln for ln in m["lines"] if ln.startswith("MAXFLOW"))
@@ -117,6 +134,8 @@ class BigTest(unittest.TestCase):
         self.assertGreaterEqual(m["narrow"], 4)          # 48/s over 15 a belt, rounded up
         self.assertTrue(side_loads(m["layout"]))       # runs fill the collectors' empty lanes
         self.assertEqual(into_splitter_sides(m["layout"]), [])
+        # under the game's rules (2.1.24): 44.5 of 48 (without the runs' priority, 37.4)
+        self.assertGreaterEqual(m["played"], 44.0, m["line"])
 
 
 class LeftTest(unittest.TestCase):
@@ -139,7 +158,8 @@ class LeftTest(unittest.TestCase):
             with self.subTest(case=name):
                 need = -(-m["demand"] // 7.5)
                 self.assertGreaterEqual(m["narrow"], need)
-        self.assertEqual(self.rows["16to16"]["narrow"], 3)
+        # 3 by the max-flow; 2.1.24's runs under the game's rules widen it by one
+        self.assertEqual(self.rows["16to16"]["narrow"], 4)
 
     def test_drivers_drop_on_the_left_lane(self):
         for name, m in self.rows.items():
