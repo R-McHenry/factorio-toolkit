@@ -29,7 +29,16 @@ Steps, each one RCON call (``fkcore.link``: 5 s, nothing registered):
    character to unlock them by hand), every player a spectator, no crash site.
 
 Guarded by ``storage.kickoff_setup``: a second run on the same map refuses.
-    python3 kickoff/setup_v1.py [--dry]      (FK_RCON_PORT / FK_RCON_PW_FILE as for fkcore.link)
+    python3 kickoff/setup_v1.py [--dry] [--pack seablock]   (FK_RCON_PORT / FK_RCON_PW_FILE as for
+                                                             fkcore.link; FK_PACK as --pack)
+
+**Sea Block** (``--pack seablock``, 2026-11-01): the world is water, so the bootstrap's rectangle is
+landfilled first. The roboport is fk-early-roboport with 30 + 20 early robots (fk-early-bots: the
+player can make more from the start), no oil and no plant. The chests hold Sea Block's own
+starting items (read from its remote interface, then cleared so no joining player gets a copy;
+minus the bootstrap's panels and accumulators), wood (foraging is hand-only and nothing else makes
+wood early) and assemblers (locked until red science). ``angels-bio-wood-processing`` is granted:
+its trigger is crafting wood by hand, which no character will do.
 """
 from __future__ import annotations
 
@@ -68,6 +77,26 @@ RESEARCH = {"worker-robots-speed-1": True, "worker-robots-storage-1": True, "ste
 RESEARCH.update({f"worker-robots-speed-{n}": False for n in range(2, 8)})
 RESEARCH.update({f"worker-robots-storage-{n}": False for n in range(2, 4)})
 
+SB_BOOTSTRAP = [("fk-early-roboport" if n == "roboport" else n, x, y) for n, x, y in BOOTSTRAP]
+SB_RESEARCH = {k: v for k, v in RESEARCH.items() if k not in ("steam-power", "electronics")}
+SB_RESEARCH["angels-bio-wood-processing"] = True
+
+#: per pack: the bootstrap, its roboport, robots, oil, kit, research, the landfilled rectangle
+#: (x0, y0, x1, y1) and whether Sea Block's starting items join the kit
+PACKS = {
+    None: {"bootstrap": BOOTSTRAP, "port": "roboport", "robots": ROBOTS, "oil": OIL, "kit": KIT,
+           "research": RESEARCH, "land": [], "sb_items": False},
+    "seablock": {
+        "bootstrap": SB_BOOTSTRAP, "port": "fk-early-roboport",
+        "robots": {"fk-early-construction-robot": 30, "fk-early-logistic-robot": 20}, "oil": [],
+        "kit": [("fk-early-roboport", 4), ("assembling-machine-1", 8), ("medium-electric-pole", 93),
+                 ("storage-chest", 10), ("requester-chest", 10), ("passive-provider-chest", 10),
+                 ("active-provider-chest", 1), ("wood", 500), ("offshore-pump", 4),
+                 ("transport-belt", 200), ("inserter", 50), ("underground-belt", 20),
+                 ("splitter", 10), ("iron-chest", 1)],
+        "research": SB_RESEARCH, "land": [0, 5, 25, 23], "tile": "sand-3", "sb_items": True},
+}
+
 
 def q(value):
     return json.dumps(json.dumps(value))
@@ -77,6 +106,7 @@ LUA_BOOTSTRAP = """
 if storage.kickoff_setup then rcon.print('REFUSED: this map is already set up') return end
 local s = game.surfaces[1] local f = game.forces.player
 local B = helpers.json_to_table(%s) local R = helpers.json_to_table(%s) local O = helpers.json_to_table(%s)
+local PORT = %s local L = helpers.json_to_table(%s) local TILE = %s
 pcall(function() remote.call('freeplay', 'set_disable_crashsite', true) end)
 pcall(function() remote.call('freeplay', 'set_skip_intro', true) end)
 local wrecks = 0
@@ -85,7 +115,7 @@ for _, e in pairs(s.find_entities_filtered{force = 'neutral'}) do
 end
 local cleared = 0
 for _, b in ipairs(B) do
-  local r = (b[1] == 'roboport') and 2.5 or 1.6
+  local r = (b[1] == PORT) and 2.5 or 1.6
   for _, e in pairs(s.find_entities_filtered{area = {{b[2] - r, b[3] - r}, {b[2] + r, b[3] + r}}, type = {'tree', 'simple-entity'}}) do
     e.destroy() cleared = cleared + 1
   end
@@ -98,13 +128,23 @@ for _, o in ipairs(O) do
   if s.create_entity{name = 'crude-oil', position = {o[1], o[2]}, amount = o[3]} then wells = wells + 1 end
 end
 local out = {'wrecks removed ' .. wrecks, 'nature cleared ' .. cleared, 'oil wells ' .. wells .. '/' .. #O}
+if L[1] then
+  for _, e in pairs(s.find_entities_filtered{area = {{L[1], L[2]}, {L[3], L[4]}}, type = 'fish'}) do e.destroy() end
+  local t = {}
+  for x = L[1], L[3] - 1 do for y = L[2], L[4] - 1 do
+    local m = s.get_tile(x, y).prototype.collision_mask.layers
+    if m and m.water_tile then t[#t + 1] = {name = TILE, position = {x, y}} end
+  end end
+  s.set_tiles(t, true)
+  out[#out + 1] = 'landfilled ' .. #t
+end
 local built = 0
 for _, b in ipairs(B) do
   local e = s.create_entity{name = b[1], position = {b[2], b[3]}, force = f, raise_built = true}
   if e then built = built + 1 else out[#out + 1] = b[1] .. ' FAILED at ' .. b[2] .. ',' .. b[3] end
 end
 out[#out + 1] = 'built ' .. built .. '/' .. #B
-local port = s.find_entity('roboport', {8, 8})
+local port = s.find_entity(PORT, {8, 8})
 if port then
   local inv = port.get_inventory(defines.inventory.roboport_robot)
   for n, c in pairs(R) do inv.insert{name = n, count = c} end
@@ -116,7 +156,21 @@ rcon.print(table.concat(out, ' | '))
 LUA_KIT = """
 if storage.kickoff_setup ~= 'bootstrap' then rcon.print('REFUSED: kit step out of order') return end
 local s = game.surfaces[1] local f = game.forces.player
-local C = helpers.json_to_table(%s) local K = helpers.json_to_table(%s)
+local C = helpers.json_to_table(%s) local K = helpers.json_to_table(%s) local SB = %s
+local sb = ''
+if SB then
+  local used = {}
+  for _, b in ipairs(helpers.json_to_table(%s)) do used[b[1]] = (used[b[1]] or 0) + 1 end
+  local ok, items = pcall(remote.call, 'SeaBlock', 'get_starting_items')
+  if ok and items then
+    local n = 0
+    for name, c in pairs(items) do
+      if prototypes.item[name] and c - (used[name] or 0) > 0 then K[#K + 1] = {name, c - (used[name] or 0)} n = n + 1 end
+    end
+    remote.call('SeaBlock', 'set_starting_items', {})
+    sb = ' seablock items ' .. n
+  else sb = ' seablock items MISSING' end
+end
 local chests = {}
 for _, c in ipairs(C) do chests[#chests + 1] = s.create_entity{name = 'storage-chest', position = c, force = f} end
 local short = {} local i = 1
@@ -129,7 +183,7 @@ for _, k in ipairs(K) do
   if left > 0 then short[#short + 1] = k[1] .. ':' .. left end
 end
 storage.kickoff_setup = 'kit'
-rcon.print('chests ' .. #chests .. ' short {' .. table.concat(short, ',') .. '}')
+rcon.print('chests ' .. #chests .. ' short {' .. table.concat(short, ',') .. '}' .. sb)
 """
 
 LUA_RULES = """
@@ -159,18 +213,23 @@ rcon.print(helpers.table_to_json(o))
 """
 
 
-def run(r, dry=False):
+def run(r, dry=False, pack=None):
+    p = PACKS[pack]
     out = {}
     if not dry:
-        out["bootstrap"] = r.lua(LUA_BOOTSTRAP % (q(BOOTSTRAP), q(ROBOTS), q(OIL))).strip()
-        out["kit"] = r.lua(LUA_KIT % (q(CHESTS), q(KIT))).strip()
-    out["rules"] = json.loads(r.lua(LUA_RULES % (q(RESEARCH), "true" if dry else "false")))
+        out["bootstrap"] = r.lua(LUA_BOOTSTRAP % (q(p["bootstrap"]), q(p["robots"]), q(p["oil"]),
+                                                  json.dumps(p["port"]), q(p["land"]),
+                                                  json.dumps(p.get("tile", "landfill")))).strip()
+        out["kit"] = r.lua(LUA_KIT % (q(CHESTS), q(p["kit"]), "true" if p["sb_items"] else "false",
+                                      q(p["bootstrap"]))).strip()
+    out["rules"] = json.loads(r.lua(LUA_RULES % (q(p["research"]), "true" if dry else "false")))
     return out
 
 
 def main(argv):
+    pack = argv[argv.index("--pack") + 1] if "--pack" in argv else (os.environ.get("FK_PACK") or None)
     with link.Rcon() as r:
-        got = run(r, dry="--dry" in argv)
+        got = run(r, dry="--dry" in argv, pack=pack)
     for k, v in got.items():
         print(f"{k}: {v}")
     rules = got["rules"]

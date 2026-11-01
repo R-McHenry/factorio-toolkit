@@ -1,6 +1,7 @@
 """fkcore.pack: a run's mod pack, and water as ground in a pack with landfill (Sea Block)."""
 import json
 import os
+import tempfile
 import unittest
 from collections import namedtuple
 from unittest import mock
@@ -28,8 +29,24 @@ class PackTest(unittest.TestCase):
 
     def test_seablock(self):
         with mock.patch.dict(os.environ, {"FK_PACK": "seablock"}):
-            self.assertEqual(pack.landfill(), "landfill")
+            self.assertEqual(pack.landfill(), "sand-3")           # what a game paste lays
+            self.assertEqual(pack.landfill_item(), "landfill-sand")
             self.assertTrue(os.path.exists(pack.path("catalog.json")))
+
+    def test_pack_file_in_the_game_codebase(self):
+        env = {k: v for k, v in os.environ.items() if k != "FK_PACK"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True):
+            here = os.getcwd()
+            os.chdir(d)
+            try:
+                self.assertIsNone(pack.name())
+                with open("pack", "w") as fh:
+                    fh.write("seablock\n")
+                self.assertEqual(pack.name(), "seablock")
+                with mock.patch.dict(os.environ, {"FK_PACK": ""}):
+                    self.assertIsNone(pack.name())             # the variable wins
+            finally:
+                os.chdir(here)
 
     def test_water_blocks_without_landfill(self):
         with mock.patch.dict(os.environ, {"FK_PACK": ""}):
@@ -57,7 +74,7 @@ class PackTest(unittest.TestCase):
         self.assertEqual(landfill_tiles([pump], t, cat), {(5, 6)})
 
     def test_single_ghosts_carry_the_landfill(self):
-        for name, want in (("seablock", "landfill"), ("", None)):
+        for name, want in (("seablock", "sand-3"), ("", None)):
             with mock.patch.dict(os.environ, {"FK_PACK": name}):
                 lua = link.lua_ghosts("nauvis", "player", [])
                 data = lua.split("helpers.json_to_table(", 1)[1].split(")\n", 1)[0]

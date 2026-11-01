@@ -143,7 +143,7 @@ Git Bash.
 
 def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
          host_root="/home/computah/factorio/v1-runs", local=None, player="deepseek", notes=None,
-         workers=None, worker_model="inherit", effort=""):
+         workers=None, worker_model="inherit", effort="", pack=None):
     if os.path.exists(run) and os.listdir(run):
         raise SystemExit(f"new_run: {run} exists and is not empty")
     if workers not in (None, "claude"):
@@ -154,6 +154,7 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
                          check=True, text=True).stdout.strip()
     src = os.path.join(run, ".kit")
     _archive(sha, src, ("agent", "kickoff/template")
+             + ((f"kickoff/template-{pack}",) if pack else ())
              + (tuple(f"kickoff/{name}" for name in LOOP) if player == "claude" else ()))
     agent = os.path.join(src, "agent")
     brief = os.path.join(agent, "prompts", f"{prompt}.md")
@@ -173,6 +174,12 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     _archive(sha, os.path.join(run, ".toolkit"))
     shutil.copytree(os.path.join(src, "kickoff", "template", "game"), os.path.join(run, "game"),
                     ignore=shutil.ignore_patterns("out"))
+    if pack:   # the pack's overlay (kickoff/template-PACK): its game files over the template's
+        over = os.path.join(src, "kickoff", f"template-{pack}")
+        shutil.copytree(os.path.join(over, "game"), os.path.join(run, "game"), dirs_exist_ok=True)
+        with open(os.path.join(over, "DROP"), encoding="utf-8") as fh:
+            for drop in fh.read().split():
+                os.remove(os.path.join(run, "game", drop))
     shutil.copytree(os.path.join(src, "kickoff", "template", "helpers"),
                     os.path.join(run, "helpers"), ignore=shutil.ignore_patterns("__pycache__"))
     if player == "claude":
@@ -198,6 +205,8 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
         md5 = hashlib.md5(fh.read()).hexdigest()
     cfg = {"prompt": prompt, "prompt_md5": md5, "toolkit_sha": sha, "player": player,
            "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if pack:
+        cfg["pack"] = pack
     if workers:
         cfg["workers"] = {"backend": workers, "model": worker_model, "brief": "worker-v1",
                           "brief_md5": worker_md5}
@@ -232,6 +241,7 @@ def main(argv=None):
     ap.add_argument("--worker-model", default="inherit",
                     help="the workers' model: inherit (the lead's), sonnet, opus or a model id")
     ap.add_argument("--effort", default="", help="the Claude player's --effort (low, medium, high, ...)")
+    ap.add_argument("--pack", help="a mod pack: kickoff/template-PACK over the template (seablock)")
     a = ap.parse_args(argv)
     workers = None if a.workers == "none" else a.workers
     prompt = a.prompt or ("lead-v1" if workers else "core-v1")
@@ -240,7 +250,7 @@ def main(argv=None):
         local = {"FK_RCON_PORT": a.rcon_port, "FK_RCON_PW_FILE": a.pw_file,
                  "FK_SCRIPT_OUTPUT": a.script_output}
     cfg = make(a.run, prompt, a.sha, a.host, a.host_root, local, a.player, a.notes, workers,
-               a.worker_model, a.effort)
+               a.worker_model, a.effort, **({"pack": a.pack} if a.pack else {}))
     print(json.dumps(cfg, indent=1))
     return 0
 
