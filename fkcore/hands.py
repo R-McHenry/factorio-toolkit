@@ -77,7 +77,9 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
     hands = [n for n in allow if n]
     if not hands:
         raise ValueError("hands: --allow names at least one inserter")
-    lg, res = routedmod.required(flat, lay, cat, model, hand=hand, bulk_hand=bulk_hand)
+    # sized for the inputs arriving: a shortage upstream in the model never shrinks a hand (3.0)
+    lg, res = routedmod.required(flat, lay, cat, routedmod.sizing_model(flat, model), hand=hand,
+                                 bulk_hand=bulk_hand)
     g = lg.graph
     short = set(hands) | set(availmod.HANDS)
     onto, need = {}, {}

@@ -35,6 +35,7 @@ consumers a net starves are those beyond the bus too (a load's net, the bus, its
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 from . import fkp as fkpmod
@@ -199,6 +200,47 @@ def overflow(flat, net, item):
 
 
 _OVERFLOW = ("provider", "storage", "buffer")
+
+
+def sizing_model(flat, model=None):
+    """The rates model a hand is sized by (``fkcore.hands``): every net's supply unlimited
+    (``rates.solve``'s ``unbounded``), so each machine runs at what its consumers take, whatever
+    its inputs get in the model. A shortage upstream never shrinks a hand; only what the consumers
+    take downstream does. 3.0 (the live run, ~7820k): the model saw no plastic out of a hand-piped
+    Literal, so all of B5 stood at 0 and its cable hand was left plain at 1.7/s against 3/s.
+    Each machine's utilization and each net's delivered and to-sinks is the higher of that solve's
+    and the build's, so a hand is never sized below the build's model. Where that solve has no end
+    to a net's flow (an unbounded net), what its drivers that make at a rate put on it stands in,
+    or the build's figure if that is higher (a source without a rate). Solved once per model
+    (``model``, the build's own, keys the cache)."""
+    model = model or ratesmod.solve(flat)
+    cache = getattr(flat, "_sizing", None)
+    if cache is not None and cache[0] is model:
+        return cache[1]
+    free = ratesmod.solve(flat, unbounded=tuple(flat.nets))
+    util = dict(model.util)
+    for key, u in free.util.items():
+        util[key] = max(util.get(key, 0.0), u)
+    def made(ni):
+        """What the net's drivers that make at a rate put on it, at the utilizations above."""
+        net, item = ni
+        if net not in flat.nets:
+            return 0.0
+        rates_ = [flat.machines[k].makes.get(item, 0.0) * util.get(k, 1.0)
+                  for k, i in flat.nets[net].drivers if i == item and k in flat.machines]
+        return sum(r for r in rates_ if r != INF)
+
+    def higher(a, b, ni):
+        return max(made(ni), b) if a == INF else max(a, b)
+    nets = dict(model.nets)
+    for ni, st in free.nets.items():
+        own = model.nets.get(ni)
+        if own is not None:
+            nets[ni] = dataclasses.replace(own, delivered=higher(st.delivered, own.delivered, ni),
+                                           to_sinks=higher(st.to_sinks, own.to_sinks, ni))
+    got = dataclasses.replace(model, util=util, nets=nets)
+    flat._sizing = (model, got)
+    return got
 
 
 def required(flat, lay, cat, model=None, hand=1, bulk_hand=1, lg=None):
