@@ -44,6 +44,8 @@ import re
 import socket
 import struct
 
+from . import pack as _pack
+
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_rip_load", "lua_stuck_hands", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
            "lua_seed", "lua_ghosts", "ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
@@ -865,7 +867,7 @@ _GHOSTS = r"""
 local s = game.get_surface(__SURFACE__)
 local F = __FORCE__
 local d = helpers.json_to_table(__DATA__)
-local missed, n = {}, 0
+local missed, n, laid = {}, 0, 0
 local function miss(k) missed[k] = (missed[k] or 0) + 1 end
 local function try(k, fn) if not pcall(fn) then miss(k) end end
 -- a blueprint field's runtime name where the two differ
@@ -918,11 +920,31 @@ local function requests(g, rf)
   end
   if rf.trash_not_requested then miss('request_filters.trash_not_requested') end
 end
+-- a pack with landfill: landfill under a ghost on water, as a paste lays it (an offshore pump: its
+-- own tile only; the side it pumps from stays water)
+local function landfill(g)
+  local at = {}
+  if g.ghost_type == 'offshore-pump' then
+    at[1] = {math.floor(g.position.x), math.floor(g.position.y)}
+  else
+    local b = g.bounding_box
+    for x = math.floor(b.left_top.x), math.ceil(b.right_bottom.x) - 1 do
+      for y = math.floor(b.left_top.y), math.ceil(b.right_bottom.y) - 1 do at[#at + 1] = {x, y} end
+    end
+  end
+  for _, p in pairs(at) do
+    local t = s.get_tile(p[1], p[2])
+    if t.valid and t.collides_with('water_tile') and not t.has_tile_ghost() then
+      if s.create_entity{name = 'tile-ghost', inner_name = d.l, position = p, force = F} then laid = laid + 1 end
+    end
+  end
+end
 for _, e in ipairs(d.e) do
   local g = s.create_entity{name = 'entity-ghost', inner_name = e.name, position = e.position,
     direction = e.direction, force = F, recipe = e.recipe, type = e.type, quality = e.quality}
   if g then
     n = n + 1
+    if d.l then try('landfill', function() landfill(g) end) end
     if e.tags then try('tags', function() g.tags = e.tags end) end
     if e.control_behavior then behaviour(g, e.control_behavior) end
     if e.use_filters ~= nil then try('use_filters', function() g.use_filters = e.use_filters end) end
@@ -956,7 +978,7 @@ for _, w in ipairs(d.w) do
     miss('wires')
   end
 end
-rcon.print(helpers.table_to_json({n = n, missed = missed}))
+rcon.print(helpers.table_to_json({n = n, missed = missed, landfill = laid}))
 """
 
 
@@ -968,25 +990,29 @@ def lua_ghosts(surface, force, entities, wires=()):
     go on the ghost, and a field the game won't take on a ghost is counted. ``wires``: [[end,
     connector, end, connector]], each end [name, x, y], found built (not ordered out) or as a
     ghost. Every one of these was checked on a laptop test server (2.0.77, 2026-10-22): a ghost
-    keeps them when robots (or a revive) build it. -> JSON {n: ghosts placed, missed: {field: n}}."""
-    data = json.dumps({"e": list(entities), "w": [list(w) for w in wires]},
-                      separators=(",", ":"))
+    keeps them when robots (or a revive) build it. A pack with landfill (``fkcore.pack``): a ghost
+    on water gets landfill tile ghosts under it, as a paste lays them (checked on the Sea Block test
+    server, 2026-11-01: robots lay the landfill, then build the ghost on it).
+    -> JSON {n: ghosts placed, missed: {field: n}, landfill: tile ghosts laid}."""
+    data = json.dumps({"e": list(entities), "w": [list(w) for w in wires],
+                       "l": _pack.landfill()}, separators=(",", ":"))
     return (_GHOSTS.replace("__SURFACE__", _q(surface)).replace("__FORCE__", _q(force))
             .replace("__DATA__", _q(data)))
 
 
 def ghosts(rcon, surface, force, entities, wires=(), chunk=None):
     """:func:`lua_ghosts` in RCON-sized calls: the entities in batches of about ``chunk``
-    characters, then the wires (both ends placed by then). -> {n, missed} summed."""
-    n, missed = 0, {}
+    characters, then the wires (both ends placed by then). -> {n, missed, landfill} summed."""
+    n, missed, laid = 0, {}, 0
     chunk = chunk or CHUNK
 
     def call(es, ws):
-        nonlocal n
+        nonlocal n, laid
         reply = rcon.lua(lua_ghosts(surface, force, es, ws)).strip()
         try:
             got = json.loads(reply)
             n += int(got.get("n") or 0)
+            laid += int(got.get("landfill") or 0)
             m = got.get("missed")           # Lua's empty table comes back as a JSON list
             for k, v in (m.items() if isinstance(m, dict) else ()):
                 missed[k] = missed.get(k, 0) + int(v)
@@ -997,7 +1023,7 @@ def ghosts(rcon, surface, force, entities, wires=(), chunk=None):
         call(batch, [])
     for batch in _batches(wires, chunk):
         call([], batch)
-    return {"n": n, "missed": missed}
+    return {"n": n, "missed": missed, "landfill": laid}
 
 
 def _batches(items, chunk):

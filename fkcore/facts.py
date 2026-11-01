@@ -23,13 +23,16 @@ from __future__ import annotations
 import json
 import os
 
+from . import pack as _pack
+
 __all__ = ["PATH", "load", "entity", "energy_w", "is_burner", "burns", "mining_radius", "drop_vector",
            "mining_time", "mines", "solid_resources", "fuel_value", "fuels", "module_slots",
            "module_effects", "productive", "steam_per_s", "heat_w", "wire_reach", "signals",
            "never_transmit", "electric_consumer", "signal_type", "is_signal", "never_sent",
            "SIGNAL_TYPES"]
 
-PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "facts.json")
+#: the run's pack has its own (``tools/read_facts.py --attach``, :mod:`fkcore.pack`); else the base game's
+PATH = _pack.path("facts.json")
 
 _CACHE = {}
 

@@ -36,12 +36,15 @@ import os
 from collections import namedtuple
 
 from . import facts as _facts
+from . import pack as _pack
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
            "MINING_RADIUS", "STEAM_PER_S", "HEAT_W", "REACTOR_FUEL_S", "CIRCUIT_WIRE_REACH",
            "FluidBox", "PipeConn", "expected"]
 
-DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
+#: The run's mod pack (env FK_PACK, :mod:`fkcore.pack`): its catalog is fkcore/data/packs/<pack>/,
+#: dumped from that game by tools/dump_catalog.lua + .py. Unset: the base game's measured fixture.
+DEFAULT_PATH = _pack.path("catalog.json")
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
 FLUID_PATH = os.path.join(os.path.dirname(DEFAULT_PATH), "fluidboxes.json")
 
