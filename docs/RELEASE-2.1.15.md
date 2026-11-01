@@ -1,4 +1,4 @@
-# Toolkit 2.1, the library: cells with parameters, a sushi gate, and `fk check` naming the cell
+# Toolkit 2.1.15: the library (cells with parameters, a sushi gate, `fk check` naming the cell)
 
 PLAN-2.1.md, "Rows in 2.1": new lines are Stacks of cells, and the library gives the cells. Rows
 still build.
