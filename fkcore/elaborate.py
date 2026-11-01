@@ -1511,10 +1511,6 @@ def _fluid_port(p, cat, src):
     if len(set(p.all_items)) > 1:
         raise ElabError(src, p.line, f"port {p.name}: a fluid port is one pipe, and a pipe holds "
                                      f"one fluid: {', '.join(p.all_items)} need a port each")
-    if p.dir == "inout":
-        raise ElabError(src, p.line, f"port {p.name}: {fluids[0]} is a fluid, and a fluid port is "
-                                     "in or out, the way its net runs: inout is for a belt's "
-                                     "port")
     return fluids[0]
 
 
@@ -2142,6 +2138,12 @@ def _settle_inout(flat):
                     takes = True
         if feeds != takes:
             port.dir, port.inout = ("in" if feeds else "out"), True
+        elif flat.machines[key].prototype == "pipe" and (feeds or takes):
+            # a pipe has one way at a time: a fluid port fed and taken from outside is two
+            raise ElabError(port.src, port.line,
+                            f"port {port.name}: a fluid inout port takes the way its net outside "
+                            "runs, and nets outside both feed it and take from it: make it in or "
+                            "out")
 
 
 def _buffer_items(flat, pending, cat):

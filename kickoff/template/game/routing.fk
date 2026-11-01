@@ -64,3 +64,14 @@ module Split<item> size 2x3 {
   port b : inout $item @s1
   net p: i -> a, b
 }
+
+# A pump in a pipe, 1x2: `net lub: oil -> pp -> engines` with pp = InlinePump<fluid=lubricant>.
+# A long pipe loses throughput; a pump starts a new run, so the route step's pipe-length check
+# names where one helps. (Pump<fluid=...> is the one pump on its own, for nets written by hand.)
+module InlinePump<fluid> size 1x2 {
+  port i : inout $fluid @n0
+  port o : inout $fluid @s0
+  pm = Pump<fluid=$fluid> @(0, 0, rot 2)
+  net a: i -> pm
+  net b: pm -> o
+}

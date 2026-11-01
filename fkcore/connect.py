@@ -127,7 +127,9 @@ class Node:
 
     @property
     def carrier(self):
-        return self.kind in CARRIER_TYPES or self.net is not None
+        # 3.0: a pump with no net= is a Pump, an end of its two nets (fkp.machine_pump)
+        return (self.kind in CARRIER_TYPES and not (self.kind == "pump" and self.net is None)) \
+            or self.net is not None
 
     @property
     def nets(self):
@@ -924,6 +926,64 @@ def one_inserter(ents, cat, nets):
         else:
             if reached == consumers:
                 out.add(net)
+    return out
+
+
+#: 3.0: a pipe segment (pipes, pipes-to-ground and tanks joined, a pump or a machine ends one)
+#: that spreads outside a 320x320-tile area (10x10 chunks) carries nothing until a pump breaks it
+#: up (Factorio 2.0, wiki "Fluid system": inside a segment flow has no length limit)
+PIPE_EXTENT = 320
+_RUN_KINDS = frozenset({"pipe", "pipe-to-ground", "storage-tank"})
+
+
+def pipe_runs(g):
+    """[(keys, (x0, y0, x1, y1), nets)] of the layout's pipe segments: the pipes, pipes-to-ground
+    and tanks of graph ``g`` joined to each other; a pump or a machine between two is a boundary.
+    The box is in tiles, inclusive."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    runs = [k for k, n in g.nodes.items() if n.kind in _RUN_KINDS]
+    for k in runs:
+        find(k)
+    for (a, _ba), (b, _bb), _via in g.joins:
+        if g.nodes[a].kind in _RUN_KINDS and g.nodes[b].kind in _RUN_KINDS:
+            parent[find(a)] = find(b)
+    for a, b in g.fluid_pairs.items():
+        if a in parent and b in parent:
+            parent[find(a)] = find(b)
+    groups = {}
+    for k in runs:
+        groups.setdefault(find(k), []).append(k)
+    out = []
+    for keys in groups.values():
+        tiles = [t for k in keys for t in g.nodes[k].tiles]
+        xs, ys = [t[0] for t in tiles], [t[1] for t in tiles]
+        nets = sorted({n for k in keys for n in g.nodes[k].nets})
+        out.append((sorted(keys, key=natural_key), (min(xs), min(ys), max(xs), max(ys)), nets))
+    return out
+
+
+def long_pipes(g):
+    """``pipe-too-long`` checks: each pipe segment wider or taller than ``PIPE_EXTENT`` tiles."""
+    out = []
+    for keys, (x0, y0, x1, y1), nets in pipe_runs(g):
+        w, h = x1 - x0 + 1, y1 - y0 + 1
+        if max(w, h) <= PIPE_EXTENT:
+            continue
+        where = "net " + ", ".join(nets) if nets else f"pipes from {keys[0]}"
+        need = -(-max(w, h) // PIPE_EXTENT) - 1
+        out.append(Check("pipe-too-long", where,
+                         f"one pipe segment of {len(keys)} pipes spans {w}x{h} tiles "
+                         f"({x0},{y0} to {x1},{y1}): past {PIPE_EXTENT}x{PIPE_EXTENT} the game "
+                         f"moves no fluid through it at all. At least {need} pump"
+                         f"{'s' if need != 1 else ''} in it: routing.fk's InlinePump in the net's "
+                         "chain (net N: a -> pp -> b), or a Pump between two nets"))
     return out
 
 

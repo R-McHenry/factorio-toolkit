@@ -220,6 +220,7 @@ it. Each is a sealed module (ports and one net), so the router lays each stretch
 | `Waypoint<item>` | one belt, 1x3: the net passes here | `i`, `o` (inout) |
 | `Merge<a, b>` | two belts into one by a splitter; each item stays on the lane it came in on | `a`, `b` in, `o` out |
 | `Split<item>` | one belt into two, by a splitter | `i`, `a`, `b` (inout) |
+| `InlinePump<fluid>` | one pump in a pipe, 1x2: `net lub: oil -> pp -> engines` | `i`, `o` (inout) |
 
 They run north to south; `rot 1` turns one to run east to west, `rot 3` west to east.
 
@@ -248,6 +249,7 @@ y`) works too. Merge is not a chain piece: it joins two nets.
 | `Pumpjack<n>` | crude oil. A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
 | `Reactor<read=temperature, signal=S>`, `HeatExchanger`, `SteamTurbine` | nuclear power: a reactor heats the exchangers it touches (`net heat items heat: reactor -> hx`, no route), 10 MW each, 103 steam/s for 1.7 turbines | pipes, an inserter for the cells |
 | `InfinityPipe<fluid, rate=>` | a fluid from nowhere, for the lab only (its free materials) | pipes |
+| `Pump<fluid=lubricant>` | one pump, 1x2, ending two nets: `net a: x -> pm` takes in at its back, `net b: pm -> y` leaves at its front (rot 0 pushes north). A pipe segment past 320x320 tiles carries nothing (`pipe-too-long`); a pump starts a new one. In a chain, use routing.fk's `InlinePump` | pipes |
 | `Constant<signals="S=N, T=M">`, `Decider`, `Arithmetic` | combinators (Circuits, below) | wires |
 | `Literal<file="x.json">` | entities exactly as given. The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. A listed entity sets itself too: `"request": {"logistic-robot": 50}` (a requester's request), `"recipe"`, or `"config"` (the game's fields as JSON). Its frame is its entities' box, so a lone roboport needs a pole of its own beside it. `fk capture` writes such a file from anything built: a lab slot, an area of the game or the planner, or an instance of your design. So a build made in the lab or by hand goes anywhere, inside a module too | |
 | `Bus<belts=4, length, item, load=s11, tap=n26\|s33>` | Rory's bus: `belts` belts of one item, `length` tiles, running east at rot 0. Its loads and taps are ports (A bus, below) | one belt per port, beside the bus |

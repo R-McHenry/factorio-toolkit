@@ -462,6 +462,20 @@ def infinity_pipe(params, cat):
                   frozenset(), source=rate is None, extra={"fluid": fluid})]
 
 
+def pump(params, cat):
+    """``Pump<fluid=lubricant>`` (3.0): one pump in a fluid net, ``net a: x -> p`` and ``net b: p ->
+    y``. It takes in at its back and pushes out at its front (``rot`` turns it: rot 0 pushes north),
+    so the router meets each net at its own end. A conduit, as a port is: its two nets are one
+    flow to the rate model. A long pipe loses throughput; a pump starts a new run (a check names
+    the runs too long for their flow)."""
+    _only(params, ("fluid",))
+    fluid = _word(params, "fluid")
+    if not cat.is_fluid(fluid):
+        raise TemplateError(f"Pump<fluid={fluid}>: {fluid} is not a fluid")
+    return [MSpec("m0", "pump", None, {}, {fluid: 0.0}, frozenset([fluid]),
+                  extra={"port": "pump", "item": fluid, "fluid": fluid})]
+
+
 def roboport(params, cat):
     """``Roboport<>``: a roboport of the logistic network, taking construction and logistic robots
     into its robot inventory from the net (a sink). A ``Chest<requester, item="logistic-robot",
@@ -672,6 +686,7 @@ TEMPLATES = {
     "Arithmetic": arithmetic,
     "Pole": pole,
     "InfinityPipe": infinity_pipe,
+    "Pump": pump,
     "LabRow": lab_row,
     "Lab": lab,
     "Roboport": roboport,
@@ -685,7 +700,7 @@ TEMPLATES = {
 #: ``expand`` and ``elaborate``; a kind resolves to one of these or not)
 SINGLE = ("Machine", "Entity", "Chest", "Pumpjack", "OffshorePump", "Pole", "Boiler",
           "SteamEngine", "InfinityPipe", "Lab", "Reactor", "HeatExchanger", "SteamTurbine",
-          "Constant", "Roboport", "Decider", "Arithmetic")
+          "Constant", "Roboport", "Decider", "Arithmetic", "Pump")
 
 
 def literal_machines(entities, cat):

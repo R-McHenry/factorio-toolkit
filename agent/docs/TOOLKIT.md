@@ -745,6 +745,12 @@ answer is the next build. Nothing here is broken by itself.
 - `overlap`: two sealed modules' frames share tiles. Both modules' routes may use them, and each
   is in the way of the other's; a port that opens inside the other module's frame is named, since
   a net from outside both can't reach it. Only two entities on one tile stop the build
+- `pipe-too-long`: one pipe segment (pipes, pipes-to-ground and tanks joined; a pump or a machine
+  ends one) spreads past 320x320 tiles. The game moves no fluid through such a segment at all,
+  however short its load. The line says how many pumps at least: an `InlinePump` from
+  routing.fk in the net's chain (`net lub: oil -> pp -> engines`), or a `Pump<fluid=...>`
+  between two nets. Inside a segment, distance costs nothing; each machine's connection is
+  limited (about 4200/s in practice)
 - `too-thin`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
   and some of the net's belt lanes or inserters run full: the line says what is required there,
   what they carry, and who runs short. Lanes count one at a time (7.5/s yellow); on a belt two

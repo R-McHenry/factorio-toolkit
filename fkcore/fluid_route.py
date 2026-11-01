@@ -153,6 +153,11 @@ def _ends(flat, lay, cat, net):
             b = connectmod.endpoint_box(_boxes(cat, e), item, side)
             if b is None:
                 raise _Skip(f"{key} ({e.name}) has no fluid box for {item}")
+            # 3.0: a box that takes in at one end and pushes out at the other (a pump) meets the
+            # net that feeds it at its input and the net it drives at its output
+            want = ("output", "input-output") if side == "out" else ("input", "input-output")
+            if {c.flow for c in b.conns} >= {"input", "output"}:
+                b = b._replace(conns=tuple(c for c in b.conns if c.flow in want))
             out.append((key, item, side, b))
     if not any(s == "out" for _k, _i, s, _b in out):
         raise _Skip("no driver is placed")
@@ -255,8 +260,11 @@ def _world(flat, lay, cat, nets_all, blocked, box, keep):
     for e in lay.entities.values():
         occ |= fkpmod.tiles_of(cat, e)
     w = _World(box, occ)
-    owners = {}
+    owners, ways = {}, {}            # ways: (key, box, side) -> net, a two-way box's ends (a pump)
     edges = port_edges(flat, lay, cat)
+    # a machine on the tile just inside a port's edge whose connection points across it (3.0: the
+    # pump of an InlinePump) joins the port directly: the tile outside stays the outer net's
+    across = {(tuple(pe.inside), tuple(pe.outside)) for pe in edges.values()}
     ports = getattr(flat, "ports", {})
     for net in nets_all:
         abut = _abut(flat, lay, cat, net)
@@ -285,12 +293,14 @@ def _world(flat, lay, cat, nets_all, blocked, box, keep):
                 b = connectmod.endpoint_box(_boxes(cat, e), item, side) if e is not None else None
                 if b is not None:
                     owners.setdefault((key, b.box), net)
+                    ways[(key, b.box, side)] = net
     for key in sorted(lay.entities, key=fkpmod.natural_key):
         e = lay.entities[key]
         if not cat.has_fluid_boxes(e.name):
             continue
         tiles = fkpmod.tiles_of(cat, e)
-        if cat.kind(e.name) in _CARRIERS:
+        # a carrier the netlist names as a machine (3.0, a Pump) is an end of its nets, not a pipe
+        if cat.kind(e.name) in _CARRIERS and key not in flat.machines:
             for t in tiles:
                 w.owner[t] = e.net
             if e.name == PTG or cat.kind(e.name) == "pipe-to-ground":
@@ -298,10 +308,13 @@ def _world(flat, lay, cat, nets_all, blocked, box, keep):
             continue
         w.occ |= cat.water_tiles(e.name, e.x, e.y, e.dir)
         for b in _boxes(cat, e):
-            o = owners.get((key, b.box))
             for c in b.conns:
                 if c.type != "normal":
                     continue
+                if (tuple(c.tile), tuple(c.target)) in across:
+                    continue    # it meets a port across the frame's edge: the port's tile (3.0)
+                side = {"input": "in", "output": "out"}.get(c.flow)
+                o = ways.get((key, b.box, side), owners.get((key, b.box)))
                 if c.target in w.reserve and w.reserve[c.target] != o:
                     w.reserve[c.target] = _CONTESTED
                 else:

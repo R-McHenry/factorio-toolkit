@@ -126,7 +126,17 @@ class RefusalTest(unittest.TestCase):
         self.assertIn(words, str(e.exception))
 
     def test_inout(self):
-        self.refused("inout petroleum-gas @w4", "inout is for a belt's port")
+        # 3.0: a fluid inout port (a chain piece's, routing.fk's InlinePump) takes the way its net
+        # outside runs; used both ways outside, it is refused
+        flat = elab(PORT.replace("PORT", "inout petroleum-gas @w4")
+                    + "gas = InfinityPipe<fluid=petroleum-gas> @(0, 0)\nnet f: gas -> c.g\n")
+        self.assertEqual((flat.ports["c/g"].dir, flat.ports["c/g"].inout), ("in", True))
+        with self.assertRaises(ElabError) as e:
+            elab(PORT.replace("PORT", "inout petroleum-gas @w4")
+                 + "gas = InfinityPipe<fluid=petroleum-gas> @(0, 0)\n"
+                   "net f: gas -> c.g\nnet f2: c.g -> gas2\n"
+                   "gas2 = Machine<entity=chemical-plant, recipe=plastic-bar> @(0, 6)\n")
+        self.assertIn("nets outside both feed it and take from it", str(e.exception))
 
     def test_a_lane_pin(self):
         self.refused("in petroleum-gas @w4L", "a pipe has no lanes")

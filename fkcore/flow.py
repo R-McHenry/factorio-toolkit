@@ -1767,6 +1767,8 @@ def s_report_checks(ctx, args):
         rep = connect.connect(lay, ctx.cat, connect.endpoints(flat), ports)
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
+        checks += [Check(c.code, f"{factory} {c.where}", c.msg)
+                   for c in connect.long_pipes(rep.graph)]          # 3.0
         sink_lines, sink_checks = _sinks(ctx, factory, flat, rep)
         lines += sink_lines
         checks += sink_checks

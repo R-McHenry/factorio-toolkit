@@ -220,6 +220,18 @@ class Catalog:
             prod = prods.pop() if len(prods) == 1 else "input-output"
             out.append(FluidBox(i, fluid or protos[members[0][0]].get("filter"), prod,
                                 tuple(conns)))
+        if self.kind(name) == "pump":
+            # 3.0: a pump moves its fluid one way, so its box is two ends: the input it takes from
+            # and the output it pushes to, each a box of its own (a Pump ends two nets)
+            split = []
+            for b in out:
+                ways = [(f, tuple(c for c in b.conns if c.flow == f)) for f in ("input", "output")]
+                if all(cs for _f, cs in ways):
+                    for f, cs in ways:
+                        split.append(FluidBox(len(split) + 1, b.fluid, f, cs))
+                else:
+                    split.append(b._replace(box=len(split) + 1))
+            out = split
         return out
 
     def water_tiles(self, name, x, y, direction=None) -> set:
