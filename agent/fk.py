@@ -301,7 +301,8 @@ def remote(cfg, args, footer=True, data=None):
         if footer:
             subprocess.run([sys.executable, "-m", "fkcore", "poll", "."], cwd=GAME, env=env)
         return code
-    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
+    # 3.0 (U6): unbuffered, so a lab or a foreground build says where it is as it goes
+    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on PYTHONUNBUFFERED=1 "
            f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} python3 -m fkcore "
            + " ".join(shlex.quote(a) for a in args))
     if footer:

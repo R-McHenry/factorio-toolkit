@@ -5,7 +5,7 @@ elaborate
 size                                            # no n=auto rows here: it says so
 place           --keep pinned
 route           --only stale --hand inserter    # the plant's inserters are plain ones
-cover robots    --storage none
+cover robots
 cover power     --pole medium-electric-pole
 floorplan
 report_checks

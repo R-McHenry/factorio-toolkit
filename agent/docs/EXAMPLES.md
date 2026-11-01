@@ -205,9 +205,12 @@ about each gate's amount plus a hand of each item.
 ## More examples
 
 These are older: most are written with rows, or as one factory fed by chests, before cells had
-parameters. They still build, and they show the language's pieces one at a time. `busbase.fk`,
-`blue6.fk` and `furnace-column.fk` are bases and lines of sealed modules; the rest are single
-factories. The first three below together, next to the kit (whose grid the reactor feeds), give 9 nets,
+parameters. They still build, and they show the language's pieces one at a time; for a new design
+take the line from the five above (a Stack of cells) and the shape from these. The rows in them
+(`SmelterRow`, `SmelterArray`, `AsmRow`, `LabRow`, `CircuitStack`) are not for new designs:
+LANGUAGE.md, "Rows, the older way", names the cell that replaces each. `MinerRow` is still the
+drill line. `busbase.fk`, `blue6.fk` and `furnace-column.fk` are bases and lines of sealed
+modules; the rest are single factories. The first three below together, next to the kit (whose grid the reactor feeds), give 9 nets,
 all routed and connected, 0 SPILL.
 
 ### smelting.fk: ore to plates (26x26)

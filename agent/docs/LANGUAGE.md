@@ -266,8 +266,10 @@ recipes the game allows them in (intermediates, science packs, uranium fuel cell
 
 `AsmRow<n, recipe>`, `SmelterRow<n, recipe>`, `LabRow<n>`, `SmelterArray<n, recipe>` and
 `CircuitStack<n>` are rows the toolkit lays for you. They still build, exactly as before, and a
-design that has them keeps working; new lines are Stacks of cells. `fk check` names the library
-cell a new row could be (`row-cell`). A row is **counterflow**: every belt of a row attaches at
+design that has them keeps working; they are not for new designs. Each has a library cell that
+replaces it (`SmelterPair`, `FurnaceCell`/`FurnacePair`, `AsmCell`, `LabCell`/`LabColumn`,
+`CircuitCell`), and `fk check` names it (`row-cell`). `MinerRow` is not one of these: it is the
+drill line, and there is no drill cell. A row is **counterflow**: every belt of a row attaches at
 its head, the west end at rot 0, so leave a few free tiles there.
 
 `inserter=inserter` on a row puts plain inserters in place of the fast ones; `inserter=any` (or

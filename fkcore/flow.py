@@ -1440,30 +1440,28 @@ def _infra(ctx):
 def s_cover_robots(ctx, args):
     """Roboports so every logistic chest of a factory is in a logistic area (``fkcore.robots``);
     before ``cover power`` in the script, so the poles power them. A chest the surface's network
-    already reaches (the kit's roboport and every roboport joined to it) needs none (1.2), and
-    each roboport placed gets a storage chest beside it (``--storage none``: no chest). 1.7 (pin
-    and patch): the committed roboports and their chests stay where they still fit and reach a
-    chest; ``--fresh`` places them all anew, as before."""
+    already reaches (the kit's roboport and every roboport joined to it) needs none (1.2). 1.7 (pin
+    and patch): the committed roboports stay where they still fit and reach a chest; ``--fresh``
+    places them all anew, as before. 3.0 (U5, Rory): no storage chest beside a roboport any more;
+    ``--storage`` is ignored with one line."""
     from . import robots
-    o = _opts(args, roboport="roboport", storage="storage-chest")
+    o = _opts(args, roboport="roboport", storage=None)
     if ctx.surface is not None and ctx.surface.mode == "lab":
         return ["cover robots: lab mode revives the ghosts, no robots build here; nothing placed"], []
-    storage = None if o["storage"] in ("none", "off") else \
-        ("storage-chest" if o["storage"] is True else o["storage"])
-    if storage and not ctx.cat.has_entity(storage):
-        return [f"cover robots: no {storage} in the catalog; nothing placed"], [
-            Check("no-robots", "cover robots", f"--storage {storage}: not an entity")]
+    storage = None
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
     # 2.1.3: new roboports only where one that stands builds them (the last diff's read)
     standing = _standing_roboports(ctx)
     lines, checks = [], []
+    if o["storage"] not in (None, "none", "off"):
+        lines.append("cover robots: --storage is gone in 3.0 (no chest beside a roboport); ignored")
     for factory, lay in list(ctx.layouts.items()):
         near = robots.served(places, infra, ctx.layouts, factory, ctx.cat)
         keep_out = _frame_blocked(ctx, factory, lay.size)        # no roboport or chest on water
         prev = ctx.previous.get(factory)
         pinned = [] if o.get("fresh") is True else \
-            _own(prev, "robots", "r") + _own(prev, "robots", "s")
+            _own(prev, "robots", "r")
         reach = robots.in_frame(places, ctx.layouts, factory, standing)
         new, rep = robots.apply_robots(lay, ctx.cat, keep_out=keep_out, roboport=o["roboport"],
                                        served=near, storage=storage, pinned=pinned, reach=reach)
@@ -1689,7 +1687,11 @@ def _on_terrain(t, s, cat):
         full += len(body) == len(e.tiles)
         under += len(body)
         amount += sum(body)
-        if not any(q in ore for q in placer.mining_area(e.name, float(e.x), float(e.y))):
+        # 3.0 (U11): a pumpjack stands on its well, so its own tiles are where the crude is (its
+        # mining area is not; every pumpjack on a field read no-ore)
+        area = e.tiles if e.name == "pumpjack" else \
+            placer.mining_area(e.name, float(e.x), float(e.y))
+        if not any(q in ore for q in area):
             checks.append(Check("no-ore", e.key,
                                 f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)}: no "
                                 f"{e.attrs['resource']} in its mining area"))

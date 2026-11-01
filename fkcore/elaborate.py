@@ -258,21 +258,26 @@ def load(path):
     f = lang.parse(snapshot.read(path), path)
     modules = dict(f.modules)
     _imports(f, os.path.dirname(os.path.abspath(path)), modules, {os.path.abspath(path)},
-             f.kinds, f.tiers)
+             f.kinds, f.tiers, {os.path.abspath(path): f})
     return f, modules
 
 
-def _imports(f, folder, modules, seen, kinds=None, tiers=None):
+def _imports(f, folder, modules, seen, kinds=None, tiers=None, parsed=None):
     kinds = f.kinds if kinds is None else kinds
     tiers = f.tiers if tiers is None else tiers
+    parsed = {} if parsed is None else parsed
     for names, rel, line in f.imports:
         target = os.path.abspath(os.path.join(folder, rel))
         if not os.path.exists(target):
             raise ElabError(f.path, line, f"import: no file {rel}")
-        g = lang.parse(snapshot.read(target), target)
+        # 3.0 (U9): each file is parsed once per load, so a module imported by two paths (a
+        # diamond: world.fk and d5.fk both import FurnacePair from cells.fk) is one module
+        g = parsed.get(target)
+        if g is None:
+            g = parsed[target] = lang.parse(snapshot.read(target), target)
         if target not in seen:
             seen.add(target)
-            _imports(g, os.path.dirname(target), modules, seen, kinds, tiers)
+            _imports(g, os.path.dirname(target), modules, seen, kinds, tiers, parsed)
         for name, k in g.kinds.items():     # 2.1: an imported file's kinds come with it
             kinds.setdefault(name, k)
         for name, t in g.tiers.items():     # and its tiers

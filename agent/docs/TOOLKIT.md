@@ -488,6 +488,11 @@ save after-smelt
 run: a building on a cliff or an enemy base, or a drill off its ore. `place` says how many didn't
 stand and why. The planner's own files are in `sim\` of your run folder.
 
+- A `.fkp` is in its design's own tiles: `world.fkp` goes in at `@-1000,-1000` (the world plot's
+  corner on the map), a factory's at its plot's corner.
+- `place` and `paste` lay power wires only, not circuit wires: try a circuit design by building
+  it from its blueprint with `fk sim game lua`, or check it on the lab.
+
 A save state loads at the tick it was saved at, every time. A save written while the game was
 running (the fetched start, `fetch --live`) used to run on for tens to hundreds of ticks each time
 it booted. The first boot of one now saves it again, paused, and says so.
@@ -776,11 +781,10 @@ answer is the next build. Nothing here is broken by itself.
   roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`
   gives a factory a roboport only for the chests no roboport of that network reaches yet (the
   kit's, and every one joined to it), which joins the network when it stands within 50 tiles of
-  another one on both axes. It puts a storage chest beside each roboport it places, so what the
-  robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
-  the chest out). Grow outward: the next factory within reach of the last. It chains only from
-  roboports that stand, or that it lays in reach of them: a roboport no robot could reach
-  is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
+  another one on both axes. It places no storage chest (3.0): what robots take up goes to the
+  nearest storage chest you built, so put one in your hub. Grow outward: the next factory within
+  reach of the last. It chains only from roboports that stand, or that it lays in reach of them:
+  a roboport no robot could reach is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
   the old one is ordered out (robots take it up and carry it to the new spot), and an old roboport
   is ordered out at once when the network holds none for the new ones; otherwise the old ones
   stand until the new ones do

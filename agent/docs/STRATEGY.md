@@ -57,6 +57,40 @@ cost, but the base itself takes a sizeable share on top: machines, belts, robots
 the rocket's materials and the silo. So run mining and smelting well above what science alone
 implies, roughly one and a half to two times.
 
+## Modules from the first paste
+
+The base is a hierarchy of sealed modules from its first build, not a heap of machines that gets
+sorted out later. Every run that started loose spent its second day untangling it: one world
+build of 660 instances and 1,000 nets, every attempt laying all of it again, and one stuck net
+holding the whole paste.
+
+- **`world.fk` places modules and the trunks between their ports, and nothing else** (besides the
+  plant and the kit). Smelting, the mall, each science, power: each one a `module NAME size WxH`
+  with its ports on its edges, in a file of its own once it grows.
+- **Regions nest.** A region (the iron smelting, the red-green block) is a sealed module of sealed
+  modules: a Stack of cells inside, a module or two beside it, and its own trunks. The last run's
+  LabArea, 72 nets, routed in 12 s on its own; its flat world of 1,000 nets took minutes a build.
+- **Lab each module alone before it goes into the world** (`fk lab NAME`, then `--measure`). A
+  module that builds clean on its own goes into the world and only its trunks are new there.
+- **Leave room and ports for the next size.** A module's frame should take the next doubling of
+  its line (a Stack's `built=K`) without moving its ports, so growing it never re-routes its
+  neighbours.
+- **Paste one region at a time.** Change one module, build, look, then the next. A change that
+  touches five regions at once is five problems in one build.
+
+`docs\examples\busbase.fk` is a whole base built this way (it predates cells: its smelting and
+circuits are rows, so put Stacks of cells in their place); `blue6.fk` and `furnace-column.fk` are
+lines of cells inside a module.
+
+## Lines are Stacks of cells
+
+A line of machines is a `Stack` of cells (`game\cells.fk`), not one of the old rows. The
+smelters, assemblers, labs and circuits each have cells that replace the rows (on the lab, 12
+SmelterPair cells made 450 plates/min to SmelterArray's 445), and a cell is yours to read, copy
+and change, where a row is a black box. Use `MinerRow` for drills on a patch:
+there is no drill cell yet. A new cell earns a place in your library when it has built and
+measured clean in the lab; until then it lives in the one module that needs it.
+
 ## Bootstrap
 
 - **Guard the starter iron.** Spend the first plates on what makes more iron:
@@ -120,6 +154,11 @@ implies, roughly one and a half to two times.
 
   Size the next step with `fk rates` / `fk plan` (or `n=auto`) against what the base makes now
   (`fk stats`) and holds (`fk stock`), build it, then double it when it runs.
+- **Don't build past the ramp.** The row the base is on says what to build next; a block sized for
+  a row further down waits until the base reaches the row before it. Designing ahead is good: draw
+  and lab the next two rows while the robots build this one, so each is ready when the base is.
+  Pasting ahead is what costs: a blue science block on a base that makes 150 plates a minute
+  starves, and its belts and inserters were taken from the step that would have grown the plates.
 - **Ask the order-of-magnitude question before every build.** At the stage the base is at, is this
   ten times too big, ten times too small, or about right? Spending hundreds of inserters and belts
   before you have constructed a single one is a sign you are off by an order of magnitude, and you
@@ -129,7 +168,7 @@ implies, roughly one and a half to two times.
   everything. Once the base is big enough that you're managing it, robots and every material get
   capped: you want as much as you need.
 - **Find the next ore patch before you need it.** Use radar, and a belt or a roboport chain (each
-  roboport within 50 tiles of the last) to reach new patches; put a storage chest near far builds.
+  roboport within 50 tiles of the last) to reach new patches.
 - **Keep the rest of the base growing alongside science.** A big science block with too little
   smelting and too few building materials stalls.
 
