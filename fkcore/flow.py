@@ -2093,7 +2093,7 @@ def _net_items(ctx):
 
 
 def s_diff(ctx, args):
-    o = _opts(args, scope="all", confirm=False)
+    o = _opts(args, scope="all", confirm=False, yes=False)
     if ctx.composed is None:
         return ["diff: no composed surface yet (floorplan first)"], []
     r = _link(ctx)
@@ -2133,7 +2133,14 @@ def s_diff(ctx, args):
         lines.append(f"hand: {len(hand)} hand edits that the apply would replace, remove or set "
                      "back:")
         lines += [f"  {line}" for line in hand]
-        checks += [Check("by-hand", ctx.surface.name, line) for line in hand]
+        # 3.0 (the retro: builds undid pumps, hand upgrades and filters set in the game): with
+        # `stop_on by-hand` the paste waits; `fk build --yes` (diff --yes) is the player's OK for
+        # this one build, and adopting the change into the design keeps it
+        code = "by-hand-ok" if o["yes"] is True else "by-hand"
+        if code == "by-hand":
+            lines.append("  keep one: put it in the design (fk adopt, a Literal, a set line); "
+                         "paste over them: fk build --yes")
+        checks += [Check(code, ctx.surface.name, line) for line in hand]
     turned = _turned(ctx, rep)
     if turned:
         lines.append(f"  {turned.msg}")
@@ -2529,6 +2536,13 @@ def _steps(ctx, script, lines, first, last, width, written, notes, timings):
             why = (f"stopped at line {ln.n} ({ln.cmd}): {len(stops)} {stops[0].code} "
                    f"line(s), first: {stops[0]}")
             echo(why)
+            # 3.0: a held paste over hand edits names every one (the player says yes to a list)
+            hand = [c for c in stops if c.code == "by-hand"]
+            for c in hand[:30]:
+                echo(f"  by-hand: {c.msg}")
+            if hand:
+                echo(("  ... and more in out/diff.txt; " if len(hand) > 30 else "  ")
+                     + "keep one: put it in the design; paste over them: fk build --yes")
             # the steps this run would have reached say so, instead of keeping an earlier run's
             # report (the first lead run's mall2 designer read stale report_checks and route
             # lines after a build stopped at elaborate, 2026-10-21)

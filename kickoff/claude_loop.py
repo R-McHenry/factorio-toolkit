@@ -753,6 +753,16 @@ WAKE = {"research:none": "[The labs stand idle: nothing researches. `fk research
         "fuel:low": f"[The reactor's fuel is low: under {FUEL_LOW} minutes at full burn.]"}
 
 
+def _reminder(run):
+    """The run's REMINDER.md as one line ('' when there is none or it is empty), 3.0: what the
+    run is for, said again at every round so a long run doesn't drift off it."""
+    try:
+        with open(os.path.join(run, "REMINDER.md"), encoding="utf-8") as fh:
+            return " ".join(fh.read().split())
+    except OSError:
+        return ""
+
+
 def _dict(x):
     """Lua's empty table comes back as a JSON list."""
     return x if isinstance(x, dict) else {}
@@ -1168,12 +1178,14 @@ def main():
                 if os.path.exists(sid_file):
                     os.remove(sid_file)
                 asked_note = asked
+        # 3.0: the run's REMINDER.md (what the run is for) ends every round's message
+        reminder = _reminder(run)
         if sid and handing:
             text = HANDOVER.format(k=handing // 1000)
         elif sid:
             text = (f"[GOAL.md, round {n + 1}. This message is the text of GOAL.md in your folder: "
                     f"edit that file to change what it says next time, or empty it to stop "
-                    f"playing.]\n\n{goal}")
+                    f"playing.]\n\n{goal}") + (f"\n\n[REMINDER.md] {reminder}" if reminder else "")
         elif fresh:
             text = f"{FRESH}\n\n{goal}" + (f"\n\n[Your note, from {NEW}]\n{asked_note}"
                                            if asked_note else "")

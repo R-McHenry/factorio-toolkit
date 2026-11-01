@@ -28,10 +28,18 @@ fk look AREA --zoom 16 --layers all --image
                                  zoomed out, with every layer, as a PNG ("What `fk look` says")
 ```
 
-Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, and `fk wait built
-X0,Y0,X1,Y1` waits until the robots have built the area. It asks first: run it again, or add
-`--sure`. The run has 30 minutes of waiting in all; `wait-budget.json` in your folder says how
-much is spent.
+Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, `fk wait built
+X0,Y0,X1,Y1` waits until the robots have built the area, `fk wait build` until the background
+build is done (its exit code), and `fk wait 2m -- COMMAND` runs a command and stops it at the
+cap (in place of `timeout`). It asks first: run it again, or add `--sure`. The run has 30
+minutes of waiting in all; `wait-budget.json` in your folder says how much is spent. Anything
+long goes in the background while you keep working.
+
+A build never quietly undoes what was changed in the game. The diff step lists every hand edit
+the paste would replace, remove or set back (a pump you placed, an inserter upgraded by hand, a
+filter), and `stop_on by-hand` in the build script holds the paste there; the build log and
+`out\diff.txt` name each one. Put the ones to keep into the design (`fk adopt`, a Literal, a
+`set` line) and build again, or `fk build --yes` pastes over them for that one build.
 
 A buffer (LANGUAGE.md, "Buffers") gets a line per item at the end of `fk rates`: what comes in
 minus what goes out.
@@ -884,7 +892,11 @@ fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  file names its machines (asm1, furnace1, ...): X.asm1 is a net end
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
-fk stats [--items iron-plate,copper-plate] [--window 10min]
+fk stats                         the whole base in one report: research and its rate, capital and
+                                 the share that works (reinvested), made and used a minute,
+                                 power made and used (by domain), machines by state, the trend
+                                 (a sample first if one is due; the same as --history)
+fk stats --items iron-plate,copper-plate [--window 10min]
                                  production statistics (free to read), made and used per item;
                                  windows 5s, 1min, 10min, 1h, 10h, 50h, 250h and 1000h, as the
                                  production panel's. --fluids for fluids

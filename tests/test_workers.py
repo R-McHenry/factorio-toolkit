@@ -141,7 +141,11 @@ class HookTest(unittest.TestCase):
                              ("python bin/fk.py wait built 1,1,9,9 --max 2m", False),
                              ("fk wait 90s --sure", False),
                              ("Start-Sleep -Seconds 30", True), ("python bin/fk.py build", False),
-                             ("grep -n sleep NOTES.md", False)):
+                             ("grep -n sleep NOTES.md", False),
+                             # 3.0: the hidden waits
+                             ("timeout 120 python x.py", True), ("fk build --wait", True),
+                             ("Get-Job | Wait-Job", True), ("fk wait 2m -- python x.py", False),
+                             ("fk wait build --max 5m", False), ("fk build", False)):
             raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
             out = io.StringIO()
             with mock.patch("sys.stdin", io.StringIO(raw)), mock.patch("sys.stdout", out), \
@@ -150,7 +154,7 @@ class HookTest(unittest.TestCase):
             if blocked:
                 decision = json.loads(out.getvalue())["hookSpecificOutput"]
                 self.assertEqual((decision["permissionDecision"], decision["permissionDecisionReason"]),
-                                 ("deny", "Use fk wait."), cmd)
+                                 ("deny", wait_hook.REASON), cmd)
             else:
                 self.assertEqual(out.getvalue(), "", cmd)
 

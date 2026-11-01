@@ -1,8 +1,7 @@
 # Fair play
 
-The game's rules for this world, and Rory's three rules for how the base is built, all in one
-place. The other docs are advice (`STRATEGY.md`) and how-to (`TOOLKIT.md`, `LANGUAGE.md`,
-`EXAMPLES.md`).
+The game's rules for this world, all in one place. The other docs are advice (`STRATEGY.md`,
+`BUILDING.md`) and how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
 
 ## Changing the world
 
@@ -36,23 +35,6 @@ place. The other docs are advice (`STRATEGY.md`) and how-to (`TOOLKIT.md`, `LANG
   Investigating with your own code and `fk lua` reads is fine. A script that watches the whole base
   and tells you what broke is not: to keep an eye on a far part of the base, build it in the game
   with circuits and a programmable speaker.
-
-## How the base is built (Rory, 2026-11-01)
-
-Three rules for the design, from the first paste. Every 2.x run broke at least one of them, and
-each cost a day. `STRATEGY.md` says why.
-
-- **Modules all the way down.** `world.fk` holds the plant, the kit, sealed module instances and
-  the trunks between their ports, and nothing else: no loose machine, chest or Stack at the top.
-  A region is a sealed module of sealed modules. Each module builds clean in the lab
-  (`fk lab NAME`) before it goes into the world.
-- **Not past the ramp.** Paste the step the speedrun ramp says comes next (`STRATEGY.md`,
-  "Growing"), sized to it, and the step after only once this one runs. Designing, labbing and
-  planner runs (`fk sim`) of later steps are free; pasting them early is not allowed.
-- **Stacks of cells, not rows.** Lines are `Stack`s of cells. The rows `SmelterRow`,
-  `SmelterArray`, `AsmRow`, `LabRow` and `CircuitStack` are not used; `MinerRow` is (there is no
-  drill cell). A template of any kind new to the run goes into the world only after it built
-  and measured clean in the lab (`fk lab NAME --measure 60`).
 
 ## The lab
 

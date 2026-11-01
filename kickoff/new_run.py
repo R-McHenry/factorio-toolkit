@@ -7,7 +7,8 @@ into C:\\fk-player and the host's kickoff waits for Rory's go.
         [--player claude --workers claude [--worker-model inherit]]   (a lead and its workers)
 
 RUN_DIR gets:
-  AGENTS.md            the brief (agent/prompts/<prompt>.md), GOAL.md, FRICTION.md
+  AGENTS.md            the brief (agent/prompts/<prompt>.md), GOAL.md, FRICTION.md,
+                       REMINDER.md (a line or two every round's message ends with)
   docs/                TOOLKIT.md, LANGUAGE.md, EXAMPLES.md (agent/docs)
   bin/fk.cmd, fk.py    the agent's one command (agent/)
   .toolkit/fkcore/     the toolkit at SHA (git archive): the design steps run on the laptop
@@ -133,7 +134,8 @@ pause
 CLAUDE = """# Your Factorio run
 
 `AGENTS.md` is your brief: read it first, then `NOTES.md` if there is one, then `docs\\FAIR-PLAY.md`
-(the game's rules), `docs\\STRATEGY.md` (playing well) and `docs\\TOOLKIT.md` (the toolkit).
+(the game's rules), `docs\\STRATEGY.md` (playing well), `docs\\BUILDING.md` (laying out the base)
+and `docs\\TOOLKIT.md` (the toolkit).
 
 `fk` is your command: `bin\\fk.cmd <command>` in PowerShell, or `python bin/fk.py <command>` in
 Git Bash.
@@ -159,8 +161,10 @@ def make(run, prompt="core-v1", sha="HEAD", host="computah-ct",
     if not os.path.exists(brief):
         raise SystemExit(f"new_run: no brief agent/prompts/{prompt}.md at {sha}")
     shutil.copy(brief, os.path.join(run, "AGENTS.md"))
-    for name in ("GOAL.md", "FRICTION.md"):
-        shutil.copy(os.path.join(agent, "run", name), os.path.join(run, name))
+    # 3.0: REMINDER.md rides on every round's message (claude_loop); the run's own, to edit
+    for name in ("GOAL.md", "FRICTION.md", "REMINDER.md"):
+        if os.path.exists(os.path.join(agent, "run", name)):
+            shutil.copy(os.path.join(agent, "run", name), os.path.join(run, name))
     if notes:
         shutil.copy(notes, os.path.join(run, "NOTES.md"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))

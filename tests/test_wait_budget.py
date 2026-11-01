@@ -97,6 +97,29 @@ class BudgetTest(unittest.TestCase):
         self.assertEqual(seen, [["wait", ".", "built", "--area", "1,2,30,40", "--max", "100s"]])
         self.assertIn("waited 40 s; 1 min of wait budget left", said)
 
+    def test_a_command_with_a_cap_is_a_wait(self):
+        # 3.0: `fk wait 2m -- COMMAND` in place of `timeout 120 COMMAND`
+        code, _said = self.wait("2m", "--", sys.executable, "-c", "raise SystemExit(3)", "--sure")
+        self.assertEqual(code, 3)
+        code, said = self.wait("1s", "--", sys.executable, "-c", "import time; time.sleep(5)",
+                               "--sure")
+        self.assertEqual(code, 124)
+        self.assertIn("still ran after 1 s; stopped", said)
+
+    def test_wait_build_reads_the_newest_build_in_the_log(self):
+        log = os.path.join(self.dir, "build.log")
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("\n== fk build (10:00)\nfk build: done, exit 0\n== fk build (10:05)\nroute\n")
+        with mock.patch("sys.stdout"):
+            self.assertEqual(fk._wait_build(10, self.clock, self.clock.sleep, log), 1)
+        self.assertGreaterEqual(self.clock.t, 1010.0)               # it waited out the cap
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("fk build: done, exit 1\n")
+        with mock.patch("sys.stdout"):
+            self.assertEqual(fk._wait_build(10, self.clock, self.clock.sleep, log), 1)
+            self.assertEqual(fk._wait_build(10, self.clock, self.clock.sleep,
+                                            os.path.join(self.dir, "none.log")), 2)
+
     def test_anything_else_is_no_wait(self):
         self.assertEqual(self.wait("forever")[0], 2)
         self.assertEqual(self.wait()[0], 2)

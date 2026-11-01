@@ -29,6 +29,8 @@ stop_on         no-destination            # and no paste with a maker whose prod
                                           # (a net that doesn't route is pasted without its new belt and fixed after;
                                           #  add `stop_on no-route` to hold the paste until every net routes)
 stop_on         cannot-carry              # or a machine on a net whose items it takes none of (it would be left off the route)
+stop_on         by-hand                   # or a paste that would replace, remove or reset something changed in the game
+                                          # (out/diff.txt lists each one: adopt it into the design, or fk build --yes)
 
 later:                                    # off the critical path: after the paste, reports only, never stops the build
 report_rates                              # again, routed: the lanes and inserters as laid (too-thin)

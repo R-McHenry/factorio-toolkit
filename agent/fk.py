@@ -449,6 +449,8 @@ def build(cfg, args):
     j = _at(names, args[args.index("--to") + 1]) if "--to" in args else len(names) - 1
     # this build's own options (2.0.62): --with 'STEP OPTS' (repeatable) and --reroute NET[,NET]
     extra = ["--confirm"] if "--confirm" in args else []      # 2.0.63: take up DNP pieces
+    if "--yes" in args:            # 3.0: the OK to paste over the hand edits the diff listed
+        extra += ["--with", "diff --yes"]
     for k, a in enumerate(args[:-1]):
         if a in ("--with", "--reroute"):
             extra += [a, args[k + 1]]
@@ -512,10 +514,11 @@ def main(argv):
             # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
             # ran all 19 steps, the paste included)
             print("fk build [--wait] [--from STEP] [--to STEP] [--with 'STEP OPTS'] "
-                  "[--reroute NET[,NET]] [--confirm]: "
+                  "[--reroute NET[,NET]] [--confirm] [--yes]: "
                   "runs in the background (its lines in game\\out\\build.log, fk status for "
                   "progress) unless --wait; "
                   "--confirm takes up what stands built on DNP pieces; "
+                  "--yes pastes over the hand edits the last build listed and held; "
                   "the steps of game\\<surface>.build.fkb in order, design here and the game "
                   "steps on the host; STEP is a step's name, or NAME:K for its K-th time. --with "
                   "adds options to a step for this build only (--with 'cover robots --fresh'); "
@@ -544,7 +547,9 @@ def main(argv):
     if cmd == "wait":
         if "-h" in rest or "--help" in rest:
             print("fk wait 90s | fk wait built [AREA] [--name ENTITY[,...]] [--max 5m] [--poll "
-                  "10s]: the one way to wait, from the run's fixed wait budget; it asks first "
+                  "10s] | fk wait build [--max 5m] (the background build's end) | fk wait 2m -- "
+                  "COMMAND (a command, stopped at the cap): "
+                  "the one way to wait, from the run's fixed wait budget; it asks first "
                   "(run it again, or add --sure). built: until the area has no ghosts left (or "
                   "the named entity's are gone), or the bound expires; 0 clear, 1 ghosts left, "
                   "2 a link error or no budget left (docs\\TOOLKIT.md, \"The loop\")")
@@ -607,6 +612,12 @@ def main(argv):
         return code
     if cmd == "lua":
         return lua(cfg, rest)
+    if cmd == "stats" and not rest:
+        # 3.0: plain `fk stats` is the one global feed (research, capital and reinvestment, made
+        # and used, power, machines): a sample if one is due, then the history report
+        remote(cfg, ["stats", ".", "--sample"], footer=False)
+        pull(cfg, stats=True)
+        rest = ["--history"]
     if cmd == "stats" and "--sample" in rest:
         # 2.1: the run's stats sample, on the host; no footer, so a sampler that runs on its own
         # never takes the player's new alerts or chat
@@ -739,8 +750,13 @@ def wait(cfg, rest, clock=time.time, sleep=time.sleep):
     sure = "--sure" in rest
     rest = [a for a in rest if a != "--sure"]
     plain = len(rest) == 1 and _seconds(rest[0]) is not None
-    if not plain and rest[:1] != ["built"]:
-        print("fk wait 90s, or fk wait built [AREA] [--max 5m] (fk wait --help)", file=sys.stderr)
+    # 3.0: the other waits a player reaches for, given a budgeted way: a command with a time cap
+    # (in place of `timeout 120 ...` or a long foreground run) and the background build's end
+    capped = len(rest) >= 3 and _seconds(rest[0]) is not None and rest[1] == "--"
+    building = rest[:1] == ["build"]
+    if not (plain or capped or building) and rest[:1] != ["built"]:
+        print("fk wait 90s, fk wait built [AREA] [--max 5m], fk wait build [--max 5m], or "
+              "fk wait 2m -- COMMAND (fk wait --help)", file=sys.stderr)
         return 2
     b = _budget(clock=clock)
     left = _left(b)
@@ -766,6 +782,28 @@ def wait(cfg, rest, clock=time.time, sleep=time.sleep):
         _save_budget(b)
         sleep(want)
         code = 0
+    elif capped:
+        want = min(_seconds(rest[0]), left)
+        b["running"] = {"since": t0, "for": want}
+        _save_budget(b)
+        try:
+            code = subprocess.run(rest[2:], timeout=want, stdin=subprocess.DEVNULL).returncode
+        except subprocess.TimeoutExpired:
+            print(f"fk wait: {rest[2]} still ran after {want:.0f} s; stopped")
+            code = 124
+        except OSError as exc:
+            print(f"fk wait: {rest[2]}: {exc}")
+            code = 127
+    elif building:
+        args = rest[1:]
+        want = left
+        if "--max" in args and args.index("--max") + 1 < len(args):
+            want = min(_seconds(args[args.index("--max") + 1]) or 300.0, left)
+        else:
+            want = min(300.0, left)
+        b["running"] = {"since": t0, "for": want}
+        _save_budget(b)
+        code = _wait_build(want, clock, sleep)
     else:
         args = _wait_args(rest)
         if "--max" in args:
@@ -786,6 +824,31 @@ def wait(cfg, rest, clock=time.time, sleep=time.sleep):
     _save_budget(b)
     print(f"fk wait: waited {took:.0f} s; {_left(b) / 60:.0f} min of wait budget left")
     return code
+
+
+def _wait_build(want, clock, sleep, log=None):
+    """``fk wait build``: until the newest build in game/out/build.log says ``fk build: done,
+    exit N`` (-> N), or ``want`` seconds pass (-> 1); 2 when no build was started."""
+    log = log or os.path.join(GAME, "out", "build.log")
+    end = clock() + want
+    while True:
+        try:
+            with open(log, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            print("fk wait build: no build.log: no build was started (fk build)")
+            return 2
+        last = text.rsplit("\n== fk build", 1)[-1]
+        m = re.search(r"fk build: done, exit (\d+)", last)
+        if m:
+            print("fk wait build: " + m.group(0))
+            return int(m.group(1))
+        if clock() >= end:
+            tail = [ln for ln in last.splitlines() if ln.strip()][-1:]
+            print(f"fk wait build: still running after {want:.0f} s"
+                  + (f"; last line: {tail[0]}" if tail else ""))
+            return 1
+        sleep(min(2.0, max(0.0, end - clock())))
 
 
 #: ``fk wait built`` takes the area where look does, after the word ``built``.

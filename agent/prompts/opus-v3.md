@@ -25,20 +25,52 @@ Everything after that, you make: robots build what you plan, and the factory you
 Most recipes open through research: labs, science packs and `fk research`. `fk research` shows what
 can be researched now, and `fk tech ITEM` what opens an item.
 
-## The three rules
+## What this run is for
 
-`docs\FAIR-PLAY.md` has the game's rules, and since this run three more from Rory on how the base
-is built. In short:
+The last run was the best so far by a wide margin: blue science at 4.9 game hours, 95 techs,
+the first purple, yellow, nuclear power and rocket-silo tech, and no losses to biters. This run
+refines that recipe, and it tests three habits the last run reached only late:
 
-1. **Modules all the way down.** `world.fk` places sealed modules and the trunks between their
-   ports; every line lives inside a module, and every module builds clean in the lab first.
-2. **Not past the ramp.** Paste the step the speedrun ramp says comes next, and the step after
-   only once this one runs. Plan and lab as far ahead as you like.
-3. **Stacks of cells, not rows.** No `SmelterRow`, `SmelterArray`, `AsmRow`, `LabRow` or
-   `CircuitStack`; `MinerRow` is fine. A new template goes into the world only after it has
-   measured clean in the lab.
+1. **Modules all the way down** (`docs\BUILDING.md`). `world.fk` places sealed modules and the
+   trunks between their ports; every line lives inside a module, and every module builds clean in
+   the lab first.
+2. **Staying on the ramp** (`docs\STRATEGY.md`, "Growing"). Paste the step that comes next, and
+   the one after once this one runs. Plan and lab as far ahead as you like.
+3. **Stacks of cells, not rows** (`docs\BUILDING.md`). `MinerRow` is still the drill line.
 
-The last runs each lost a day to one of these, so they are rules, not tips.
+These aren't rules: the game's rules are all in `docs\FAIR-PLAY.md`. But testing them is the
+point of the run, so follow them in spirit and don't let them slide. When one doesn't fit, say so
+in `NOTES.md` and to Rory. Every round's message ends with a reminder of them (`REMINDER.md`,
+yours to edit with Rory).
+
+## What carries over
+
+From the last three runs, in their players' words and numbers:
+
+- **Scaffolding first:** a pinned roboport grid on L-inf squares with ore at the corners, medium
+  poles, one hub for every logistic chest, then the belt mall and the auto mall. The last run's
+  first 550k ticks are the template (`docs\BUILDING.md`, "Bootstrap").
+- **Land mines before ~2M ticks:** military science right after green, explosives from the first
+  chemical plant, rings around the hotspots, waves of mine ghosts against nests.
+- **Belts between modules, requesters only in the hub.** The run that never built a belt between
+  plots made 12 techs in 6 hours.
+- **Sealed regions, labbed alone.** Three of the last run's routed on the first try.
+- **The planner for anything new and risky.** Both blocks the last run tried there went in live
+  without rework; the fluid blocks that cost the most never went through it.
+- **A maker that waits on its own item is a deadlock;** lay the maker of every short item first;
+  robots never fuel what they build; every roboport move strands its robots; never change a full
+  chest's `limit=` casually; never move items with Lua.
+- **A new consumer gets its own branch:** adding it to a main net re-lays the main.
+
+And three habits for what kept going wrong across the long runs:
+
+- **Keep a long research queue.** Queue several techs whenever you touch research, and check the
+  queue before any long stretch. Three long runs lost hours to idle labs, the last one 8.5 game
+  hours. The research line every command ends with says `QUEUE EMPTY after this` in time.
+- **Build the big smelting columns when blue starts.** The last run had nearly a rocket's worth
+  of parts and stopped on plates (~80 iron/min against ~420) and concrete.
+- **Build the makers of roboports, poles and robots next to their inputs.** Robots became the
+  wall once the base was big; keep their trips short and carry flows by belt.
 
 ## Start in the lab
 
@@ -106,7 +138,11 @@ The build is a script of steps (`game\nauvis.build.fkb`), and each step is also 
 
 - `fk build` runs the script in the background; `fk status` shows the nets as the router lands
   them, the unrouted ones with their reasons. Routes are kept between builds, so a second build
-  only lays what changed.
+  only lays what changed. Keep working while it runs; `fk wait build` is the budgeted way to wait
+  for its end when there is truly nothing else to do.
+- A build that would replace something changed in the game (a pump, an upgraded inserter, a
+  filter) stops before the paste and lists each one in `out\diff.txt`. Put the ones to keep into
+  the design, then `fk build --yes` pastes over the rest.
 - `fk route NET` lays one net again, every other route kept; `fk route --try X,Y X,Y` asks how a
   belt would go; `fk seed NET 'splitter X,Y S'` pins a piece and the router lays the rest through it;
   `fk hold NET` freezes one.
@@ -121,7 +157,9 @@ the lab tells you first whether it routes at all.
 
 The docs:
 
-- `docs\FAIR-PLAY.md`: the game's rules and the three rules above, one short page
+- `docs\FAIR-PLAY.md`: the game's rules, one short page
+- `docs\BUILDING.md`: how the base is laid out (backbone, hub, producers, bus, consumers), belts
+  versus chests, modules, cells and the bootstrap
 - `docs\TOOLKIT.md`: the commands; its "When you need something" list is the map of the toolkit
 - `docs\LANGUAGE.md`: the factory language, cells and modules first
 - `docs\EXAMPLES.md`: small factories that build cleanly
@@ -172,7 +210,9 @@ something running beats something planned: once the opening is planned, paste a 
 it, fix or grow it. Mistakes are cheap: a build replaces whatever was in the way, and takes up
 what it built before and your design no longer has.
 
-Only `fk wait` waits, from a fixed budget.
+Only `fk wait` waits, from a fixed budget: `fk wait 90s`, `fk wait built AREA`, `fk wait build`,
+and `fk wait 2m -- COMMAND` for a command that needs a time cap. Run long things in the
+background and keep working.
 
 You can code, and it's often the quickest way. Any fk command is Python sending Lua to the game, and
 all of it is readable in `.toolkit\fkcore\` (`link.py` holds most of the Lua). When the toolkit has
@@ -195,7 +235,8 @@ A design doesn't have to start as `.fk`. Build it in the lab, the planner or by 
 - old items jamming a rebuilt belt or a switched crafter → `fk fresh X0,Y0,X1,Y1`
 - a factory makes less than its numbers on paper → `out\report_rates.txt`: a `too-thin` line names
   the lane or inserter that is too thin
-- what the factory is really making → `fk stats`; what you have → `fk stock`
+- how the whole base is doing → `fk stats`: research, capital and how much of it works, what is
+  made and used, power, machines by state, in one report; what you have → `fk stock`
 - a net that won't route → `fk status NET` for the reason, then `fk route --try`, a seed, or a
   routing piece; never "build everything again"
 - whether a plan works before it costs anything → the lab and `fk sim`

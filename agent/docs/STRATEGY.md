@@ -57,39 +57,8 @@ cost, but the base itself takes a sizeable share on top: machines, belts, robots
 the rocket's materials and the silo. So run mining and smelting well above what science alone
 implies, roughly one and a half to two times.
 
-## Modules from the first paste
-
-The base is a hierarchy of sealed modules from its first build, not a heap of machines that gets
-sorted out later. Every run that started loose spent its second day untangling it: one world
-build of 660 instances and 1,000 nets, every attempt laying all of it again, and one stuck net
-holding the whole paste.
-
-- **`world.fk` places modules and the trunks between their ports, and nothing else** (besides the
-  plant and the kit). Smelting, the mall, each science, power: each one a `module NAME size WxH`
-  with its ports on its edges, in a file of its own once it grows.
-- **Regions nest.** A region (the iron smelting, the red-green block) is a sealed module of sealed
-  modules: a Stack of cells inside, a module or two beside it, and its own trunks. The last run's
-  LabArea, 72 nets, routed in 12 s on its own; its flat world of 1,000 nets took minutes a build.
-- **Lab each module alone before it goes into the world** (`fk lab NAME`, then `--measure`). A
-  module that builds clean on its own goes into the world and only its trunks are new there.
-- **Leave room and ports for the next size.** A module's frame should take the next doubling of
-  its line (a Stack's `built=K`) without moving its ports, so growing it never re-routes its
-  neighbours.
-- **Paste one region at a time.** Change one module, build, look, then the next. A change that
-  touches five regions at once is five problems in one build.
-
-`docs\examples\busbase.fk` is a whole base built this way (it predates cells: its smelting and
-circuits are rows, so put Stacks of cells in their place); `blue6.fk` and `furnace-column.fk` are
-lines of cells inside a module.
-
-## Lines are Stacks of cells
-
-A line of machines is a `Stack` of cells (`game\cells.fk`), not one of the old rows. The
-smelters, assemblers, labs and circuits each have cells that replace the rows (on the lab, 12
-SmelterPair cells made 450 plates/min to SmelterArray's 445), and a cell is yours to read, copy
-and change, where a row is a black box. Use `MinerRow` for drills on a patch:
-there is no drill cell yet. A new cell earns a place in your library when it has built and
-measured clean in the lab; until then it lives in the one module that needs it.
+`BUILDING.md` is the other half of this guide: how the base is laid out (the backbone, the hub,
+producers, the bus, consumers), modules all the way down, Stacks of cells, and the bootstrap.
 
 ## Bootstrap
 
@@ -112,7 +81,11 @@ measured clean in the lab; until then it lives in the one module that needs it.
 
 ## Research
 
-- **Idle labs mean progress has stopped.** Keep the queue long. Research what moves you forward
+- **Idle labs mean progress has stopped.** Keep the queue long: every time you touch research,
+  queue several techs ahead, and look at the queue before any long stretch of building. Three of
+  the long runs lost hours to an empty queue (the last one 8.5 game hours, overnight). The
+  research line at the end of every command says `QUEUE EMPTY after this` while the last tech
+  still runs. Research what moves you forward
   (automation, electric mining, logistics, fast inserter, automation-2, electric energy
   distribution, construction and logistic robotics) and skip what doesn't.
 - **When research stalls, check which pack the labs are waiting for** and scale that pack's makers.
@@ -171,6 +144,10 @@ measured clean in the lab; until then it lives in the one module that needs it.
   roboport within 50 tiles of the last) to reach new patches.
 - **Keep the rest of the base growing alongside science.** A big science block with too little
   smelting and too few building materials stalls.
+- **Build the big smelting columns when blue starts**, not after the rocket parts. The last run
+  had nearly a rocket's worth of processing units, low density structures and rocket fuel, and
+  stopped at ~80 iron plates/min against ~420 the rocket needed: the columns planned at ~5.5M
+  ticks were never built. Plates are what the top tiers run short of.
 
 ## Robots
 

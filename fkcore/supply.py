@@ -473,7 +473,10 @@ def research_line(state):
     q = [x for x in _list(st.get("queue")) if x and x != st.get("current")]
     if st.get("current"):
         pct = f" {float(st.get('progress') or 0) * 100:.0f}%" if st.get("progress") is not None else ""
-        queue = f"; queue: {', '.join(q)}" if q else ""
+        # 3.0 (the retro: research sat idle in three long runs, the last time 8.5 h after its
+        # queue ran out): say so while the last tech still runs, not once the labs stand
+        queue = f"; queue: {', '.join(q)}" if q else \
+            ("; QUEUE EMPTY after this: `fk research TECH ...` queues more" if "queue" in st else "")
         warn = " (0 labs: it will not move)" if labs == 0 else ""
         tail = f"{queue}; {labs} lab{'s' if labs != 1 else ''}{warn}"
         rate = research_rate(st)
