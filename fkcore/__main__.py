@@ -1330,8 +1330,6 @@ def main(argv=None):
     sp.add_argument("nets", nargs="?", default="",
                     help="route only: NET[,NET] (or an instance, every net in it) to lay again")
     sp.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'")
-    sp.add_argument("--via", action="append", default=[], metavar="X,Y",
-                    help="route one net in pieces through these waypoints, in order (repeatable)")
     sp.add_argument("--try", dest="try_", nargs=2, metavar="X,Y",
                     help="how a belt would go from tile A to tile B here; nothing laid")
     st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design)")
@@ -1595,12 +1593,8 @@ def main(argv=None):
             extra = list(a.extra) + ([f"route --again {a.nets}"] if a.nets else [])
             if a.nets and a.step != "route":
                 raise flow.FlowError("nets go with the route step only")
-            if a.via:
-                if a.step != "route" or not a.nets or "," in a.nets:
-                    raise flow.FlowError("--via goes with one net: fk route NET --via X,Y")
-                extra.append(f"route --via {a.nets}@{'+'.join(a.via)}")
             if a.try_:
-                if a.step != "route" or a.nets or a.via:
+                if a.step != "route" or a.nets:
                     raise flow.FlowError("--try goes alone: fk route --try X,Y X,Y")
                 extra.append(f"route --try {a.try_[0]}:{a.try_[1]}")
             code, _ctx = flow.run(a.script, a.step, a.step, cat, extra=extra)

@@ -968,10 +968,9 @@ def s_route(ctx, args):
     # --skip NET,... (left to the player, reported manual)
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
               m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
-              skip="", via="", **{"try": ""})
+              skip="", **{"try": ""})
     if o["try"]:
         return _route_try(ctx, str(o["try"]))
-    via = _via(o["via"])
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -1000,9 +999,6 @@ def s_route(ctx, args):
             pinned.pop(net, None)
             again.pop(net, None)
         lines += [f"{factory}: {line}" for line in held_lines]
-        for net in via:
-            if net in flat.nets and pinned.pop(net, None) is not None:
-                again[net] = "asked (--via)"
         if o["again"]:
             asked, unknown = _asked(flat, str(o["again"]))
             for net in sorted(asked):
@@ -1048,8 +1044,7 @@ def s_route(ctx, args):
                                    memo=memo,
                                    again=sorted(_asked(flat, str(o["again"]))[0])
                                    if o["again"] else (),
-                                   on_net=on_net, on_reach=on_reach,
-                                   via={n: w for n, w in via.items() if n in flat.nets})
+                                   on_net=on_net, on_reach=on_reach)
         finally:
             route.PROGRESS = saved
             design.clear_now(ctx.out, factory)
@@ -1111,24 +1106,6 @@ def _route_try(ctx, spec):
         lines.append(f"{factory}: try {where}: {len(got)} carriers, {how} ({took}); nothing laid")
         lines += [f"  {e.name} {e.x:g},{e.y:g} {fkp.DIRS[e.dir]}" for e in got]
     return lines, []
-
-
-def _via(spec):
-    """``route --via NET@X,Y[+X,Y...][;NET@...]``: {net: [(x, y), ...]} (3.0, waypoints)."""
-    out = {}
-    for part in (p.strip() for p in str(spec or "").split(";")):
-        if not part:
-            continue
-        net, at, points = part.partition("@")
-        try:
-            if not at or not net:
-                raise ValueError(part)
-            out[net] = [tuple(int(v) for v in pt.split(",")) for pt in points.split("+")]
-            if any(len(pt) != 2 for pt in out[net]):
-                raise ValueError(part)
-        except ValueError:
-            raise FlowError(f"route --via NET@X,Y[+X,Y...][;NET@...], got {part!r}") from None
-    return out
 
 
 def _asked(flat, spec):

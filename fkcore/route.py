@@ -1244,60 +1244,6 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
     return got, f"{text}; one lane: no join for {what} routes ({how})"
 
 
-def _route_via(cat, job, ents, frames, js, box, limit, terrain, avoid, via, allow=frozenset()):
-    """3.0 ``route --via NET@X,Y[+X,Y...]`` (Rory, 2026-11-01: "if an agent gets held up on routing
-    a net, they should ideally be able to break it up like once"): the net in pieces, its drivers
-    to the first waypoint, waypoint to waypoint, the last to its consumers, each piece the
-    router's own search and laid on the pieces before it. A piece's last belt stands on the
-    waypoint and the next piece starts on the tile it feeds, in whichever of the four headings
-    lets both pieces through.
-    -> (carriers, report text) or (None, reason)."""
-    if job.parts or job.m2m is not None or job.fluid:
-        return None, "--via takes a net on one belt (not a lane pair, an m2m net or a pipe)"
-    via = [tuple(w) for w in via]
-
-    def pieces(k, starts, sources, laid):
-        """The pieces from waypoint ``k`` on: -> ([(carriers, where)], None) or (None, why)."""
-        last = k == len(via)
-        where = "its consumers" if last else f"waypoint {via[k][0]},{via[k][1]}"
-        why = None
-        for h in ([None] if last else range(4)):
-            piece = NetJob(job.net, starts=starts, sources=sources,
-                           goals=list(job.goals) if last else [(via[k], h)],
-                           taps=list(job.taps) if last else [], owners=list(job.owners),
-                           anchors=dict(job.anchors))
-            got, why = _route_one(cat, piece, list(ents) + laid, frames, js, box, limit, terrain,
-                                  avoid, allow=allow)
-            if got is None:
-                why = f"no piece from {'its drivers' if not k else 'the waypoint before'} to " \
-                      f"{where}: {why}"
-                if not k and len(starts) + len(sources) > 1:
-                    why += " (its drivers all reach the first waypoint: put it past where they join)"
-                continue
-            if last:
-                return [(got, where)], None
-            w = via[k]
-            rest, why = pieces(k + 1, [((w[0] + _DX[h], w[1] + _DY[h]), h)], [], laid + got)
-            if rest is not None:
-                return [(got, where)] + rest, None
-        return None, why
-
-    got, why = pieces(0, list(job.starts), list(job.sources), [])
-    if got is None:
-        return None, why
-    laid = [e for ents_, _w in got for e in ents_]
-    words = [f"{len(ents_)} carriers to {where}" for ents_, where in got]
-    count = {}
-    out = []
-    for e in laid:                        # one net's keys: b0, b1, ... across the pieces
-        letter = e.key.rsplit("/", 1)[1][0]
-        n = count.get(letter, 0)
-        count[letter] = n + 1
-        out.append(fkpmod.Entity(f"~{job.net}/{letter}{n}", e.name, e.x, e.y, e.dir,
-                                 dict(e.attrs)))
-    return out, "via " + "; ".join(words)
-
-
 def try_route(flat, lay, cat, a, b, bounds=None, margin=4, blocked=(), limit=60000):
     """3.0 ``route --try A:B``, the question mode: how a belt would run from tile ``a`` to tile
     ``b`` on ``lay`` as it stands, every heading tried at both ends; commits nothing.
@@ -2263,7 +2209,7 @@ def _filter_loads(flat, lay, cat):
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                  blocked=(), hand=None, patch=None, ug=None, m2m=False, group_budget=None,
                  group_max=None, first=(), skip=(), memo=None, again=(), on_net=None,
-                 on_reach=None, via=None) -> Routed:
+                 on_reach=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2283,12 +2229,11 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     3.0, the design database on disk (``fkcore.design``): ``on_net(net, status, carriers, why,
     seconds)`` is told each net the moment it lands (routed or unrouted), so a build that stops
     leaves what it finished; ``on_reach(net, which, k, n)`` is asked as the router reaches a net,
-    and may answer carriers to take as they stand (a net the player held while the build ran).
-    ``via``: {net: [(x, y), ...]}, nets laid in pieces through those waypoints (``_route_via``)."""
+    and may answer carriers to take as they stand (a net the player held while the build ran)."""
     global _HANDS, _M2M
     policy = dict(group_budget=group_budget, group_max=group_max, first=tuple(first or ()),
                   skip=tuple(skip or ()), memo=memo or {}, fresh=tuple(again or ()),
-                  on_net=on_net, on_reach=on_reach, via=dict(via or {}))
+                  on_net=on_net, on_reach=on_reach)
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
@@ -2318,8 +2263,7 @@ def _named(net, patterns):
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                   blocked=(), patch=None, group_budget=None, group_max=None, first=(),
-                  skip=(), memo=None, fresh=(), on_net=None, on_reach=None,
-                  via=None) -> Routed:
+                  skip=(), memo=None, fresh=(), on_net=None, on_reach=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
@@ -2449,7 +2393,6 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     ents = list(base.entities.values())
     added, failed, how, swaps, rlines = {}, {}, {}, [], {}
     memo = memo or {}
-    fresh = tuple(fresh) + tuple(via or ())     # a net laid --via is searched, whatever it did last
     remembered, last_key, known = {}, {}, {}
     held_now = set()                   # nets the player held while this build ran (on_reach)
 
@@ -2511,15 +2454,6 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             rlines[net] = summary
             return ents
         fnet, bnet = net_frames(net)
-        if via and net in via:
-            got, why = _route_via(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
-                                  via[net], allow=joints)
-            if got is None:
-                failed[net] = f"--via: {why}"
-                return ents
-            failed.pop(net, None)
-            added[net], how[net] = got, why
-            return ents + got
         got, why = (None, failed.get(net)) if promo else \
             _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid, allow=joints)
         if got is None and promo:

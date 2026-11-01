@@ -96,23 +96,24 @@ class DesignFlowTest(unittest.TestCase):
         self.assertIn("stale     gear: routed again: asked", route_txt)
         self.assertEqual(main(["step", self.script, "place", "gear"]), 2)   # nets: route only
 
-    def test_a_net_laid_through_a_waypoint(self):
-        # 3.0 `fk route gear --via X,Y`: the net in two pieces, the first ending on the waypoint
-        from fkcore.__main__ import main
-        self.build(to="route")
-        gear = design.read_all(self.out, "main")["gear"]["ents"]
-        belts = sorted((e.x, e.y) for e in gear if e.name == "transport-belt")
-        mid = belts[len(belts) // 2]
-        at = f"{int(mid[0])},{int(mid[1])}"
-        self.assertEqual(main(["step", self.script, "route", "gear", "--via", at]), 0)
-        route_txt = self.read("out/route.txt")
-        self.assertRegex(route_txt, r"routed    gear: .*via \d+ carriers to waypoint "
-                                    + at + r"; \d+ carriers to its consumers")
-        now = design.read_all(self.out, "main")["gear"]["ents"]
-        self.assertIn(mid, {(e.x, e.y) for e in now})
+    def test_a_waypoint_is_a_literal_belt_the_net_is_split_at(self):
+        # Rory, 11-01: no route --via; a stuck net is broken up by placing a belt piece (a Literal
+        # of two named belts) and splitting the net at it, both halves the router's own nets
+        with open(os.path.join(self.dir, "wp.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"entities": [{"name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 8},'
+                     ' {"name": "transport-belt", "x": 0.5, "y": 1.5, "direction": 8}],'
+                     ' "names": {"in": 0, "out": 1}}')
+        fk = self.read("main.fk").replace(
+            "labs  = LabRow<n=10>", 'wp    = Literal<file="wp.json">  @(8, 28)\nlabs  = LabRow<n=10>'
+        ).replace("net gear:   gears -> red, belts, ins",
+                  "net gear:   gears -> wp.in\nnet gear2 items iron-gear-wheel: wp.out -> red, belts, ins")
+        with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8") as fh:
+            fh.write(fk)
         self.build(to="report_checks")
-        self.assertIn("12 nets: 12 connected", self.read("out/report_checks.txt"))
-        self.assertEqual(main(["step", self.script, "route", "packs,gear", "--via", at]), 2)
+        route_txt = self.read("out/route.txt")
+        self.assertRegex(route_txt, r"routed    gear: 1 -> 1, ")
+        self.assertRegex(route_txt, r"routed    gear2: 1 -> 3, ")
+        self.assertIn("13 nets: 13 connected", self.read("out/report_checks.txt"))
 
     def test_route_try_asks_and_lays_nothing(self):
         # 3.0 `fk route --try A B`: a belt from A to B on the design as it stands; nothing changes
