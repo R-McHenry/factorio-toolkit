@@ -158,6 +158,30 @@ class MachineTest(unittest.TestCase):
         self.assertAlmostEqual(m.makes["iron-gear-wheel"], 6.0)
         self.assertAlmostEqual(m.needs["molten-iron"], 40.0)
 
+    def test_a_biochamber_burns_nutrients(self):
+        # its burner takes nutrients, not chemical fuel: the default fuel is its own category's
+        with mock.patch.dict(os.environ, {"FK_LEARNED": FIXTURE}):
+            flat, _cat = self.elaborate(
+                "b = Machine<entity=biochamber, recipe=nutrients-from-spoilage> @(0, 0)\n")
+            m = flat.machines["b/m0"]
+            self.assertAlmostEqual(m.needs["nutrients"], 0.25)    # 500 kW / 2 MJ
+            self.assertNotIn("coal", m.needs)
+            with self.assertRaises(ElabError) as e:
+                self.elaborate("b = Machine<entity=biochamber, recipe=nutrients-from-spoilage, "
+                               "fuel=coal> @(0, 0)\n")
+        self.assertIn("coal is chemical fuel", str(e.exception))
+
+    def test_fewer_fluids_than_boxes_measured(self):
+        # tools/laptop_server.py recipeboxes: 3 boxes, 2 fluids, the first fluid takes boxes 1-2
+        path = os.path.join(os.path.dirname(DEFAULT_PATH), "packs", "seablock", "catalog.json")
+        cat = Catalog.load(path)
+        m = "angels-advanced-chemical-plant"
+        live = cat._recipe_boxes(m, cat._fluid["entities"][m], "angels-coal-cracking-3")
+        self.assertEqual(sorted((f, sorted({b for b, _c in mem})) for f, mem in live),
+                         [("angels-gas-carbon-dioxide", [5]), ("angels-gas-hydrogen-sulfide", [6]),
+                          ("angels-gas-oxygen", [3]), ("angels-gas-synthesis", [4]),
+                          ("steam", [1, 2])])
+
     def test_wrong_category_is_a_check(self):
         with mock.patch.dict(os.environ, {"FK_LEARNED": FIXTURE}):
             flat, _cat = self.elaborate(

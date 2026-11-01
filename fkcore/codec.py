@@ -402,6 +402,11 @@ def _entity_json(row, number):
             raise CodecError(f"{row.get('src')}: ug must be in or out, got {ug!r}")
         entity["type"] = _UG[ug]
     attrs.pop("wire", None)                    # blueprint() writes it into the wires
+    if row["name"] == "infinity-pipe" and attrs.get("fluid"):
+        # 3.0: an InfinityPipe<fluid=...> pastes with its fluid set (full, at least), as the
+        # lab sets the pipes it feeds ports with; fluid= stays in tags.fkp to come back
+        entity["infinity_settings"] = {"name": attrs["fluid"], "percentage": 1,
+                                       "mode": "at-least"}
     # the typed circuit settings make game fields, and stay in tags.fkp to come back as written;
     # the raw ones (2.1) too
     entity.update(made_fields(attrs, row.get("src")))

@@ -118,6 +118,11 @@ something of (a foundry's fluid boxes), takes three steps:
    mi_out`, and stack the cell like any other. On the lab, three stacked foundry cells routed and
    connected 12 of 12 nets and cast gears from molten iron.
 
+A burner takes its own kind of fuel: a biochamber burns nutrients by default (`fuel=` picks
+another of its category). A recipe with fewer fluids than the machine has boxes on a side gives
+the extra boxes to its first fluid (a cryogenic plant's three inputs with two fluids: boxes 1-2 and
+3). `InfinityPipe<fluid=...>` pastes with its fluid set, so a test design can feed itself.
+
 ## Bootstrap
 
 The kit has no labs and no stone furnaces, 3 assembling-machine-1s, 10 burner drills, 200 belts and

@@ -191,7 +191,8 @@ class Catalog:
         A crafting machine with a recipe the file measured takes that recipe's live boxes (one
         fluid on a side with several boxes holds them all: one box, every connection). A recipe
         it did not measure gets the same rule from the recipe itself (fluids in order, one per
-        box, an explicit ``fluidbox_index`` first). No recipe: every prototype box, except where
+        box, an explicit ``fluidbox_index`` first; fewer fluids than boxes, the first fluid takes
+        the extra boxes). No recipe: every prototype box, except where
         the boxes need a fluid recipe (assembling machines 2 and 3)."""
         row = (self._fluid.get("entities") or {}).get(name)
         if not row:
@@ -281,6 +282,16 @@ class Catalog:
             if len(fluids) == 1 and not fluids[0].get("fluidbox_index"):
                 out.append((fluids[0]["name"], [[b["index"], j + 1] for b in boxes
                                                  for j in range(len(b["connections"]))]))
+                continue
+            if len(fluids) < len(boxes) and not any(r.get("fluidbox_index") for r in fluids):
+                # 3.0 (measured: tools/laptop_server.py recipeboxes): fewer fluids than boxes,
+                # the first fluid takes the extra boxes, the others one each from the end (a
+                # cryogenic plant's or an Angel's plant's 3 boxes, 2 fluids: boxes 1-2 and 3, the
+                # only such shape in Space Age or Sea Block)
+                k = len(boxes) - len(fluids) + 1
+                for r, group in zip(fluids, [boxes[:k]] + [[b] for b in boxes[k:]]):
+                    out.append((r["name"], [[b["index"], j + 1] for b in group
+                                            for j in range(len(b["connections"]))]))
                 continue
             free = list(boxes)
             for r in fluids:
