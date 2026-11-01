@@ -79,6 +79,7 @@ class Line:
     cmd: str                 # the step name: "route", "cover_power", ...
     args: list
     text: str
+    later: bool = False      # 3.0: after `later:`, off the critical path (never stops a paste)
 
 
 @dataclass
@@ -123,10 +124,18 @@ class Ctx:
 
 
 def parse(text, path="<fkb>") -> list:
-    out = []
+    """The script's lines. 3.0 (Rory, 2026-11-01: "a section for non critical path stuff that
+    wont block a paste, like the more expensive rate report"): the steps after a `later:` line run
+    once the rest has run, the paste too; what they find is reported and never stops the build,
+    and one that fails says so in its report. They only read the layout, so a layout step there
+    is a script error."""
+    out, later = [], False
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
+            continue
+        if line == "later:":
+            later = True
             continue
         t = shlex.split(line)
         cmd, args = t[0], t[1:]
@@ -138,7 +147,10 @@ def parse(text, path="<fkb>") -> list:
             raise FlowError(f"{path}:{n}: unknown step {t[0]!r} (steps: "
                             + ", ".join(sorted(s.replace('_power', ' power')
                                                .replace('_robots', ' robots') for s in STEPS)) + ")")
-        out.append(Line(n, cmd, args, line))
+        if later and cmd in _NOT_LATER:
+            raise FlowError(f"{path}:{n}: {t[0]} changes the layout or the game; it goes before "
+                            "`later:`, whose steps only report")
+        out.append(Line(n, cmd, args, line, later))
     return out
 
 
@@ -2066,6 +2078,9 @@ STEPS = {
 }
 _SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "size", "stop_on")
 _LAYOUT = ("place", "route", "hands", "tier", "cover_power", "cover_robots")
+#: the steps a `later:` section may not hold: they lay out, write or paste
+_NOT_LATER = tuple(s for s in _SOURCE if s != "stop_on") + _LAYOUT + (
+    "floorplan", "write_layout", "diff", "apply")
 
 
 def _write_checkpoint(ctx, step, upto):
@@ -2133,8 +2148,8 @@ def with_options(lines, extra):
     missing = sorted(set(add) - {ln.cmd for ln in lines})
     if missing:
         raise FlowError(f"--with: the script has no {', '.join(missing)} step")
-    return [Line(ln.n, ln.cmd, ln.args + add[ln.cmd], ln.text + "  " + " ".join(add[ln.cmd]))
-            if ln.cmd in add else ln for ln in lines]
+    return [Line(ln.n, ln.cmd, ln.args + add[ln.cmd], ln.text + "  " + " ".join(add[ln.cmd]),
+                 ln.later) if ln.cmd in add else ln for ln in lines]
 
 
 def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) -> tuple:
@@ -2230,7 +2245,16 @@ def _steps(ctx, script, lines, first, last, width, written, notes, timings):
     for i in range(first, last + 1):
         ln = lines[i]
         t0 = time.monotonic()
-        report, checks = STEPS[ln.cmd](ctx, ln.args)
+        if ln.later:
+            try:
+                report, checks = STEPS[ln.cmd](ctx, ln.args)
+            except FlowError:
+                raise                         # a malformed line is still the script's error
+            except Exception as exc:      # noqa: BLE001 - off the critical path: it reports
+                report, checks = [f"failed (a later step; the build goes on): "
+                                  f"{type(exc).__name__}: {exc}"], []
+        else:
+            report, checks = STEPS[ln.cmd](ctx, ln.args)
         took = time.monotonic() - t0
         timings.write(f"{ln.cmd:<14} line {ln.n:>3}  {took:8.1f} s  (at {t0 - began:7.1f} s)\n")
         timings.flush()
@@ -2248,7 +2272,7 @@ def _steps(ctx, script, lines, first, last, width, written, notes, timings):
         written.add(ln.cmd)
         if ln.cmd in _LAYOUT or ln.cmd == "floorplan":
             _write_checkpoint(ctx, ln.cmd, lines[:i + 1])
-        stops = _stopping(ctx, checks)
+        stops = [] if ln.later else _stopping(ctx, checks)
         head = report[0] if report else ""
         summary = (f"[{i + 1:>2}/{width}] {ln.text:<44} {head[:70]}"
                    + (f"  ({len(checks)} check lines)" if checks else "")

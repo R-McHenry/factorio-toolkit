@@ -193,6 +193,11 @@ How route works through the nets is yours to set, on its line in the build scrip
   budget.
 - `out\route.txt` has a `group` line for each net that got a group try, and whether it settled.
 
+Steps after a `later:` line in the build script run once the rest is done, the paste included.
+They are off the critical path: what they find is reported and never stops the build, and one
+that breaks says so in its report. Put slow reports there, like the routed `report_rates`. Steps
+that lay out, write or paste can't go there.
+
 Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on objects (`set
 NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
 before the floorplan (`out\floorplan.txt`, the `circuits` lines, says what each one set), and the

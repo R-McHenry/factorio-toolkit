@@ -10,7 +10,6 @@ place           --keep pinned             # fragments by their @(x, y) hints; Li
 route           --only stale --effort normal --group-budget 10 --hand any
 hands           minimize                  # every short hand: the lowest rung, raised where the flow needs more
 tier            minimize                  # belt tier per lane: the slowest that carries what the design asks
-report_rates                              # again, routed: the lanes and inserters as laid (CAPACITY)
 cover power     --pole medium-electric-pole
 cover robots
 floorplan                                 # plots + shared infra, compose the surface
@@ -20,3 +19,6 @@ write_layout                              # write the .fkp files (commit them)
 diff            --scope stale             # reads only the scope being built (needs the game)
 apply           --scope stale             # paste + decon; the only world write (needs the game)
 stop_on         invariant                 # the default: only malformed data stops the run
+
+later:                                    # off the critical path: after the paste, reports only
+report_rates                              # again, routed: the lanes and inserters as laid (CAPACITY)

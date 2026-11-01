@@ -67,8 +67,11 @@ class FluidRouteTest(unittest.TestCase):
             r = route.route_layout(flat, lay, CAT)
             self.assertEqual((sorted(r.memo), r.failed),
                              (["water"], {"water": "fake: no pipe route"}))
+            # the first build's water saw no steam pipes; the next sees them standing
+            r = route.route_layout(flat, r.layout, CAT, memo=r.memo)
+            self.assertEqual(calls[-1], ["water"])
             again = route.route_layout(flat, r.layout, CAT, memo=r.memo)
-            self.assertEqual(len(calls), 1)               # steam stands, water is remembered
+            self.assertEqual(len(calls), 2)               # steam stands, water is remembered
             self.assertIn("not searched again", again.failed["water"])
             route.route_layout(flat, r.layout, CAT, memo=r.memo, again=["water"])
             self.assertEqual(calls[-1], ["water"])

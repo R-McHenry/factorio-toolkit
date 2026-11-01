@@ -2177,7 +2177,8 @@ def _filter_loads(flat, lay, cat):
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                  blocked=(), hand=None, patch=None, ug=None, m2m=False, group_budget=None,
-                 group_max=None, first=(), skip=(), memo=None, again=()) -> Routed:
+                 group_max=None, first=(), skip=(), memo=None, again=(), on_net=None,
+                 on_reach=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2192,10 +2193,16 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     (``fnmatch``, ``mall/*``) laid first, in that order; ``skip``: nets or patterns the router
     leaves to the player (reported ``manual``, never a failure). ``memo``: the last build's
     ``Routed.memo``; a net in it whose ends and ground are as they were then is not searched again
-    (it fails with its last reason), unless ``again`` (names or patterns) names it."""
+    (it fails with its last reason), unless ``again`` (names or patterns) names it.
+
+    3.0, the design database on disk (``fkcore.design``): ``on_net(net, status, carriers, why,
+    seconds)`` is told each net the moment it lands (routed or unrouted), so a build that stops
+    leaves what it finished; ``on_reach(net, which, k, n)`` is asked as the router reaches a net,
+    and may answer carriers to take as they stand (a net the player held while the build ran)."""
     global _HANDS, _M2M
     policy = dict(group_budget=group_budget, group_max=group_max, first=tuple(first or ()),
-                  skip=tuple(skip or ()), memo=memo or {}, fresh=tuple(again or ()))
+                  skip=tuple(skip or ()), memo=memo or {}, fresh=tuple(again or ()),
+                  on_net=on_net, on_reach=on_reach)
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
@@ -2225,7 +2232,7 @@ def _named(net, patterns):
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                   blocked=(), patch=None, group_budget=None, group_max=None, first=(),
-                  skip=(), memo=None, fresh=()) -> Routed:
+                  skip=(), memo=None, fresh=(), on_net=None, on_reach=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
@@ -2356,6 +2363,17 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     added, failed, how, swaps, rlines = {}, {}, {}, [], {}
     memo = memo or {}
     remembered, last_key, known = {}, {}, {}
+    held_now = set()                   # nets the player held while this build ran (on_reach)
+
+    def landed(net, took):
+        """Tell ``on_net`` how ``net`` (or each net of a ribbon) landed."""
+        if on_net is None:
+            return
+        for m in (ribs[net].nets if net in ribs else [net]):
+            if m in added:
+                on_net(m, "routed", added[m], how.get(m, ""), took)
+            elif m in failed:
+                on_net(m, "unrouted", (), failed[m], took)
 
     def avoid_of(net):
         avoid = set()
@@ -2373,6 +2391,15 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         entities with its carriers. ``promo``: only the promoting search (the plain one failed on
         this ground already)."""
         _progress(0, k, steps, net, which=which)
+        if on_reach is not None and net not in ribs:
+            mine = on_reach(net, which, k, len(steps))
+            if mine is not None:
+                taken = {t for e in ents for t in fkpmod.tiles_of(cat, e)}
+                mine = [e for e in mine if not fkpmod.tiles_of(cat, e) & taken]
+                added[net], how[net] = mine, "held: your net file, as it stands"
+                failed.pop(net, None)
+                held_now.add(net)
+                return ents + mine
         avoid = avoid_of(net)
         if net in ribs:
             rib = ribs[net]
@@ -2424,7 +2451,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         most ``gmax`` (never a ribbon's: a ribbon is laid whole). None when ``net`` finds no way
         even then: the ground, not the order, stops it."""
         lift = {e.key: other for other, laid in added.items() if other not in rib_of
-                for e in laid}
+                and other not in held_now for e in laid}
         avoid = avoid_of(net)
         fnet, bnet = net_frames(net)
         _progress(0, 0, [net], net, which=f"the way of {net}")
@@ -2456,7 +2483,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                     failed[net] = memo[net]["why"]
                     remembered[net] = memo[net]
                 else:
+                    t0 = time.monotonic()
                     ents = lay(net, ents, j, later, "pass 1, the nets that failed last build")
+                    landed(net, time.monotonic() - t0)
             break
         if memo.get(net) and net not in ribs and not _named(net, fresh):
             if memo[net].get("key") == key_of(net, ents):
@@ -2465,7 +2494,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             else:
                 later.append(net)
             continue
+        t0 = time.monotonic()
         ents = lay(net, ents, k, order, "pass 1")
+        landed(net, time.monotonic() - t0)
     # a net that failed: laid again together with the nets in its way, for up to the budget
     groups = []
     for net in [n for n in order if n in failed and n not in ribs and n not in remembered]:
@@ -2500,6 +2531,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                     break
             if not hopeless and all(m in added for m in steps):
                 ents, settled = trial, True
+                for m in steps:
+                    landed(m, time.monotonic() - t0)
                 break
             lost = [m for m in steps if m not in added]
             for d, was in zip((added, failed, how, rlines), saved):
@@ -2522,7 +2555,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     left = [n for n in order if n in failed and n not in ribs and n not in remembered]
     for k, net in enumerate(left):
         passes = 2
+        t0 = time.monotonic()
         ents = lay(net, ents, k, left, "the promoting pass", promo=True)
+        landed(net, time.monotonic() - t0)
         if net in failed:
             last_key[net] = key_of(net, ents)      # the ground of its last search
     added, failed, how, rib_lines = dict(added), dict(failed), dict(how), dict(rlines)
@@ -2560,12 +2595,16 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and n not in kept
                         and js[n].skip is None)
 
-    def fluid_key(net):
-        # a fluid net is searched in the whole box, and the fluid nets laid before it count
-        return _ground_key(cat, js[net], list(new.entities.values()), box, terrain, (),
-                           ("fluid", limit, budget), whole=True)
+    # a fluid net is searched in the whole box: its key is the ground as the fluid router finds it
+    # (the fluid nets it lays this run are not in it), one hash for all of them
+    if fluid_todo:
+        world = _ground_key(cat, NetJob(""), list(new.entities.values()), box, terrain, (), (),
+                            whole=True)
+    f_keys = {net: hashlib.sha1(repr((world, js[net].signature(), sorted(js[net].ends()),
+                                      "fluid", limit, budget)).encode()).hexdigest()
+              for net in fluid_todo}
     for net in list(fluid_todo):
-        if memo.get(net) and not _named(net, fresh) and memo[net].get("key") == fluid_key(net):
+        if memo.get(net) and not _named(net, fresh) and memo[net].get("key") == f_keys[net]:
             known[net] = memo[net]
             failed[net] = (f"{memo[net]['why']}; not searched again: it failed on this same "
                            f"ground last build (route --again {net} tries it)")
@@ -2582,7 +2621,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         failed.update(f_failed)
         for net in f_failed:
             if net in js:
-                known[net] = {"key": fluid_key(net), "why": f_failed[net]}
+                known[net] = {"key": f_keys.get(net), "why": f_failed[net]}
     xs = [t[0] + 1 for e in new.entities.values() for t in fkpmod.tiles_of(cat, e)]
     ys = [t[1] + 1 for e in new.entities.values() for t in fkpmod.tiles_of(cat, e)]
     new.size = (max(xs + [w]), max(ys + [h]))

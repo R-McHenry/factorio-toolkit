@@ -10,7 +10,6 @@ place           --keep pinned             # fragments by their @(x, y) hints; Li
 route           --only stale --effort normal --hand any   # direct insertion: the lowest hand the network can build (out/avail.json, which falls back to the lowest it can make)
 hands           minimize                  # every short hand: that lowest rung, raised only where the routed flow needs more (out/hands.txt; "hands maximize" takes the top rung everywhere)
 tier            minimize --allow yellow   # belt tier per lane: --allow yellow,red for red where yellow is too thin; --red N caps it
-report_rates                              # again, routed: the lanes and inserters as laid (too-thin)
 cover robots                              # roboports over the logistic chests (before power)
 cover power     --pole any                # medium poles where the network can build them, else small: the coverage step picks (no ghost the network cannot build)
 floorplan                                 # the plot composed: one surface, one owner of every tile
@@ -22,3 +21,6 @@ apply           --scope stale             # the paste: ghosts, robots build them
 stop_on         malformed                 # the default: only malformed data stops the run
 stop_on         no-route no-destination   # and no paste with a net unrouted, or a maker whose product reaches no sink
 stop_on         cannot-carry              # or a machine on a net whose items it takes none of (it would be left off the route)
+
+later:                                    # off the critical path: after the paste, reports only, never stops the build
+report_rates                              # again, routed: the lanes and inserters as laid (too-thin)
