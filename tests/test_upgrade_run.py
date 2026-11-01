@@ -53,7 +53,8 @@ class StopsTest(unittest.TestCase):
         with open(TEMPLATE, encoding="utf-8") as fh:
             lines = flow.parse(fh.read(), TEMPLATE)
         codes = {a.lower() for ln in lines if ln.cmd == "stop_on" for a in ln.args}
-        self.assertEqual(codes, {"malformed", "no-destination", "cannot-carry"})   # 3.0: no no-route
+        self.assertEqual(codes, {"malformed", "no-destination", "cannot-carry",   # 3.0: no no-route,
+                                 "by-hand"})                                   # and hand edits hold
         with open(TEMPLATE, encoding="utf-8") as fh:
             self.assertIsNone(upgrade_run._stops(fh.read()))
 
