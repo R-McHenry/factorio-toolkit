@@ -21,6 +21,10 @@ carriers. Changes since the copy:
 - A forward branch to a tap sink never ends on an underground exit whose tile ahead is taken
   (2.0.78): a belt's last tile is turned off another net's belt (route._settle_leaves), but an
   exit can't turn, and the 10-30 run's cb5o side-loaded onto the coal belt from one (SPILL).
+- A reversed tree's own belts keep off its merges' spare outputs too (2.1, ``Tree.spare``): the
+  hourglass 16to16 hub merged two drivers' belts in a splitter and ran a later driver's branch
+  through the tile its spare output points at, as a turn; the spare output fed that belt from
+  behind, so the game made it straight and the branch side-loaded onto it.
 - ``ribbon`` (2.1, PLAN-2.1 "Bus routing: ribbons"): several belts routed as one path, side by
   side and in order. One A* over the ribbon's cross-sections, its footprint as wide as the
   ribbon: straight steps, bus turns (an n x n square, the inner belt turning first) and every
@@ -235,7 +239,7 @@ class Tree:
     def tiles(self):
         """tile -> list of owners (a state or a splitter half); >1 owner is a conflict."""
         if self._tiles is None:
-            own = {}
+            own, spare = {}, set()
             for s in self.states():
                 own.setdefault((s[0], s[1]), []).append(s)
                 mv = self.succ.get(s)
@@ -243,16 +247,25 @@ class Tree:
                     n, m = self.split_tiles(s, mv[1])
                     own.setdefault(n, []).append(("splitter", s))
                     own.setdefault(m, []).append(("splitter", s))
+                    if self.grid.drop_taps:
+                        spare.add(self.spare_tile(s, mv[1]))
             for q, _n, _d, _s in self.taps:
                 own.setdefault(q, []).append(("tap", q))
-            self._tiles = own
+            self._tiles, self._spare = own, spare
         return self._tiles
+
+    def spare(self):
+        """Laid reversed, the tiles the merges' spare outputs point at: a belt of the tree there
+        would be fed from behind by the merge, so a branch turning there side-loads instead."""
+        self.tiles()
+        return self._spare
 
     def touch(self):
         self._tiles = None
 
     def free(self, t):
-        return not self.grid.blocked(t) and t not in self.tiles() and t not in self.reserved
+        return (not self.grid.blocked(t) and t not in self.tiles() and t not in self.reserved
+                and t not in self.spare())
 
     @staticmethod
     def split_tiles(s, side):
@@ -260,6 +273,13 @@ class Tree:
         n = (x + DX[d], y + DY[d])
         sh = (d + side) % 4
         return n, (n[0] + DX[sh], n[1] + DY[sh])
+
+    @staticmethod
+    def spare_tile(s, side):
+        """The tile beside a split's feed ``s``: laid reversed, its merge's spare output points
+        there."""
+        sh = (s[2] + side) % 4
+        return (s[0] + DX[sh], s[1] + DY[sh])
 
     def spans(self):
         out = {0: set(), 1: set()}
@@ -362,6 +382,8 @@ class Tree:
                 out.append(f"TILE_SHARED {t}: {len(owners)} pieces")
             if self.grid.blocked(t):
                 out.append(f"BLOCKED {t}")
+        for t in sorted(self.spare() & set(self.tiles())):
+            out.append(f"SPARE_FEEDS {t}: a merge's spare output points at the tree's own belt")
         reached = set(self.sink_at.values())
         for i, s in enumerate(sinks):
             if i not in reached:
@@ -500,6 +522,8 @@ def _starts(tree):
             sh = (d + side) % 4
             if (s[0] + DX[sh], s[1] + DY[sh]) in tree.grid.keep_clear:
                 continue     # laid reversed, this merge's spare output would feed what is there
+            if tree.grid.drop_taps and Tree.spare_tile(s, side) in tree.tiles():
+                continue     # ... the tree's own belt there, too
             if tree.free(m) and tree.free((o2[0], o2[1])):
                 out.append((o2, k["split"] - k["belt"], ("split", s, side, c), (n, m)))
     return out
@@ -509,12 +533,18 @@ def _astar(tree, starts, sinks, targets, limit=60000):
     """One A* from every start state to the nearest target sink; (path, how, sink, cost) or None.
     A start is (state, g0, how) or (state, g0, how, taken): a tap is never planned on ``taken``."""
     k = tree.costs
-    grid, tiles, res = tree.grid, tree.tiles(), tree.reserved
+    grid, tiles, res, spare = tree.grid, tree.tiles(), tree.reserved, tree.spare()
     sink_tiles = {s.tile for i, s in enumerate(sinks) if isinstance(s, FixedSink)}
     spans = tree.spans()
 
     def blocked(t):
-        return grid.blocked(t) or t in tiles or t in res
+        return grid.blocked(t) or t in tiles or t in res or t in spare
+
+    def crosses_own_spare(path):
+        how = how_of[path[0]]
+        if not grid.drop_taps or how[0] != "split":
+            return False
+        return Tree.spare_tile(how[1], how[2]) in {(p[0], p[1]) for p in path}
 
     def hh(x, y):
         return min(sinks[i].h(x, y) for i in targets)
@@ -554,7 +584,8 @@ def _astar(tree, starts, sinks, targets, limit=60000):
                 hit = sinks[i].goal(st, tree, path, taken_of[path[0]])
             if hit:
                 path = path or _trace(parent, st)
-                if len({(p[0], p[1]) for p in path}) == len(path):
+                if len({(p[0], p[1]) for p in path}) == len(path) and \
+                        not crosses_own_spare(path):
                     return path, how_of[path[0]], i, gs
         x, y, d, ex = st
         if (x, y) in sink_tiles and parent[st] is not None:

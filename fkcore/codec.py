@@ -104,6 +104,9 @@ MAX_POLE_WIRES = 5
 
 #: The Factorio blueprint version the harness emits (an opaque 2.0.77 format marker).
 BLUEPRINT_VERSION = 562949954076673
+#: The blueprint's icon. The game takes a blueprint without one, but a blueprint renderer
+#: (fbe.teoxoy.com) refuses it ("could not be loaded").
+BLUEPRINT_ICONS = [{"index": 1, "signal": {"type": "item", "name": "transport-belt"}}]
 
 _UG = {"in": "input", "out": "output"}
 _UG_BACK = {v: k for k, v in _UG.items()}
@@ -585,7 +588,8 @@ def blueprint(rows, description=None, label=None, wires=None, links=None) -> str
     :func:`wire_list` takes them. Deterministic."""
     rows = list(rows or [])
     entities = [_entity_json(row, i + 1) for i, row in enumerate(rows)]
-    bp = {"item": "blueprint", "entities": entities, "version": BLUEPRINT_VERSION}
+    bp = {"item": "blueprint", "entities": entities, "version": BLUEPRINT_VERSION,
+          "icons": BLUEPRINT_ICONS}
     out = wire_list(rows, wires, links)
     if out:
         bp["wires"] = out

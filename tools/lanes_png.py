@@ -23,6 +23,7 @@ GRID = (34, 37, 42)
 MID = (90, 90, 140)
 FRAME = (240, 170, 110)
 SIDE = (250, 250, 250)
+ARROW = (235, 235, 240)
 
 _V = {0: (0, -1), 1: (1, 0), 2: (0, 1), 3: (-1, 0)}
 
@@ -84,12 +85,12 @@ class _Pen:
             self.cv.line(int(a + (c - a) * t0), int(b + (d - b) * t0),
                          int(a + (c - a) * t1), int(b + (d - b) * t1), rgb)
 
-    def arrow(self, c, v, rgb):
-        """A small chevron at tile point ``c`` pointing along ``v``."""
+    def arrow(self, c, v, rgb, size=0.12):
+        """A small chevron at tile point ``c`` pointing along ``v``, ``size`` tiles long."""
         (cx, cy) = self.px(c)
-        k = max(2, int(self.s * 0.12))
+        k = max(2, int(self.s * size))
         for i in range(k):
-            w = k - i
+            w = i + 1                      # the point first, along the flow
             if v == (0, -1):
                 self.cv.rect(int(cx - w), int(cy - k / 2 + i), 2 * w, 1, rgb)
             elif v == (0, 1):
@@ -175,7 +176,7 @@ def draw(cv, ox, oy, lay, cat, lg, load, bounds, s, blocked=(), mid=None, owner=
                     rgb = load_rgb(load.get((e.key, lane), 0.0))
                     pen.seg((hc[0] - v[0] * 0.5 + o[0], hc[1] - v[1] * 0.5 + o[1]),
                             (hc[0] + v[0] * 0.5 + o[0], hc[1] + v[1] * 0.5 + o[1]), rgb, w)
-                pen.arrow(hc, v, (40, 20, 10))
+                pen.arrow(hc, v, ARROW, 0.2)
             pen.frame(tx0, ty0, tw, th, FRAME)
             continue
         c = (tx0 + 0.5, ty0 + 0.5)
@@ -212,8 +213,8 @@ def draw(cv, ox, oy, lay, cat, lg, load, bounds, s, blocked=(), mid=None, owner=
             pen.seg((c[0] + back[0] * 0.05 - v[1] * 0.4, c[1] + back[1] * 0.05 - v[0] * 0.4),
                     (c[0] + back[0] * 0.05 + v[1] * 0.4, c[1] + back[1] * 0.05 + v[0] * 0.4),
                     (30, 24, 12), 0.12)
-        elif a == v:
-            pen.arrow(c, v, (40, 32, 14))
+        else:
+            pen.arrow(c, v, ARROW, 0.2)
     for a, b in tunnel:
         if a in ents and b in ents:
             ea, eb = ents[a], ents[b]
@@ -243,6 +244,6 @@ def legend(cv, x, y, s=14):
     for i in range(100):
         cv.rect(bx + i, y - 1, 1, FONT_H + 2, load_rgb((i + 1) / 100))
     cv.text(bx + 104, y, "0 -> 100% of the lane", (180, 180, 190))
-    cv.text(x, y + FONT_H + 6, "two strips per belt: left and right lane looking along the flow; "
-                               "dashed: an underground's tunnel; white bar: a side-load",
+    cv.text(x, y + FONT_H + 6, "two strips per belt: left and right lane looking along the flow (the "
+                               "arrow); dashed: an underground's tunnel; white bar: a side-load",
             (180, 180, 190))
