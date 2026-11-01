@@ -1,0 +1,156 @@
+
+{
+  "mods": 
+  [
+    
+    {
+      "name": "base",
+      "enabled": true
+    },
+    
+    {
+      "name": "elevated-rails",
+      "enabled": false
+    },
+    
+    {
+      "name": "quality",
+      "enabled": false
+    },
+    
+    {
+      "name": "space-age",
+      "enabled": false
+    },
+    
+    {
+      "name": "angelsaddons-storage",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelsbioprocessing",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelsbioprocessinggraphics",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelspetrochem",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelspetrochemgraphics",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelsrefining",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelsrefininggraphics",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelssmelting",
+      "enabled": true
+    },
+    
+    {
+      "name": "angelssmeltinggraphics",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobassembly",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobelectronics",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobequipment",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobinserters",
+      "enabled": true
+    },
+    
+    {
+      "name": "boblibrary",
+      "enabled": true
+    },
+    
+    {
+      "name": "boblogistics",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobmining",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobmodules",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobores",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobplates",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobpower",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobrevamp",
+      "enabled": true
+    },
+    
+    {
+      "name": "bobtech",
+      "enabled": true
+    },
+    
+    {
+      "name": "CircuitProcessing",
+      "enabled": true
+    },
+    
+    {
+      "name": "fk-early-bots",
+      "enabled": true
+    },
+    
+    {
+      "name": "LandfillPainting",
+      "enabled": true
+    },
+    
+    {
+      "name": "SeaBlock",
+      "enabled": true
+    }
+  ]
+}

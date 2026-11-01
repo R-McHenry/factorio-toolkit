@@ -36,8 +36,9 @@ Guarded by ``storage.kickoff_setup``: a second run on the same map refuses.
 landfilled first. The roboport is fk-early-roboport with 30 + 20 early robots (fk-early-bots: the
 player can make more from the start), no oil and no plant. The chests hold Sea Block's own
 starting items (read from its remote interface, then cleared so no joining player gets a copy;
-minus the bootstrap's panels and accumulators), wood (foraging is hand-only and nothing else makes
-wood early) and assemblers (locked until red science). ``angels-bio-wood-processing`` is granted:
+minus the bootstrap's panels and accumulators), 2000 wood (foraging is hand-only and nothing else
+makes wood before the arboretum: each basic circuit and red pack is one wood, and burner crushers
+and stone furnaces burn it) and assemblers (locked until red science). ``angels-bio-wood-processing`` is granted:
 its trigger is crafting wood by hand, which no character will do.
 """
 from __future__ import annotations
@@ -91,7 +92,7 @@ PACKS = {
         "robots": {"fk-early-construction-robot": 30, "fk-early-logistic-robot": 20}, "oil": [],
         "kit": [("fk-early-roboport", 4), ("assembling-machine-1", 8), ("medium-electric-pole", 93),
                  ("storage-chest", 10), ("requester-chest", 10), ("passive-provider-chest", 10),
-                 ("active-provider-chest", 1), ("wood", 500), ("offshore-pump", 4),
+                 ("active-provider-chest", 1), ("wood", 2000), ("offshore-pump", 4),
                  ("transport-belt", 200), ("inserter", 50), ("underground-belt", 20),
                  ("splitter", 10), ("iron-chest", 1)],
         "research": SB_RESEARCH, "land": [0, 5, 25, 23], "tile": "sand-3", "sb_items": True},

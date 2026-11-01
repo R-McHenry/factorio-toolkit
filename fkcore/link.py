@@ -52,11 +52,25 @@ __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
            "open_from_env", "OUT_DIR", "WINDOWS"]
 
+def _game_link():
+    """``link.json`` in the game codebase (the working directory): where a run's server is when it
+    is not factorio.service, e.g. ``{"port": 27016, "pw_file": ..., "script_output": ...}`` for
+    the Sea Block test server (kickoff-v1.sh --instance sb writes it). The env vars win."""
+    try:
+        with open("link.json", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+_GAME = _game_link()
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
-PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
-PW_FILE = os.environ.get("FK_RCON_PW_FILE", "/home/computah/factorio/instance/rcon.pw")
+PORT = int(os.environ.get("FK_RCON_PORT") or _GAME.get("port") or 27015)
+PW_FILE = os.environ.get("FK_RCON_PW_FILE") or _GAME.get("pw_file") \
+    or "/home/computah/factorio/instance/rcon.pw"
 #: script-output of the server (write-data/script-output); snapshot files land in OUT_DIR/fk5/.
-OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT", "/home/computah/factorio/server/factorio/script-output")
+OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT") or _GAME.get("script_output") \
+    or "/home/computah/factorio/server/factorio/script-output"
 TIMEOUT = 5.0
 
 _FORBIDDEN = re.compile(r"\b(script\s*\.\s*on_\w+|commands\s*\.\s*add_command|remote\s*\.\s*add_interface"

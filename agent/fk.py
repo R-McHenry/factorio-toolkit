@@ -346,10 +346,10 @@ def sim(cfg, rest):
             if r.returncode != 0:
                 return r.returncode
             time.sleep(5)
-            path = f"{HOST_SAVES}/{tag}.zip"
+            path = f"{cfg.get('host_saves') or HOST_SAVES}/{tag}.zip"
         else:
             path = cfg.get("host_start_save") or \
-                f"{HOST_SAVES}/v1-{os.path.basename(RUN)}-start.zip"
+                f"{cfg.get('host_saves') or HOST_SAVES}/v1-{os.path.basename(RUN)}-start.zip"
         got = _ssh(cfg, f"cat {shlex.quote(path)}", capture=True)
         if got.returncode != 0 or not got.stdout:
             print(f"fk sim fetch: no {path} on {cfg['host']}", file=sys.stderr)
