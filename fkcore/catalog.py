@@ -319,7 +319,17 @@ class Catalog:
         East/west (direction 4/12) swap width and height. Without a direction, a centre that only
         lines up with the swapped size is taken as rotated (a 2x1 splitter facing east sits on
         (x.5, y), facing north on (x, y.5)): most callers do not pass the direction.
+        2.1.28: remembered per (name, x, y, direction), a fresh set each call (route's patches
+        asked ~675k times for the 20261030-2352 world's few thousand entities).
         """
+        memo = self.__dict__.setdefault("_tiles_memo", {})
+        key = (name, x, y, direction)
+        got = memo.get(key)
+        if got is None:
+            got = memo[key] = tuple(self._tiles(name, x, y, direction))
+        return set(got)
+
+    def _tiles(self, name, x, y, direction):
         w, h = self.size(name)
         if direction is not None and int(direction) % 8 == 4:
             w, h = h, w

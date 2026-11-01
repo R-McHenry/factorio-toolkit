@@ -133,22 +133,24 @@ _progress_at = [0.0, 0.0]                  # [the last line, the route's start] 
 _progress_net = [None, 0.0]
 
 
-def _progress(attempt, k, order, net):
+def _progress(attempt, k, order, net, promo=False):
     if PROGRESS is None:
         return
     import time
     now = time.monotonic()
+    # 2.1.28: the promoting pass is attempt retries + 1, which read as "pass 280"
+    which = "the promoting pass" if promo else f"pass {attempt + 1}"
     last, since = _progress_net
     _progress_net[0], _progress_net[1] = net, now
     if last is not None and now - since >= PROGRESS_EVERY:
         _progress_at[0] = now
-        PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, pass {attempt + 1}: {last} took "
+        PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, {which}: {last} took "
                  f"{now - since:.0f} s; next net {k + 1} of {len(order)} ({net})")
         return
     if now - _progress_at[0] < PROGRESS_EVERY:
         return
     _progress_at[0] = now
-    PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, pass {attempt + 1}, net {k + 1} of "
+    PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, {which}, net {k + 1} of "
              f"{len(order)} ({net})")
 
 
@@ -2280,7 +2282,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         ents = list(base.entities.values())
         added, failed, how, swaps, rlines = {}, {}, {}, [], {}
         for k, net in enumerate(order):
-            _progress(attempt, k, order, net)
+            _progress(attempt, k, order, net, promo)
             avoid = set()
             for other, tiles in claims.items():
                 if other != net and rib_of.get(other) != net:

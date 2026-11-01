@@ -59,6 +59,7 @@ comma, more than two lanes, or lanes on a carrier that has none. The writer (:fu
 """
 from __future__ import annotations
 
+import functools
 import math
 import re
 import shlex
@@ -90,11 +91,16 @@ LANE_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "loade
 # -- a carrier's nets (2.0: a net is one lane) ----------------------------------------------------
 def net_names(net):
     """Every net a ``net=`` names, in order and once each: ``iron|copper`` -> [iron, copper]."""
+    return list(_net_names(net or ""))
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _net_names(net):
     out = []
-    for part in re.split(r"[|+]", net or ""):
+    for part in re.split(r"[|+]", net):
         if part and part not in out:
             out.append(part)
-    return out
+    return tuple(out)
 
 
 def net_lanes(net):
@@ -370,7 +376,13 @@ def _quote(v):
 
 
 def natural_key(s):
-    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s)]
+    return list(_natural_key(s))
+
+
+@functools.lru_cache(maxsize=1 << 17)
+def _natural_key(s):
+    # 2.1.28: remembered; route's patches sorted ~700k keys on the 20261030-2352 world
+    return tuple(int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s))
 
 
 # -- parse ----------------------------------------------------------------------------------------
