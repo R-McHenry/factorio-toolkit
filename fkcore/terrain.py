@@ -51,6 +51,8 @@ import os
 from dataclasses import dataclass, field
 from functools import cached_property
 
+from . import pack as _pack
+
 __all__ = ["BLOCK", "REFERENCE", "Cliff", "Patch", "Terrain", "FrameGround", "lua_block", "read",
            "merge", "cliff_tiles", "patches", "from_dict", "load", "save", "to_frame",
            "from_frame", "frame_size", "frame_blocked", "frame_ground", "summary",
@@ -121,7 +123,9 @@ class Terrain:
 
     @cached_property
     def blocked(self):
-        return frozenset(self.water | self.other | self.cliff_tiles)
+        # a pack with landfill (Sea Block): water is ground that costs landfill (fkcore.pack)
+        water = frozenset() if _pack.landfill() else self.water
+        return frozenset(water | self.other | self.cliff_tiles)
 
     @cached_property
     def patches(self):

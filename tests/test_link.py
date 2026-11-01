@@ -94,7 +94,7 @@ class GhostsTest(unittest.TestCase):
         entities = [{"entity_number": i, "name": "transport-belt"} for i in range(1, 5)]
         wires = [[["transport-belt", 0.5, 0.5], 5, ["transport-belt", 1.5, 0.5], 5]]
         self.assertEqual(link.ghosts(r, "lab", "lab", entities, wires, chunk=1),
-                         {"n": 5, "missed": {"tags": 15}})
+                         {"n": 5, "missed": {"tags": 15}, "landfill": 0})
         self.assertEqual(len(r.calls), 5)           # one entity a call, then the wire
 
     def test_luas_empty_missed_table_is_no_miss(self):
@@ -103,7 +103,7 @@ class GhostsTest(unittest.TestCase):
                 return '{"n": 2, "missed": []}'
         self.assertEqual(link.ghosts(R(), "lab", "lab",
                                      [{"entity_number": 1, "name": "stone-furnace"}]),
-                         {"n": 2, "missed": {}})
+                         {"n": 2, "missed": {}, "landfill": 0})
 
     def test_a_reply_that_is_not_json_is_a_link_error(self):
         class R:

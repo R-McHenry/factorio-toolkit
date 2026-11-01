@@ -155,6 +155,14 @@ for name, p in pairs(prototypes.entity) do
       table.sort(boxes, function(a, b) return a.index < b.index end)
       local frow = { type = p.type, size = { p.tile_width, p.tile_height }, boxes = boxes }
       if l.boxes_off and p.crafting_categories then frow.boxes_need_fluid_recipe = true end
+      -- an offshore pump's area that must be water (its tile_buildability_rules), for it facing N
+      for _, rule in pairs(try(function() return p.tile_buildability_rules end) or {}) do
+        local req = rule.required_tiles and rule.required_tiles.layers
+        if req and req.water_tile then
+          local a = rule.area
+          frow.water_area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y }
+        end
+      end
       fluid_entities[name] = frow
     end
   end

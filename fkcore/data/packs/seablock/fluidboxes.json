@@ -8212,7 +8212,13 @@
     3,
     3
    ],
-   "type": "mining-drill"
+   "type": "mining-drill",
+   "water_area": [
+    -2,
+    -3,
+    2,
+    -2
+   ]
   },
   "angels-sea-pump-placeable": {
    "boxes": [
@@ -8251,7 +8257,13 @@
     3,
     3
    ],
-   "type": "offshore-pump"
+   "type": "offshore-pump",
+   "water_area": [
+    -2,
+    -3,
+    2,
+    -2
+   ]
   },
   "angels-seafloor-pump": {
    "boxes": [
@@ -8290,7 +8302,13 @@
     3,
     3
    ],
-   "type": "offshore-pump"
+   "type": "offshore-pump",
+   "water_area": [
+    -2,
+    -3,
+    2,
+    -2
+   ]
   },
   "angels-separator": {
    "boxes": [
@@ -18074,7 +18092,13 @@
     1,
     1
    ],
-   "type": "offshore-pump"
+   "type": "offshore-pump",
+   "water_area": [
+    -1,
+    -2,
+    1,
+    -1
+   ]
   },
   "oil-refinery": {
    "boxes": [
