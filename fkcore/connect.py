@@ -83,7 +83,10 @@ from dataclasses import dataclass, field
 
 from .catalog import FluidBox
 from .elaborate import Check
-from .fkp import CARRIER_TYPES, map_nets, natural_key, net_names
+from .fkp import CARRIER_TYPES, map_nets, net_names
+# 2.1.30: every use here is a sort key: the remembered tuple, not a fresh list per call (route's
+# standing nets sorted ~1.7M keys building graphs on the 20261030-2352 world)
+from .fkp import _natural_key as natural_key
 from .templates import CONTACT
 
 __all__ = ["Node", "Graph", "Leak", "NetReport", "Report", "graph", "connect", "endpoints",

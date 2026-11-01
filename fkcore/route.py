@@ -1561,20 +1561,22 @@ class _Patch:
     pair (``A|B``, 2.0) is patched by its two member nets: each has its own drivers, consumers and
     reach, and a new carrier's ``net=`` says which lanes it carries."""
 
-    def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid):
+    def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid,
+                 g=None):
         self.cat, self.flat, self.table, self.job, self.net = cat, flat, table, job, job.net
         self.members = fkpmod.net_names(job.net) or [job.net]
         self.ents, self.kept, self.added, self.replaced = list(ents), list(kept), [], []
         self.frames, self.js, self.box, self.limit = frames, js, box, limit
         self.terrain, self.avoid = terrain, set(avoid)
         self.used = {e.key for e in kept}
-        self.refresh()
+        self.refresh(g)
 
-    def refresh(self):
-        """The graph, each member's ends and flows, and the ground with what stands now."""
+    def refresh(self, g=None):
+        """The graph, each member's ends and flows, and the ground with what stands now. ``g``:
+        the graph of exactly what stands now, when the caller has it (2.1.30)."""
         cat, net = self.cat, self.net
         allents = self.ents + self.kept + self.added
-        self.g = connectmod.graph(allents, cat, _ports(self.flat))
+        self.g = g if g is not None else connectmod.graph(allents, cat, _ports(self.flat))
         self.ends, self.fwd, self.bwd = {}, {}, {}
         for m in self.members:
             self.ends[m] = _ends_of(self.flat, self.table, self.job, self.g, net=m)
@@ -1939,7 +1941,10 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
         return None, f"what stands of its route would SPILL: {leak.text}", None
     kept = [e for e in old if e.key in serve]
     kept += [e for e in old if _is_stub(e) and e.key not in serve and kept]   # a lane pin's join
-    p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
+    # 2.1.30: a patch that keeps every carrier stands on the graph just built (the same entities)
+    same = {e.key for e in kept} == mine
+    p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid,
+               g if same else None)
     p.used |= mine
     new_c, new_d = set(), set()
     for m in members:
@@ -2274,6 +2279,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         return key in failed
 
     repeats = False
+    # 2.1.30: a pass laid in the order of the one before it lays the same routes on the same
+    # ground, net by net, until a promotion changes the ground: those nets take the last pass's
+    # answer (the promoting pass re-laid all 278 nets of the 20261030-2352 world, ~60 s, to try
+    # promoting its four that failed)
+    prev_order, prev_plain = None, {}
     for attempt in range(retries + 2):
         # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
         promo = attempt == retries + 1
@@ -2283,7 +2293,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             continue
         ents = list(base.entities.values())
         added, failed, how, swaps, rlines = {}, {}, {}, [], {}
+        plain, same = {}, prev_order is not None
         for k, net in enumerate(order):
+            same = same and k < len(prev_order) and prev_order[k] == net
             _progress(attempt, k, order, net, promo)
             avoid = set()
             for other, tiles in claims.items():
@@ -2310,8 +2322,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 rlines[net] = summary
                 continue
             fnet, bnet = net_frames(net)
-            got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
-                                  allow=joints)
+            if same and net in prev_plain:
+                got, why = prev_plain[net]
+            else:
+                got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
+                                      allow=joints)
+            plain[net] = (got, why)
             if got is None and promo:
                 # once more, crossing other nets' straight belts by promoting them
                 prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
@@ -2322,6 +2338,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                     ents = [e for e in ents if e.key not in gone] + [e for s in mine for e in s[1]]
                     _swap_added(added, mine)
                     swaps += mine
+                    same = False                  # the ground is not the last pass's now
             if got is None:
                 failed[net] = why
                 continue
@@ -2330,6 +2347,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             added[net] = got
             how[net] = why
             ents += got
+        prev_order, prev_plain = list(order), plain
         score = (len(added), -len(swaps), -attempt)
         if best is None or score > best[0]:
             best = (score, added, failed, how, attempt + 1, list(order), swaps, rlines)
