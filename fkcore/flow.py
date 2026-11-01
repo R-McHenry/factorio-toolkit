@@ -968,7 +968,9 @@ def s_route(ctx, args):
     # --skip NET,... (left to the player, reported manual)
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
               m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
-              skip="", via="")
+              skip="", via="", **{"try": ""})
+    if o["try"]:
+        return _route_try(ctx, str(o["try"]))
     via = _via(o["via"])
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
@@ -1082,6 +1084,33 @@ def s_route(ctx, args):
     if ug_note and any(ln.lstrip().startswith("ribbon ") for ln in lines):
         lines.append(f"  {ug_note}")
     return lines, checks
+
+
+def _route_try(ctx, spec):
+    """``route --try X,Y:X,Y`` (3.0, the question mode): how a belt would go from A to B on the
+    design as it stands (the net files on its base); nothing is laid or written."""
+    try:
+        a, b = (tuple(int(v) for v in end.split(",")) for end in spec.split(":"))
+        if len(a) != 2 or len(b) != 2:
+            raise ValueError
+    except ValueError:
+        raise FlowError(f"route --try X,Y:X,Y (a belt from tile A to tile B), got {spec!r}")
+    import time
+    lines = []
+    for factory, lay in list(ctx.layouts.items()):
+        now = design.layout(ctx.out, factory) or lay
+        ctx.layouts[factory] = now
+        t0 = time.monotonic()
+        got, how = route.try_route(ctx.flats[factory], now, ctx.cat, a, b,
+                                   blocked=_frame_blocked(ctx, factory, now.size))
+        took = f"{time.monotonic() - t0:.1f} s"
+        where = f"{a[0]},{a[1]} -> {b[0]},{b[1]}"
+        if got is None:
+            lines.append(f"{factory}: try {where}: no belt: {how} ({took})")
+            continue
+        lines.append(f"{factory}: try {where}: {len(got)} carriers, {how} ({took}); nothing laid")
+        lines += [f"  {e.name} {e.x:g},{e.y:g} {fkp.DIRS[e.dir]}" for e in got]
+    return lines, []
 
 
 def _via(spec):

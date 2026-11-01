@@ -1332,6 +1332,8 @@ def main(argv=None):
     sp.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'")
     sp.add_argument("--via", action="append", default=[], metavar="X,Y",
                     help="route one net in pieces through these waypoints, in order (repeatable)")
+    sp.add_argument("--try", dest="try_", nargs=2, metavar="X,Y",
+                    help="how a belt would go from tile A to tile B here; nothing laid")
     st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design)")
     st.add_argument("game")
     st.add_argument("net", nargs="?")
@@ -1597,6 +1599,10 @@ def main(argv=None):
                 if a.step != "route" or not a.nets or "," in a.nets:
                     raise flow.FlowError("--via goes with one net: fk route NET --via X,Y")
                 extra.append(f"route --via {a.nets}@{'+'.join(a.via)}")
+            if a.try_:
+                if a.step != "route" or a.nets or a.via:
+                    raise flow.FlowError("--try goes alone: fk route --try X,Y X,Y")
+                extra.append(f"route --try {a.try_[0]}:{a.try_[1]}")
             code, _ctx = flow.run(a.script, a.step, a.step, cat, extra=extra)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)

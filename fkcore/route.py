@@ -1298,6 +1298,37 @@ def _route_via(cat, job, ents, frames, js, box, limit, terrain, avoid, via, allo
     return out, "via " + "; ".join(words)
 
 
+def try_route(flat, lay, cat, a, b, bounds=None, margin=4, blocked=(), limit=60000):
+    """3.0 ``route --try A:B``, the question mode: how a belt would run from tile ``a`` to tile
+    ``b`` on ``lay`` as it stands, every heading tried at both ends; commits nothing.
+    -> (carriers, report text) of the shortest, or (None, reasons)."""
+    js = jobs(flat, lay, cat)
+    frames = set()
+    for path, rec in lay.insts.items():
+        if rec.kind in ("Literal", "Bus") or path not in flat.insts:
+            continue
+        x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
+        frames |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+    w, h = lay.size or (0, 0)
+    box = bounds or (0, 0, w + margin, h + margin)
+    ents = list(lay.entities.values())
+    terrain = frozenset(tuple(t) for t in blocked)
+    best, whys = None, []
+    for sh in range(4):
+        for gh in range(4):
+            job = NetJob("?try", starts=[(tuple(a), sh)], goals=[(tuple(b), gh)])
+            got, how = _route_one(cat, job, ents, frames, dict(js, **{"?try": job}), box, limit,
+                                  terrain)
+            if got is None:
+                if how not in whys:
+                    whys.append(how)
+            elif best is None or len(got) < len(best[0]):
+                best = (got, how)
+    if best is None:
+        return None, "; ".join(whys[:3])
+    return best
+
+
 def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
               allow=frozenset(), promoted=frozenset()):
     net = job.net

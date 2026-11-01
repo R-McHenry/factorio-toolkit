@@ -21,6 +21,7 @@ fk status [NET]                  the nets as the router left them (or lands them
 fk hold NET / fk unroute NET     keep a net's route as it stands / route it again next build
 fk route NET[,NET]               lay those nets again now, every other route kept; nothing pasted
 fk route NET --via X,Y           lay one stuck net in pieces through a waypoint (repeat --via)
+fk route --try X,Y X,Y           how a belt would go from tile A to tile B now; nothing laid
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 fk look AREA --zoom 16 --layers all --image
@@ -211,6 +212,10 @@ How route works through the nets is yours to set, on its line in the build scrip
   piece searched on its own. Give `--via` again for more waypoints, in order. With several
   drivers, put the first waypoint past where they join. The pieces stay in the net's file, so
   later builds keep them.
+- `fk route --try X,Y X,Y` asks the router how a belt would run from tile A to tile B on the
+  design as it stands (its routed nets included), every heading tried at both ends. It prints
+  the carriers, or why there is no way, and lays nothing: a quick check before you move a
+  block or pick a waypoint.
 - Fluid nets get one pass too. Another pass in a new order runs only if it fits in the group
   budget.
 - `out\route.txt` has a `group` line for each net that got a group try, and whether it settled.

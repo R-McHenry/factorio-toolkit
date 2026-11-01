@@ -114,6 +114,19 @@ class DesignFlowTest(unittest.TestCase):
         self.assertIn("12 nets: 12 connected", self.read("out/report_checks.txt"))
         self.assertEqual(main(["step", self.script, "route", "packs,gear", "--via", at]), 2)
 
+    def test_route_try_asks_and_lays_nothing(self):
+        # 3.0 `fk route --try A B`: a belt from A to B on the design as it stands; nothing changes
+        from fkcore.__main__ import main
+        self.build(to="route")
+        before = {n: (r["status"], len(r["ents"])) for n, r in design.read_all(self.out, "main").items()}
+        self.assertEqual(main(["step", self.script, "route", "--try", "0,52", "20,52"]), 0)
+        text = self.read("out/route.txt")
+        self.assertRegex(text, r"main: try 0,52 -> 20,52: \d+ carriers, .*nothing laid")
+        self.assertIn("transport-belt 0.5,52.5", text)
+        after = {n: (r["status"], len(r["ents"])) for n, r in design.read_all(self.out, "main").items()}
+        self.assertEqual(after, before)
+        self.assertEqual(main(["step", self.script, "route", "--try", "0,52", "x"]), 2)
+
     def test_unroute_routes_a_net_again(self):
         self.build(to="route")
         design.set_status(self.out, "main", "gear", "unrouted", design.UNROUTED_BY_YOU)
