@@ -1750,20 +1750,22 @@ class _Patch:
     pair (``A|B``, 2.0) is patched by its two member nets: each has its own drivers, consumers and
     reach, and a new carrier's ``net=`` says which lanes it carries."""
 
-    def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid):
+    def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid,
+                 g=None):
         self.cat, self.flat, self.table, self.job, self.net = cat, flat, table, job, job.net
         self.members = fkpmod.net_names(job.net) or [job.net]
         self.ents, self.kept, self.added, self.replaced = list(ents), list(kept), [], []
         self.frames, self.js, self.box, self.limit = frames, js, box, limit
         self.terrain, self.avoid = terrain, set(avoid)
         self.used = {e.key for e in kept}
-        self.refresh()
+        self.refresh(g)
 
-    def refresh(self):
-        """The graph, each member's ends and flows, and the ground with what stands now."""
+    def refresh(self, g=None):
+        """The graph, each member's ends and flows, and the ground with what stands now. ``g``:
+        the graph of exactly what stands now, when the caller has it (2.1.30)."""
         cat, net = self.cat, self.net
         allents = self.ents + self.kept + self.added
-        self.g = connectmod.graph(allents, cat, _ports(self.flat))
+        self.g = g if g is not None else connectmod.graph(allents, cat, _ports(self.flat))
         self.ends, self.fwd, self.bwd = {}, {}, {}
         for m in self.members:
             self.ends[m] = _ends_of(self.flat, self.table, self.job, self.g, net=m)
@@ -2128,7 +2130,10 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
         return None, f"what stands of its route would SPILL: {leak.text}", None
     kept = [e for e in old if e.key in serve]
     kept += [e for e in old if _is_stub(e) and e.key not in serve and kept]   # a lane pin's join
-    p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid)
+    # 2.1.30: a patch that keeps every carrier stands on the graph just built (the same entities)
+    same = {e.key for e in kept} == mine
+    p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid,
+               g if same else None)
     p.used |= mine
     new_c, new_d = set(), set()
     for m in members:

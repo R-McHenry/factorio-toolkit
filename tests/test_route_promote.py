@@ -61,6 +61,29 @@ class PromoteTest(unittest.TestCase):
             seen = g.reach({col[0].key}, f"w{c}")
             self.assertIn(col[-1].key, seen, c)
 
+    def test_the_promoting_pass_takes_the_last_pass_answers(self):
+        # 2.1.30: the promoting search doesn't run a net's plain search again, only the promoted
+        # one (3.0: each net is searched once; with no group budget nothing else re-searches x)
+        flat, lay = walled()
+        orig, calls, depth = route._route_one, [], [0]
+
+        def counted(cat, job, *a, **k):
+            if depth[0] == 0 and not k.get("promoted"):
+                calls.append(job.net)
+            depth[0] += 1
+            try:
+                return orig(cat, job, *a, **k)
+            finally:
+                depth[0] -= 1
+        route._route_one = counted
+        try:
+            r = route.route_layout(flat, lay, CAT, bounds=(0, 0, 30, H), group_budget=0)
+        finally:
+            route._route_one = orig
+        self.assertEqual(calls, ["x"])
+        self.assertEqual(r.failed, {}, r.lines)
+        self.assertEqual(sum(l.startswith("promoted  w") for l in r.lines), 6, r.lines)
+
     def test_a_belt_an_inserter_touches_is_not_promoted(self):
         flat, lay = walled()
         js = route.jobs(flat, lay, CAT)
