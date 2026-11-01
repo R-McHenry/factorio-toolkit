@@ -90,7 +90,7 @@ class _Pen:
         (cx, cy) = self.px(c)
         k = max(2, int(self.s * size))
         for i in range(k):
-            w = k - i
+            w = i + 1                      # the point first, along the flow
             if v == (0, -1):
                 self.cv.rect(int(cx - w), int(cy - k / 2 + i), 2 * w, 1, rgb)
             elif v == (0, 1):

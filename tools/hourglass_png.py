@@ -44,7 +44,7 @@ def _arrow(cv, x, y, s, d, rgb):
     """A small triangle pointing heading ``d`` (0 N, 1 E, 2 S, 3 W) in the tile at (x, y)."""
     c = s / 2
     for i in range(int(s * 0.35)):
-        w = int(s * 0.35) - i
+        w = i + 1                          # the point first, along the flow
         if d == 0:
             cv.rect(x + c - w, y + s * 0.25 + i, 2 * w, 1, rgb)
         elif d == 2:
