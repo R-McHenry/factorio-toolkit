@@ -120,6 +120,8 @@ _HUBS = 8          # hub candidates tried at most
 _HUB_WINS = 3      # stop after this many hubs that route
 _NEAR = 12         # tiles around a net's own ends it is searched in first (2.0.45)
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
+#: 2.1 ``route --m2m``: many-to-many nets above one lane go to ``fkcore.m2m`` (``route_layout``)
+_M2M = False
 
 
 @dataclass
@@ -139,6 +141,7 @@ class NetJob:
     wide: bool = False                             # 2.0.54: one net on both lanes (its parts)
     pin: str | None = None                         # 2.0.54: the lane it ends on (L or R)
     drv: list = field(default_factory=list)        # [(start or source, instance path)]
+    m2m: dict | None = None                        # 2.1 route --m2m: fkcore.m2m.spec_of
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
@@ -199,6 +202,7 @@ class Routed:
     passes: int = 1
     patched: dict = field(default_factory=dict)    # net -> what its patch laid and kept
     again: dict = field(default_factory=dict)      # net -> why its committed route was not kept
+    maxflow: dict = field(default_factory=dict)    # 2.1 --m2m: net -> why its max-flow is short
 
 
 class _Bounded(Grid):
@@ -279,6 +283,8 @@ def jobs(flat, lay, cat) -> dict:
     if getattr(flat, "pairs", None):
         from . import pairs
         pairs.merge(flat, out)
+    if _M2M:
+        _mark_m2m(flat, cat, out)
     _widen(flat, cat, out)
     for net, job in out.items():
         if job.skip is not None or job.fluid:
@@ -577,17 +583,17 @@ def _clean(v):
 _FILTERED = frozenset()
 
 
-def _grow(grid, root, fixed, machines, limit, sources=False):
+def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink):
     """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
     inserters, or long-handed ones where only those reach. ``sources``: the machines are drivers,
     and one in ``_FILTERED`` is tried with fast inserters alone before a long-handed one may load
-    it (2.0.76). -> (result, sinks)."""
+    it (2.0.76). ``tap``: the machines' sink kind (2.1 m2m: ``m2m.LeftTap``). -> (result, sinks)."""
     passes = list(_HANDS)
     if sources and any(key in _FILTERED for key, _r in machines):
         passes = [_HANDS[0], None] + passes[1:]
     for hands in passes:
-        sinks = fixed + [TapSink(key, rect, 1, _HANDS[0] if hands is None and key in _FILTERED
-                                 else hands or _HANDS[-1]) for key, rect in machines]
+        sinks = fixed + [tap(key, rect, 1, _HANDS[0] if hands is None and key in _FILTERED
+                             else hands or _HANDS[-1]) for key, rect in machines]
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
             break
@@ -684,15 +690,16 @@ def _hubs(grid, job, most=_HUBS):
     return out
 
 
-def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f):
+def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink):
     """The reversed tree from H to every driver, then the forward tree from F = H + f to every
-    consumer on what is left. -> (cost, plan, counts, counts) or a reason."""
+    consumer on what is left. ``tap``: the driver machines' sink kind. -> (cost, plan, counts,
+    counts) or a reason."""
     net = job.net
     fx, fy = hub[0] + _DX[f], hub[1] + _DY[f]
     rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
     fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
     rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit,
-                         sources=True)
+                         sources=True, tap=tap)
     if rres["problems"]:
         return "drivers: " + "; ".join(rres["problems"][:2])
     rtree = rres["tree"]
@@ -834,15 +841,16 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
     return _hub_search(cat, job, blocked, spans, clear, box, limit)
 
 
-def _hub_search(cat, job, blocked, spans, clear, box, limit):
-    """The hub search proper: a trunk from every driver, split to every consumer."""
+def _hub_search(cat, job, blocked, spans, clear, box, limit, tap=TapSink):
+    """The hub search proper: a trunk from every driver, split to every consumer. ``tap``: the
+    driver machines' sink kind (2.1 m2m: on the left lane)."""
     grid = _Bounded(blocked, box, spans)
     cands = _hubs(grid, job)
     if not cands:
         return None, "no free tile is reached from every driver and consumer (no hub)"
     best, why, wins = None, None, 0
     for hub, f in cands:
-        got = _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f)
+        got = _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap)
         if isinstance(got, str):
             why = why or f"hub {hub[0]},{hub[1]}: {got}"
             continue
@@ -971,6 +979,22 @@ def _halves(flat, fn, job, cap):
     return [e for _a, _r, e in rows[:i]], [e for _a, _r, e in rows[i:]]
 
 
+def _mark_m2m(flat, cat, js):
+    """2.1 ``route --m2m``: a net with two or more drivers and two or more consumers whose flow
+    is above one lane, or whose ``width`` above 2 asks for that many lanes, is laid by
+    ``fkcore.m2m`` (its job's ``m2m``: what each end puts on and takes). Not a lane pair, a
+    pinned lane or a fluid."""
+    from . import m2m as m2mmod
+    cap = _lane_cap(cat)
+    for net, job in js.items():
+        fn = flat.nets.get(net)
+        if fn is None or job.parts or job.fluid or job.skip or net in getattr(flat, "lane_of", {}) \
+                or fn.lane is not None or job.drivers() < 2 or job.consumers() < 2:
+            continue
+        if fn.width > 2 or _flow(flat, fn) > cap + 1e-9:
+            job.m2m = m2mmod.spec_of(flat, cat, fn, job, cap)
+
+
 def _widen(flat, cat, js):
     """A net on both lanes of its belt (``width 2``, or a flow above one lane) with two or more
     drivers: its job is a pair of itself (``fkcore.pairs``): the drivers in two groups, chosen from
@@ -980,7 +1004,8 @@ def _widen(flat, cat, js):
     for net, job in list(js.items()):
         fn = flat.nets.get(net)
         if fn is None or job.parts or job.fluid or job.skip or not job.drivers() or \
-                not job.consumers() or net in getattr(flat, "lane_of", {}) or fn.width > 2:
+                not job.consumers() or net in getattr(flat, "lane_of", {}) or fn.width > 2 \
+                or job.m2m is not None:
             continue          # 2.1: a wide net (width above 2) is a ribbon (fkcore.ribbons)
         pin = fn.lane if fn.width < 2 else None
         if pin is None and (job.drivers() < 2 or
@@ -1092,7 +1117,10 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
             laid = _settle_leaves(cat, _carriers(job, straight, net), ents, allow=allow)
             if laid is not None:
                 return laid, f"a straight belt, {len(straight)} carriers"
-    if job.mode == "hub":
+    if job.m2m is not None:
+        from . import m2m as m2mmod
+        plan, how = m2mmod.route(cat, job, blocked, spans, clear, box, limit, ents)
+    elif job.mode == "hub":
         plan, how = _hub_job(cat, job, blocked, spans, clear, box, limit)
     else:
         plan, how = _tree_job(cat, job, blocked, spans, clear, box, limit)
@@ -1988,15 +2016,19 @@ def _filter_loads(flat, lay, cat):
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                 blocked=(), hand=None, patch=None, ug=None) -> Routed:
+                 blocked=(), hand=None, patch=None, ug=None, m2m=False) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
-    as it, and lays each tunnel with the slowest tier that reaches it (2.1 ribbon tunnels)."""
-    global _HANDS
+    as it, and lays each tunnel with the slowest tier that reaches it (2.1 ribbon tunnels).
+    ``m2m`` (2.1, ``route --m2m``): a net with two or more drivers and two or more consumers
+    whose flow is above one lane (or whose ``width`` above 2 asks for that many lanes) is laid by
+    ``fkcore.m2m`` and gets a ``MAXFLOW`` line; without it nothing changes."""
+    global _HANDS, _M2M
     from . import ribbons as ribmod
-    saved_ug = ribmod._UG
+    saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
+    _M2M = bool(m2m)
     try:
         if not hand or hand == "fast-inserter":
             return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
@@ -2010,6 +2042,7 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
             _HANDS = saved
     finally:
         ribmod._UG = saved_ug
+        _M2M = saved_m2m
 
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
@@ -2117,6 +2150,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     from . import ribbons as ribmod
     pending = set(todo) | {n for n in js if n not in have and n not in patch and n not in abut
                            and not js[n].fluid}
+    pending = {n for n in pending if js[n].m2m is None}     # 2.1 --m2m: lanes, not a ribbon
     ribs = ribmod.plan(flat, cat, js, pending)
     ribs = {k: r for k, r in ribs.items() if any(n in todo for n in r.nets)}
     rib_of = {n: k for k, r in ribs.items() for n in r.nets}
@@ -2251,10 +2285,19 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for key in sorted(rib_lines, key=fkpmod.natural_key):
         if all(n in added for n in ribs[key].nets):
             lines.append(rib_lines[key])
+    short = {}
+    for net in sorted(js, key=fkpmod.natural_key):
+        if js[net].m2m is not None and net in added and net in todo:
+            from . import m2m as m2mmod
+            text, why = m2mmod.report(cat, js[net], added[net], list(new.entities.values()))
+            lines.append(text)
+            if why:
+                short[net] = why
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
-    return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again)
+    return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again,
+                  short)
 
 
 def seal_checks(flat, lay, cat):

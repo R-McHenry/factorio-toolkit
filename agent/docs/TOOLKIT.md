@@ -87,6 +87,20 @@ longer than yellow's 5 tiles adds its length and tier, `(7 tiles red)`. `route -
 reach that far. A ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates
 (4 belts): ...` with the reason, and lays none of its belts.
 
+`route --m2m` lays a net with several drivers and several consumers whose flow is above one
+lane as a network of runs, not one trunk. The hub comes first, without side-loads, each driver
+dropping on the left lane. Then runs are added, each split off a belt or from a driver with
+items to spare, and merged onto a belt or into a consumer that can take more, until the
+max-flow covers the demand. A `width 6` net is then six lanes at least, not a ribbon. Each such
+net gets a `MAXFLOW` line:
+
+```
+MAXFLOW   plates: 22.4 of 22.4/s, the narrowest cut 3 lanes
+```
+
+A net that falls short also gets a `maxflow` check, naming the carriers where it binds. Without
+`--m2m` nothing changes.
+
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
 build at a time in a run: a second `fk build` waits for the first). Each step writes its report
 to `game\out\<step>.txt`: read the one that matters
