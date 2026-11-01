@@ -208,6 +208,23 @@ class TapSink:
         return max(0, dx + dy - 3)    # a long-handed tap reaches 3 tiles from the footprint
 
 
+class DropSink:
+    """3.0 (drills in cells): a machine that drops its output on one fixed tile (a mining drill's
+    drop tile), reached by a belt of the net standing on that tile, any heading, no inserter. The
+    tree may run on through it: a through-belt passes the drill and takes its ore."""
+    terminal = False
+
+    def __init__(self, name, tile):
+        self.name, self.tile = name, tuple(tile)
+
+    def goal(self, state, tree, path=None, taken=()):
+        x, y, _d, ex = state
+        return (x, y) == self.tile and not ex
+
+    def h(self, x, y):
+        return abs(x - self.tile[0]) + abs(y - self.tile[1])
+
+
 # -- the tree -----------------------------------------------------------------------------------
 class Tree:
     """Arrival states with their outgoing move: ("step", child), ("jump", child),

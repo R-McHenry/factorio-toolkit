@@ -50,6 +50,7 @@ def merge(flat, js):
         for part in (left, right, pair):
             job.starts += part.starts
             job.sources += part.sources
+            job.drops.update(part.drops)
             job.goals += part.goals
             job.taps += part.taps
             job.owners += part.owners
@@ -193,9 +194,11 @@ def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
     lt, rt = _step(hub, (h + 3) % 4), _step(hub, (h + 1) % 4)
     back, ahead = _step(hub, (h + 2) % 4), _step(hub, h)
     a = routemod.NetJob(left.net, starts=list(left.starts), sources=list(left.sources),
+                        drops=dict(left.drops),
                         goals=list(left.goals) + [(lt, (h + 1) % 4)], taps=list(left.taps),
                         owners=list(left.owners))
     b = routemod.NetJob(right.net, starts=list(right.starts), sources=list(right.sources),
+                        drops=dict(right.drops),
                         goals=list(right.goals) + [(rt, (h + 3) % 4)], taps=list(right.taps),
                         owners=list(right.owners))
     both = routemod.NetJob(job.net, starts=[(hub, h)], goals=list(pair.goals),

@@ -871,7 +871,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
                 keys.append(m.key)
             if core == "Chest" and any(flat.machines[k].extra.get("buffer") for k in keys):
                 flat.buffers[path] = "chest"
-            if imported is not None and path in getattr(flat, "_lit_names", {}):
+            if imported is not None and (path in getattr(flat, "_lit_names", {})
+                                         or path in getattr(flat, "_lit_ports", {})):
                 _literal_names(flat, path, imported, keys, inst, src, d)
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, None, None,
                         inst.line, imported, conns=inst.conns)
@@ -1092,7 +1093,18 @@ def _literal_names(flat, path, imported, keys, inst, src, duty=1.0):
     of the Literal's line), and one that starts at it leaves from its front (the last). As a
     consumer it takes what reaches it, like a chest; what the Literal does with it is its own."""
     names, other = {}, {}
-    for name, ekey in flat._lit_names[path].items():
+    # 3.0: a port (``"ports"``) is a carrier end on one edge of the frame: a belt or pipe end
+    for name, (ekey, side) in getattr(flat, "_lit_ports", {}).get(path, {}).items():
+        ent = next(e for e in imported[0] if e.key == ekey)
+        pipe = not ent.name.endswith("belt") and "splitter" not in ent.name \
+            and "loader" not in ent.name
+        extra = {"lit_port": side, ("pipe_end" if pipe else "belt_end"): True}
+        spec = MSpec(ekey.rsplit("/", 1)[-1], ent.name, None, {}, {}, None, sink=True,
+                     extra=extra)
+        flat.machines[ekey] = _machine(spec, path, inst.kind, duty)
+        keys.append(ekey)
+        names[name] = ekey
+    for name, ekey in getattr(flat, "_lit_names", {}).get(path, {}).items():
         if ekey in keys:
             names[name] = ekey
             continue
@@ -1130,6 +1142,14 @@ def _literal_entities(flat, path, params, cat, src):
         if names:
             flat._lit_names = getattr(flat, "_lit_names", {})
             flat._lit_names[path] = names
+        try:
+            ports = literal.ports_of(literal.resolve(src, params["file"]), ents, cat,
+                                     params.get("box"))
+        except (literal.LiteralError, OSError) as exc:
+            raise TemplateError(str(exc)) from None
+        if ports:
+            flat._lit_ports = getattr(flat, "_lit_ports", {})
+            flat._lit_ports[path] = ports
         return ents, size, origin, literal.signature(ents, size)
     if flat._layout is None:
         raise TemplateError("a Literal without file= needs the factory's .fkp")
@@ -2037,7 +2057,8 @@ def _resolve_nets(flat, cat):
         keys = machines_of(p, ref, "driver")
         for key in keys:
             m = flat.machines[key]
-            if m.extra.get("belt_end") and not m.makes and w["items"]:
+            if (m.extra.get("belt_end") or m.extra.get("pipe_end")) and not m.makes \
+                    and w["items"]:
                 # 2.1.19: a Literal's named belt drives what its net says it carries, without
                 # bound, as a requester does (what the Literal puts on it is its own)
                 m.makes, m.source = {i: INF for i in w["items"]}, True

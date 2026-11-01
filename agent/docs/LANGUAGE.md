@@ -198,6 +198,8 @@ you use: `import SmelterPair, AsmCell from "cells.fk"`.
 | `CircuitCell` | green circuits: three cable assemblers to two circuit assemblers, handing straight across. Two cells: 480 circuits/min | `wi_*`, `wo_*`, `cu_*`, `eo_*`, `ei_*` |
 | `LabCell<packs>` | a lab, two packs on the two lanes of one belt (red and green unless you say) | `p_in`/`p_out` |
 | `LabColumn<packs>` | six LabCells and a header of one belt a pack; stacked east, a lab field | `r_*`, `g_*` |
+| `DrillCell<resource>` | an electric drill dropping its ore onto the belt through the cell: one lane, 15 drills to a yellow lane | `ore_in`/`ore_out` |
+| `DrillPair<resource>` | two drills facing each other across the ore belt: both lanes | `ore_in`/`ore_out` |
 | `AcidDrillCell` | an electric drill on uranium, its acid through the cell on a pipe | `acid_*`, `ore_*` |
 | `GateCell<item, items, amount=auto>`, `GateCellR` | a sushi loop's source: loads its item while the loop holds less than `amount` (`GateCellR` on the right lane) | `s_in`/`s_out` |
 | `MallCell<recipe, items>` | a maker on a sushi loop, and its provider chest | `s_in`/`s_out` |
@@ -269,7 +271,9 @@ recipes the game allows them in (intermediates, science packs, uranium fuel cell
 design that has them keeps working; they are not for new designs. Each has a library cell that
 replaces it (`SmelterPair`, `FurnaceCell`/`FurnacePair`, `AsmCell`, `LabCell`/`LabColumn`,
 `CircuitCell`), and `fk check` names it (`row-cell`). `MinerRow` is not one of these: it is the
-drill line, and there is no drill cell. A row is **counterflow**: every belt of a row attaches at
+drill line, and it is also what a drill cell holds (`DrillCell`, `DrillPair`): in a cell whose
+frame its own belt would leave, a MinerRow lays no belt, and its drills drop their ore onto the
+cell's through-belt. A row is **counterflow**: every belt of a row attaches at
 its head, the west end at rot 0, so leave a few free tiles there.
 
 `inserter=inserter` on a row puts plain inserters in place of the fast ones; `inserter=any` (or
@@ -723,9 +727,10 @@ net out: line.g_out -> box
   straight belt tunnels under it. `docs\examples\blue6.fk` is such a cell.
 - A fluid port pair works the same way: `stack acid_in -> acid_out` runs one pipe through each
   cell, and each cell's pipe joins the next one's at their shared edge. Both ends carry the same
-  fluid. The library's `AcidDrillCell` is one, and `docs\examples\plastic-cell.fk` another. A
-  drill cell narrower than 7x7 can fail to route its ore (`UNREACHED`): the belt router merges a
-  port's belt and a drill's ore only with room for a splitter.
+  fluid. The library's `AcidDrillCell` is one, and `docs\examples\plastic-cell.fk` another.
+- A drill drops its ore on the tile in front of it, so a cell's through-belt that passes that tile
+  takes the ore with no inserter (`DrillCell`, 3x4). Two drills facing one belt tile fill both
+  lanes (`DrillPair`, 3x7).
 - Reports list a stack's cells as `line/0`, `line/1` ...: each cell is an instance of its own.
 - On a short line the cells nearest the feed run full and the last ones get what is left, as on
   the belt: `fk rates` says so cell by cell. Off a Stack's chain, a short net is shared evenly.
@@ -1027,9 +1032,21 @@ names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order
 behind, so name the first belt of the Literal's own line; a net out of it starts in front of it
 (name the last), and carries what the net declares (`net out items iron-plate: blk.last -> box`).
 The Literal's inserters pick from its own belts as built. A name of any other entity that is no
-machine is refused when a net uses it. A blueprint Literal keeps its circuit
-settings (`if=`, `read=`, ...) and its wires; a wire longer than the game's 9 tiles is dropped by
-the game.
+machine is refused when a net uses it.
+
+**Ports of a Literal.** A JSON Literal file may also name its ports, the way a module declares
+them: `"ports": {"heavy": {"carrier": 12, "side": "e"}}`, a pipe, pipe-to-ground or belt of the
+file (its index, from 0) and the edge of the frame it meets (`n`, `e`, `s`, `w`, in the file's own
+frame; a turned Literal turns them). `plant.heavy` is then a net end on that edge: `net heavy
+items heavy-oil: plant.heavy -> crack` starts on the tile beside the carrier across the edge, and a
+net into a port ends there, flowing in. The carrier's whole group of touching pipes (or belts)
+carries the net, so the router lays no other net beside it: a refinery's three outputs, each a
+port, never short. With ports a Literal is a sealed piece, and a module around it (a wrapper, a
+buffer) routes like any other. `fk capture` writes a port for each belt and pipe that crosses the
+edge of what it captures (`e1`, `n2`, ...); rename them in the file.
+
+A blueprint Literal keeps its circuit settings (`if=`, `read=`, ...) and its wires; a wire longer
+than the game's 9 tiles is dropped by the game.
 
 ## Checks on paper
 

@@ -34,7 +34,10 @@ connected graph joining every driver to every consumer); a net is laid in one of
 A consumer that is a single machine (a chest, an assembler cell: its role has no attach tile) is
 reached by direct insertion: a fast (or long-handed) inserter beside the belt picks into it
 (``steiner.TapSink``), keyed ``~<net>/i<k>``. A single machine as a driver works the same way on a
-reversed tree, so its inserter turns round to pick from the machine.
+reversed tree, so its inserter turns round to pick from the machine. A mining drill as a driver
+(3.0: a drill in a cell, or a Literal's named drill) is reached by a belt over its drop tile, any
+heading and no inserter (``steiner.DropSink``, ``NetJob.drops``); the tile is its net's end, so
+the through-belt of a cell may pass it.
 
 Two nets that share a belt (``lanes A | B``, 2.0) are one job, ``A|B``: each net from its drivers
 to its side of a join, and one route of both lanes from the join to every consumer
@@ -106,7 +109,7 @@ from dataclasses import dataclass, field
 from . import connect as connectmod
 from . import fkp as fkpmod
 from .expand import attach_points, frame_of, port_edges, record_misfit
-from .steiner import COSTS, FixedSink, Grid, TapSink, Tree, grow
+from .steiner import COSTS, DropSink, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
 
 __all__ = ["NetJob", "Routed", "jobs", "route_layout", "fluid_nets"]
@@ -190,9 +193,11 @@ class NetJob:
     pin: str | None = None                         # 2.0.54: the lane it ends on (L or R)
     drv: list = field(default_factory=list)        # [(start or source, instance path)]
     m2m: dict | None = None                        # 2.1 route --m2m: fkcore.m2m.spec_of
+    drops: dict = field(default_factory=dict)      # 3.0: {source key: tile} a drill drops onto
 
     def ends(self):
-        return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
+        return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved) \
+            + sorted(set(self.drops.values()))
 
     def signature(self):
         """Everything a route of this net is laid to: per role, its start or goal tiles with their
@@ -329,6 +334,7 @@ def jobs(flat, lay, cat) -> dict:
                 mine.append((side, job.goals[-1]))
             job.owners.append(f"{path}.{role}")
     _literal_ends(flat, lay, cat, out, fluids)
+    _drill_drops(lay, cat, out)
     if getattr(flat, "pairs", None):
         from . import pairs
         pairs.merge(flat, out)
@@ -345,6 +351,29 @@ def jobs(flat, lay, cat) -> dict:
     return out
 
 
+def _drop_tile(cat, e):
+    """The tile a mining drill drops its output on (the game's vector_to_place_result, as
+    fkcore.connect has it), or None for a pumpjack or an undirected drill."""
+    if not cat.has_entity(e.name) or cat.kind(e.name) != "mining-drill" or e.name == "pumpjack" \
+            or _heading(e) is None:
+        return None
+    w, hh = cat.size(e.name)
+    vx, vy = (-0.5 if w % 2 == 0 else 0.0), -(hh / 2 + 0.3)
+    for _ in range(_heading(e)):
+        vx, vy = -vy, vx
+    return math.floor(float(e.x) + vx), math.floor(float(e.y) + vy)
+
+
+def _drill_drops(lay, cat, out):
+    """3.0: every machine driver that is a mining drill drops on its tile, no inserter."""
+    for job in out.values():
+        for key, _rect in job.sources:
+            e = lay.entities.get(key)
+            t = None if e is None else _drop_tile(cat, e)
+            if t is not None:
+                job.drops[key] = t
+
+
 def _literal_ends(flat, lay, cat, out, fluids):
     """2.1 (PLAN-2.1 H): a Literal's named machine on a net is an end the router reaches from
     outside the Literal's entities, as it reaches a single machine: an inserter beside it, on a
@@ -359,6 +388,8 @@ def _literal_ends(flat, lay, cat, out, fluids):
             if m is not None and m.extra.get("belt_end"):
                 _belt_end(flat, lay, out, fluids, path, name, key)
                 continue
+            if m is not None and m.extra.get("pipe_end"):
+                continue                         # a fluid port: the fluid plug-in's end
             ts = fkpmod.tiles_of(cat, lay.entities[key])
             rect = (min(t[0] for t in ts), min(t[1] for t in ts),
                     max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
@@ -383,6 +414,7 @@ def _belt_end(flat, lay, out, fluids, path, name, key):
     e = lay.entities[key]
     h = _heading(e)
     tile = (math.floor(float(e.x)), math.floor(float(e.y)))
+    edge = port_side(flat, lay, key)
     for side, hold in (("out", flat._out_hold), ("in", flat._in_hold)):
         for net in sorted({n for (k, _i), ns in hold.items() if k == key for n in ns}):
             if net in fluids or net not in flat.nets:
@@ -390,7 +422,17 @@ def _belt_end(flat, lay, out, fluids, path, name, key):
             job = out.setdefault(net, NetJob(net))
             owner = f"{path}.{name}"
             mine = job.anchors.setdefault(owner, [])
-            if side == "out":
+            if edge is not None:
+                # 3.0, a Literal port: the net meets the carrier across its frame edge
+                t = (tile[0] + _DX[edge], tile[1] + _DY[edge])
+                if side == "out":
+                    job.starts.append((t, edge))
+                    job.drv.append((job.starts[-1], path))
+                    mine.append((side, job.starts[-1]))
+                else:
+                    job.goals.append((t, (edge + 2) % 4))
+                    mine.append((side, job.goals[-1]))
+            elif side == "out":
                 job.starts.append(((tile[0] + _DX[h], tile[1] + _DY[h]), h))
                 job.drv.append((job.starts[-1], path))
                 mine.append((side, job.starts[-1]))
@@ -399,6 +441,18 @@ def _belt_end(flat, lay, out, fluids, path, name, key):
                 mine.append((side, job.goals[-1]))
             if owner not in job.owners:
                 job.owners.append(owner)
+
+
+def port_side(flat, lay, key):
+    """3.0: the heading (N E S W = 0..3) out of a Literal port's frame edge, turned with the
+    Literal, or None when ``key`` is no Literal port."""
+    m = flat.machines.get(key)
+    side = m.extra.get("lit_port") if m is not None else None
+    if side is None:
+        return None
+    from .literal import SIDES
+    rec = lay.insts.get(key.rsplit("/", 1)[0])
+    return (SIDES[side] + (int(rec.rot) if rec is not None else 0)) % 4
 
 
 # -- the ground -----------------------------------------------------------------------------------
@@ -442,13 +496,10 @@ def _hand_tiles(cat, ents):
             (tx, ty), = fkpmod.tiles_of(cat, e)
             for s in (r, -r):
                 out.setdefault((tx + _DX[h] * s, ty + _DY[h] * s), e.net)
-        elif kind == "mining-drill" and e.name != "pumpjack" and _heading(e) is not None:
-            # the game's vector_to_place_result, as fkcore.connect has it
-            w, hh = cat.size(e.name)
-            vx, vy = (-0.5 if w % 2 == 0 else 0.0), -(hh / 2 + 0.3)
-            for _ in range(_heading(e)):
-                vx, vy = -vy, vx
-            out.setdefault((math.floor(float(e.x) + vx), math.floor(float(e.y) + vy)), None)
+        elif kind == "mining-drill":
+            t = _drop_tile(cat, e)
+            if t is not None:          # the drill's own net may still lay on it: it is that net's end
+                out.setdefault(t, None)
     return out
 
 
@@ -662,16 +713,25 @@ def _clean(v):
 _FILTERED = frozenset()
 
 
-def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink):
+def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None):
     """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
     inserters, or long-handed ones where only those reach. ``sources``: the machines are drivers,
     and one in ``_FILTERED`` is tried with fast inserters alone before a long-handed one may load
-    it (2.0.76). ``tap``: the machines' sink kind (2.1 m2m: ``m2m.LeftTap``). -> (result, sinks)."""
+    it (2.0.76). ``tap``: the machines' sink kind (2.1 m2m: ``m2m.LeftTap``). ``drops``: {key:
+    tile} of the driver machines that drop on a tile (drills: ``DropSink``). -> (result, sinks)."""
+    drops = drops or {}
     passes = list(_HANDS)
     if sources and any(key in _FILTERED for key, _r in machines):
         passes = [_HANDS[0], None] + passes[1:]
+    # two drills facing one belt tile (a pair) drop on the same tile: one sink for both
+    first = {}
+    for key, _r in machines:
+        if key in drops:
+            first.setdefault(drops[key], key)
+    machines = [(k, r) for k, r in machines if k not in drops or first[drops[k]] == k]
     for hands in passes:
-        sinks = fixed + [tap(key, rect, 1, _HANDS[0] if hands is None and key in _FILTERED
+        sinks = fixed + [DropSink(key, drops[key]) if key in drops else
+                         tap(key, rect, 1, _HANDS[0] if hands is None and key in _FILTERED
                              else hands or _HANDS[-1]) for key, rect in machines]
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
@@ -695,7 +755,8 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
         machines = job.taps
     if grid.blocked((root[0], root[1])):
         return None, f"its {'end' if reverse else 'start'} tile {root[0]},{root[1]} is taken"
-    res, sinks = _grow(grid, root, fixed, machines, limit, sources=reverse)
+    res, sinks = _grow(grid, root, fixed, machines, limit, sources=reverse,
+                       drops=job.drops if reverse else None)
     if res["problems"]:
         return None, "; ".join(res["problems"][:3])
     c = res["counts"]
@@ -741,7 +802,8 @@ def _hubs(grid, job, most=_HUBS):
     by the summed walking distance from every driver to H and from F to every consumer; a hub
     within 2 tiles of an end on a side with several ends ranks last; picked 3 tiles apart."""
     ends = set(job.ends())
-    near_d = [[t] for t, _h in job.starts] + [_beside(grid, r) for _k, r in job.sources]
+    near_d = [[t] for t, _h in job.starts] + [[job.drops[k]] if k in job.drops else
+                                              _beside(grid, r) for k, r in job.sources]
     near_c = [[t] for t, _h in job.goals] + [_beside(grid, r) for _k, r in job.taps]
     dd = [_walk(grid, s) for s in near_d]
     dc = [_walk(grid, s) for s in near_c]
@@ -778,7 +840,7 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink)
     rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
     fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
     rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit,
-                         sources=True, tap=tap)
+                         sources=True, tap=tap, drops=job.drops)
     if rres["problems"]:
         return "drivers: " + "; ".join(rres["problems"][:2])
     rtree = rres["tree"]
@@ -888,7 +950,7 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
             if not rest and not job.goals:
                 return direct, n
             sub = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=rest,
-                         sources=list(job.sources), owners=list(job.owners))
+                         sources=list(job.sources), drops=dict(job.drops), owners=list(job.owners))
             if sub.mode == "hub":
                 plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
             else:
@@ -912,7 +974,7 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
             n = f"{len(direct)} inserter{'s' if len(direct) > 1 else ''} (direct insertion)"
             if not rest:
                 return direct, n
-            sub = NetJob(job.net, taps=list(job.taps), sources=rest, owners=list(job.owners))
+            sub = NetJob(job.net, taps=list(job.taps), sources=rest, drops=dict(job.drops), owners=list(job.owners))
             plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
             if plan is not None:
                 return direct + plan, f"{n}, then {how}"
@@ -1105,10 +1167,12 @@ def _widen(flat, cat, js):
             part = NetJob(f"{net}.{side}")
             for entry in group:
                 (part.sources if isinstance(entry[0], str) else part.starts).append(entry)
+                if isinstance(entry[0], str) and entry[0] in job.drops:
+                    part.drops[entry[0]] = job.drops[entry[0]]
             parts.append(part)
         both = NetJob(net, goals=list(job.goals), taps=list(job.taps), owners=list(job.owners))
         wide = NetJob(net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
-                      sources=list(job.sources), owners=list(job.owners),
+                      sources=list(job.sources), drops=dict(job.drops), owners=list(job.owners),
                       anchors=dict(job.anchors), parts=(parts[0], parts[1], both),
                       wide=pin is None, pin=pin, drv=list(job.drv))
         js[net] = wide
@@ -1235,7 +1299,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
         return got, how
     # 2.0.54: no join routes, so the net goes on as one lane, the way it went before
     plain = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
-                   sources=list(job.sources), owners=list(job.owners), anchors=dict(job.anchors))
+                   sources=list(job.sources), drops=dict(job.drops), owners=list(job.owners), anchors=dict(job.anchors))
     got, text = _route_one(cat, plain, ents, frames, js, box, limit, terrain, avoid, spans, allow,
                            promoted)
     if got is None:
@@ -1315,7 +1379,7 @@ def _route_seeded(cat, job, ents, frames, js, box, limit, terrain, avoid, seed,
     for k, (starts, sources) in enumerate(into):
         if not starts and not sources:
             continue
-        piece = NetJob(job.net, starts=starts, sources=sources, goals=[ins[k]],
+        piece = NetJob(job.net, starts=starts, sources=sources, drops=dict(job.drops), goals=[ins[k]],
                        owners=list(job.owners), anchors=dict(job.anchors))
         got, why = _route_one(cat, piece, list(ents) + laid, frames, js, box, limit, terrain,
                               avoid, allow=allow)
@@ -1450,7 +1514,7 @@ def _prejoined(job):
                   goals=list(pair.goals) + list(left.goals) + list(right.goals),
                   taps=list(pair.taps) + list(left.taps) + list(right.taps),
                   sources=list(left.sources) + list(right.sources),
-                  owners=list(job.owners))
+                  drops={**left.drops, **right.drops}, owners=list(job.owners))
 
 
 def _straight(job, grid):

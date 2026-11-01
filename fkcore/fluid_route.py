@@ -47,7 +47,7 @@ from collections import deque
 
 from . import connect as connectmod
 from . import fkp as fkpmod
-from .catalog import PipeConn
+from .catalog import FluidBox, PipeConn
 
 __all__ = ["route", "reserved", "why_not", "PIPE", "PTG"]
 
@@ -122,6 +122,22 @@ def _port_end(flat, pe, key, item, side):
     return b._replace(conns=(conn,))
 
 
+def _lit_port_box(flat, lay, key, item, side):
+    """3.0, a Literal's pipe port: a box with one connection, from the carrier across the frame
+    edge its port names; None when ``key`` is no Literal pipe port."""
+    m = flat.machines.get(key)
+    if m is None or not m.extra.get("pipe_end"):
+        return None
+    from .route import port_side
+    h = port_side(flat, lay, key)
+    e = lay.entities[key]
+    tile = (math.floor(float(e.x)), math.floor(float(e.y)))
+    d = _DIRS[h]
+    target = (tile[0] + _STEP[d][0], tile[1] + _STEP[d][1])
+    flow = "output" if side == "out" else "input"
+    return FluidBox(1, item, flow, (PipeConn(tile, d, target, flow, "normal"),))
+
+
 def _abut(flat, lay, cat, net):
     """A net between two fluid ports that meet on one edge (2.1: a Stack's cells, one's out port
     on the next one's in port): connected as they stand, nothing to lay."""
@@ -150,6 +166,10 @@ def _ends(flat, lay, cat, net):
             e = lay.entities.get(key)
             if e is None:
                 raise _Skip(f"{key} is not placed")
+            b = _lit_port_box(flat, lay, key, item, side)
+            if b is not None:
+                out.append((key, item, side, b))
+                continue
             b = connectmod.endpoint_box(_boxes(cat, e), item, side)
             if b is None:
                 raise _Skip(f"{key} ({e.name}) has no fluid box for {item}")
@@ -266,6 +286,7 @@ def _world(flat, lay, cat, nets_all, blocked, box, keep):
     # pump of an InlinePump) joins the port directly: the tile outside stays the outer net's
     across = {(tuple(pe.inside), tuple(pe.outside)) for pe in edges.values()}
     ports = getattr(flat, "ports", {})
+    lit_ports = set()
     for net in nets_all:
         abut = _abut(flat, lay, cat, net)
         for side, rows in (("out", flat.nets[net].drivers), ("in", flat.nets[net].consumers)):
@@ -290,13 +311,23 @@ def _world(flat, lay, cat, nets_all, blocked, box, keep):
                         w.reserve[t] = net
                     continue
                 e = lay.entities.get(key)
+                pb = _lit_port_box(flat, lay, key, item, side) if e is not None else None
+                if pb is not None:
+                    # 3.0, a Literal's pipe port: its carrier is the net's, and only the tile
+                    # across its edge is where the net's pipe joins it
+                    for t in fkpmod.tiles_of(cat, e):
+                        w.owner[t] = net
+                    t = pb.conns[0].target
+                    w.reserve[t] = net if w.reserve.get(t, net) == net else _CONTESTED
+                    lit_ports.add(key)
+                    continue
                 b = connectmod.endpoint_box(_boxes(cat, e), item, side) if e is not None else None
                 if b is not None:
                     owners.setdefault((key, b.box), net)
                     ways[(key, b.box, side)] = net
     for key in sorted(lay.entities, key=fkpmod.natural_key):
         e = lay.entities[key]
-        if not cat.has_fluid_boxes(e.name):
+        if not cat.has_fluid_boxes(e.name) or key in lit_ports:
             continue
         tiles = fkpmod.tiles_of(cat, e)
         # a carrier the netlist names as a machine (3.0, a Pump) is an end of its nets, not a pipe

@@ -32,6 +32,13 @@ index of an entity in the file's list (from 0; a blueprint's entity order when t
 only ``bp``). ``automall.asm10`` is then a net end like any machine's (``names_of``, read by
 ``fkcore.elaborate``). ``fk capture`` writes a name for each machine it captures.
 
+3.0 (Literal ports, FRICTION-REVIEW-3.0 U4): a JSON file may name its ports, ``"ports":
+{"heavy": {"carrier": 12, "side": "e"}}``: a pipe or belt of the file (its index) and the frame
+edge it meets (n, e, s, w, in the file's own frame). ``plant.heavy`` is then a net end on that edge,
+as a module's port is: a net into it ends on the tile beside the carrier on that side, a net out
+of it starts there, and the carrier's whole group of touching pipes (or belts) carries the net
+(``ports_of``), so no other net's pipe may stand beside it.
+
 Keys are ``<inst>/<prototype><k>`` in file order. Carriers get a net by connectivity, since a file
 has no netlist: each group of touching pipes is ``<inst>/fluid<k>``, each group of touching belts
 ``<inst>/belt<k>``, each inserter ``<inst>/hand<k>`` (one inserter is a route). Rename them in source
@@ -50,7 +57,10 @@ from . import fkp as fkpmod
 from . import snapshot
 
 __all__ = ["LiteralError", "read_entities", "import_entities", "signature", "names_of",
-           "machine_names"]
+           "machine_names", "ports_of", "SIDES"]
+
+#: a port's side: the frame edge, as a heading (N E S W = 0..3)
+SIDES = {"n": 0, "e": 1, "s": 2, "w": 3}
 
 _DIRS = {0, 4, 8, 12}
 _PIPES = ("pipe", "pipe-to-ground", "pump")
@@ -286,6 +296,56 @@ def names_of(path, ents, box=None):
             raise LiteralError(f"{path}: names {name}: entity {idx} ({rows[idx][0]}) lies outside "
                                f"box {box}")
         out[str(name)] = ents[pos[idx]].key
+    return out
+
+
+def _json(path):
+    if not path.lower().endswith(".json"):
+        return None
+    try:
+        data = json.loads(snapshot.read(path))
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def ports_of(path, ents, cat, box=None):
+    """``{name: (entity key, side)}`` from a JSON Literal file's ``"ports"`` (3.0): each a
+    ``{"carrier": index, "side": "n|e|s|w"}``, the carrier a pipe, pipe-to-ground or belt of the
+    file (its index from 0) and the side the frame edge it meets. {} when the file has none."""
+    data = _json(path)
+    if data is None or not data.get("ports"):
+        return {}
+    ports = data["ports"]
+    if not isinstance(ports, dict):
+        raise LiteralError(f'{path}: "ports" maps a name to {{"carrier": index, "side": "e"}}')
+    rows, _wires = read_entities(path)
+    kept = list(range(len(rows)))
+    if box is not None:
+        x0, y0, x1, y1 = _box(box)
+        kept = [k for k in kept if x0 <= math.floor(rows[k][1]) < x1
+                and y0 <= math.floor(rows[k][2]) < y1]
+    pos = {k: n for n, k in enumerate(kept)}
+    out = {}
+    for name, spec in ports.items():
+        if not _NAME.match(str(name)):
+            raise LiteralError(f"{path}: ports {name}: a name is a word without dashes (heavy), "
+                               "so a net can name it")
+        idx = spec.get("carrier") if isinstance(spec, dict) else None
+        side = str(spec.get("side", "")).lower() if isinstance(spec, dict) else ""
+        if isinstance(idx, bool) or not isinstance(idx, int) or not 0 <= idx < len(rows):
+            raise LiteralError(f"{path}: ports {name}: carrier {idx!r} is no entity's index (the "
+                               f"file has {len(rows)}, from 0)")
+        if side not in SIDES:
+            raise LiteralError(f"{path}: ports {name}: side {side!r} is not n, e, s or w")
+        if idx not in pos:
+            raise LiteralError(f"{path}: ports {name}: entity {idx} ({rows[idx][0]}) lies outside "
+                               f"box {box}")
+        kind = cat.kind(rows[idx][0]) if cat.has_entity(rows[idx][0]) else None
+        if rows[idx][0] not in _PIPES and kind not in _PIPES and kind not in _BELTS:
+            raise LiteralError(f"{path}: ports {name}: entity {idx} is a {rows[idx][0]}; a port's "
+                               "carrier is a pipe, a pipe-to-ground or a belt")
+        out[str(name)] = (ents[pos[idx]].key, side)
     return out
 
 

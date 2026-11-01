@@ -80,6 +80,14 @@ LINES = {
         net r: red -> labs.p_in
         net g: green -> labs.p_in
         lanes r | g""",
+    "DrillCell": """
+        col = Stack<cell=DrillCell, n=4> @(10, 8)
+        box = Chest<provider> @(30, 20)
+        net p: col.ore_out -> box""",
+    "DrillPair": """
+        col = Stack<cell=DrillPair, n=4> @(10, 8)
+        box = Chest<provider> @(30, 20)
+        net p: col.ore_out -> box""",
 }
 
 

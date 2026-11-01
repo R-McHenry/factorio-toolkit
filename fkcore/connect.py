@@ -762,6 +762,10 @@ def _fluid_leaks(g, owners, table):
             continue
         elif na.carrier or nb.carrier:
             (c, oc), m = ((a, oa), b) if na.carrier else ((b, ob), a)
+            inst = c[0].rsplit("/", 1)[0]
+            if oc in table and m[0].rsplit("/", 1)[0] == inst and any(
+                    k.rsplit("/", 1)[0] == inst for k in list(table[oc][0]) + list(table[oc][1])):
+                continue      # 3.0: a Literal port's own carriers into its own machine: its inside
             if oc in table:
                 out.append(Leak(oc, c[0], m[0], via, f"{c[0]} joins {m[0]} ({_box_word(g, m)}), "
                                                      f"which is not an endpoint of {oc}"))
