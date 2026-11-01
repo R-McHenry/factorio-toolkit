@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import unittest
 
-from fkcore import capture, circuits, codec, expand, lang, literal, rates, route, settings
+from fkcore import capture, circuits, codec, connect, expand, lang, literal, rates, route, settings
 from fkcore.catalog import Catalog
 from fkcore.elaborate import ElabError, advice, elaborate
 
@@ -362,7 +362,8 @@ class LiteralNamesTest(unittest.TestCase):
 
     ENTS = [{"name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 4},
             {"name": "assembling-machine-1", "x": 2.5, "y": 2.5, "recipe": "iron-gear-wheel"},
-            {"name": "assembling-machine-1", "x": 6.5, "y": 2.5, "recipe": "iron-gear-wheel"}]
+            {"name": "assembling-machine-1", "x": 6.5, "y": 2.5, "recipe": "iron-gear-wheel"},
+            {"name": "small-electric-pole", "x": 9.5, "y": 0.5}]
     SRC = """
 fein = Chest<requester, item=iron-plate, rate=1/s> @(0, 8)
 lit  = Literal<file="lit.json"> @(6, 4)
@@ -405,14 +406,47 @@ net out: lit.asm2 -> gb
         self.assertIn("names nothing", str(cm.exception))
 
     def test_a_name_of_no_machine(self):
-        self.write({"entities": self.ENTS, "names": {"belt": 0, "asm2": 2}})
+        self.write({"entities": self.ENTS, "names": {"pole": 3, "asm2": 2}})
         with self.assertRaises(ElabError) as cm:
-            self.flat(self.SRC.replace("lit.asm2 -> gb", "lit.belt -> gb"))
-        self.assertIn("names a transport-belt of Literal lit, which is no machine", str(cm.exception))
+            self.flat(self.SRC.replace("lit.asm2 -> gb", "lit.pole -> gb"))
+        self.assertIn("names a small-electric-pole of Literal lit, which is no machine",
+                      str(cm.exception))
+
+    def test_a_named_belt_is_fed_from_behind(self):
+        # 2.1.19 (Rory's 42-lab block, ~4115k): a net may end INTO a Literal's own belt
+        self.write({"entities": self.ENTS, "names": {"belt": 0, "asm2": 2}})
+        flat = self.flat(self.SRC.replace("fein -> lit.asm2", "fein -> lit.belt"))
+        self.assertEqual(flat.nets["in"].consumers, [("lit/transport-belt0", "iron-plate")])
+        lay, _notes = expand.expand_factory(flat, CAT)
+        jobs = route.jobs(flat, lay, CAT)
+        self.assertEqual(jobs["in"].goals, [((5, 4), 1)])       # behind the belt at 6.5,4.5 east
+        self.assertEqual(jobs["in"].taps, [])
+        r = route.route_layout(flat, lay, CAT)
+        self.assertNotIn("in", r.failed, r.failed)
+        into = [e for e in r.layout.entities.values()
+                if e.attrs.get("net") == "in" and (float(e.x), float(e.y)) == (5.5, 4.5)]
+        self.assertEqual([(e.name, e.dir) for e in into], [("transport-belt", 4)])
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        self.assertEqual(rep.nets["in"].status, "connected")
+        self.assertEqual(rep.leaks, [])
+
+    def test_a_named_belt_drives_what_its_net_declares(self):
+        self.write({"entities": self.ENTS, "names": {"belt": 0}})
+        src = ('lit = Literal<file="lit.json"> @(6, 4)\ngb = Chest<provider> @(16, 0)\n'
+               "net out items iron-plate: lit.belt -> gb\n")
+        flat = self.flat(src)
+        self.assertEqual(flat.nets["out"].drivers, [("lit/transport-belt0", "iron-plate")])
+        self.assertNotIn("cannot-carry", [c.code for c in flat.checks])
+        lay, _notes = expand.expand_factory(flat, CAT)
+        self.assertEqual(route.jobs(flat, lay, CAT)["out"].starts, [((7, 4), 1)])  # in front
+        r = route.route_layout(flat, lay, CAT)
+        self.assertEqual(r.failed, {})
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        self.assertEqual((rep.nets["out"].status, rep.leaks), ("connected", []))
 
     def test_bad_names(self):
         for names, want in (({"asm-2": 2}, "a word without dashes"),
-                            ({"asm2": 7}, "no entity's index (the file has 3"),
+                            ({"asm2": 7}, "no entity's index (the file has 4"),
                             ({"asm2": "2"}, "no entity's index"),
                             ([1, 2], "maps a name to an entity's index")):
             self.write({"entities": self.ENTS, "names": names})

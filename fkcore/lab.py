@@ -50,6 +50,7 @@ SLOT = 200                         # tiles a cell spans; a slot is one or more c
 ORIGIN = -900                      # a cell's corner is ORIGIN + SLOT * i (2.0.3's grid, extended)
 SPARE = 10                         # tiles a slot keeps free beyond its factory
 DEFAULT_SIZE = (100, 100)          # a factory no surface file places
+PAD = 4                            # tiles round a sealed module built alone: its ports' feeds
 #: what the workspace copies from the source: the modules, their layouts, Literals' files, models
 _COPY = (".fk", ".fkp", ".json", ".py")
 _SKIP = ("map.terrain.json",)
@@ -176,6 +177,9 @@ def prepare(game, name, src=None, size=None):
     if not os.path.exists(os.path.join(source, f"{module}.fk")):
         raise LabError(f"{name}: no {module}.fk in {source}"
                        + ("" if sf is None else f" (its surface places {', '.join(sorted(sf.places))})"))
+    alone = _sealed_alone(os.path.join(source, f"{module}.fk"), name)
+    if alone is not None and size is None:
+        w, h = alone[1][0] + 2 * PAD, alone[1][1] + 2 * PAD
     (x, y, _sw, _sh), _old = slot_of(game, name, (w, h))
     ws = workspace(game, name)
     if os.path.isdir(ws):
@@ -187,6 +191,13 @@ def prepare(game, name, src=None, size=None):
         if os.path.isfile(full) and f.endswith(_COPY) and f not in skip \
                 and not f.endswith((".surface", ".build.fkb")):
             shutil.copy2(full, os.path.join(ws, f))
+    if alone is not None:
+        mod, _size = alone
+        with open(os.path.join(ws, "lab_feed.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(f"# lab_feed.fk (fkcore.lab): {mod} from {module}.fk alone, its open ports fed"
+                     f" by the lab\nimport {mod} from \"{module}.fk\"\n"
+                     f"{re.sub(r'[^a-z0-9_]', '_', mod.lower())} = {mod} @({PAD}, {PAD})\n")
+        module = "lab_feed"
     with open(os.path.join(ws, "lab.surface"), "w", encoding="utf-8", newline="\n") as fh:
         fh.write(f"# lab.surface (fkcore.lab): {name} from {os.path.relpath(source, _run_dir(game))}"
                  f" on its lab slot\nsurface  lab\nmode     lab\nterrain  none\ncatalog  base\n\n"
@@ -194,6 +205,30 @@ def prepare(game, name, src=None, size=None):
     with open(os.path.join(ws, "lab.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
         fh.write(SCRIPT)
     return ws, (x, y, w, h)
+
+
+def _sealed_alone(path, name):
+    """(module, (w, h)) when the file at ``path`` places nothing and defines the sealed module the
+    lab builds alone, its ports fed (2.2): the one sealed module, or the one named like ``name``
+    (any case). None for a file with instances of its own (a lab design, as before 2.2)."""
+    from . import lang
+    try:
+        with open(path, encoding="utf-8") as fh:
+            f = lang.parse(fh.read(), path)
+    except (OSError, lang.FkSyntaxError):
+        return None
+    if f.body.insts:
+        return None
+    sealed = {n: m for n, m in f.modules.items() if m.size is not None}
+    pick = [n for n in sealed if n.lower() == name.lower()] or (list(sealed) if len(sealed) == 1
+                                                                 else [])
+    if not pick:
+        return None
+    m = sealed[pick[0]]
+    if any(p.default is None for p in m.params):
+        raise LabError(f"{name}: {m.name} takes parameters ({', '.join(p.name for p in m.params)}):"
+                       f" write a lab file that places it with them")
+    return m.name, m.size
 
 
 def _box(x, y, w=SLOT, h=SLOT):
@@ -308,6 +343,150 @@ rcon.print(helpers.table_to_json(out))
 """
 
 
+# -- sources and sinks at the open ports (2.2, Rory 2026-10-31) -----------------------------------
+#: Rory: "lab: should have infinity fluid source, and infinity chest source using loaders, loaders
+#: should also not be placed on half cells". A port of a sealed module that no net of the lab
+#: design binds from outside gets the lab's free materials at its edge: an infinity chest and a
+#: 1x1 loader (one whole tile each, outside every frame) for a belt port, an infinity pipe for a
+#: fluid port. An ``out`` port empties into a chest (or pipe) that deletes what it gets.
+_VEC = {(0, -1): "north", (1, 0): "east", (0, 1): "south", (-1, 0): "west"}
+_LEFTV = {(0, -1): (-1, 0), (1, 0): (0, -1), (0, 1): (1, 0), (-1, 0): (0, 1)}
+
+
+def _frames(flat, lay):
+    """[(path, x0, y0, x1, y1)] of the top-level sealed instances' frames, factory frame."""
+    out = []
+    for path, rec in lay.insts.items():
+        inst = flat.insts.get(path)
+        if "/" in path or inst is None or inst.module is None or inst.size is None:
+            continue
+        w, h = inst.size if rec.rot % 2 == 0 else inst.size[::-1]
+        out.append((path, rec.x, rec.y, rec.x + w, rec.y + h))
+    return out
+
+
+def _bound_outside(flat, key):
+    """A net outside port ``key``'s module names it."""
+    scope = flat.ports[key].scope
+    return any(n.scope != scope and any(k == key for k, _it in list(n.drivers) + list(n.consumers))
+               for n in flat.nets.values())
+
+
+def feeds(flat, lay, cat, ox=0, oy=0):
+    """What the lab stands at each open port of a top-level sealed instance: (entities, skipped).
+    An entity is a dict ``{k: chest|loader|belt|pipe, at: [x, y] (a tile centre, world), port,
+    ...}``; ``skipped`` is ``[(port, why)]``, a port whose source has no room outside the frames."""
+    from . import expand
+    frames = _frames(flat, lay)
+    tops = {p for p, *_r in frames}
+    edges = expand.port_edges(flat, lay, cat)
+    ents, skipped, taken = [], [], set()
+
+    def inside(t):
+        return any(x0 <= t[0] < x1 and y0 <= t[1] < y1 for _p, x0, y0, x1, y1 in frames)
+
+    for key in sorted(edges):
+        port = flat.ports[key]
+        if port.scope not in tops or _bound_outside(flat, key):
+            continue
+        pe = edges[key]
+        d = (pe.dst[0] - pe.src[0], pe.dst[1] - pe.src[1])
+        o = pe.outside
+
+        def at(t, k, **kw):
+            return dict(k=k, at=[t[0] + ox + 0.5, t[1] + oy + 0.5], port=key, **kw)
+
+        if pe.fluid:
+            want = [at(o, "pipe", fluid=pe.fluid, out=port.dir == "out")]
+        elif port.dir == "out":
+            beyond = (o[0] + d[0], o[1] + d[1])
+            want = [at(beyond, "chest", items=[]),
+                    at(o, "loader", dir=_VEC[d], type="input")]
+        elif port.right is None or list(port.right) == list(port.items):
+            behind = (o[0] - d[0], o[1] - d[1])
+            want = [at(behind, "chest", items=sorted(set(port.all_items))),
+                    at(o, "loader", dir=_VEC[d], type="output")]
+        else:                     # a pair: a belt at the edge, a loader side-loading each lane
+            want = [at(o, "belt", dir=_VEC[d])]
+            for sign, items in ((1, port.items), (-1, port.right)):
+                lx, ly = _LEFTV[d][0] * sign, _LEFTV[d][1] * sign
+                side, far = (o[0] + lx, o[1] + ly), (o[0] + 2 * lx, o[1] + 2 * ly)
+                want += [at(far, "chest", items=sorted(set(items))),
+                         at(side, "loader", dir=_VEC[(-lx, -ly)], type="output")]
+        tiles = [(int(e["at"][0] - ox - 0.5), int(e["at"][1] - oy - 0.5)) for e in want]
+        if any(inside(t) or t in taken for t in tiles):
+            skipped.append((key, "its source would stand inside a frame or on another port's"))
+            continue
+        taken |= set(tiles)
+        ents += want
+    return ents, skipped
+
+
+def lua_feed(ents):
+    """Lua that stands the ports' sources and sinks (``feeds``). -> JSON {placed, blocked: [port]}."""
+    rows = []
+    for e in sorted(ents, key=lambda e: e["k"] == "loader"):     # chests before their loaders
+        parts = [f"k='{e['k']}'", f"x={e['at'][0]}", f"y={e['at'][1]}", f"port='{e['port']}'"]
+        if "dir" in e:
+            parts.append(f"dir=defines.direction.{e['dir']}")
+        if "type" in e:
+            parts.append(f"type='{e['type']}'")
+        if "fluid" in e:
+            parts.append(f"fluid='{e['fluid']}', out={'true' if e['out'] else 'false'}")
+        if "items" in e:
+            parts.append("items={" + ", ".join(f"'{n}'" for n in e["items"]) + "}")
+        rows.append("{" + ", ".join(parts) + "}")
+    return f"""
+local s, f = game.get_surface('{SURFACE}'), '{FORCE}'
+local NAME = {{chest = 'infinity-chest', loader = 'loader-1x1', belt = 'transport-belt',
+              pipe = 'infinity-pipe'}}
+local out = {{placed = 0, blocked = {{}}}}
+for _, x in pairs({{{', '.join(rows)}}}) do
+  local spec = {{name = NAME[x.k], position = {{x.x, x.y}}, force = f, direction = x.dir}}
+  if x.k == 'loader' then spec.type = x.type end
+  local e = s.can_place_entity{{name = spec.name, position = spec.position, direction = spec.direction,
+                                force = f}} and s.create_entity(spec)
+  if not e then
+    out.blocked[#out.blocked + 1] = x.port
+  else
+    out.placed = out.placed + 1
+    if x.k == 'pipe' then
+      e.set_infinity_pipe_filter{{name = x.fluid, percentage = x.out and 0 or 1,
+                                 mode = x.out and 'at-most' or 'at-least'}}
+    elseif x.k == 'chest' then
+      if #x.items == 0 then e.remove_unfiltered_items = true end
+      for i, n in ipairs(x.items) do
+        e.set_infinity_container_filter(i, {{name = n, count = prototypes.item[n].stack_size,
+                                             mode = 'exactly', index = i}})
+      end
+    end
+  end
+end
+rcon.print(helpers.table_to_json(out))
+"""
+
+
+def _feed(r, ctx, name, x, y):
+    """Stand the sources and sinks of NAME's open ports (plot at x, y). -> report lines."""
+    flat, lay = ctx.flats.get(name), ctx.layouts.get(name)
+    if flat is None or lay is None or not flat.ports:
+        return []
+    ents, skipped = feeds(flat, lay, ctx.cat, x, y)
+    if not ents and not skipped:
+        return []
+    got = json.loads(r.lua(lua_feed(ents)).strip() or "{}") if ents else {}
+    blocked = sorted(set(got.get("blocked") or []) if isinstance(got.get("blocked"), list) else [])
+    ports = sorted({e["port"] for e in ents} - set(blocked))
+    out = [f"  open ports fed by the lab: {len(ports)} ({', '.join(p.split('/')[-1] for p in ports)}):"
+           " infinity chest + loader at a belt port, infinity pipe at a fluid port; out ports "
+           "empty into a chest or pipe that deletes"] if ports else []
+    for key, why in skipped:
+        out.append(f"  {key}: not fed, {why}")
+    for key in blocked:
+        out.append(f"  {key}: not fed, a tile outside it is taken (the game said can't place)")
+    return out
+
+
 def clear(r, game, name):
     """Empty NAME's slot and free it. -> the report lines."""
     held = slots(game)
@@ -346,6 +525,7 @@ def build(r, game, name, src=None, size=None, cat=None):
     if code != 0:
         lines.append(f"  stopped: {steps[-1] if steps else 'the flow'} (out\\*.txt in the workspace)")
         return lines
+    fed = _feed(r, ctx, name, x, y)
     got = json.loads(r.lua(lua_supply(_box(sx, sy, sw, sh))).strip() or "{}")
     stocked = got.get("stocked") or {}
     if isinstance(stocked, list):
@@ -354,6 +534,7 @@ def build(r, game, name, src=None, size=None, cat=None):
                  f"; requesters stocked: {', '.join(f'{n} {k}' for n, k in sorted(stocked.items())) or 'none'}"
                  f"; burners given a first load: {got.get('fuel', 0)}"
                  + (f"; modules put in: {got['modules']}" if got.get("modules") else ""))
+    lines += fed
     lines.append(f"  next: let it run a minute or two, then `fk lab {name} --measure 60`; Rory sees "
                  f"it with /lab at {x + w // 2},{y + h // 2}")
     return lines

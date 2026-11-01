@@ -122,6 +122,23 @@ _NEAR = 12         # tiles around a net's own ends it is searched in first (2.0.
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
 #: 2.1 ``route --m2m``: many-to-many nets above one lane go to ``fkcore.m2m`` (``route_layout``)
 _M2M = False
+#: 2.1.19 (the live run, ~4525k: a real paste routed 15+ min with nothing said): a callable the
+#: route loop tells how far it is, at most every PROGRESS_EVERY seconds; None says nothing
+PROGRESS = None
+PROGRESS_EVERY = 30.0
+_progress_at = [0.0, 0.0]                  # [the last line, the route's start] (monotonic)
+
+
+def _progress(attempt, k, order, net):
+    if PROGRESS is None:
+        return
+    import time
+    now = time.monotonic()
+    if now - _progress_at[0] < PROGRESS_EVERY:
+        return
+    _progress_at[0] = now
+    PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, pass {attempt + 1}, net {k + 1} of "
+             f"{len(order)} ({net})")
 
 
 @dataclass
@@ -306,6 +323,10 @@ def _literal_ends(flat, lay, cat, out, fluids):
         for name, key in sorted(names.items()):
             if key not in lay.entities:
                 continue
+            m = flat.machines.get(key)
+            if m is not None and m.extra.get("belt_end"):
+                _belt_end(flat, lay, out, fluids, path, name, key)
+                continue
             ts = fkpmod.tiles_of(cat, lay.entities[key])
             rect = (min(t[0] for t in ts), min(t[1] for t in ts),
                     max(t[0] for t in ts) + 1, max(t[1] for t in ts) + 1)
@@ -322,6 +343,30 @@ def _literal_ends(flat, lay, cat, out, fluids):
                     mine.append((side, key, rect))
                     if owner not in job.owners:
                         job.owners.append(owner)
+
+
+def _belt_end(flat, lay, out, fluids, path, name, key):
+    """2.1.19: a Literal's named belt on a net, as a port's edge is: a net into it ends on the tile
+    behind it flowing its way, a net out of it starts on the tile in front."""
+    e = lay.entities[key]
+    h = _heading(e)
+    tile = (math.floor(float(e.x)), math.floor(float(e.y)))
+    for side, hold in (("out", flat._out_hold), ("in", flat._in_hold)):
+        for net in sorted({n for (k, _i), ns in hold.items() if k == key for n in ns}):
+            if net in fluids or net not in flat.nets:
+                continue
+            job = out.setdefault(net, NetJob(net))
+            owner = f"{path}.{name}"
+            mine = job.anchors.setdefault(owner, [])
+            if side == "out":
+                job.starts.append(((tile[0] + _DX[h], tile[1] + _DY[h]), h))
+                job.drv.append((job.starts[-1], path))
+                mine.append((side, job.starts[-1]))
+            else:
+                job.goals.append(((tile[0] - _DX[h], tile[1] - _DY[h]), h))
+                mine.append((side, job.goals[-1]))
+            if owner not in job.owners:
+                job.owners.append(owner)
 
 
 # -- the ground -----------------------------------------------------------------------------------
@@ -2090,8 +2135,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             continue
         for key in flat.insts[path].machines:
             m = flat.machines.get(key)
-            if m is not None and m.extra.get("port") in ("load", "mouth"):
-                joints.add(key)
+            if m is not None and (m.extra.get("port") in ("load", "mouth")
+                                  or m.extra.get("belt_end")):
+                joints.add(key)         # 2.1.19: a Literal's named belt is one too
             if m is not None and m.extra.get("mouth"):
                 # a mouth is a belt end of the bus itself: its carrier is the bus's own belt
                 name = m.extra.get("at") or ""
@@ -2170,7 +2216,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             break
         ents = list(base.entities.values())
         added, failed, how, swaps, rlines = {}, {}, {}, [], {}
-        for net in order:
+        for k, net in enumerate(order):
+            _progress(attempt, k, order, net)
             avoid = set()
             for other, tiles in claims.items():
                 if other != net and rib_of.get(other) != net:

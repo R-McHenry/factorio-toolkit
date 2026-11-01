@@ -58,7 +58,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import avail as availmod
-from . import compose, connect, expand, fkp, placer, rates, route
+from . import compose, connect, expand, fkp, placer, rates, route, snapshot
 from . import own as ownmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
@@ -109,6 +109,7 @@ class Ctx:
     sized: object = None                             # the size step's fkcore.size.Sizing
     steps: list = field(default_factory=list)        # the script's step names, in order
     source: dict = field(default_factory=dict)       # {source file: sha1} as the run began
+    echo: object = None                              # the run's echo, for a long step's progress
 
 
 def parse(text, path="<fkb>") -> list:
@@ -200,10 +201,8 @@ def _source_files(root):
     for name in sorted(os.listdir(root)):
         full = os.path.join(root, name)
         if name.endswith(_SOURCE_EXT) and os.path.isfile(full):
-            h = hashlib.sha1()
-            with open(full, "rb") as fh:
-                h.update(fh.read())
-            out[name] = h.hexdigest()
+            # inside a build, the bytes it holds (fkcore.snapshot): what it is laid from
+            out[name] = hashlib.sha1(snapshot.read_bytes(full)).hexdigest()
     return out
 
 
@@ -877,8 +876,18 @@ def s_route(ctx, args):
             if unknown:
                 lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
         blocked = _frame_blocked(ctx, factory, lay.size)
-        r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
-                               hand=hand, patch=pinned, ug=ug, m2m=o["m2m"] not in (False, "no"))
+        # 2.1.19: a long route says how far it is, every route.PROGRESS_EVERY seconds
+        saved = route.PROGRESS
+        if ctx.echo is not None:
+            import time
+            route._progress_at[:] = [time.monotonic()] * 2
+            route.PROGRESS = lambda msg, f=factory: ctx.echo(f"      {f}: {msg}")
+        try:
+            r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
+                                   blocked=blocked, hand=hand, patch=pinned, ug=ug,
+                                   m2m=o["m2m"] not in (False, "no"))
+        finally:
+            route.PROGRESS = saved
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
@@ -1318,6 +1327,22 @@ def _on_terrain(t, s, cat):
                             f"{first[0]},{first[1]})"))
     x0, y0, x1, y1 = t.area
     unknown = {tuple(c) for c in t.ungenerated}
+    # 2.1.19 (the live run, ~4245k): the terrain stopped at x480 and cu2p was routed on to x498,
+    # over cliffs it had never read, and nothing said so. An entity on ground the terrain does not
+    # hold is a no-terrain line, with the area to read
+    def unread(q):
+        return not (x0 <= q[0] < x1 and y0 <= q[1] < y1) or (q[0] // 32, q[1] // 32) in unknown
+    blind = sorted((k for k, e in s.entities.items() if any(unread(q) for q in e.tiles)),
+                   key=fkp.natural_key)
+    if blind:
+        qs = [q for k in blind for q in s.entities[k].tiles if unread(q)]
+        bx0, by0 = min(q[0] for q in qs), min(q[1] for q in qs)
+        bx1, by1 = max(q[0] for q in qs) + 1, max(q[1] for q in qs) + 1
+        checks.append(Check("no-terrain", f"{len(blind)} entities",
+                            f"stand on ground the terrain has not read ({bx0},{by0} to {bx1},{by1}; "
+                            f"first {', '.join(blind[:4])}): cliffs and water there are not "
+                            f"checked. fk read-terrain --area {bx0 - 8},{by0 - 8},{bx1 + 8},"
+                            f"{by1 + 8}, then build again"))
     for key in sorted(s.entities, key=fkp.natural_key):
         e = s.entities[key]
         wet = cat.water_tiles(e.name, e.x, e.y, e.dir) if cat.has_entity(e.name) else set()
@@ -2043,11 +2068,28 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) 
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
     stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
     steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes.
-    ``extra``: options for this build only (``with_options``)."""
+    ``extra``: options for this build only (``with_options``).
+
+    2.1.19: the whole build reads the source as it began (``fkcore.snapshot``). A file edited
+    while it runs is left for the next build, and the build says which ones were."""
+    with snapshot.held() as snap:
+        try:
+            return _run(script, frm, to, cat, echo, link, extra)
+        finally:
+            moved = snapshot.changed(snap)
+            if moved:
+                names = ", ".join(os.path.relpath(p, os.path.dirname(os.path.abspath(script)))
+                                  for p in moved)
+                echo(f"changed while this build ran: {names}. It was laid from them as the "
+                     "build began; build again to lay the new source")
+
+
+def _run(script, frm, to, cat, echo, link, extra):
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
         lines = with_options(parse(fh.read(), script), extra)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
+    ctx.echo = echo
     availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:
         ctx.link, ctx.link_lent = link, True

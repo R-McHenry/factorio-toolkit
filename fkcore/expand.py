@@ -395,7 +395,18 @@ def _module_fragment(flat, path, cat):
     for key in ports_of(flat, path):
         port = flat.ports[key]
         item = port.items[0] if port.items else None
-        x, y, out = _port_tile(port, w, h, _port_choice(flat, key))
+        choice = _port_choice(flat, key)
+        x, y, out = _port_tile(port, w, h, choice)
+        if (x, y) in seen and choice is None and port.pos is None:
+            # 2.1.19 (the live run's LabArea, ~4480k): three `@e` ports all took the middle of
+            # the side here and the module was left unplaced. An unpinned port's tile is chosen
+            # after placing (_choose_port_tiles); until then it takes the free tile nearest the
+            # middle
+            free = _side_tiles(port, w, h, set(seen))
+            if free:
+                mid = (w if port.side in ("n", "s") else h) // 2
+                x, y = min(free, key=lambda t: (abs((t[0] if port.side in ("n", "s") else t[1])
+                                                    - mid), t))
         if (x, y) in seen:
             raise FragmentError(f"{path}: ports {seen[(x, y)]} and {port.name} share the tile "
                                 f"{x},{y}: give one a position along the side")

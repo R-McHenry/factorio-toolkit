@@ -28,7 +28,7 @@ import os
 from . import fkp as fkpmod
 
 #: what the lab adds for itself, never part of a design
-LAB_OWN = ("electric-energy-interface", "infinity-chest", "infinity-pipe")
+LAB_OWN = ("electric-energy-interface", "infinity-chest", "infinity-pipe", "loader-1x1")
 
 
 class CaptureError(ValueError):
