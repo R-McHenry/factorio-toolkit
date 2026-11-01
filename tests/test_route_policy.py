@@ -101,6 +101,23 @@ class PolicyTest(unittest.TestCase):
         self.assertNotIn("not searched again", moved.failed["x"])
         self.assertEqual(moved.memo, r.memo)
 
+    def test_retry_failed_is_the_scripts_choice(self):
+        # route --retry-failed: changed (the default, above), always, never
+        r, _fake = self.run_fake(group_budget=0, first=["y"])
+        _a, fake = self.run_fake(group_budget=0, first=["y"], memo=r.memo, retry="always")
+        self.assertEqual(fake.calls, ["y", "x"])            # searched though its ground stands
+        other = {"x": dict(r.memo["x"], key="other ground")}
+        never, fake = self.run_fake(group_budget=0, memo=other, retry="never")
+        self.assertEqual(fake.calls, ["y"])                 # not searched though its ground moved
+        self.assertIn("--retry-failed never", never.failed["x"])
+        self.assertEqual(never.failed["x"].count("not searched again"), 1)
+        twice, _fake = self.run_fake(group_budget=0, memo={"x": dict(r.memo["x"],
+                                                                    why=never.failed["x"])},
+                                     retry="never")
+        self.assertEqual(twice.failed["x"].count("not searched again"), 1)   # said once
+        _n, fake = self.run_fake(group_budget=0, memo=other, retry="never", again=["x"])
+        self.assertIn("x", fake.calls)                      # --again still searches it
+
     def test_patterns(self):
         self.assertTrue(route._named("mall/fe", ["mall/*"]))
         self.assertFalse(route._named("mall2/fe", ["mall/*"]))

@@ -846,7 +846,7 @@ def _held_nets(ctx, flat, lay, recs):
     return lay, out, lines
 
 
-def _write_nets(ctx, factory, r, held, seeds=None):
+def _write_nets(ctx, factory, r, held, seeds=None, stood=()):
     """Every net's file (``fkcore.design``) as the route step left it; a net held while it ran
     stays held, a seed stays (``fk seed``), and the file of a net the design no longer has goes."""
     seeds = seeds or {}
@@ -854,7 +854,7 @@ def _write_nets(ctx, factory, r, held, seeds=None):
     for e in r.layout.entities.values():
         if e.owner.startswith("~"):
             by_owner.setdefault(e.owner[1:], []).append(e)
-    kept, routed = set(r.kept), set(r.routed)
+    kept, routed = set(r.kept) | set(stood), set(r.routed)
     now = design.read_all(ctx.out, factory)
     held = set(held) | {n for n, rec in now.items() if rec["status"] == "held"}
     nets = set(by_owner) | set(r.failed) | held
@@ -970,12 +970,19 @@ def _ribbon_ug(word):
 def s_route(ctx, args):
     # 3.0: the routing policy is the build script's: --group-budget S (a failed net's group try,
     # 0 = every net once and alone), --group-max N, --first NET,... (patterns too: mall/*), and
-    # --skip NET,... (left to the player, reported manual)
+    # --skip NET,... (left to the player, reported manual); --retry-failed changed|always|never (a
+    # net that failed last build), --failed keep|drop (a net that fails now keeps the route that
+    # stands, or loses it), --area X0,Y0,X1,Y1 (only the nets there are routed; the rest stand)
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
               m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
-              skip="", **{"try": ""})
+              skip="", retry_failed="changed", failed="keep", area="", **{"try": ""})
     if o["try"]:
         return _route_try(ctx, str(o["try"]))
+    if o["retry_failed"] not in ("changed", "always", "never"):
+        raise FlowError(f"route --retry-failed changed|always|never, got {o['retry_failed']!r}")
+    if o["failed"] not in ("keep", "drop"):
+        raise FlowError(f"route --failed keep|drop, got {o['failed']!r}")
+    area = _area(o["area"]) if o["area"] else None
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -1004,6 +1011,26 @@ def s_route(ctx, args):
             pinned.pop(net, None)
             again.pop(net, None)
         lines += [f"{factory}: {line}" for line in held_lines]
+        old = _old_routes(ctx, factory, recs)
+        stood, inside = {}, set()
+        if area is not None:
+            # route --area: every net with a carrier or an end there is routed again, and every
+            # other route stands exactly as it is (held for this build), whatever the router thinks
+            inside = _nets_in_area(ctx, flat, lay, old, area)
+            out_ = {n: {"status": "held", "ents": ents} for n, ents in old.items()
+                    if n not in inside and n not in held and n in flat.nets}
+            lay, stood, stood_lines = _held_nets(ctx, flat, lay, out_)
+            lines += [f"{factory}: {ln.replace('held ', 'stands ', 1)}" for ln in stood_lines
+                      if "left out" in ln]
+            for net in stood:
+                pinned.pop(net, None)
+                again.pop(net, None)
+            for net in sorted(inside):
+                if net in flat.nets and net not in held:
+                    pinned.pop(net, None)
+                    again[net] = "in the area (route --area)"
+            lines.append(f"{factory}: route --area {o['area']}: {len(inside)} nets there routed "
+                         f"again, {len(stood)} outside stand as they are")
         # fk seed: carriers the player pinned; the router lays the rest of the net through them
         seeds = {n: design.seed_of(r) for n, r in recs.items()
                  if r["seed"] and n in flat.nets and n not in held}
@@ -1057,16 +1084,21 @@ def s_route(ctx, args):
                                    first=[p for p in str(o["first"]).split(",") if p],
                                    skip=[p for p in str(o["skip"]).split(",") if p],
                                    memo=memo,
-                                   again=sorted(_asked(flat, str(o["again"]))[0])
-                                   if o["again"] else (),
+                                   again=sorted((_asked(flat, str(o["again"]))[0]
+                                                 if o["again"] else set()) | inside),
                                    on_net=on_net, on_reach=on_reach,
-                                   seeds={n: s for n, s in seeds.items() if n not in pinned})
+                                   seeds={n: s for n, s in seeds.items() if n not in pinned},
+                                   retry=str(o["retry_failed"]))
         finally:
             route.PROGRESS = saved
             design.clear_now(ctx.out, factory)
         # every net as this step left it, the nets that failed with the ground they failed on: the
         # next build does not search them again while it stands (route --again NET does)
-        _write_nets(ctx, factory, r, held, seeds)
+        if o["failed"] == "keep":
+            r.layout, standing = _keep_failed(ctx, r, old)
+            lines += [f"  standing  {n}: unrouted; its last route ({k} carriers) stands until it "
+                      f"routes (route --failed keep)" for n, k in sorted(standing.items())]
+        _write_nets(ctx, factory, r, held, seeds, stood)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
@@ -1095,6 +1127,74 @@ def s_route(ctx, args):
     if ug_note and any(ln.lstrip().startswith("ribbon ") for ln in lines):
         lines.append(f"  {ug_note}")
     return lines, checks
+
+
+def _area(spec):
+    """``route --area X0,Y0,X1,Y1`` -> (x0, y0, x1, y1), the tiles x0 <= x < x1, y0 <= y < y1."""
+    try:
+        a = tuple(int(v) for v in str(spec).split(","))
+        if len(a) != 4 or a[0] >= a[2] or a[1] >= a[3]:
+            raise ValueError
+    except ValueError:
+        raise FlowError(f"route --area X0,Y0,X1,Y1 (x0 < x1, y0 < y1), got {spec!r}") from None
+    return a
+
+
+def _old_routes(ctx, factory, recs):
+    """{net: carriers} of the routes that stand before this route step: the committed .fkp's,
+    and over them the net files' (routed, kept, patched, held: newer when the last build stopped
+    before its paste)."""
+    out = {}
+    prev = ctx.previous.get(factory)
+    if prev is not None:
+        for e in prev.entities.values():
+            if e.owner.startswith("~"):
+                out.setdefault(e.owner[1:], []).append(e)
+    for net, rec in recs.items():
+        if rec["status"] in ("routed", "kept", "patched", "held") and rec["ents"]:
+            out[net] = list(rec["ents"])
+    return {n: [fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)) for e in ents]
+            for n, ents in out.items()}
+
+
+def _nets_in_area(ctx, flat, lay, old, area):
+    """The nets with a carrier of their standing route, or a machine at one of their ends, on a
+    tile of ``area``."""
+    x0, y0, x1, y1 = area
+
+    def hit(e):
+        return any(x0 <= x < x1 and y0 <= y < y1 for x, y in fkp.tiles_of(ctx.cat, e))
+    out = {n for n, ents in old.items() if any(hit(e) for e in ents)}
+    for name, net in flat.nets.items():
+        for key, _item in list(net.drivers) + list(net.consumers):
+            e = lay.entities.get(key)
+            if e is not None and hit(e):
+                out.add(name)
+                break
+    return out
+
+
+def _keep_failed(ctx, r, old):
+    """``route --failed keep`` (the default; Rory, 2026-11-01: "in a live game its better to
+    paste and fix after"): a net that fails keeps the route that stood before, where every tile of
+    it is still free, so the paste doesn't take up a belt that works. -> (layout, {net: carriers
+    put back})."""
+    lay = r.layout
+    have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
+    back = {}
+    for net in sorted(r.failed):
+        ents = old.get(net)
+        if not ents or net in have:
+            continue
+        taken = {t for e in lay.entities.values() for t in fkp.tiles_of(ctx.cat, e)}
+        if any(fkp.tiles_of(ctx.cat, e) & taken or e.key in lay.entities for e in ents):
+            continue
+        if not back:
+            lay = lay.copy()
+        for e in ents:
+            lay.entities[e.key] = e
+        back[net] = len(ents)
+    return lay, back
 
 
 def _route_try(ctx, spec):

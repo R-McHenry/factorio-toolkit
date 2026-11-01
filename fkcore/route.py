@@ -2315,7 +2315,7 @@ def _filter_loads(flat, lay, cat):
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                  blocked=(), hand=None, patch=None, ug=None, m2m=False, group_budget=None,
                  group_max=None, first=(), skip=(), memo=None, again=(), on_net=None,
-                 on_reach=None, seeds=None) -> Routed:
+                 on_reach=None, seeds=None, retry="changed") -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2337,11 +2337,13 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     leaves what it finished; ``on_reach(net, which, k, n)`` is asked as the router reaches a net,
     and may answer carriers to take as they stand (a net the player held while the build ran).
     ``seeds``: {net: carriers the player pinned} (``fk seed``), each such net laid through its
-    seed (``_route_seeded``)."""
+    seed (``_route_seeded``). ``retry`` (``route --retry-failed``): a net that failed last build is
+    searched again when its ground ``changed`` (the default), ``always``, or ``never`` (until
+    ``again`` names it or the player unroutes it)."""
     global _HANDS, _M2M
     policy = dict(group_budget=group_budget, group_max=group_max, first=tuple(first or ()),
                   skip=tuple(skip or ()), memo=memo or {}, fresh=tuple(again or ()),
-                  on_net=on_net, on_reach=on_reach, seeds=dict(seeds or {}))
+                  on_net=on_net, on_reach=on_reach, seeds=dict(seeds or {}), retry=retry)
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
@@ -2372,7 +2374,7 @@ def _named(net, patterns):
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                   blocked=(), patch=None, group_budget=None, group_max=None, first=(),
                   skip=(), memo=None, fresh=(), on_net=None, on_reach=None,
-                  seeds=None) -> Routed:
+                  seeds=None, retry="changed") -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
@@ -2501,8 +2503,18 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     gmax = GROUP_MAX if group_max is None else int(group_max)
     ents = list(base.entities.values())
     added, failed, how, swaps, rlines = {}, {}, {}, [], {}
-    memo = memo or {}
+    memo = {} if retry == "always" else (memo or {})
     seeds = seeds or {}
+
+    def same(net, key):
+        """Its last failure stands: ``--retry-failed never``, or its ground is as it was."""
+        return retry == "never" or memo[net].get("key") == key
+
+    def unsearched(net, why):
+        why = why.split("; not searched again:")[0]          # the net file's why has it already
+        when = ("the route step's --retry-failed never" if retry == "never"
+                else "it failed on this same ground last build")
+        return f"{why}; not searched again: {when} (route --again {net} tries it)"
     fresh = tuple(fresh) + tuple(seeds)     # a seeded net is searched, whatever it did last
     remembered, last_key, known = {}, {}, {}
     held_now = set()                   # nets the player held while this build ran (on_reach)
@@ -2630,7 +2642,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for k, net in enumerate(order + [None]):
         if net is None:
             for j, net in enumerate(later):
-                if memo[net].get("key") == key_of(net, ents):
+                if same(net, key_of(net, ents)):
                     failed[net] = memo[net]["why"]
                     remembered[net] = memo[net]
                 else:
@@ -2639,7 +2651,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                     landed(net, time.monotonic() - t0)
             break
         if memo.get(net) and net not in ribs and not _named(net, fresh):
-            if memo[net].get("key") == key_of(net, ents):
+            if same(net, key_of(net, ents)):
                 failed[net] = memo[net]["why"]
                 remembered[net] = memo[net]
             else:
@@ -2740,8 +2752,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             known[net] = {"key": key, "why": failed[net]}
     for net, was in remembered.items():
         known[net] = was
-        failed[net] = (f"{was['why']}; not searched again: it failed on this same ground last "
-                       f"build (route --again {net} tries it)")
+        failed[net] = unsearched(net, was["why"])
     failed.update(held)
     fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and n not in kept
                         and js[n].skip is None)
@@ -2755,10 +2766,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                                       "fluid", limit, budget)).encode()).hexdigest()
               for net in fluid_todo}
     for net in list(fluid_todo):
-        if memo.get(net) and not _named(net, fresh) and memo[net].get("key") == f_keys[net]:
+        if memo.get(net) and not _named(net, fresh) and same(net, f_keys[net]):
             known[net] = memo[net]
-            failed[net] = (f"{memo[net]['why']}; not searched again: it failed on this same "
-                           f"ground last build (route --again {net} tries it)")
+            failed[net] = unsearched(net, memo[net]["why"])
             fluid_todo.remove(net)
     plugin = _fluid_plugin() if fluid_todo else None
     if plugin is not None:

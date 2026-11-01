@@ -1,6 +1,7 @@
 """3.0, the design database on disk (fkcore.design): the route step writes one file per net as
 it lands, the next build starts from them, a held net stands as it is, and fk status reads them."""
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -146,6 +147,50 @@ class DesignFlowTest(unittest.TestCase):
         self.assertIn("12 nets: 12 connected", self.read("out/report_checks.txt"))
         self.assertEqual(design.read_all(self.out, "main")["gear"]["seed"], ["~gear/p0"])
         self.assertEqual(main(["seed", self.dir, "gear", "splitter nowhere"]), 2)
+
+    def test_route_area_routes_the_nets_there_and_the_rest_stand(self):
+        # route --area: pin everything outside an area, work within it
+        from fkcore.__main__ import main
+        self.build(to="route")
+        before = {n: sorted((e.x, e.y) for e in r["ents"])
+                  for n, r in design.read_all(self.out, "main").items()}
+        self.assertEqual(main(["step", self.script, "route", "--with",
+                               "route --area 14,20,28,34"]), 0)
+        text = self.read("out/route.txt")
+        m = re.search(r"route --area 14,20,28,34: (\d+) nets there routed again, (\d+) outside "
+                      r"stand as they are", text)
+        self.assertIsNotNone(m, text)
+        inside, outside = int(m.group(1)), int(m.group(2))
+        self.assertEqual(inside + outside, 12)
+        self.assertIn("stale     gear: routed again: in the area (route --area)", text)
+        recs = design.read_all(self.out, "main")
+        stood = [n for n, r in recs.items() if r["status"] == "kept"]
+        self.assertEqual(len(stood), outside)
+        for n in stood:                                  # exactly as they were
+            self.assertEqual(sorted((e.x, e.y) for e in recs[n]["ents"]), before[n])
+        self.assertEqual(main(["step", self.script, "route", "--with", "route --area 1,2,3"]), 2)
+
+    def test_a_net_that_fails_keeps_the_route_that_stands(self):
+        # route --failed keep (the default): paste and fix after, without losing a working belt
+        from unittest import mock
+        from fkcore import route
+        from fkcore.__main__ import main
+        self.build(to="route")
+        had = len(design.read_all(self.out, "main")["gear"]["ents"])
+        real = route._route_in
+
+        def no_gear(cat, job, *a, **k):
+            return (None, "no way (test)") if job.net == "gear" else real(cat, job, *a, **k)
+        with mock.patch.object(route, "_route_in", no_gear):
+            self.assertEqual(main(["step", self.script, "route", "gear"]), 0)
+            self.assertIn(f"standing  gear: unrouted; its last route ({had} carriers) stands",
+                          self.read("out/route.txt"))
+            rec = design.read_all(self.out, "main")["gear"]
+            self.assertEqual((rec["status"], len(rec["ents"])), ("unrouted", had))
+            self.assertEqual(main(["step", self.script, "route", "gear", "--with",
+                                   "route --failed drop --retry-failed always"]), 0)
+        self.assertNotIn("standing  gear", self.read("out/route.txt"))
+        self.assertEqual(design.read_all(self.out, "main")["gear"]["ents"], [])
 
     def test_route_try_asks_and_lays_nothing(self):
         # 3.0 `fk route --try A B`: a belt from A to B on the design as it stands; nothing changes

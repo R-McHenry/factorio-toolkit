@@ -206,7 +206,16 @@ How route works through the nets is yours to set, on its line in the build scrip
   the next build routes the net again.
 - A net that failed is not searched again while its ends and the ground around it stand as they
   did: its last reason stands, with "not searched again". Change something near it, or name it
-  with `--again NET`, to search it again.
+  with `--again NET`, to search it again. Your route line says this: `--retry-failed changed`.
+  Make it `always` to search failed nets every build, or `never` to leave them until you name
+  one (`fk route NET`).
+- `--failed keep` (on the route line): a net that fails keeps the route that stood before, where
+  its tiles are still free, so the paste goes on without taking up a belt that works. Fix the net
+  after. `--failed drop` loses that route instead.
+- To rework one area, pin everything else: `fk route --with "route --area X0,Y0,X1,Y1"`, or put
+  `--area` on the route line. Only nets with a belt or an end in that rectangle are routed again;
+  every other route stands exactly as it is, even one the router would have changed. Move
+  machines or ports inside the area, fix what blocked a net there, and build.
 - To help one net along without touching the design, pin a piece of it:
   `fk seed GAME NET 'splitter 9,30.5 S'` (pieces are written as a net file writes its
   carriers: name, x,y, direction, `ug=in|out` for an underground). Without pieces, the net
@@ -1055,9 +1064,11 @@ design` draws the surface as designed rather than as built.
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
-`stop_on no-route no-destination cannot-carry` holds a paste with a net unrouted, a maker whose
-product reaches no sink, or a machine on a net whose items it takes none of (an upgrade adds
-`cannot-carry` to an older script); `stop_on reach` holds one with ghosts no robot reaches,
+`stop_on no-destination cannot-carry` holds a paste with a maker whose product reaches no sink,
+or a machine on a net whose items it takes none of (an upgrade adds `cannot-carry` to an older
+script). A net that doesn't route doesn't hold the paste: it's pasted without its new belt (its
+old one stands, `--failed keep`) and you fix it after; add `stop_on no-route` to hold the paste
+until every net routes; `stop_on reach` holds one with ghosts no robot reaches,
 and `stop_on no-power` one whose poles reach no generation. Add `stop_on no-feed` before a big
 paste so that check stops it too (`stop_on short-stock`
 holds the paste until the network has what it lays: report_bom says when a paste would take up

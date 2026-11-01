@@ -121,7 +121,9 @@ def _write_last(text):
 #: the template's second stop_on line (2.0.12): no paste with a net unrouted, or a maker whose
 #: product reaches no sink; and (2.1.3) none with a machine on a net it takes nothing from (the
 #: 10-29 run's pole maker, dropped from its route, starved for an hour)
-STOPS = ("no-route", "no-destination", "cannot-carry")
+#: 3.0 (Rory, 2026-11-01): no `no-route`: in a live game a net that doesn't route is pasted
+#: without its new belt and fixed after; a run's own `stop_on no-route` stays as it is
+STOPS = ("no-destination", "cannot-carry")
 #: what an older run's script may still say for a stop (2.0.52's rename): read either way, so an
 #: upgrade adds only the stops the run really lacks
 OLD_STOPS = {"unrouted": "no-route", "no_sink": "no-destination", "no sink": "no-destination",
@@ -141,9 +143,8 @@ def _stops(text):
     at = max([i for i, s in enumerate(steps) if s[:1] == ["stop_on"]] or [len(lines) - 1])
     if lines and not lines[at].endswith("\n"):
         lines[at] += "\n"
-    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need) + ' ':<26}# and no paste with a net unrouted, "
-                         "a maker whose product reaches no sink, or a machine on a net it takes "
-                         "nothing from\n")
+    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need) + ' ':<26}# and no paste with a maker whose "
+                         "product reaches no sink, or a machine on a net it takes nothing from\n")
     return "".join(lines)
 
 
@@ -233,8 +234,8 @@ def upgrade(run, sha, dry=False):
         stops = _stops(new_script or text)
         if stops:
             new_script = stops
-            changes.append(f"stop_on {' '.join(STOPS)}, the ones it lacked (no paste with a net "
-                           "unrouted)")
+            changes.append(f"stop_on {' '.join(STOPS)}, the ones it lacked (no paste with a maker "
+                           "whose product reaches no sink)")
         hand = _hand(new_script or text)
         if hand:
             new_script = hand
