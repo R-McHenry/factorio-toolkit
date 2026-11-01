@@ -775,6 +775,38 @@ def _pinned_routes(flat, new, prev, cat):
     return pinned, again
 
 
+def _with_last_routes(ctx, factory, flat, lay, pinned, again):
+    """3.0 (the 20261030-2352 run, 11-01: eight hours of builds that stopped before the paste, each
+    laying every new net again): the routes the last route step laid (``out/route/``), when it
+    ran after the committed ``.fkp`` was written, are kept too, for the nets the committed ``.fkp``
+    has no route for (laid since the last paste). A committed route wins: a last route keeps only
+    its carriers on tiles no committed route holds. -> (pinned, again), in net order."""
+    last = os.path.join(ctx.out, "route", f"{factory}.fkp")
+    committed = os.path.join(ctx.root, f"{factory}.fkp")
+    if not os.path.exists(last) or (os.path.exists(committed)
+                                    and os.path.getmtime(last) <= os.path.getmtime(committed)):
+        return pinned, again
+    try:
+        prev = fkp.load(last)
+    except (OSError, ValueError):
+        return pinned, again
+    more, _why = _pinned_routes(flat, lay, prev, ctx.cat)
+    committed = set(pinned) | set(again)
+    more = {n: ents for n, ents in more.items() if n not in committed}
+    if not more:
+        return pinned, again
+    taken = set()
+    for ents in pinned.values():
+        for e in ents:
+            taken |= fkp.tiles_of(ctx.cat, e)
+    out = dict(pinned)
+    for net, ents in more.items():
+        ents = [e for e in ents if not fkp.tiles_of(ctx.cat, e) & taken]
+        if ents:
+            out[net] = ents
+    return dict(sorted(out.items())), again
+
+
 def _module_pinned(flat, prev, cat, path):
     """A sealed module's patch scope (``route --module X``, PLAN-MODULES phase 4): X's own nets and
     the parent nets ending at X's ports are routed again; every other committed route is kept as it
@@ -860,8 +892,12 @@ def _ribbon_ug(word):
 
 
 def s_route(ctx, args):
+    # 3.0: the routing policy is the build script's: --group-budget S (a failed net's group try,
+    # 0 = every net once and alone), --group-max N, --first NET,... (patterns too: mall/*), and
+    # --skip NET,... (left to the player, reported manual)
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
-              m2m=False)
+              m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
+              skip="")
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -878,6 +914,7 @@ def s_route(ctx, args):
                                                o["module"])
         elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
+            pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
         if o["again"]:
             asked, unknown = _asked(flat, str(o["again"]))
             for net in sorted(asked):
@@ -897,7 +934,11 @@ def s_route(ctx, args):
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
                                    blocked=blocked, hand=hand, patch=pinned, ug=ug,
                                    m2m="left" if o["m2m"] == "left"
-                                   else o["m2m"] not in (False, "no"))
+                                   else o["m2m"] not in (False, "no"),
+                                   group_budget=float(o["group_budget"]),
+                                   group_max=int(o["group_max"]),
+                                   first=[p for p in str(o["first"]).split(",") if p],
+                                   skip=[p for p in str(o["skip"]).split(",") if p])
         finally:
             route.PROGRESS = saved
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)

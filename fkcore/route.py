@@ -97,6 +97,8 @@ from __future__ import annotations
 import heapq
 import math
 import re
+import time
+from fnmatch import fnmatchcase
 from dataclasses import dataclass, field
 
 from . import connect as connectmod
@@ -120,6 +122,14 @@ _HUBS = 8          # hub candidates tried at most
 _HUB_WINS = 3      # stop after this many hubs that route
 _NEAR = 12         # tiles around a net's own ends it is searched in first (2.0.45)
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
+#: 3.0 (Rory, 2026-11-01: "routing multiple nets when we can, budgeting like 3 seconds by default
+#: before starting to fall back to 1 at a time"): a net that fails is laid again together with the
+#: nets laid this run in its way (at most GROUP_MAX, their carriers within GROUP_MARGIN tiles of the
+#: way it finds with them lifted), in new orders for up to GROUP_BUDGET s; then it is left to
+#: itself. The build script sets both (``route --group-budget S --group-max N``)
+GROUP_BUDGET = 3.0
+GROUP_MAX = 8
+GROUP_MARGIN = 1
 #: 2.1 ``route --m2m``: many-to-many nets above one lane go to ``fkcore.m2m`` (``route_layout``);
 #: True on both lanes (2.1.21), "left" on the left lane only (version 1)
 _M2M = False
@@ -2124,7 +2134,8 @@ def _filter_loads(flat, lay, cat):
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                 blocked=(), hand=None, patch=None, ug=None, m2m=False) -> Routed:
+                 blocked=(), hand=None, patch=None, ug=None, m2m=False, group_budget=None,
+                 group_max=None, first=(), skip=()) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2132,21 +2143,30 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     ``m2m`` (2.1, ``route --m2m``): a net with two or more drivers and two or more consumers
     whose flow is above one lane (or whose ``width`` above 2 asks for that many lanes) is laid by
     ``fkcore.m2m`` and gets a ``MAXFLOW`` line; without it nothing changes. ``m2m="left"``: on
-    the left lane only (version 1); otherwise on both lanes (2.1.21)."""
+    the left lane only (version 1); otherwise on both lanes (2.1.21).
+
+    3.0, the build script's routing policy: ``group_budget`` / ``group_max`` (GROUP_BUDGET,
+    GROUP_MAX; a budget of 0 lays every net once and alone), ``first``: net names or patterns
+    (``fnmatch``, ``mall/*``) laid first, in that order; ``skip``: nets or patterns the router
+    leaves to the player (reported ``manual``, never a failure)."""
     global _HANDS, _M2M
+    policy = dict(group_budget=group_budget, group_max=group_max, first=tuple(first or ()),
+                  skip=tuple(skip or ()))
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
     _M2M = "left" if m2m == "left" else bool(m2m)
     try:
         if not hand or hand == "fast-inserter":
-            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch,
+                                 **policy)
         if _REACH.get(hand) != 1:
             raise ValueError(f"hand is a short inserter (inserter, fast-inserter, "
                              f"burner-inserter), got {hand!r}")
         saved, _HANDS = _HANDS, ((hand,), (hand, "long-handed-inserter"))
         try:
-            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch,
+                                 **policy)
         finally:
             _HANDS = saved
     finally:
@@ -2154,15 +2174,25 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
         _M2M = saved_m2m
 
 
+def _named(net, patterns):
+    """True when ``net`` matches one of ``patterns`` (names or ``fnmatch`` patterns)."""
+    return any(net == p or fnmatchcase(net, p) for p in patterns)
+
+
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                  blocked=(), patch=None) -> Routed:
+                  blocked=(), patch=None, group_budget=None, group_max=None, first=(),
+                  skip=()) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
     tiles east and south (the frame starts at 0, 0). ``blocked``: ground no carrier may use,
     in the factory frame (terrain: water, cliffs). ``patch``: {net: its committed carriers} for
     nets none of whose ends moved (``route --only stale``): each stands as it is, is patched,
-    or is routed again (``_standing``), before the nets with nothing laid are routed."""
+    or is routed again (``_standing``), before the nets with nothing laid are routed.
+
+    3.0: each net is laid once, in order, and keeps what it laid; a net that fails gets its group
+    try (GROUP_BUDGET), then one promoting search of its own. ``retries`` is not used any more
+    (kept for callers)."""
     global _FILTERED
     _FILTERED = frozenset(k for net in flat.nets.values() for k, _i in net.drivers
                           if k in flat.machines
@@ -2252,8 +2282,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                                                    net_frames)
         todo += [n for n in again if js[n].skip is None and not js[n].fluid]
     kept = sorted(n for n in js if n in have or n in standing)
+    # 3.0: the nets the build script leaves to the player (route --skip)
+    manual = sorted(n for n in todo if _named(n, skip))
+    todo = [n for n in todo if n not in manual]
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
-    retries = len(todo) if retries is None else retries
     claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
     # 2.1: ribbons (a net each, a bundle, a wide net) are routed as one, first: they need the
     # widest ways. A ribbon is routed whole only when every net of it is laid this run.
@@ -2265,84 +2297,163 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     ribs = {k: r for k, r in ribs.items() if any(n in todo for n in r.nets)}
     rib_of = {n: k for k, r in ribs.items() for n in r.nets}
     rib_lines, rib_seen = {}, {}
-    best = None
     order = list(ribs) + [n for n in todo if n not in rib_of]
+    if first:
+        # 3.0: the build script's order (route --first): the nets it names, in its order, then
+        # the rest as before
+        def rank(key):
+            names = ribs[key].nets if key in ribs else [key]
+            return next((i for i, p in enumerate(first) if any(_named(m, (p,)) for m in names)),
+                        len(first))
+        order.sort(key=rank)
+    budget = GROUP_BUDGET if group_budget is None else float(group_budget)
+    gmax = GROUP_MAX if group_max is None else int(group_max)
+    ents = list(base.entities.values())
+    added, failed, how, swaps, rlines = {}, {}, {}, [], {}
 
-    def unrouted(key, failed):
-        if key in ribs:
-            return any(n in failed for n in ribs[key].nets)
-        return key in failed
-
-    repeats = False
-    for attempt in range(retries + 2):
-        # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
-        promo = attempt == retries + 1
-        if promo and (best is None or not best[2]):
-            break
-        if repeats and not promo:
-            continue
-        ents = list(base.entities.values())
-        added, failed, how, swaps, rlines = {}, {}, {}, [], {}
-        for k, net in enumerate(order):
-            _progress(attempt, k, order, net, promo)
-            avoid = set()
-            for other, tiles in claims.items():
-                if other != net and rib_of.get(other) != net:
-                    avoid |= tiles
-            if net in ribs:
-                rib = ribs[net]
-                fnet, bnet = net_frames(rib.nets[0])
-                # the same ground as a pass before (the same nets laid first): the same answer
-                seen = (net, tuple(sorted(added)), tuple(s[2] for s in swaps))
-                if seen not in rib_seen:
-                    rib_seen[seen] = ribmod.route(cat, rib, ents, fnet, js, bnet, limit,
-                                                  terrain, avoid, joints)
-                got, why, summary = rib_seen[seen]
-                if got is None:
-                    for m in rib.nets:
-                        if js[m].skip is None:
-                            failed[m] = why
-                    continue
-                for m, laid in got.items():
-                    added[m] = laid
-                    how[m] = why[m]
-                    ents += laid
-                rlines[net] = summary
-                continue
-            fnet, bnet = net_frames(net)
-            got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
-                                  allow=joints)
-            if got is None and promo:
-                # once more, crossing other nets' straight belts by promoting them
-                prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
-                                       joints)
-                if prom is not None:
-                    got, why, mine = prom
-                    gone = {k for s in mine for k in s[0]}
-                    ents = [e for e in ents if e.key not in gone] + [e for s in mine for e in s[1]]
-                    _swap_added(added, mine)
-                    swaps += mine
+    def lay(net, ents, k, steps, which, promo=False):
+        """Lay ``net`` (a net, or a ribbon's key) on ``ents``, into added / failed / how: -> the
+        entities with its carriers. ``promo``: only the promoting search (the plain one failed on
+        this ground already)."""
+        _progress(0, k, steps, net, which=which)
+        avoid = set()
+        for other, tiles in claims.items():
+            if other != net and rib_of.get(other) != net:
+                avoid |= tiles
+        if net in ribs:
+            rib = ribs[net]
+            fnet, bnet = net_frames(rib.nets[0])
+            # the same ground as a try before (the same nets laid first): the same answer
+            seen = (net, tuple(sorted(added)), tuple(s[2] for s in swaps))
+            if seen not in rib_seen:
+                rib_seen[seen] = ribmod.route(cat, rib, ents, fnet, js, bnet, limit,
+                                              terrain, avoid, joints)
+            got, why, summary = rib_seen[seen]
             if got is None:
-                failed[net] = why
-                continue
-            if js[net].wide or js[net].pin:
-                got = _serving_only(flat, cat, js[net], ents, got)
-            added[net] = got
-            how[net] = why
-            ents += got
-        score = (len(added), -len(swaps), -attempt)
-        if best is None or score > best[0]:
-            best = (score, added, failed, how, attempt + 1, list(order), swaps, rlines)
-        if not failed:
-            break
-        reordered = [n for n in order if unrouted(n, failed)] + \
-            [n for n in order if not unrouted(n, failed)]
-        # 2.1.26: the same order on the same ground lays the same routes, and the score keeps the
-        # first of equal passes: go on to the promoting pass. The 20261030-2352 world's coal
-        # failed first in order, so each of its 45 passes (~13 s) repeated the one before
-        repeats = reordered == order
-        order = reordered
-    _score, added, failed, how, passes, order, swaps, rlines = best
+                for m in rib.nets:
+                    if js[m].skip is None:
+                        failed[m] = why
+                return ents
+            for m, laid in got.items():
+                added[m] = laid
+                how[m] = why[m]
+                failed.pop(m, None)
+                ents = ents + laid
+            rlines[net] = summary
+            return ents
+        fnet, bnet = net_frames(net)
+        got, why = (None, failed.get(net)) if promo else \
+            _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid, allow=joints)
+        if got is None and promo:
+            # once more, crossing other nets' straight belts by promoting them
+            prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
+                                   joints)
+            if prom is not None:
+                got, why, mine = prom
+                gone = {k for s in mine for k in s[0]}
+                ents = [e for e in ents if e.key not in gone] + [e for s in mine for e in s[1]]
+                _swap_added(added, mine)
+                swaps.extend(mine)
+        if got is None:
+            failed[net] = why
+            return ents
+        failed.pop(net, None)
+        if js[net].wide or js[net].pin:
+            got = _serving_only(flat, cat, js[net], ents, got)
+        added[net] = got
+        how[net] = why
+        return ents + got
+
+    def in_way(net):
+        """The nets laid this run that stand in ``net``'s way: ``net`` searched once with them
+        lifted, and the nets whose carriers are on or beside that way, most carriers first, at
+        most ``gmax`` (never a ribbon's: a ribbon is laid whole). None when ``net`` finds no way
+        even then: the ground, not the order, stops it."""
+        lift = {e.key: other for other, laid in added.items() if other not in rib_of
+                for e in laid}
+        avoid = set()
+        for other, tiles in claims.items():
+            if other != net and rib_of.get(other) != net:
+                avoid |= tiles
+        fnet, bnet = net_frames(net)
+        _progress(0, 0, [net], net, which=f"the way of {net}")
+        got, _why = _route_one(cat, js[net], [e for e in ents if e.key not in lift], fnet, js,
+                               bnet, limit, terrain, avoid, allow=joints)
+        if got is None:
+            return None
+        way = set()
+        for e in got:
+            for x, y in fkpmod.tiles_of(cat, e):
+                way |= {(x + dx, y + dy) for dx in range(-GROUP_MARGIN, GROUP_MARGIN + 1)
+                        for dy in range(-GROUP_MARGIN, GROUP_MARGIN + 1)}
+        hits = {}
+        for e in ents:
+            other = lift.get(e.key)
+            if other is not None and other != net and fkpmod.tiles_of(cat, e) & way:
+                hits[other] = hits.get(other, 0) + 1
+        return sorted(hits, key=lambda o: (-hits[o], o))[:gmax]
+
+    # 3.0: one pass, each net once, in order; what it lays stays (2.1.29 laid every net again in
+    # each of its passes: the 20261030-2352 world's 278 nets three times over for four that failed)
+    for k, net in enumerate(order):
+        ents = lay(net, ents, k, order, "pass 1")
+    # a net that failed: laid again together with the nets in its way, for up to the budget
+    groups = []
+    for net in [n for n in order if n in failed and n not in ribs]:
+        if budget <= 0 or net not in failed:
+            continue
+        t0 = time.monotonic()
+        members = in_way(net)
+        if members is None:
+            groups.append((net, None, False, time.monotonic() - t0))
+            continue
+        if not members:
+            continue
+        steps, tried, settled = [net] + members, set(), False
+        while tuple(steps) not in tried:
+            tried.add(tuple(steps))
+            saved = (dict(added), dict(failed), dict(how), dict(rlines), ents)
+            members = [m for m in steps if m != net]
+            gone = {e.key for m in members for e in added[m]}
+            trial = [e for e in ents if e.key not in gone]
+            for m in members:
+                added.pop(m)
+                how.pop(m, None)
+            hopeless = False
+            for k, m in enumerate(steps):
+                trial = lay(m, trial, k, steps, f"the group of {net}")
+                if m not in added and m == net:
+                    # the failed net, with the others lifted, fails: no order of them helps it
+                    hopeless = True
+                    break
+                if time.monotonic() - t0 >= budget and k < len(steps) - 1:
+                    hopeless = True               # the budget is spent: no half-laid group
+                    break
+            if not hopeless and all(m in added for m in steps):
+                ents, settled = trial, True
+                break
+            lost = [m for m in steps if m not in added]
+            for d, was in zip((added, failed, how, rlines), saved):
+                d.clear()
+                d.update(was)
+            ents = saved[4]
+            if hopeless or time.monotonic() - t0 >= budget:
+                break
+            # a net of the group that failed: what stands in its way joins the group
+            for m in lost:
+                if m != net and len(steps) <= gmax:
+                    more = in_way(m) or []
+                    steps += [o for o in more if o not in steps][:gmax + 1 - len(steps)]
+            # the failed net stays first (the group is for it), then the ones that failed now
+            steps = [net] + [m for m in lost if m != net] + \
+                [m for m in steps if m not in lost and m != net]
+        groups.append((net, len(steps) - 1, settled, time.monotonic() - t0))
+    # 2.0.78: last, a net still unrouted may promote other nets' belts (its own search only)
+    passes = 1
+    left = [n for n in order if n in failed and n not in ribs]
+    for k, net in enumerate(left):
+        passes = 2
+        ents = lay(net, ents, k, left, "the promoting pass", promo=True)
     added, failed, how, rib_lines = dict(added), dict(failed), dict(how), dict(rlines)
     order = [m for n in order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
     new = base.copy()
@@ -2392,6 +2503,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(f"patched   {net}: {patched[net]}")
         elif job.skip:
             lines.append(f"skipped   {net}: {job.skip}")
+        elif net in manual:
+            lines.append(f"manual    {net}: the build script leaves it to you (route --skip)")
         elif net in added and job.fluid:
             lines.append(f"routed    {net}: {how[net]}")
         elif net in added:
@@ -2412,6 +2525,14 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(text)
             if why:
                 short[net] = why
+    for net, size, settled, took in groups:
+        if size is None:
+            lines.append(f"group     {net}: no way even with the nets laid this run lifted: the "
+                         f"ground stops it, not the order ({took:.1f} s)")
+            continue
+        lines.append(f"group     {net}: laid again with {size} net{'s' if size != 1 else ''} in its "
+                     f"way, {'all routed' if settled else 'not settled in the budget, left alone'}"
+                     f" ({took:.1f} s)")
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)

@@ -176,6 +176,18 @@ Any step takes options for one build without editing the script: `fk build --wit
 --fresh'`, `fk build --with 'route --effort high' --with 'tier --allow yellow,red'` (repeat
 `--with` as often as you like; the step's own options stay, the ones you add win).
 
+How route works through the nets is yours to set, on its line in the build script or with `--with`:
+- Each net is routed once, in order, and keeps what it laid. A net that fails is tried again
+  together with the nets laid near its ends (up to `--group-max 8`), in new orders, for up to
+  `--group-budget 3` seconds. If they don't all fit, the old routes stay and the net gets one
+  last search of its own. `--group-budget 0` routes every net once and alone.
+- `--first coal,fe3p,mall/*` routes those nets first, in that order (names or patterns).
+- `--skip st3o,oil/*` leaves those nets to you: route.txt says `manual`, and they never stop the
+  build. Lay them yourself (a Literal, `fk adopt`).
+- The routes the last build laid are kept for the next one, even when it stopped before the
+  paste, so a build after a failed one routes only what changed.
+- `out\route.txt` has a `group` line for each net that got a group try, and whether it settled.
+
 Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on objects (`set
 NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
 before the floorplan (`out\floorplan.txt`, the `circuits` lines, says what each one set), and the
