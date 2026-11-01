@@ -108,32 +108,47 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("out")
     ap.add_argument("--only", default="")
-    ap.add_argument("--scale", type=int, default=12)
+    ap.add_argument("--scale", type=int, default=0, help="pixels a tile (12; 20 with --lanes)")
+    ap.add_argument("--lanes", action="store_true",
+                    help="draw every lane and its load (tools/lanes_png.py): CASE-lanes.png")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     cat = Catalog.load()
-    s = a.scale
+    s = a.scale or (20 if a.lanes else 12)
+    if a.lanes:
+        import lanes_png
     names = [n for n in hourglass.CASES if not a.only or n in a.only.split(",")]
     for name in names:
         ms = [hourglass.measure(name, cat, router=r) for r in ROUTERS]
-        _f, _l, bounds, _b, _mid = hourglass.build(name, cat)
+        _f, _l, bounds, blocked, mid = hourglass.build(name, cat)
+        if a.lanes:
+            bounds = lanes_png.crop(bounds, [m["layout"] for m in ms], cat)
         pw, ph = (bounds[2] - bounds[0]) * s, (bounds[3] - bounds[1]) * s
         head = 3 * FONT_H + 8
         gap = 24
         width = max(len(ROUTERS) * pw + (len(ROUTERS) - 1) * gap,
                     max(text_width(stats(m)) for m in ms)) + 32
-        cv = Canvas(width, ph + head + 2 * FONT_H + 24 + len(ROUTERS) * (FONT_H + 3) + 8, BG)
+        foot = 2 * FONT_H + 16 if a.lanes else 0
+        cv = Canvas(width, ph + head + 2 * FONT_H + 24 + len(ROUTERS) * (FONT_H + 3) + 8 + foot,
+                    BG)
         cv.text(16, 8, f"hourglass {name}: {ms[0]['pc']}, demand {ms[0]['demand']:.1f}/s "
                        f"(one lane 7.5/s)", TEXT, scale=2)
         for i, m in enumerate(ms):
             ox = 16 + i * (pw + gap)
             cv.text(ox, head, m["router"], TEXT, scale=2)
-            panel(cv, ox, head + 2 * FONT_H + 6, m, cat, s)
+            if a.lanes:
+                lg, load = lanes_png.solve(m["flat"], m["layout"], cat)
+                lanes_png.draw(cv, ox, head + 2 * FONT_H + 6, m["layout"], cat, lg, load, bounds,
+                               s, blocked, mid)
+            else:
+                panel(cv, ox, head + 2 * FONT_H + 6, m, cat, s)
             cv.text(16, head + 2 * FONT_H + 14 + ph + i * (FONT_H + 3), stats(m), DIM)
             bp = codec.blueprint(codec.rows_of(m["layout"]), label=f"hourglass {name} {m['router']}")
             with open(os.path.join(a.out, f"{name}-{m['router']}.txt"), "w") as fh:
                 fh.write(bp + "\n")
-        path = os.path.join(a.out, f"{name}.png")
+        if a.lanes:
+            lanes_png.legend(cv, 16, head + 2 * FONT_H + 22 + ph + len(ROUTERS) * (FONT_H + 3))
+        path = os.path.join(a.out, f"{name}{'-lanes' if a.lanes else ''}.png")
         cv.save(path)
         print(path)
     return 0
