@@ -58,7 +58,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import avail as availmod
-from . import compose, connect, expand, fkp, placer, rates, route, snapshot
+from . import compose, connect, design, expand, fkp, placer, rates, route, snapshot
 from . import own as ownmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
@@ -789,20 +789,20 @@ def _pinned_routes(flat, new, prev, cat):
 
 def _with_last_routes(ctx, factory, flat, lay, pinned, again):
     """3.0 (the 20261030-2352 run, 11-01: eight hours of builds that stopped before the paste, each
-    laying every new net again): the routes the last route step laid (``out/route/``), when it
-    ran after the committed ``.fkp`` was written, are kept in place of the committed ones: that step
+    laying every new net again): the routes the last route step laid (its net files,
+    ``fkcore.design``, written as each net landed, so a build that stopped mid-route counts too),
+    when it ran after the committed ``.fkp`` was written, are kept in place of the committed ones: that step
     laid on what stood of them, so its routes are the newer design (the 11-01 bench: c4_suo's
     committed route was broken, its last route stood, and it was laid again in every build). A
     committed route of a net the last step has none for keeps its carriers on tiles no last route
     holds. -> (pinned, again), in net order."""
-    last = os.path.join(ctx.out, "route", f"{factory}.fkp")
+    last = os.path.join(design.folder(ctx.out, factory), "base.fkp")
     committed = os.path.join(ctx.root, f"{factory}.fkp")
     if not os.path.exists(last) or (os.path.exists(committed)
                                     and os.path.getmtime(last) <= os.path.getmtime(committed)):
         return pinned, again
-    try:
-        prev = fkp.load(last)
-    except (OSError, ValueError):
+    prev = design.layout(ctx.out, factory)
+    if prev is None:
         return pinned, again
     more, why = _pinned_routes(flat, lay, prev, ctx.cat)
     if not more:
@@ -820,6 +820,62 @@ def _with_last_routes(ctx, factory, flat, lay, pinned, again):
             out[net] = ents
     again = {n: w for n, w in {**again, **why}.items() if n not in out}
     return dict(sorted(out.items())), again
+
+
+def _held_nets(ctx, flat, lay, recs):
+    """3.0: the nets the player holds (``fk hold NET``, or ``status: held`` in a net file) stand as
+    they are: their carriers go on the layout before the router, which keeps them. A carrier on a
+    tile something else now holds is left out, and said. -> (layout, {net: carriers}, lines)."""
+    held = {n: r["ents"] for n, r in recs.items() if r["status"] == "held"
+            and all(m in flat.nets for m in fkp.net_names(n) or [n])}
+    if not held:
+        return lay, {}, []
+    lay = lay.copy()
+    taken = {t for e in lay.entities.values() for t in fkp.tiles_of(ctx.cat, e)}
+    out, lines = {}, []
+    for net, ents in sorted(held.items()):
+        mine = [e for e in ents if e.key not in lay.entities
+                and not fkp.tiles_of(ctx.cat, e) & taken]
+        for e in mine:
+            lay.entities[e.key] = e
+            taken |= fkp.tiles_of(ctx.cat, e)
+        out[net] = mine
+        lines.append(f"held {net}: {len(mine)} carriers stand as you hold them"
+                     + (f" ({len(ents) - len(mine)} left out: their tiles are taken now)"
+                        if len(mine) < len(ents) else ""))
+    return lay, out, lines
+
+
+def _write_nets(ctx, factory, r, held):
+    """Every net's file (``fkcore.design``) as the route step left it; a net held while it ran
+    stays held, and the file of a net the design no longer has goes."""
+    by_owner = {}
+    for e in r.layout.entities.values():
+        if e.owner.startswith("~"):
+            by_owner.setdefault(e.owner[1:], []).append(e)
+    kept, routed = set(r.kept), set(r.routed)
+    now = design.read_all(ctx.out, factory)
+    held = set(held) | {n for n, rec in now.items() if rec["status"] == "held"}
+    nets = set(by_owner) | set(r.failed) | held
+    for net in set(now) - nets:
+        try:
+            os.remove(design.net_path(ctx.out, factory, net))
+        except OSError:
+            pass
+    for net in sorted(nets):
+        ents = by_owner.get(net, [])
+        if net in held:
+            status, why = "held", ""
+        elif net in r.failed:
+            status, why = "unrouted", r.failed[net]
+        elif net in r.patched:
+            status, why = "patched", r.patched[net]
+        elif net in kept:
+            status, why = "kept", ""
+        else:
+            status, why = ("routed" if ents or net in routed else "skipped"), ""
+        design.write_net(ctx.out, factory, net, status, ents, why,
+                         key=(r.memo.get(net) or {}).get("key") if status == "unrouted" else None)
 
 
 def _module_pinned(flat, prev, cat, path):
@@ -912,7 +968,8 @@ def s_route(ctx, args):
     # --skip NET,... (left to the player, reported manual)
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
               m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
-              skip="")
+              skip="", via="")
+    via = _via(o["via"])
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -930,6 +987,20 @@ def s_route(ctx, args):
         elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
             pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
+        # 3.0, the design database: the net files the last route step left (fkcore.design)
+        recs = design.read_all(ctx.out, factory)
+        for net, rec in sorted(recs.items()):
+            if rec["status"] == "unrouted" and rec["why"].startswith(design.UNROUTED_BY_YOU):
+                pinned.pop(net, None)
+                again[net] = "unrouted by you (fk unroute)"
+        lay, held, held_lines = _held_nets(ctx, flat, lay, recs)
+        for net in held:
+            pinned.pop(net, None)
+            again.pop(net, None)
+        lines += [f"{factory}: {line}" for line in held_lines]
+        for net in via:
+            if net in flat.nets and pinned.pop(net, None) is not None:
+                again[net] = "asked (--via)"
         if o["again"]:
             asked, unknown = _asked(flat, str(o["again"]))
             for net in sorted(asked):
@@ -945,12 +1016,24 @@ def s_route(ctx, args):
             route._progress_at[:] = [time.monotonic()] * 2
             route._progress_net[:] = [None, 0.0]
             route.PROGRESS = lambda msg, f=factory: ctx.echo(f"      {f}: {msg}")
-        memo_path = os.path.join(ctx.out, "route", f"{factory}.failed.json")
-        try:
-            with open(memo_path, encoding="utf-8") as fh:
-                memo = json.load(fh)
-        except (OSError, ValueError):
-            memo = {}
+        memo = {n: {"key": r["key"], "why": r["why"]} for n, r in recs.items()
+                if r["status"] == "unrouted" and r["key"]}
+        design.write_base(ctx.out, factory, lay)
+        began = time.time()
+
+        def on_net(net, status, ents, why, took, f=factory):
+            design.write_net(ctx.out, f, net, status, ents, why, took)
+
+        def on_reach(net, which, k, n, f=factory):
+            design.write_now(ctx.out, f, f"route, {which}: {k + 1} of {n}, {net}")
+            path = design.net_path(ctx.out, f, net)
+            try:
+                if os.path.getmtime(path) < began:
+                    return None
+            except OSError:
+                return None
+            rec = design.read_net(path)        # the player held it while this build runs
+            return rec["ents"] if rec and rec["status"] == "held" else None
         try:
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
                                    blocked=blocked, hand=hand, patch=pinned, ug=ug,
@@ -960,16 +1043,17 @@ def s_route(ctx, args):
                                    group_max=int(o["group_max"]),
                                    first=[p for p in str(o["first"]).split(",") if p],
                                    skip=[p for p in str(o["skip"]).split(",") if p],
-                                   memo=memo if isinstance(memo, dict) else {},
+                                   memo=memo,
                                    again=sorted(_asked(flat, str(o["again"]))[0])
-                                   if o["again"] else ())
+                                   if o["again"] else (),
+                                   on_net=on_net, on_reach=on_reach,
+                                   via={n: w for n, w in via.items() if n in flat.nets})
         finally:
             route.PROGRESS = saved
-        # 3.0: the nets that failed, and the ground they failed on: the next build does not
-        # search them again while it stands (route --again NET does)
-        os.makedirs(os.path.dirname(memo_path), exist_ok=True)
-        with open(memo_path, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(r.memo, fh, indent=1, sort_keys=True)
+            design.clear_now(ctx.out, factory)
+        # every net as this step left it, the nets that failed with the ground they failed on: the
+        # next build does not search them again while it stands (route --again NET does)
+        _write_nets(ctx, factory, r, held)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
@@ -998,6 +1082,24 @@ def s_route(ctx, args):
     if ug_note and any(ln.lstrip().startswith("ribbon ") for ln in lines):
         lines.append(f"  {ug_note}")
     return lines, checks
+
+
+def _via(spec):
+    """``route --via NET@X,Y[+X,Y...][;NET@...]``: {net: [(x, y), ...]} (3.0, waypoints)."""
+    out = {}
+    for part in (p.strip() for p in str(spec or "").split(";")):
+        if not part:
+            continue
+        net, at, points = part.partition("@")
+        try:
+            if not at or not net:
+                raise ValueError(part)
+            out[net] = [tuple(int(v) for v in pt.split(",")) for pt in points.split("+")]
+            if any(len(pt) != 2 for pt in out[net]):
+                raise ValueError(part)
+        except ValueError:
+            raise FlowError(f"route --via NET@X,Y[+X,Y...][;NET@...], got {part!r}") from None
+    return out
 
 
 def _asked(flat, spec):

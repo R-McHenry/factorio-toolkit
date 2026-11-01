@@ -1236,6 +1236,37 @@ def _glue(argv):
     return out
 
 
+def _design(a):
+    """3.0 ``fk status|hold|unhold|unroute``: the design database's net files
+    (``fkcore.design``), read even while a build runs; a hold written now is taken when the router
+    reaches that net."""
+    from . import design
+    out = os.path.join(a.game, "out")
+    factories = design.factories(out)
+    if not factories:
+        print(f"error: no net files under {os.path.join(out, 'design')}: no route step has run "
+              "since 3.0", file=sys.stderr)
+        return 2
+    if a.cmd == "status":
+        for f in factories:
+            if a.net is None or a.net in design.read_all(out, f):
+                print("\n".join(design.status_lines(out, f, a.net)))
+        return 0
+    where = [f for f in factories if a.net in design.read_all(out, f)]
+    if not where:
+        print(f"error: no net file for {a.net} (fk status {a.game} lists them)", file=sys.stderr)
+        return 2
+    status, why = {"hold": ("held", ""), "unhold": ("routed", ""),
+                   "unroute": ("unrouted", design.UNROUTED_BY_YOU + " (fk unroute)")}[a.cmd]
+    for f in where:
+        design.set_status(out, f, a.net, status, why)
+        print(f"{f} net {a.net}: {status}" + {
+            "hold": "; its route stands as it is in every build until fk unhold",
+            "unhold": "; the next build judges its route as any other",
+            "unroute": "; the next build routes it again"}[a.cmd])
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m fkcore", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1292,6 +1323,24 @@ def main(argv=None):
                         "--with 'route --again NET'")
     b.add_argument("--confirm", action="store_true",
                    help="take up what stands built on DNP pieces (diff and apply --confirm)")
+    sp = sub.add_parser("step", help="3.0: one step of the build script alone, on what the steps "
+                                       "before it left (fk route NET, fk place)")
+    sp.add_argument("script")
+    sp.add_argument("step", help="a step of the script: route, place, report_checks, ...")
+    sp.add_argument("nets", nargs="?", default="",
+                    help="route only: NET[,NET] (or an instance, every net in it) to lay again")
+    sp.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'")
+    sp.add_argument("--via", action="append", default=[], metavar="X,Y",
+                    help="route one net in pieces through these waypoints, in order (repeatable)")
+    st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design)")
+    st.add_argument("game")
+    st.add_argument("net", nargs="?")
+    for name, what in (("hold", "keep a net's route as it stands, whatever the router would do"),
+                       ("unhold", "let the router judge a held net again"),
+                       ("unroute", "drop a net's route: the next build routes it again")):
+        p = sub.add_parser(name, help=f"3.0: {what}")
+        p.add_argument("game")
+        p.add_argument("net")
     lk = sub.add_parser("look")
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
@@ -1531,6 +1580,24 @@ def main(argv=None):
                     have = {ln.cmd for ln in flow.parse(fh.read(), a.script)}
                 extra += [f"{s} --confirm" for s in ("diff", "apply") if s in have]
             code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra)
+        except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return code
+    if a.cmd in ("status", "hold", "unhold", "unroute"):
+        return _design(a)
+    if a.cmd == "step":
+        # 3.0 (PLAN-3.0 §2, every step a command): the script's own line for that step, alone;
+        # the nets named are laid again, every other route kept from the net files
+        try:
+            extra = list(a.extra) + ([f"route --again {a.nets}"] if a.nets else [])
+            if a.nets and a.step != "route":
+                raise flow.FlowError("nets go with the route step only")
+            if a.via:
+                if a.step != "route" or not a.nets or "," in a.nets:
+                    raise flow.FlowError("--via goes with one net: fk route NET --via X,Y")
+                extra.append(f"route --via {a.nets}@{'+'.join(a.via)}")
+            code, _ctx = flow.run(a.script, a.step, a.step, cat, extra=extra)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

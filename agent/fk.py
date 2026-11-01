@@ -60,6 +60,11 @@ STAMP = os.path.join(GAME, "out", ".synced")
 #: commands that are pure: they run here, on the run's own toolkit
 LOCAL = {"rates", "plan", "check", "explain", "unfold", "dnp", "render", "layout", "split-to-chest",
          "merge", "insert", "chests-to-net", "net-to-chests"}
+#: 3.0: the design database's net files (game/out/design), read and written here, during a
+#: build too
+DESIGN = {"status", "hold", "unhold", "unroute"}
+#: 3.0: build steps as commands of their own, run alone on the laptop (``fk route NET``)
+STEP_CMDS = {"route", "place", "report"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capital",
         "read-terrain", "measure", "adopt", "sense", "research", "tech", "recipes", "lua", "fresh",
@@ -448,19 +453,49 @@ def build(cfg, args):
             extra += [a, args[k + 1]]
     link_at = [k for k, n in enumerate(names) if n in LINK_STEPS]
     split = link_at[0] if link_at else len(names)
+    # 3.0: what comes after the last game step (a `later:` section's reports) runs here again,
+    # once the paste is done: heavy compute stays off the host the server shares
+    after = link_at[-1] + 1 if link_at else len(names)
     code = 0
     if i < split:
         _avail_first(cfg)
         code = local(cfg, ["build", script, "--from", _spec(names, i),
                            "--to", _spec(names, min(j, split - 1))] + extra)
-    if code == 0 and j >= split:
+    if code == 0 and j >= split and i < after:
         push(cfg)
         code = remote(cfg, ["build", script, "--from", _spec(names, max(i, split)),
-                            "--to", _spec(names, j)] + extra, footer=False)
+                            "--to", _spec(names, min(j, after - 1))] + extra, footer=False)
         pull(cfg)
     else:
         push(cfg)
+    if code == 0 and j >= after:
+        code = local(cfg, ["build", script, "--from", _spec(names, max(i, after)),
+                           "--to", _spec(names, j)] + extra)
     return code
+
+
+def background(argv):
+    """3.0 (PLAN-3.0 1b, Rory: "the default mode of the build going in the background"): ``fk
+    build`` starts the build on its own and returns at once; its lines go to game/out/build.log,
+    and ``fk status`` says where the route step is. ``fk build --wait`` runs it here."""
+    log = os.path.join(GAME, "out", "build.log")
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    flags = {}
+    if os.name == "nt":
+        flags["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS, NEW_PROCESS_GROUP
+    else:
+        flags["start_new_session"] = True
+    with open(log, "a", encoding="utf-8") as fh:          # a build still queued keeps its lines
+        fh.write(f"\n== fk build {' '.join(argv)} ({time.strftime('%H:%M:%S')})\n")
+        fh.flush()
+        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "build", "--wait"] + argv,
+                             stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             cwd=os.getcwd(), env=dict(os.environ, PYTHONUNBUFFERED="1",
+                                                       FK_BACKGROUND="1"), **flags)
+    print(f"fk build: started in the background (pid {p.pid}). Its lines go to "
+          f"{os.path.relpath(log, RUN)}; `fk status` shows the nets as the router lands them; "
+          "`fk build --wait` runs a build here instead.")
+    return 0
 
 
 def main(argv):
@@ -475,8 +510,10 @@ def main(argv):
         if "-h" in rest or "--help" in rest:
             # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
             # ran all 19 steps, the paste included)
-            print("fk build [--from STEP] [--to STEP] [--with 'STEP OPTS'] [--reroute NET[,NET]] "
-                  "[--confirm]: "
+            print("fk build [--wait] [--from STEP] [--to STEP] [--with 'STEP OPTS'] "
+                  "[--reroute NET[,NET]] [--confirm]: "
+                  "runs in the background (its lines in game\\out\\build.log, fk status for "
+                  "progress) unless --wait; "
                   "--confirm takes up what stands built on DNP pieces; "
                   "the steps of game\\<surface>.build.fkb in order, design here and the game "
                   "steps on the host; STEP is a step's name, or NAME:K for its K-th time. --with "
@@ -484,9 +521,14 @@ def main(argv):
                   "--reroute lays these nets (or every net inside an instance) again "
                   "(docs\\TOOLKIT.md, \"The build script\")")
             return 0
+        if "--wait" not in rest:
+            return background(rest)
+        rest = [a for a in rest if a != "--wait"]
         with _build_lock():
             code = build(cfg, rest)
-        footer(cfg)
+        print(f"fk build: done, exit {code}", flush=True)
+        if not os.environ.get("FK_BACKGROUND"):
+            footer(cfg)                # in the background its log would take the new alerts
         return code
     if cmd == "look":
         if "--design" in rest:
@@ -541,6 +583,25 @@ def main(argv):
     if cmd in LOCAL:
         code = local(cfg, [cmd] + rest)
         push(cfg)
+        footer(cfg)
+        return code
+    if cmd in STEP_CMDS:
+        # 3.0: one step of the build script alone, here: `fk route coal,fe3p` lays those nets
+        # again and keeps every other route; nothing is pasted
+        step = {"report": "report_" + (rest[0] if rest else "checks")}.get(cmd, cmd)
+        args = rest[1:] if cmd == "report" else rest
+        with _build_lock():
+            code = local(cfg, ["step", _script(), step] + args)
+        push(cfg)
+        footer(cfg)
+        return code
+    if cmd in DESIGN:
+        code = local(cfg, [cmd, "."] + rest)
+        log = os.path.join(GAME, "out", "build.log")
+        if cmd == "status" and os.path.exists(log):
+            with open(log, encoding="utf-8", errors="replace") as fh:
+                tail = [ln.rstrip() for ln in fh.readlines()[-4:] if ln.strip()]
+            print("build.log, last lines:\n" + "\n".join(f"  {ln}" for ln in tail))
         footer(cfg)
         return code
     if cmd == "lua":

@@ -11,10 +11,16 @@ tools. The `.fkp` files beside them are the layouts the toolkit writes: read the
 fk rates main.fk                 the factory's numbers on paper: every machine's utilization, every
                                  net's supply and demand, what limits it (the binding chain)
 fk check main.fk                 the netlist checks (no-feed, no-taker, cannot-carry, ...)
-fk build                         the whole build script: lay out, route, power, check, paste
+fk build                         the whole build script: lay out, route, power, check, paste; in the
+                                 background (game\out\build.log), --wait to run it here
 fk build --to report_checks      design only: everything up to the checks, nothing pasted
 fk build --to diff               a dry run: the design against the world and what the build would
                                  take up; nothing written, nothing pasted
+fk status [NET]                  the nets as the router left them (or lands them now), the
+                                 unrouted ones with reasons; the build log's last lines
+fk hold NET / fk unroute NET     keep a net's route as it stands / route it again next build
+fk route NET[,NET]               lay those nets again now, every other route kept; nothing pasted
+fk route NET --via X,Y           lay one stuck net in pieces through a waypoint (repeat --via)
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 fk look AREA --zoom 16 --layers all --image
@@ -101,8 +107,11 @@ MAXFLOW   plates: 22.4 of 22.4/s, the narrowest cut 3 lanes
 A net that falls short also gets a `maxflow` check, naming the carriers where it binds. Without
 `--m2m` nothing changes.
 
-`fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
-build at a time in a run: a second `fk build` waits for the first). Each step writes its report
+`fk build` runs the steps of `game\nauvis.build.fkb` in order, in the background: it returns at
+once, and the build writes one line per step to `game\out\build.log` (its last line: `fk build:
+done, exit N`). Keep working meanwhile; `fk status` shows the nets as the router lands them and
+the log's last lines. `fk build --wait` runs it here instead. One build at a time in a run: a
+second `fk build` waits for the first. Each step writes its report
 to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
 in the source: unchanged rows and routes stay where they are, and a net is patched when a machine
@@ -184,11 +193,24 @@ How route works through the nets is yours to set, on its line in the build scrip
 - `--first coal,fe3p,mall/*` routes those nets first, in that order (names or patterns).
 - `--skip st3o,oil/*` leaves those nets to you: route.txt says `manual`, and they never stop the
   build. Lay them yourself (a Literal, `fk adopt`).
-- The routes the last build laid are kept for the next one, even when it stopped before the
-  paste, so a build after a failed one routes only what changed.
+- The route step writes one file per net as each one lands, under `out\design\<factory>\nets\`:
+  its status (routed, kept, patched, unrouted with the reason, held), then its carriers. The next
+  build starts from these files, even when the last one stopped before the paste or mid-route,
+  so it routes only what changed.
+- `fk status GAME` reads them, during a build too: counts per status, the unrouted nets with
+  their reasons and times, and the net the router is on now. `fk status GAME NET` shows one net.
+- `fk hold GAME NET` keeps a net's route as it stands in every build (until `fk unhold`), even
+  if you hold it while a build runs: the router takes it when it reaches it. You may also edit a
+  net file by hand (its carriers, or `# status: held`). `fk unroute GAME NET` drops a route, and
+  the next build routes the net again.
 - A net that failed is not searched again while its ends and the ground around it stand as they
   did: its last reason stands, with "not searched again". Change something near it, or name it
   with `--again NET`, to search it again.
+- A net the router can't find a way for can be broken up once: `fk route NET --via X,Y`
+  lays it from its drivers to a belt on tile X,Y, then on from there to its consumers, each
+  piece searched on its own. Give `--via` again for more waypoints, in order. With several
+  drivers, put the first waypoint past where they join. The pieces stay in the net's file, so
+  later builds keep them.
 - Fluid nets get one pass too. Another pass in a new order runs only if it fits in the group
   budget.
 - `out\route.txt` has a `group` line for each net that got a group try, and whether it settled.
