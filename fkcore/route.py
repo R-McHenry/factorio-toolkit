@@ -122,6 +122,23 @@ _NEAR = 12         # tiles around a net's own ends it is searched in first (2.0.
 _REPAIRS = 2       # judge-and-reroute rounds before a leaking net is refused
 #: 2.1 ``route --m2m``: many-to-many nets above one lane go to ``fkcore.m2m`` (``route_layout``)
 _M2M = False
+#: 2.1.19 (the live run, ~4525k: a real paste routed 15+ min with nothing said): a callable the
+#: route loop tells how far it is, at most every PROGRESS_EVERY seconds; None says nothing
+PROGRESS = None
+PROGRESS_EVERY = 30.0
+_progress_at = [0.0, 0.0]                  # [the last line, the route's start] (monotonic)
+
+
+def _progress(attempt, k, order, net):
+    if PROGRESS is None:
+        return
+    import time
+    now = time.monotonic()
+    if now - _progress_at[0] < PROGRESS_EVERY:
+        return
+    _progress_at[0] = now
+    PROGRESS(f"route: {now - _progress_at[1]:.0f}s in, pass {attempt + 1}, net {k + 1} of "
+             f"{len(order)} ({net})")
 
 
 @dataclass
@@ -2170,7 +2187,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             break
         ents = list(base.entities.values())
         added, failed, how, swaps, rlines = {}, {}, {}, [], {}
-        for net in order:
+        for k, net in enumerate(order):
+            _progress(attempt, k, order, net)
             avoid = set()
             for other, tiles in claims.items():
                 if other != net and rib_of.get(other) != net:

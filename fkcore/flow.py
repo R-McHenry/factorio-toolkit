@@ -109,6 +109,7 @@ class Ctx:
     sized: object = None                             # the size step's fkcore.size.Sizing
     steps: list = field(default_factory=list)        # the script's step names, in order
     source: dict = field(default_factory=dict)       # {source file: sha1} as the run began
+    echo: object = None                              # the run's echo, for a long step's progress
 
 
 def parse(text, path="<fkb>") -> list:
@@ -875,8 +876,18 @@ def s_route(ctx, args):
             if unknown:
                 lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
         blocked = _frame_blocked(ctx, factory, lay.size)
-        r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries, blocked=blocked,
-                               hand=hand, patch=pinned, ug=ug, m2m=o["m2m"] not in (False, "no"))
+        # 2.1.19: a long route says how far it is, every route.PROGRESS_EVERY seconds
+        saved = route.PROGRESS
+        if ctx.echo is not None:
+            import time
+            route._progress_at[:] = [time.monotonic()] * 2
+            route.PROGRESS = lambda msg, f=factory: ctx.echo(f"      {f}: {msg}")
+        try:
+            r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
+                                   blocked=blocked, hand=hand, patch=pinned, ug=ug,
+                                   m2m=o["m2m"] not in (False, "no"))
+        finally:
+            route.PROGRESS = saved
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
@@ -2078,6 +2089,7 @@ def _run(script, frm, to, cat, echo, link, extra):
     with open(script, encoding="utf-8") as fh:
         lines = with_options(parse(fh.read(), script), extra)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
+    ctx.echo = echo
     availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:
         ctx.link, ctx.link_lent = link, True
