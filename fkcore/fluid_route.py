@@ -622,10 +622,14 @@ def _route_net(w, owners, g, flat, cat, net, ends, base, extra, reach, limit, ed
 
 
 # -- the plug-in ----------------------------------------------------------------------------------
-def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
+def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000, budget=None):
     """Route the fluid nets ``nets`` of ``flat`` on ``lay`` (belts already laid). ``blocked``:
     terrain tiles in the factory frame; ``box`` (x0, y0, x1, y1): the search bounds (default:
-    the factory frame). -> (added {net: [Entity]}, how {net: text}, failed {net: reason})."""
+    the factory frame). ``budget``: seconds per net that failed the first pass for passes in
+    another order (3.0, the build script's ``--group-budget``; a pass that would not fit in what
+    is left is not started); None: as many as help. -> (added {net: [Entity]}, how {net: text},
+    failed {net: reason})."""
+    import time
     from . import route as routemod                 # the belt jobs: their attach tiles stay free
     from .expand import frame_of
     w0, h0 = lay.size or (0, 0)
@@ -679,10 +683,20 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
     # 2.1.29: retries stop once one routes no more nets than the best before it; each laid every
     # fluid net again, len(order) + 1 times (12+ min on the 20261030-2352 world)
     last = 0
+    took = spent = 0.0
+    left = None                    # 3.0: the retry budget, set by the first pass's failures
     for attempt in range(len(order) + 1):
         if attempt > 1 and best[0][0] <= last:
             break
+        if attempt and left is not None and spent + took > left:
+            # 3.0: one pass, as the belts: another would go past the build script's budget
+            for net in best[3]:
+                if net in ends:
+                    best[3][net] += (f"; not tried again in another order: a fluid pass takes "
+                                     f"{took:.0f} s, past the route's --group-budget")
+            break
         last = best[0][0] if best else 0
+        t0 = time.monotonic()
         w, owners, g = _world(flat, lay, cat, fluid_all, blocked, box, keep)
         added, how, failed = {}, {}, dict(failed0)
         extra = []
@@ -704,6 +718,11 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
         score = (len(added), -attempt)
         if best is None or score > best[0]:
             best = (score, added, how, failed)
+        took = time.monotonic() - t0
+        if attempt:
+            spent += took
+        elif budget is not None:
+            left = float(budget) * sum(1 for n in failed if n in ends)
         if len(added) == len(order):
             break
         order = [n for n in order if n in failed] + [n for n in order if n not in failed]

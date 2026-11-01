@@ -778,9 +778,11 @@ def _pinned_routes(flat, new, prev, cat):
 def _with_last_routes(ctx, factory, flat, lay, pinned, again):
     """3.0 (the 20261030-2352 run, 11-01: eight hours of builds that stopped before the paste, each
     laying every new net again): the routes the last route step laid (``out/route/``), when it
-    ran after the committed ``.fkp`` was written, are kept too, for the nets the committed ``.fkp``
-    has no route for (laid since the last paste). A committed route wins: a last route keeps only
-    its carriers on tiles no committed route holds. -> (pinned, again), in net order."""
+    ran after the committed ``.fkp`` was written, are kept in place of the committed ones: that step
+    laid on what stood of them, so its routes are the newer design (the 11-01 bench: c4_suo's
+    committed route was broken, its last route stood, and it was laid again in every build). A
+    committed route of a net the last step has none for keeps its carriers on tiles no last route
+    holds. -> (pinned, again), in net order."""
     last = os.path.join(ctx.out, "route", f"{factory}.fkp")
     committed = os.path.join(ctx.root, f"{factory}.fkp")
     if not os.path.exists(last) or (os.path.exists(committed)
@@ -790,20 +792,21 @@ def _with_last_routes(ctx, factory, flat, lay, pinned, again):
         prev = fkp.load(last)
     except (OSError, ValueError):
         return pinned, again
-    more, _why = _pinned_routes(flat, lay, prev, ctx.cat)
-    committed = set(pinned) | set(again)
-    more = {n: ents for n, ents in more.items() if n not in committed}
+    more, why = _pinned_routes(flat, lay, prev, ctx.cat)
     if not more:
         return pinned, again
     taken = set()
-    for ents in pinned.values():
+    for ents in more.values():
         for e in ents:
             taken |= fkp.tiles_of(ctx.cat, e)
-    out = dict(pinned)
-    for net, ents in more.items():
+    out = dict(more)
+    for net, ents in pinned.items():
+        if net in out:
+            continue
         ents = [e for e in ents if not fkp.tiles_of(ctx.cat, e) & taken]
         if ents:
             out[net] = ents
+    again = {n: w for n, w in {**again, **why}.items() if n not in out}
     return dict(sorted(out.items())), again
 
 
@@ -930,6 +933,12 @@ def s_route(ctx, args):
             route._progress_at[:] = [time.monotonic()] * 2
             route._progress_net[:] = [None, 0.0]
             route.PROGRESS = lambda msg, f=factory: ctx.echo(f"      {f}: {msg}")
+        memo_path = os.path.join(ctx.out, "route", f"{factory}.failed.json")
+        try:
+            with open(memo_path, encoding="utf-8") as fh:
+                memo = json.load(fh)
+        except (OSError, ValueError):
+            memo = {}
         try:
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
                                    blocked=blocked, hand=hand, patch=pinned, ug=ug,
@@ -938,9 +947,17 @@ def s_route(ctx, args):
                                    group_budget=float(o["group_budget"]),
                                    group_max=int(o["group_max"]),
                                    first=[p for p in str(o["first"]).split(",") if p],
-                                   skip=[p for p in str(o["skip"]).split(",") if p])
+                                   skip=[p for p in str(o["skip"]).split(",") if p],
+                                   memo=memo if isinstance(memo, dict) else {},
+                                   again=sorted(_asked(flat, str(o["again"]))[0])
+                                   if o["again"] else ())
         finally:
             route.PROGRESS = saved
+        # 3.0: the nets that failed, and the ground they failed on: the next build does not
+        # search them again while it stands (route --again NET does)
+        os.makedirs(os.path.dirname(memo_path), exist_ok=True)
+        with open(memo_path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(r.memo, fh, indent=1, sort_keys=True)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)

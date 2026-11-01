@@ -186,6 +186,11 @@ How route works through the nets is yours to set, on its line in the build scrip
   build. Lay them yourself (a Literal, `fk adopt`).
 - The routes the last build laid are kept for the next one, even when it stopped before the
   paste, so a build after a failed one routes only what changed.
+- A net that failed is not searched again while its ends and the ground around it stand as they
+  did: its last reason stands, with "not searched again". Change something near it, or name it
+  with `--again NET`, to search it again.
+- Fluid nets get one pass too. Another pass in a new order runs only if it fits in the group
+  budget.
 - `out\route.txt` has a `group` line for each net that got a group try, and whether it settled.
 
 Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on objects (`set

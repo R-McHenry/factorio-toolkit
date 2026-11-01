@@ -3,7 +3,7 @@ script sets the order (--first) and the nets left to the player (--skip)."""
 import unittest
 from unittest import mock
 
-from fkcore import expand, fkp, lang, route
+from fkcore import expand, fkp, fluid_route, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -84,10 +84,66 @@ class PolicyTest(unittest.TestCase):
         self.assertTrue(any(l.startswith("manual    y:") for l in r.lines), r.lines)
         self.assertFalse(any(e.owner == "~y" for e in r.layout.entities.values()))
 
+    def test_a_net_that_failed_on_this_ground_is_not_searched_again(self):
+        r, fake = self.run_fake(group_budget=0, first=["y"])
+        self.assertEqual(list(r.memo), ["x"])
+        again, fake = self.run_fake(group_budget=0, first=["y"], memo=r.memo)
+        self.assertEqual(fake.calls, ["y"])                 # x: its last reason stands
+        self.assertIn("not searched again", again.failed["x"])
+        self.assertIn("route --again x", again.failed["x"])
+        self.assertEqual(again.memo, r.memo)                # still remembered
+        _r, fake = self.run_fake(group_budget=0, first=["y"], memo=r.memo, again=["x"])
+        self.assertEqual(fake.calls, ["y", "x"])
+        # other ground: x waits for the end of the pass (where it failed last), then is searched
+        other = {"x": dict(r.memo["x"], key="other ground")}
+        moved, fake = self.run_fake(group_budget=0, memo=other)
+        self.assertEqual(fake.calls, ["y", "x"])
+        self.assertNotIn("not searched again", moved.failed["x"])
+        self.assertEqual(moved.memo, r.memo)
+
     def test_patterns(self):
         self.assertTrue(route._named("mall/fe", ["mall/*"]))
         self.assertFalse(route._named("mall2/fe", ["mall/*"]))
         self.assertTrue(route._named("coal", ["x", "coal"]))
+
+
+class FluidBudgetTest(unittest.TestCase):
+    """3.0: the fluid nets get one pass, and passes in another order only while they fit in
+    the build script's budget."""
+
+    def run_fluid(self, budget, pass_s):
+        flat, lay = two()
+        clock = [0.0]
+        calls = []
+
+        class W:
+            occ, box = set(), None
+
+        def route_net(w, owners, g, flat, cat, net, ends, base, extra, *a):
+            calls.append(net)
+            clock[0] += pass_s / 2
+            if net == "b" and extra:                       # b fails once a is laid
+                return None, "a is in the way"
+            return [net], "fake"
+        with mock.patch.object(fluid_route, "_ends", lambda *a: [("k", "water", "in", None)]), \
+                mock.patch.object(fluid_route, "_world", lambda *a: (W(), {}, None)), \
+                mock.patch.object(fluid_route, "_route_net", route_net), \
+                mock.patch("time.monotonic", lambda: clock[0]):
+            added, _how, failed = fluid_route.route(flat, lay, CAT, ["a", "b"],
+                                                    box=(0, 0, 30, 14), budget=budget)
+        return added, failed, calls
+
+    def test_a_second_pass_that_fits_the_budget(self):
+        added, failed, calls = self.run_fluid(budget=3, pass_s=1)
+        self.assertEqual(calls, ["a", "b", "b", "a"])
+        self.assertEqual((sorted(added), failed), (["a", "b"], {}))
+
+    def test_one_pass_when_another_would_go_past_it(self):
+        added, failed, calls = self.run_fluid(budget=3, pass_s=10)
+        self.assertEqual(calls, ["a", "b"])
+        self.assertIn("not tried again in another order", failed["b"])
+        added, failed, calls = self.run_fluid(budget=None, pass_s=10)
+        self.assertEqual(calls, ["a", "b", "b", "a"])           # no budget: as before
 
 
 if __name__ == "__main__":
