@@ -115,6 +115,11 @@ Doesn't carry over:
 - the reactor and oil wells: Angel's petrochem makes oil products from gas later;
 - the vanilla ramp's timings: Sea Block's pace is its own, and this is the first run of it.
 
-Machines with several fluids (electrolyser, crystallizer, liquifier) are newer ground for the
-toolkit. Building one in the lab first, by hand if need be, and wrapping it with `fk capture`
-gets you a cell that works. What doesn't route goes in `FRICTION.md`.
+The toolkit plans Sea Block's fluid machines (electrolyser, crystallizer, liquifier) with the
+game's own fluid boxes: they matched for all 2400 of its fluid recipes. They're still newer
+ground than vanilla machines, so lab each one in a cell before it goes in the base. If one won't
+route, building it by hand in the lab and wrapping it with `fk capture` gets you a cell that
+works. What doesn't route goes in `FRICTION.md`. `InfinityPipe<fluid=...>` feeds a test design
+its own fluid.
+
+`fk sim` (the planner) runs this game with its mods too.

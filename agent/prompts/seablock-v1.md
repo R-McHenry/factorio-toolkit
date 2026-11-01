@@ -113,9 +113,13 @@ hours, and Sea Block's opening is new ground.
   (`docs\BUILDING.md`, "Adding a machine").
 - **Lab every module.** `fk lab NAME`, let it run, `fk lab NAME --measure 60`, and compare with
   `fk rates`. The lab is free and runs this game's mods.
+- **Play the opening on the planner.** `fk sim fetch`, `fk sim start` (it loads Sea Block's
+  mods), then `paste` the first stages as ghosts and `run` them at speed. You'll see how long the
+  early robots take, where the kit runs short and how fast the wood goes. Fix the plan there,
+  where it's free.
 
 Then paste stage 1 in the live game and keep going: lab the next stage while the robots build
-this one. `fk sim` (the speedrun planner) doesn't run Sea Block yet; the lab does.
+this one.
 
 ## The whole picture
 
@@ -131,12 +135,27 @@ Everything here is yours to read:
   - `assessment-20261101\SEABLOCK.md` is how this Sea Block game was set up.
 - **The toolkit's source**: `C:\Users\Admin\zybo\factorio-design\v5` (`fkcore\`, with the release
   notes in `docs\RELEASE-*.md`). Read it when a command surprises you. It isn't yours to change:
-  what you find goes in `FRICTION.md`. The toolkit's Sea Block support is new, so expect gaps,
-  machines with several fluids especially. More of it may arrive as an upgrade during the run.
+  what you find goes in `FRICTION.md`. The toolkit's Sea Block support is new, so expect gaps.
+  Fixes may arrive as an upgrade during the run.
 
 Two folders stay closed: DeepSeek's own reasoning (any `session.jsonl` in a run folder) and
 anything under `C:\fk-player\dsh-home`. A DeepSeek player's notes, board and designs are fine to
 read.
+
+## The speedrun planner
+
+`fk sim` is a second game of this same map on this machine, with the same mods, the same seed
+and the same first tick. It's never the live game. Try a plan there before the live game does it.
+
+- `fk sim fetch`, then `fk sim start`: the map as it stood at the kickoff. `fk sim fetch --live
+  now` copies the live game as it stands.
+- It stands still between commands, so each action lands on the tick you choose. `fk sim speed
+  100` and `fk sim run 3600` play a minute in a few seconds.
+- `fk sim paste game\world.fkp @-1000,-1000` lays a laid-out design as ghosts for the robots.
+  `fk sim save NAME` / `load NAME` keep and restore states, and `fk sim game stats` reads what it
+  made.
+
+`docs\TOOLKIT.md`, "The speedrun planner", has all of it.
 
 ## How building works here
 
@@ -229,7 +248,7 @@ into a file that a `Literal` reads, and drop it inside a module.
 - how the whole base is doing → `fk stats`; what you have → `fk stock`
 - a net that won't route → `fk status NET` for the reason, then `fk route --try`, a seed, or a
   routing piece; never "build everything again"
-- whether a plan works before it costs anything → the lab
+- whether a plan works before it costs anything → the lab and `fk sim`
 - taking things up → `fk decon X0,Y0,X1,Y1 [--name ENTITY]`
 - anything else → `fk lua` reads or does it for you
 
