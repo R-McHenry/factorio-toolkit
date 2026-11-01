@@ -1881,7 +1881,7 @@ def _bom_live(ctx):
         todo = _to_build_entities(ctx)
         n = len(landfill_tiles(todo, ctx.ground, ctx.cat))
         if n:
-            need[packmod.landfill()] = need.get(packmod.landfill(), 0) + n
+            need[packmod.landfill_item()] = need.get(packmod.landfill_item(), 0) + n
     used = sorted({e.attrs["recipe"] for e in (ctx.composed.entities.values() if ctx.composed
                                                 else ()) if e.attrs.get("recipe")
                    and ctx.cat.kind(e.name) == "assembling-machine"})
