@@ -405,6 +405,12 @@ share, below): the drivers put items on it, the consumers take them.
   can fill, typically a requester of several items feeding makers by belt. Every inserter that
   loads a belt from a chest of several items is filtered to its net's items anyway, so nothing the
   net doesn't carry gets on the belt.
+- `net NAME any: ...` (also after `items a, b`) is connected when each driver reaches some
+  consumer and each consumer is reached by some driver, instead of every driver reaching every
+  consumer. Use it for a belt that passes through a module (in at one port, out at another,
+  machines taking and adding on the way) and for an output that splits to two ends: there a
+  driver past the split reaches only its own tail, and the plain rule would call the net
+  `partly-connected`. It changes the check, not the route.
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction, with one exception: a single machine
   (`Assembler`, `Furnace`, a chest...) may take one item from several nets, each carrying only that

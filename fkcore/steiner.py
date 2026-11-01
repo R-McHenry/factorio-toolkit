@@ -10,9 +10,8 @@ carriers. Changes since the copy:
 - For a tree laid reversed (a collector), set on its Grid by route.py: ``Grid.keep_clear``, tiles a
   split may not leave its spare output on (reversed, every splitter is a merge facing back, whose
   second output points at the tile beside the split's feed; a foreign belt there would take half
-  the merged items, a SPILL); ``Grid.drop_taps``: a tap's inserter drops onto its belt, and an
-  underground exit takes no drop (fkcore.connect, v4 B-120), so a tapped belt never starts a
-  tunnel (which, reversed, is an exit).
+  the merged items, a SPILL); ``Grid.drop_taps``: a tap's inserter drops onto its belt, an
+  underground exit included (measured on 2.0.77; v4's B-120 said an exit takes no drop).
 - A start state may name the tiles its move takes (a splitter's two, 2.0.77): the goal test picks
   no tap on them. The 10-30 run's Sci0 copper split one tile short of red2, the search planned
   red2's inserter on the splitter's second tile, the attach found it taken and laid no tap, and
@@ -180,12 +179,8 @@ class TapSink:
         """Taps off the last tiles of ``path`` (one per belt tile, newest first), up to k; none on
         ``taken`` (the tiles the path's start move lays, a splitter's)."""
         on = {(s[0], s[1]) for s in path}
-        tunnels = {path[i] for i in range(len(path) - 1) if path[i + 1][3]} \
-            if tree.grid.drop_taps else ()
         got = []
         for s in reversed(path[-6:]):
-            if s in tunnels:
-                continue     # reversed this is an underground exit, which takes no drop
             used = {g[0] for g in got}
             for q, name, direction in self.taps_at((s[0], s[1]), lambda q: tree.free(q) and q not in on
                                                    and q not in used and q not in taken):
@@ -210,16 +205,16 @@ class TapSink:
 
 class DropSink:
     """3.0 (drills in cells): a machine that drops its output on one fixed tile (a drill's or a
-    recycler's drop tile), reached by a belt of the net standing on that tile, any heading, no
-    inserter. The tree may run on through it: a through-belt passes the drill and takes its ore."""
+    recycler's drop tile), reached by a belt of the net standing on that tile, any heading, an
+    underground exit included, no inserter. The tree may run on through it: a through-belt
+    passes the drill and takes its ore."""
     terminal = False
 
     def __init__(self, name, tile):
         self.name, self.tile = name, tuple(tile)
 
     def goal(self, state, tree, path=None, taken=()):
-        x, y, _d, ex = state
-        return (x, y) == self.tile and not ex
+        return (state[0], state[1]) == self.tile
 
     def h(self, x, y):
         return abs(x - self.tile[0]) + abs(y - self.tile[1])

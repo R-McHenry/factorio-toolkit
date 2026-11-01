@@ -154,8 +154,9 @@ class InserterTest(unittest.TestCase):
         self.assertEqual(succ(g, "i/o"), {("o/b0", "drop")})
         self.assertEqual(g.inserter_tiles("i/l"), ((0, 1), (4, 1)))
 
-    def test_no_drop_on_an_underground_output(self):
-        # B-120 (v4, d6018d3): an underground output's edge is not a belt surface.
+    def test_drops_on_both_underground_ends(self):
+        # Measured on 2.0.77 (lanes.py 2.1.25, the walker's agreement on real maps): an output
+        # takes drops too, which v4's B-120 denied.
         g = graph(L("""
             e c/c iron-chest 0.5,2.5
             e i/a fast-inserter 0.5,1.5 S net=a
@@ -164,7 +165,7 @@ class InserterTest(unittest.TestCase):
             e i/b fast-inserter 3.5,1.5 S net=b
             e b/u1 underground-belt 3.5,0.5 W net=b ug=out"""), CAT)
         self.assertEqual(succ(g, "i/a"), {("a/u0", "drop")})
-        self.assertEqual(succ(g, "i/b"), set())
+        self.assertEqual(succ(g, "i/b"), {("b/u1", "drop")})
 
     def test_drills_drop_in_front(self):
         g = graph(L("""

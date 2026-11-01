@@ -19,8 +19,8 @@ Every entity is a node; an edge is one way items move from one entity into anoth
   else leaves it alone (v4's rule, C:\\fk-lead\\repo\\fk\\sight\\flow.py d6018d3).
 - ``pickup`` / ``drop``: an inserter faces the side it picks from (v4 convention) and reaches one
   tile, a long-handed one two (geometry from fk\\lanes.py). It picks from a belt, an underground, a
-  splitter or a machine, and drops onto the same, except an underground output: its edge is no
-  belt surface (v4 B-120).
+  splitter or a machine, and drops onto the same, an underground output too (measured on 2.0.77,
+  as lanes.py has it; v4's B-120 said no, and the walker found 96 game drops it missed).
 - ``mine``: a mining drill drops just past its front edge (the game's vector_to_place_result:
   centred, half a tile to its left on an even width) onto a carrier or straight into a machine.
   3.0: so does anything else with a drop vector (``Catalog.drop_tile``: a recycler).
@@ -574,9 +574,7 @@ def _gives(m):
 
 def _takes(m):
     """An inserter or a drill can drop into ``m``."""
-    if m.kind in _BELTS:
-        return m.kind != "underground-belt" or m.ug == "in"
-    return m.kind in HOLDER_TYPES
+    return m.kind in _BELTS or m.kind in HOLDER_TYPES
 
 
 # -- the checks -----------------------------------------------------------------------------------
@@ -586,7 +584,8 @@ def endpoints(flat, surface=None, factory=None):
     ``main/gear``)."""
     pre = f"{surface}:{factory}/" if surface and factory else ""
     netpre = f"{factory}/" if surface and factory else ""
-    table = {netpre + name: (Dealt if getattr(n, "width", 1) > 2 else tuple)(
+    table = {netpre + name: (Dealt if getattr(n, "width", 1) > 2 or getattr(n, "any", False)
+                             else tuple)(
                  ([(pre + k, i) for k, i in n.drivers], [(pre + k, i) for k, i in n.consumers]))
              for name, n in flat.nets.items()}
     # A bus's mouth has no entity of its own: the bus's own belt under the mouth is its carrier.
@@ -614,8 +613,9 @@ def endpoints(flat, surface=None, factory=None):
 
 class Dealt(tuple):
     """(drivers, consumers) of a wide net (2.1, ``width`` above 2: a ribbon of belts, its drivers
-    and consumers dealt out to them, ``fkcore.ribbons``): it is connected when every driver reaches
-    a consumer and every consumer is reached, not every driver every consumer."""
+    and consumers dealt out to them, ``fkcore.ribbons``) or an ``any`` net (3.0: a pass-through,
+    a split output): it is connected when every driver reaches a consumer and every consumer is
+    reached, not every driver every consumer."""
     dealt = True
 
 

@@ -100,6 +100,9 @@ class FlatNet:
     #: 3.0, a chained net's segment: the chain's path-qualified name (its first segment's), None
     #: for any other net. ``gear``, ``gear@wp``, ``gear@sp.a`` are one chain, ``gear``.
     chain: str | None = None
+    #: 3.0, `net NAME any:` connected when each driver reaches a consumer and each consumer is
+    #: reached (connect.Dealt), not every driver every consumer
+    any: bool = False
 
     @property
     def sushi(self):
@@ -2166,7 +2169,8 @@ def _resolve_nets(flat, cat):
                                   getattr(p.net, "limited", False),
                                   None if when is None else (when, p.scope), p.scope,
                                   getattr(p.net, "width", 1), getattr(p.net, "lane", None),
-                                  getattr(p.net, "why", None), group=p.group, chain=p.chain)
+                                  getattr(p.net, "why", None), group=p.group, chain=p.chain,
+                                  any=getattr(p.net, "any", False))
     flat._out_hold, flat._in_hold = out_hold, in_hold
     _settle_inout(flat)
 

@@ -286,7 +286,8 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
                 lg.add((a, ""), (b, lane), "mine", 3)
             else:
                 lg.add((a, ""), (b, ""), "mine", 0)
-    # an underground exit takes drops too (measured; connect gives it no drop edge)
+    # an underground exit takes drops too (measured); connect has the edge since 3.0, so this
+    # only adds what an older graph lacks
     for key, n in g.nodes.items():
         if n.kind != "inserter":
             continue
