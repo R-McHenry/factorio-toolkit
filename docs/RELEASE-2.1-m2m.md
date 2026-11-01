@@ -132,9 +132,9 @@ n (`balancer_plan`, `--balancer`).
   position, the thing the m2m router doesn't need.
 - **What it gave:** full reach and the demand met in every case. It cost more than the m2m
   baseline in all six (m2m against balancer): 81 against 99, 236 against 249, 143 against 151,
-  137 against 139, 108 against 116, and 140 against 149. In 16 to 16 the groups need 4 belts, not 3: five producers
-  at 1.4/s make 7.0, and a sixth would pass a lane. On the first pass, the top group's collector
-  took the next group's tap tiles; the retry laid it.
+  137 against 139, 108 against 116, and 140 against 149. In 16 to 16 the groups need 4 belts,
+  not 3: five producers at 1.4/s make 7.0, and a sixth would pass a lane. On the first pass, the
+  top group's collector took the next group's tap tiles; the retry laid it.
 
 ## What is not in it
 
