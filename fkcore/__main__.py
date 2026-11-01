@@ -131,6 +131,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -1103,6 +1104,45 @@ def _explore(s, rest):
                           "best [CELL] [--to plan.sim] | reset")
 
 
+def _walk(a, cat):
+    """fk walk (3.0, PLAN-3.0 3f): what a machine waits on, up and down its nets (fkcore.walk)."""
+    from . import walk
+    parts = a.what.split(",")
+    box = len(parts) == 4
+
+    def body(dump):
+        w = walk.infer(dump, cat)
+        if box:
+            return walk.summary(w)
+        root = walk.find_root(w, a.what)
+        if root is None:
+            return walk.summary(w)[:1] + [f"walk: nothing to walk at {a.what}"]
+        return walk.summary(w)[:1] + walk.tree(w, root, a.up, a.down)
+
+    if a.frm:
+        with open(a.frm, encoding="utf-8") as fh:
+            print("\n".join(body(json.load(fh))))
+        return 0
+    if box:
+        area = _area(a.what)
+    else:
+        try:
+            x, y = (float(v) for v in parts)
+        except ValueError:
+            raise SystemExit("error: walk from the game takes X,Y or X0,Y0,X1,Y1 (a net or a key "
+                             "needs --from)")
+        r = a.radius
+        area = (math.floor(x) - r, math.floor(y) - r, math.floor(x) + r + 1, math.floor(y) + r + 1)
+
+    def run(r):
+        dump = walk.read(r, a.surface, area)
+        if a.save:
+            with open(a.save, "w", encoding="utf-8") as fh:
+                json.dump(dump, fh)
+        return body(dump)
+    return _world(a, cat, "walk", run)
+
+
 def _adopt(a, cat):
     import math
     from . import adopt, link, scene
@@ -1522,6 +1562,16 @@ def main(argv=None):
     rq.add_argument("--name", default="", metavar="ENTITY", help="the entity's prototype there")
     rq.add_argument("--inventory", default="", metavar="NAME",
                     help="a defines.inventory name (default: the one its kind takes ITEM in)")
+    wk = sub.add_parser("walk", description="the net walker, world mode (fkcore.walk, PLAN-3.0 3f)")
+    wk.add_argument("game")
+    wk.add_argument("what", help="X,Y (a machine or belt there), an entity key, a net (n7), "
+                    "or X0,Y0,X1,Y1 (every net in the area)")
+    wk.add_argument("--up", type=int, default=2)
+    wk.add_argument("--down", type=int, default=1)
+    wk.add_argument("--radius", type=int, default=32, help="tiles read around X,Y (default 32)")
+    wk.add_argument("--surface", default="nauvis")
+    wk.add_argument("--save", metavar="FILE", help="keep the read as JSON")
+    wk.add_argument("--from", dest="frm", metavar="FILE", help="walk a kept read, no game")
     cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
                         "anywhere (fkcore.capture)")
     cp.add_argument("game")
@@ -1586,6 +1636,8 @@ def main(argv=None):
         return _lab(a, cat)
     if a.cmd == "capture":
         return _capture(a, cat)
+    if a.cmd == "walk":
+        return _walk(a, cat)
     if a.cmd == "decon":
         return _decon(a, cat)
     if a.cmd == "request":

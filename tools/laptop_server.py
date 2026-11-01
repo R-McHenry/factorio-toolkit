@@ -86,9 +86,12 @@ def _free_port(kind=socket.SOCK_STREAM):
 
 
 class LaptopServer:
-    def __init__(self, name, scenario=None, save=None, map_gen=None, boot_s=40):
+    def __init__(self, name, scenario=None, save=None, map_gen=None, boot_s=40, mods=None):
         self.name, self.scenario, self.save, self.map_gen, self.boot_s = (name, scenario, save,
                                                                           map_gen, boot_s)
+        # 3.0 (walker): the built-in mods to enable besides base ("space-age", "quality",
+        # "elevated-rails"); None leaves the game's default, () turns them all off
+        self.mods = mods
         self.dir = os.path.join(BASE, name)
         self.write = os.path.join(self.dir, "write")
         self.pw_file = os.path.join(self.dir, "rcon.pw")
@@ -112,6 +115,14 @@ class LaptopServer:
                      '"autosave_interval": 0}')
         with open(self.pw_file, "w", encoding="utf-8") as fh:
             fh.write(secrets.token_hex(12))
+        if self.mods is not None:
+            os.makedirs(os.path.join(self.write, "mods"), exist_ok=True)
+            names = ["base", "space-age", "quality", "elevated-rails"]
+            with open(os.path.join(self.write, "mods", "mod-list.json"), "w",
+                      encoding="utf-8") as fh:
+                fh.write('{"mods": [' + ", ".join(
+                    f'{{"name": "{n}", "enabled": {"true" if n == "base" or n in self.mods else "false"}}}'
+                    for n in names) + "]}")
 
     def __enter__(self):
         self._files()
