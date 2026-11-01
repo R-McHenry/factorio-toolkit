@@ -263,6 +263,10 @@ def upgrade(run, sha, dry=False):
     prelude = not os.path.exists(os.path.join(run, "game", "prelude.fk"))
     if prelude:
         plan.append("  game/prelude.fk: the template's prelude (the run has none)")
+    # 3.0: the routing pieces (Waypoint, Merge, Split), only where the run has none
+    routing = not os.path.exists(os.path.join(run, "game", "routing.fk"))
+    if routing:
+        plan.append("  game/routing.fk: the template's routing pieces (the run has none)")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:
         return plan
@@ -272,7 +276,8 @@ def upgrade(run, sha, dry=False):
              + (tuple(f"kickoff/{name}" for name in LOOP) if claude else ())
              + (("kickoff/template/helpers",) if helpers else ())
              + (("kickoff/template/game/cells.fk",) if cells else ())
-             + (("kickoff/template/game/prelude.fk",) if prelude else ()))
+             + (("kickoff/template/game/prelude.fk",) if prelude else ())
+             + (("kickoff/template/game/routing.fk",) if routing else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
     for p in REPLACED:
@@ -306,6 +311,9 @@ def upgrade(run, sha, dry=False):
     if prelude:
         shutil.copy(os.path.join(src, "kickoff", "template", "game", "prelude.fk"),
                     os.path.join(run, "game", "prelude.fk"))
+    if routing:
+        shutil.copy(os.path.join(src, "kickoff", "template", "game", "routing.fk"),
+                    os.path.join(run, "game", "routing.fk"))
     shutil.copy(os.path.join(agent, "prompts", f"{cfg.get('prompt', 'core-v1')}.md"),
                 os.path.join(run, "AGENTS.md"))
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:

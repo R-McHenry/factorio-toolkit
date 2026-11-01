@@ -17,6 +17,10 @@ The next build starts from these files: a routed net's carriers are kept (judged
 routed again as a committed route is), an unrouted one is not searched again on the same ground,
 and a ``held`` one stands as it is, whatever the router would do (``fk hold NET``, or ``status:
 held`` written by hand, read even while a build runs). ``fk status`` reads them.
+
+A ``seed`` line names carriers of the file the player pinned (``fk seed NET``: a splitter, a
+belt, a short run): the router lays the rest of the net through them, now and whenever it routes
+the net again. ``status: seeded`` asks for that on the next build.
 """
 from __future__ import annotations
 
@@ -25,8 +29,8 @@ import time
 
 from . import fkp
 
-STATUSES = ("routed", "kept", "patched", "unrouted", "held", "manual", "skipped")
-_FIELDS = ("status", "why", "took", "key")
+STATUSES = ("routed", "kept", "patched", "unrouted", "held", "manual", "skipped", "seeded")
+_FIELDS = ("status", "why", "took", "key", "seed")
 #: the reason ``fk unroute`` writes: the next build routes the net again, committed route or not
 UNROUTED_BY_YOU = "unrouted by you"
 _UNSAFE = '<>:"|?*'
@@ -51,7 +55,7 @@ def _write(path, text):
     os.replace(tmp, path)
 
 
-def net_text(factory, net, status, ents=(), why="", took=None, key=None):
+def net_text(factory, net, status, ents=(), why="", took=None, key=None, seed=()):
     if status not in STATUSES:
         raise ValueError(f"status is one of {', '.join(STATUSES)}, got {status!r}")
     lines = [f"# net: {net}", f"# status: {status}"]
@@ -61,13 +65,15 @@ def net_text(factory, net, status, ents=(), why="", took=None, key=None):
         lines.append(f"# took: {took:.1f} s")
     if key:
         lines.append(f"# key: {key}")
+    if seed:
+        lines.append(f"# seed: {','.join(sorted(seed, key=fkp.natural_key))}")
     lines.append(f"fkp 1 factory {factory}")
     lines += [fkp.entity_line(e) for e in sorted(ents, key=lambda e: fkp.natural_key(e.key))]
     return "\n".join(lines) + "\n"
 
 
-def write_net(out, factory, net, status, ents=(), why="", took=None, key=None):
-    _write(net_path(out, factory, net), net_text(factory, net, status, ents, why, took, key))
+def write_net(out, factory, net, status, ents=(), why="", took=None, key=None, seed=()):
+    _write(net_path(out, factory, net), net_text(factory, net, status, ents, why, took, key, seed))
 
 
 def read_net(path):
@@ -78,7 +84,8 @@ def read_net(path):
         mtime = os.path.getmtime(path)
     except OSError:
         return None
-    rec = {"net": None, "status": None, "why": "", "took": None, "key": None, "mtime": mtime}
+    rec = {"net": None, "status": None, "why": "", "took": None, "key": None, "seed": None,
+           "mtime": mtime}
     for line in text.splitlines():
         if not line.startswith("#"):
             continue
@@ -98,9 +105,34 @@ def read_net(path):
     except ValueError:
         return None
     rec["ents"] = list(lay.entities.values()) if lay else []
+    rec["seed"] = [k for k in (rec["seed"] or "").split(",") if k.strip()]
     if rec["status"] not in STATUSES or not rec["net"]:
         return None
     return rec
+
+
+def seed_of(rec):
+    """The carriers of a net file its ``seed`` line names."""
+    names = set(rec.get("seed") or ())
+    return [e for e in rec["ents"] if e.key in names]
+
+
+def seed(out, factory, net, ents=None):
+    """``fk seed NET``: the net's file becomes a seed, ``status: seeded``: ``ents`` (each keyed
+    ``~NET/pK``), or with none, the carriers the file holds now (the player cut it down to the
+    piece to keep, or wrote the piece in). -> the file's text, or None when there is neither."""
+    path = net_path(out, factory, net)
+    rec = read_net(path)
+    if ents is None:
+        if rec is None or not rec["ents"]:
+            return None
+        ents = rec["ents"]
+    else:
+        ents = [fkp.Entity(f"~{net}/p{k}", e.name, e.x, e.y, e.dir, dict(e.attrs, net=net))
+                for k, e in enumerate(ents)]
+    text = net_text(factory, net, "seeded", ents, seed=[e.key for e in ents])
+    _write(path, text)
+    return text
 
 
 def read_all(out, factory):
@@ -212,7 +244,10 @@ def set_status(out, factory, net, status, why=""):
     rec = read_net(path)
     if rec is None:
         return None
-    ents = [] if status == "unrouted" else rec["ents"]
-    text = net_text(factory, net, status, ents, why, rec["took"])
+    if status == "unrouted":
+        ents, keep = [], ()            # fk unroute drops a seed too
+    else:
+        ents, keep = rec["ents"], rec["seed"]
+    text = net_text(factory, net, status, ents, why, rec["took"], seed=keep)
     _write(path, text)
     return text

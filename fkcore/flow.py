@@ -846,9 +846,10 @@ def _held_nets(ctx, flat, lay, recs):
     return lay, out, lines
 
 
-def _write_nets(ctx, factory, r, held):
+def _write_nets(ctx, factory, r, held, seeds=None):
     """Every net's file (``fkcore.design``) as the route step left it; a net held while it ran
-    stays held, and the file of a net the design no longer has goes."""
+    stays held, a seed stays (``fk seed``), and the file of a net the design no longer has goes."""
+    seeds = seeds or {}
     by_owner = {}
     for e in r.layout.entities.values():
         if e.owner.startswith("~"):
@@ -874,8 +875,12 @@ def _write_nets(ctx, factory, r, held):
             status, why = "kept", ""
         else:
             status, why = ("routed" if ents or net in routed else "skipped"), ""
+        sd = seeds.get(net) or ()
+        if sd and status == "unrouted":
+            ents = sd
         design.write_net(ctx.out, factory, net, status, ents, why,
-                         key=(r.memo.get(net) or {}).get("key") if status == "unrouted" else None)
+                         key=(r.memo.get(net) or {}).get("key") if status == "unrouted" else None,
+                         seed=[e.key for e in sd])
 
 
 def _module_pinned(flat, prev, cat, path):
@@ -999,6 +1004,13 @@ def s_route(ctx, args):
             pinned.pop(net, None)
             again.pop(net, None)
         lines += [f"{factory}: {line}" for line in held_lines]
+        # fk seed: carriers the player pinned; the router lays the rest of the net through them
+        seeds = {n: design.seed_of(r) for n, r in recs.items()
+                 if r["seed"] and n in flat.nets and n not in held}
+        for net, rec in sorted(recs.items()):
+            if net in seeds and rec["status"] == "seeded":
+                pinned.pop(net, None)
+                again[net] = "seeded by you (fk seed)"
         if o["again"]:
             asked, unknown = _asked(flat, str(o["again"]))
             for net in sorted(asked):
@@ -1019,8 +1031,11 @@ def s_route(ctx, args):
         design.write_base(ctx.out, factory, lay)
         began = time.time()
 
-        def on_net(net, status, ents, why, took, f=factory):
-            design.write_net(ctx.out, f, net, status, ents, why, took)
+        def on_net(net, status, ents, why, took, f=factory, seeds=seeds):
+            sd = seeds.get(net) or ()
+            if sd and status == "unrouted":
+                ents = sd                          # a seed stays, routed or not
+            design.write_net(ctx.out, f, net, status, ents, why, took, seed=[e.key for e in sd])
 
         def on_reach(net, which, k, n, f=factory):
             design.write_now(ctx.out, f, f"route, {which}: {k + 1} of {n}, {net}")
@@ -1044,13 +1059,14 @@ def s_route(ctx, args):
                                    memo=memo,
                                    again=sorted(_asked(flat, str(o["again"]))[0])
                                    if o["again"] else (),
-                                   on_net=on_net, on_reach=on_reach)
+                                   on_net=on_net, on_reach=on_reach,
+                                   seeds={n: s for n, s in seeds.items() if n not in pinned})
         finally:
             route.PROGRESS = saved
             design.clear_now(ctx.out, factory)
         # every net as this step left it, the nets that failed with the ground they failed on: the
         # next build does not search them again while it stands (route --again NET does)
-        _write_nets(ctx, factory, r, held)
+        _write_nets(ctx, factory, r, held, seeds)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)

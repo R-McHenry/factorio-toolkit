@@ -1237,7 +1237,7 @@ def _glue(argv):
 
 
 def _design(a):
-    """3.0 ``fk status|hold|unhold|unroute``: the design database's net files
+    """3.0 ``fk status|hold|unhold|unroute|seed``: the design database's net files
     (``fkcore.design``), read even while a build runs; a hold written now is taken when the router
     reaches that net."""
     from . import design
@@ -1253,9 +1253,31 @@ def _design(a):
                 print("\n".join(design.status_lines(out, f, a.net)))
         return 0
     where = [f for f in factories if a.net in design.read_all(out, f)]
+    if a.cmd == "seed" and a.pieces and not where and len(factories) == 1:
+        where = factories
     if not where:
         print(f"error: no net file for {a.net} (fk status {a.game} lists them)", file=sys.stderr)
         return 2
+    if a.cmd == "seed":
+        ents = None
+        if a.pieces:
+            try:
+                lay = fkp.loads("fkp 1 factory x\n" + "\n".join(
+                    f"e ~seed/{k} {p}" for k, p in enumerate(a.pieces)) + "\n")
+            except ValueError as exc:
+                print(f"error: a piece is 'NAME X,Y DIR [ug=in|out]', as a net file writes "
+                      f"its carriers: {exc}", file=sys.stderr)
+                return 2
+            ents = [lay.entities[f"~seed/{k}"] for k in range(len(a.pieces))]
+        for f in where:
+            if design.seed(out, f, a.net, ents) is None:
+                print(f"error: {f} net {a.net} has no carriers to keep: give the pieces "
+                      "(fk seed NET 'splitter 11,30 S')", file=sys.stderr)
+                return 2
+            n = len(ents) if ents is not None else len(design.read_all(out, f)[a.net]["ents"])
+            print(f"{f} net {a.net}: seeded with {n} carriers; the next build lays the rest of "
+                  "it through them (fk route NET does it now)")
+        return 0
     status, why = {"hold": ("held", ""), "unhold": ("routed", ""),
                    "unroute": ("unrouted", design.UNROUTED_BY_YOU + " (fk unroute)")}[a.cmd]
     for f in where:
@@ -1341,6 +1363,12 @@ def main(argv=None):
         p = sub.add_parser(name, help=f"3.0: {what}")
         p.add_argument("game")
         p.add_argument("net")
+    sd = sub.add_parser("seed", help="3.0: pin carriers of a net (a splitter, a belt) for the "
+                                     "router to lay the rest of it through")
+    sd.add_argument("game")
+    sd.add_argument("net")
+    sd.add_argument("pieces", nargs="*", metavar="'NAME X,Y DIR'",
+                    help="the carriers to pin (default: the net file's carriers as they stand)")
     lk = sub.add_parser("look")
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
@@ -1584,7 +1612,7 @@ def main(argv=None):
             print(f"error: {exc}", file=sys.stderr)
             return 2
         return code
-    if a.cmd in ("status", "hold", "unhold", "unroute"):
+    if a.cmd in ("status", "hold", "unhold", "unroute", "seed"):
         return _design(a)
     if a.cmd == "step":
         # 3.0 (PLAN-3.0 §2, every step a command): the script's own line for that step, alone;

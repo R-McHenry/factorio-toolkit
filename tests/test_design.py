@@ -96,24 +96,56 @@ class DesignFlowTest(unittest.TestCase):
         self.assertIn("stale     gear: routed again: asked", route_txt)
         self.assertEqual(main(["step", self.script, "place", "gear"]), 2)   # nets: route only
 
-    def test_a_waypoint_is_a_literal_belt_the_net_is_split_at(self):
-        # Rory, 11-01: no route --via; a stuck net is broken up by placing a belt piece (a Literal
-        # of two named belts) and splitting the net at it, both halves the router's own nets
-        with open(os.path.join(self.dir, "wp.json"), "w", encoding="utf-8") as fh:
-            fh.write('{"entities": [{"name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 8},'
-                     ' {"name": "transport-belt", "x": 0.5, "y": 1.5, "direction": 8}],'
-                     ' "names": {"in": 0, "out": 1}}')
-        fk = self.read("main.fk").replace(
-            "labs  = LabRow<n=10>", 'wp    = Literal<file="wp.json">  @(8, 28)\nlabs  = LabRow<n=10>'
-        ).replace("net gear:   gears -> red, belts, ins",
-                  "net gear:   gears -> wp.in\nnet gear2 items iron-gear-wheel: wp.out -> red, belts, ins")
+    def test_the_routing_library_pieces(self):
+        # Rory, 11-01: no route --via in the language; a waypoint, a merge and a split are sealed
+        # modules in the kickoff's routing.fk, placed and wired like any instance
+        shutil.copy(os.path.join(os.path.dirname(__file__), "..", "kickoff", "template", "game",
+                                 "routing.fk"), self.dir)
+        fk = 'import Waypoint, Merge, Split from "routing.fk"\n' + self.read("main.fk")
+        for old, new in (
+                ("labs  = LabRow<n=10>",
+                 "wp    = Waypoint<item=iron-gear-wheel>  @(8, 28)\n"
+                 "mg    = Merge<a=automation-science-pack, b=logistic-science-pack>  @(4, 40)\n"
+                 "sp    = Split<item=copper-plate>  @(4, 16)\n"
+                 "labs  = LabRow<n=10>"),
+                ("net gear:   gears -> red, belts, ins",
+                 "net gear:   gears -> wp.i\nnet gear2:  wp.o -> red, belts, ins"),
+                ("net copper: copper_smelt -> cable, red",
+                 "net copper: copper_smelt -> sp.i\nnet cu_a: sp.a -> cable\nnet cu_b: sp.b -> red"),
+                ("net packs:  red, green -> labs",
+                 "net pk_r: red -> mg.a\nnet pk_g: green -> mg.b\nnet packs: mg.o -> labs")):
+            self.assertIn(old, fk)
+            fk = fk.replace(old, new)
         with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8") as fh:
             fh.write(fk)
         self.build(to="report_checks")
         route_txt = self.read("out/route.txt")
-        self.assertRegex(route_txt, r"routed    gear: 1 -> 1, ")
-        self.assertRegex(route_txt, r"routed    gear2: 1 -> 3, ")
-        self.assertIn("13 nets: 13 connected", self.read("out/report_checks.txt"))
+        self.assertRegex(route_txt, r"routed    wp/p: 1 -> 1, 3 belts")
+        self.assertRegex(route_txt, r"routed    mg/p: 2 -> 1, .*1 merges")
+        self.assertRegex(route_txt, r"routed    sp/p: 1 -> 2, .*1 splitters")
+        self.assertIn("main: 20 nets: 20 connected", self.read("out/report_checks.txt"))
+
+    def test_a_net_routed_through_its_seed(self):
+        # 3.0 `fk seed NET 'splitter X,Y S'`: the player pins a splitter of gear's; the router lays
+        # the rest of gear through it, and later builds keep the seed
+        from fkcore.__main__ import main
+        self.build(to="route")
+        self.assertEqual(main(["seed", self.dir, "gear", "splitter 9,30.5 S"]), 0)
+        rec = design.read_all(self.out, "main")["gear"]
+        self.assertEqual((rec["status"], rec["seed"]), ("seeded", ["~gear/p0"]))
+        self.assertEqual(main(["step", self.script, "route"]), 0)
+        route_txt = self.read("out/route.txt")
+        self.assertIn("stale     gear: routed again: seeded by you (fk seed)", route_txt)
+        self.assertRegex(route_txt, r"routed    gear: 1 -> 3, through your seed, 1 carriers; \d+ carriers "
+                                    r"into it at 9,29; \d+ carriers out of it at 8,31; \d+ "
+                                    r"carriers out of it at 9,31")
+        rec = design.read_all(self.out, "main")["gear"]
+        self.assertEqual((rec["status"], rec["seed"]), ("routed", ["~gear/p0"]))
+        self.assertIn(("splitter", 9, 30.5), {(e.name, e.x, e.y) for e in rec["ents"]})
+        self.build(to="report_checks")
+        self.assertIn("12 nets: 12 connected", self.read("out/report_checks.txt"))
+        self.assertEqual(design.read_all(self.out, "main")["gear"]["seed"], ["~gear/p0"])
+        self.assertEqual(main(["seed", self.dir, "gear", "splitter nowhere"]), 2)
 
     def test_route_try_asks_and_lays_nothing(self):
         # 3.0 `fk route --try A B`: a belt from A to B on the design as it stands; nothing changes

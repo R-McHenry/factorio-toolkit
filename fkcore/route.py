@@ -1244,6 +1244,112 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
     return got, f"{text}; one lane: no join for {what} routes ({how})"
 
 
+def _seed_ends(cat, seed):
+    """A seed's ways in and out: ([(tile, heading)] a piece ends on, [(tile, heading)] a piece
+    starts on). A way in is the tile behind a seed carrier that no seed carrier fills (the
+    piece's last belt stands there, facing in); a way out is the tile one points into."""
+    tiles = set()
+    for e in seed:
+        tiles |= set(fkpmod.tiles_of(cat, e))
+    ins, outs = [], []
+    for e in seed:
+        h = _heading(e)
+        ug = e.attrs.get("ug")
+        for tx, ty in fkpmod.tiles_of(cat, e):
+            back, front = (tx - _DX[h], ty - _DY[h]), (tx + _DX[h], ty + _DY[h])
+            if ug != "out" and back not in tiles:
+                ins.append((back, h))
+            if ug != "in" and front not in tiles:
+                outs.append((front, h))
+    return ins, outs
+
+
+def _route_seeded(cat, job, ents, frames, js, box, limit, terrain, avoid, seed,
+                  allow=frozenset()):
+    """3.0 ``fk seed NET``: one net laid through carriers the player pinned (a splitter, a belt,
+    a short run), the rest of it the router's (Rory, 2026-11-01: "a manual way to just pin the
+    splitter in"). Each driver goes to the seed's nearest way in, each consumer comes from its
+    nearest way out, a piece of the router's own search each, laid on the seed and the pieces
+    before it. -> (carriers, report text) or (None, reason)."""
+    if job.parts or job.m2m is not None or job.fluid:
+        return None, "a seed takes a net on one belt (not a lane pair, an m2m net or a pipe)"
+    for e in seed:
+        if not _is_belt(cat, e) or _heading(e) is None:
+            return None, f"seed {e.key} ({e.name}) is no belt, underground or splitter"
+    seed = [fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs, net=job.net))
+            for e in seed]
+    ins, outs = _seed_ends(cat, seed)
+    if not ins or not outs:
+        return None, f"the seed has no way {'in' if not ins else 'out'}: every end of it is " \
+                     "another of its carriers"
+
+    def mid(rect):
+        return ((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
+
+    def share(ends, belts, machines):
+        """Each end (a belt's tile, a machine's middle) to the seed's nearest way; then, while a
+        way has none and another has two or more, the one of those nearest the empty way moves
+        to it: a splitter's two outputs both get consumers. -> [(belts, machines)] per way."""
+        items = [(t, ("b", b)) for b in belts for t in [b[0]]] + \
+                [(mid(m[1]), ("m", m)) for m in machines]
+
+        def d(t, k):
+            return abs(ends[k][0][0] - t[0]) + abs(ends[k][0][1] - t[1])
+        to = [min(range(len(ends)), key=lambda k, t=t: d(t, k)) for t, _x in items]
+        while True:
+            empty = [k for k in range(len(ends)) if k not in to]
+            crowded = {k for k in to if to.count(k) > 1}
+            if not empty or not crowded:
+                break
+            i = min((i for i, k in enumerate(to) if k in crowded),
+                    key=lambda i: d(items[i][0], empty[0]))
+            to[i] = empty[0]
+        got = [([], []) for _ in ends]
+        for (_t, (kind, x)), k in zip(items, to):
+            got[k][0 if kind == "b" else 1].append(x)
+        return got
+
+    into = share(ins, job.starts, job.sources)          # per way in: (starts, sources)
+    out_of = share(outs, job.goals, job.taps)           # per way out: (goals, taps)
+    laid, words = list(seed), [f"your seed, {len(seed)} carriers"]
+    for k, (starts, sources) in enumerate(into):
+        if not starts and not sources:
+            continue
+        piece = NetJob(job.net, starts=starts, sources=sources, goals=[ins[k]],
+                       owners=list(job.owners), anchors=dict(job.anchors))
+        got, why = _route_one(cat, piece, list(ents) + laid, frames, js, box, limit, terrain,
+                              avoid, allow=allow)
+        t = ins[k][0]
+        if got is None:
+            return None, f"no way from its drivers into the seed at {t[0]},{t[1]}: {why}"
+        laid += got
+        words.append(f"{len(got)} carriers into it at {t[0]},{t[1]}")
+    for k, (goals, taps) in enumerate(out_of):
+        if not goals and not taps:
+            continue
+        piece = NetJob(job.net, starts=[outs[k]], goals=goals, taps=taps,
+                       owners=list(job.owners), anchors=dict(job.anchors))
+        got, why = _route_one(cat, piece, list(ents) + laid, frames, js, box, limit, terrain,
+                              avoid, allow=allow)
+        t = outs[k][0]
+        if got is None:
+            return None, f"no way out of the seed at {t[0]},{t[1]} to its consumers: {why}"
+        laid += got
+        words.append(f"{len(got)} carriers out of it at {t[0]},{t[1]}")
+    used = {e.key for e in seed}
+    count, out = {}, list(seed)
+    for e in laid[len(seed):]:                # the pieces' keys: b0, b1, ... past the seed's
+        letter = e.key.rsplit("/", 1)[1][0]
+        while True:
+            key = f"~{job.net}/{letter}{count.get(letter, 0)}"
+            count[letter] = count.get(letter, 0) + 1
+            if key not in used:
+                break
+        used.add(key)
+        out.append(fkpmod.Entity(key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
+    return out, "through " + "; ".join(words)
+
+
 def try_route(flat, lay, cat, a, b, bounds=None, margin=4, blocked=(), limit=60000):
     """3.0 ``route --try A:B``, the question mode: how a belt would run from tile ``a`` to tile
     ``b`` on ``lay`` as it stands, every heading tried at both ends; commits nothing.
@@ -2209,7 +2315,7 @@ def _filter_loads(flat, lay, cat):
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                  blocked=(), hand=None, patch=None, ug=None, m2m=False, group_budget=None,
                  group_max=None, first=(), skip=(), memo=None, again=(), on_net=None,
-                 on_reach=None) -> Routed:
+                 on_reach=None, seeds=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2229,11 +2335,13 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     3.0, the design database on disk (``fkcore.design``): ``on_net(net, status, carriers, why,
     seconds)`` is told each net the moment it lands (routed or unrouted), so a build that stops
     leaves what it finished; ``on_reach(net, which, k, n)`` is asked as the router reaches a net,
-    and may answer carriers to take as they stand (a net the player held while the build ran)."""
+    and may answer carriers to take as they stand (a net the player held while the build ran).
+    ``seeds``: {net: carriers the player pinned} (``fk seed``), each such net laid through its
+    seed (``_route_seeded``)."""
     global _HANDS, _M2M
     policy = dict(group_budget=group_budget, group_max=group_max, first=tuple(first or ()),
                   skip=tuple(skip or ()), memo=memo or {}, fresh=tuple(again or ()),
-                  on_net=on_net, on_reach=on_reach)
+                  on_net=on_net, on_reach=on_reach, seeds=dict(seeds or {}))
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
@@ -2263,7 +2371,8 @@ def _named(net, patterns):
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                   blocked=(), patch=None, group_budget=None, group_max=None, first=(),
-                  skip=(), memo=None, fresh=(), on_net=None, on_reach=None) -> Routed:
+                  skip=(), memo=None, fresh=(), on_net=None, on_reach=None,
+                  seeds=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
@@ -2393,6 +2502,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     ents = list(base.entities.values())
     added, failed, how, swaps, rlines = {}, {}, {}, [], {}
     memo = memo or {}
+    seeds = seeds or {}
+    fresh = tuple(fresh) + tuple(seeds)     # a seeded net is searched, whatever it did last
     remembered, last_key, known = {}, {}, {}
     held_now = set()                   # nets the player held while this build ran (on_reach)
 
@@ -2454,6 +2565,15 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             rlines[net] = summary
             return ents
         fnet, bnet = net_frames(net)
+        if net in seeds:
+            got, why = _route_seeded(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid,
+                                     seeds[net], allow=joints)
+            if got is None:
+                failed[net] = f"through your seed: {why}"
+                return ents
+            failed.pop(net, None)
+            added[net], how[net] = got, why
+            return ents + got
         got, why = (None, failed.get(net)) if promo else \
             _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid, allow=joints)
         if got is None and promo:

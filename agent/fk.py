@@ -62,7 +62,7 @@ LOCAL = {"rates", "plan", "check", "explain", "unfold", "dnp", "render", "layout
          "merge", "insert", "chests-to-net", "net-to-chests"}
 #: 3.0: the design database's net files (game/out/design), read and written here, during a
 #: build too
-DESIGN = {"status", "hold", "unhold", "unroute"}
+DESIGN = {"status", "hold", "unhold", "unroute", "seed"}
 #: 3.0: build steps as commands of their own, run alone on the laptop (``fk route NET``)
 STEP_CMDS = {"route", "place", "report"}
 #: commands that need the game: they run on the host, with the link on

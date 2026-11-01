@@ -19,6 +19,7 @@ fk build --to diff               a dry run: the design against the world and wha
 fk status [NET]                  the nets as the router left them (or lands them now), the
                                  unrouted ones with reasons; the build log's last lines
 fk hold NET / fk unroute NET     keep a net's route as it stands / route it again next build
+fk seed NET 'splitter X,Y S'     pin a piece of one net; the router lays the rest through it
 fk route NET[,NET]               lay those nets again now, every other route kept; nothing pasted
 fk route --try X,Y X,Y           how a belt would go from tile A to tile B now; nothing laid
 fk look X0,Y0,X1,Y1              that area now, against the design
@@ -206,14 +207,21 @@ How route works through the nets is yours to set, on its line in the build scrip
 - A net that failed is not searched again while its ends and the ground around it stand as they
   did: its last reason stands, with "not searched again". Change something near it, or name it
   with `--again NET`, to search it again.
-- A net the router can't find a way for can be broken up: place a belt piece where you want it
-  to pass and split the net there. The piece is a Literal of two named belts (`wp.json`:
-  `{"entities": [{"name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 8},
-  {"name": "transport-belt", "x": 0.5, "y": 1.5, "direction": 8}], "names": {"in": 0,
-  "out": 1}}`), placed like any instance (`wp = Literal<file="wp.json"> @(8, 28)`). Then
-  `net gear: gears -> wp.in` and `net gear2 items iron-gear-wheel: wp.out -> red, belts`: two
-  ordinary nets, each routed on its own (LANGUAGE.md, names inside a Literal). Only plain
-  belts can be named so far, not splitters or undergrounds.
+- To help one net along without touching the design, pin a piece of it:
+  `fk seed GAME NET 'splitter 9,30.5 S'` (pieces are written as a net file writes its
+  carriers: name, x,y, direction, `ug=in|out` for an underground). Without pieces, the net
+  file's carriers as they stand are the seed, so you can cut a route down to the part you
+  like, or write a piece in. The next build (or `fk route NET` now) lays the rest of the net
+  through the seed: each driver into its nearest way in, each consumer from its nearest way
+  out, and every way out of a splitter gets a consumer when there are enough. The seed stays
+  in the net file (`# seed:`), so a later build that routes the net again keeps it.
+  `fk unroute NET` drops it. One belt only: not lane pairs, m2m nets or pipes.
+- A net the router can't find a way for can be broken up: place a piece from `game\routing.fk`
+  where you want it to pass, and split the net there. `import Waypoint, Merge, Split from
+  "routing.fk"`, then `wp = Waypoint<item=iron-gear-wheel> @(8, 28)`, `net gear: gears -> wp.i`
+  and `net gear2: wp.o -> red, belts`: two ordinary nets, each routed on its own. `Merge` joins
+  two belts where you choose, `Split` divides one. Each is a small sealed module; open the file
+  to see how, and copy one to make your own.
 - `fk route --try X,Y X,Y` asks the router how a belt would run from tile A to tile B on the
   design as it stands (its routed nets included), every heading tried at both ends. It prints
   the carriers, or why there is no way, and lays nothing: a quick check before you move a

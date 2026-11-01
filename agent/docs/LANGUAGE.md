@@ -209,6 +209,20 @@ On the lab each line made what the row it replaces makes, within 3% (the gear ce
 `fk explain FILE INST` shows any instance as its exact entities, with its size and where its belts
 attach.
 
+### Your `game\routing.fk`
+
+Small pieces for steering the router: place one where a belt must go, and split the net at it.
+Each is a sealed module (ports and one net), so the router lays each half of the net on its own.
+`import Waypoint, Merge, Split from "routing.fk"`.
+
+| piece | what | ports |
+|---|---|---|
+| `Waypoint<item>` | one belt, 1x3: the net passes here (`net a: x -> wp.i`, `net b: wp.o -> y`) | `i`, `o` |
+| `Merge<a, b>` | two belts into one, a on one lane, b on the other (the same item twice: both lanes) | `a`, `b`, `o` |
+| `Split<item>` | one belt into two, by a splitter | `i`, `a`, `b` |
+
+They run north to south; `rot 1` turns one to run east to west, `rot 3` west to east.
+
 ## Other kinds
 
 | kind | what | belts |
