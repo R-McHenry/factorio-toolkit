@@ -601,6 +601,13 @@ def main(argv):
         push(cfg)
         footer(cfg)
         return code
+    if cmd == "compile":
+        # 3.0: a sealed module's insides routed alone and stored; the next build lays them
+        with _build_lock():
+            code = local(cfg, ["compile", _script()] + rest)
+        push(cfg)
+        footer(cfg)
+        return code
     if cmd in DESIGN:
         code = local(cfg, [cmd, "."] + rest)
         log = os.path.join(GAME, "out", "build.log")

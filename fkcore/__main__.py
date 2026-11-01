@@ -720,6 +720,10 @@ def _capture(a, cat):
             named = capture.names([row["name"] for row in rows], cat)
             if named:
                 data["names"] = named
+            edge = capture.ports([(row["name"], float(row["x"]), float(row["y"]),
+                                   row.get("direction")) for row in rows], cat)
+            if edge:
+                data["ports"] = edge
             capture.write(dest, data)
             names = {}
             for row in rows:
@@ -747,6 +751,9 @@ def _capture(a, cat):
             named = capture.names_of_bp(got["bp"], cat)
             if named:
                 data["names"] = named
+            edge = capture.ports_of_bp(got["bp"], cat)
+            if edge:
+                data["ports"] = edge
             capture.write(dest, data)
     except (capture.CaptureError, link.LinkError, surfacemod.SurfaceError, OSError) as exc:
         print(f"error: capture: {exc}", file=sys.stderr)
@@ -756,6 +763,10 @@ def _capture(a, cat):
     if named:
         print(f"  names: {capture.name_span(named)}: a net ends on one as X.asm1 when the Literal "
               "is X")
+    if edge:
+        print(f"  ports: {', '.join(sorted(edge, key=lambda p: (p[0], int(p[1:]))))}: the belts "
+              "and pipes that cross the frame's edge; a net ends on one as X.e1 (rename them in "
+              "the file)")
     print(f'  use it anywhere, a module included:  X = Literal<file="{rel}"> @(x, y)'
           f"   (or fk sim place game\\{rel.replace('/', chr(92))} @X,Y)")
     return 0
@@ -1354,6 +1365,10 @@ def main(argv=None):
     sp.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'")
     sp.add_argument("--try", dest="try_", nargs=2, metavar="X,Y",
                     help="how a belt would go from tile A to tile B here; nothing laid")
+    cp = sub.add_parser("compile", help="3.0: a sealed module's insides routed alone and stored "
+                                         "(out/design/modules); the world lays them from there")
+    cp.add_argument("script")
+    cp.add_argument("module")
     st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design)")
     st.add_argument("game")
     st.add_argument("net", nargs="?")
@@ -1614,6 +1629,16 @@ def main(argv=None):
         return code
     if a.cmd in ("status", "hold", "unhold", "unroute", "seed"):
         return _design(a)
+    if a.cmd == "compile":
+        # 3.0 (PLAN-3.0 §4): the script up to its route step, which routes and stores MODULE's
+        # insides alone (route --compile); nothing is pasted
+        try:
+            code, _ctx = flow.run(a.script, None, "route", cat,
+                                  extra=[f"route --compile {a.module}"])
+        except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return code
     if a.cmd == "step":
         # 3.0 (PLAN-3.0 §2, every step a command): the script's own line for that step, alone;
         # the nets named are laid again, every other route kept from the net files

@@ -22,6 +22,8 @@ fk hold NET / fk unroute NET     keep a net's route as it stands / route it agai
 fk seed NET 'splitter X,Y S'     pin a piece of one net; the router lays the rest through it
 fk route NET[,NET]               lay those nets again now, every other route kept; nothing pasted
 fk route --try X,Y X,Y           how a belt would go from tile A to tile B now; nothing laid
+fk compile MODULE                route a sealed module's inside once and store it; every build
+                                 that places it lays the stored inside ("Compiled modules")
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 fk look AREA --zoom 16 --layers all --image
@@ -451,6 +453,22 @@ fk lab NAME --clear-ore          every ore tile of NAME's slot taken up
   speed. `--measure 60` takes a minute; it tops the requesters up first.
 - A good worker task: "Try stage 4's mall in the lab (`fk lab mall --from stages\4`), let it run
   two minutes, measure it, and report what each maker makes and what it waits for."
+
+### Compiled modules
+
+A sealed module's inside is routed once, then stored under `out\design\modules\MODULE\`, keyed
+by what is inside (its machines, inner nets and ports, the turn, the router version), not by
+where it stands. A build that places the module lays its stored inside and routes only the nets
+that cross frames, so a second copy, a move or a rebuild routes no inner net (the route step
+says `compiled  P: k inner nets from its stored inside`).
+
+- `fk compile MODULE` routes the inside now, alone, and stores it; the next world build lays
+  it. A build stores every sealed inside that routed whole, so you rarely need it.
+- A lab build of the module stores its inside too, and the world build reads the lab's store:
+  try a module in the lab, then place it. `--with "route --reuse-lab"` makes even a `fk route`
+  of named nets lay the stored insides.
+- Change anything inside and the key changes: the module routes again and stores the new
+  inside. `--with "route --compiled no"` routes every inside afresh.
 
 ## The speedrun planner: `fk sim`
 

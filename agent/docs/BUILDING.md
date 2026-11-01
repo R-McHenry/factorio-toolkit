@@ -77,19 +77,20 @@ with the starter base still running beside it until the new one carries the load
 - **Paste one region at a time.** Change a module, build, look, then the next one.
 - **A new consumer gets its own branch.** Adding a far consumer to a main net re-lays the main
   (the coal belt by the boilers, once): give it a tap, a hub requester, or a net of its own.
-- The world build still lays a sealed module's inside belts itself; kept routes make the second
-  build fast. `--with "route --area ..."` reworks one region and leaves the rest standing.
+- A sealed module's inside routes once: the build (or `fk compile MODULE`) stores it, and every
+  later build, copy or move lays the stored inside (TOOLKIT.md, "Compiled modules").
+  `--with "route --area ..."` reworks one region and leaves the rest standing.
 
 ## Lines are Stacks of cells
 
-A line of machines is a `Stack` of cells from `game\cells.fk`: furnaces (electric, a pair across the
-plate belt, stone, a smelter pair, a column), assemblers, green circuits, labs. A cell is yours to
-read, copy and change; the old rows (`SmelterRow`, `SmelterArray`, `AsmRow`, `LabRow`,
-`CircuitStack`) are black boxes, and each has a cell that replaces it (on the lab, 12 SmelterPair
-cells made 450 plates/min to SmelterArray's 445). `MinerRow` is still the drill line: a drill
-placed alone in a cell doesn't route its ore into the cell's belt yet. A cell you write earns a
-place in your library once it has built and measured clean in the lab; until then it lives in the
-one module that needs it.
+A line of machines is a `Stack` of cells from `game\cells.fk`: drills (`DrillCell`, one side;
+`DrillPair`, both lanes), furnaces (electric, a pair across the plate belt, stone, a smelter pair,
+a column), assemblers, green circuits, labs. A cell is yours to read, copy and change; the old
+rows (`SmelterRow`, `SmelterArray`, `AsmRow`, `LabRow`, `CircuitStack`) are black boxes, and each
+has a cell that replaces it (on the lab, 12 SmelterPair cells made 450 plates/min to
+SmelterArray's 445). A `Stack<cell=DrillPair, n=8>` on a patch is a drill line you can read and
+change. A cell you write earns a place in your library once it has built and measured clean in
+the lab; until then it lives in the one module that needs it.
 
 ## Bootstrap
 
