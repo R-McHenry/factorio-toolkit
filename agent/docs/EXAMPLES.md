@@ -1,44 +1,216 @@
 # Examples
 
-Small factories that build cleanly, each in `docs\examples\`. New designs build their lines from
-cells, as `furnace-column.fk` and `blue6.fk` do; your own starter cells are in `game\cells.fk`
-(LANGUAGE.md, "Lines of machines"). The rest use the toolkit's row kinds, which still build. Copy
-one into `game\`, give it ground, check it on paper, build it:
+Small factories that build cleanly, each in `docs\examples\`. Copy one into `game\`, give it
+ground, check it on paper, build it:
 
 ```
-copy docs\examples\gears.fk game\gears.fk
-# in game\world.fk (your base's plot):   import Gears from "gears.fk"
-#                                        gears = Gears @(6, 6) size 16x16
-fk rates gears.fk
+copy docs\examples\library-lines.fk game\library-lines.fk
+# in game\world.fk (your base's plot):   import Lines from "library-lines.fk"
+#                                        lines = Lines @(6, 6) size 40x30
+fk check library-lines.fk
+fk rates library-lines.fk
 fk build --to report_checks          # design only: read out\report_checks.txt
 fk build                             # the paste
-fk look 68,-42 88,-22
+fk look 68,-42 108,-12
 ```
 
 A factory goes in `world.fk`, your base's file: one plot, 2000x2000 tiles, so the ground is not the
 limit. It can have a plot of its own instead: `import Gears from "gears.fk"` and
 `gears = Gears @(70, -40) size 16x16` in `nauvis.fk`, at map coordinates, and it keeps its own
-`.fkp`. `size WxH` is the factory's frame; the size in each heading below is what its rows take.
+`.fkp`. `size WxH` is the factory's frame.
 
-The first three together, next to the kit (whose grid the reactor feeds), give 9 nets, all routed
-and connected, 0 SPILL.
+The examples that import cells take them from `cells.fk` beside them. `docs\examples\cells.fk` is
+the library as the toolkit ships it; in `game\` your own `cells.fk` is used, with whatever you
+changed in it. Each example also builds where it stands (`fk rates docs\examples\mall-loop.fk`).
 
-**The current way, and the older examples.** The newest examples build a base the way the
-toolkit now works best: every factory a sealed module with ports, joined by belts between its
-ports, standing across a bus, its cells in straight lines:
+## Five pieces of a base
 
-- **busbase.fk**: a whole bus base (smelting, circuits, a mall, science), each spine a sealed
-  module across the bus;
-- **blue6.fk**: blue science as a stack of cells (`Stack`), every belt straight, one pinned pole
-  per cell;
-- **smelter-array.fk** (`SmelterArray`) and the circuits in busbase.fk (`CircuitStack`): machines
-  on both sides of their output belt.
+These five use the language as it stands: lines are Stacks of cells, most of them from the
+library, and the rest is the parts the router can't guess. Each one routes every net and connects
+on paper; on paper alone they have no generator, so `NO_POWER` is the one line they share (in the
+base, `floorplan --bridge-power` joins them to the grid).
 
-The rest are older: written before modules, ports and stacks, each one a single factory fed by
-chests. They still build, and they show the language's pieces one at a time; for a base, start
-from the current ones.
+### plastic-cell.fk: a cell of your own around a Machine
 
-## smelting.fk: ore to plates (26x26) (older)
+```
+kind Plastics = Machine<entity=chemical-plant, recipe=plastic-bar>
+
+module PlasticCell<fuel=coal> size 12x5 {
+  port c_in    : in  $fuel         @s0
+  port c_out   : out $fuel         @n0
+  port gas_in  : in  petroleum-gas @s5
+  port gas_out : out petroleum-gas @n5
+  port p_in    : in  plastic-bar   @n11
+  port p_out   : out plastic-bar   @s11
+  stack c_in -> c_out, gas_in -> gas_out, p_out -> p_in
+  plant = Plastics @(5, 1)
+  net c: c_in -> plant, c_out
+  net g: gas_in -> plant, gas_out
+  net p: p_in, plant -> p_out
+}
+
+gas   = InfinityPipe<fluid=petroleum-gas, rate=80/s> @(7, 26)
+coal  = Chest<requester, item=coal, rate=4/s> @(2, 26)
+line  = Stack<cell=PlasticCell, n=4> @(2, 4)
+box   = Chest<provider, limit=8> @(18, 26)
+net fuel:    coal -> line.c_in
+net gas_:    gas -> line.gas_in
+net plastic: line.p_out -> box
+```
+
+A cell is yours to write when the library has none for the machine. `Machine` takes any crafting
+building, and a `kind` gives it a name. The gas runs up through all four cells on one pipe (a
+fluid port pair: each cell's pipe meets the next one's at their shared edge, and the nets between
+them lay nothing), the coal up the west belt, the plastic back down the east one. On paper: four
+plants at full speed, 480 plastic/min, on 80 gas/s and 4 coal/s. The `InfinityPipe` is the lab's
+free gas: in the base the gas comes from a refinery's net. A cell names its machine: for an
+assembler, write another cell.
+
+### library-lines.fk: two lines of library cells
+
+```
+import SmelterPair, AsmCell1 from "cells.fk"
+
+kind CableCell = AsmCell1<recipe=copper-cable, ins=copper-plate, out=copper-cable>
+
+ore   = Chest<requester, item=copper-ore, rate=3/s> @(4, 2)
+coal  = Chest<requester, item=coal, rate=0.3/s>     @(14, 2)
+smelt = Stack<cell=SmelterPair, n=5, plate=copper-plate, ore=copper-ore> @(10, 8)
+cable = Stack<cell=CableCell, n=3>                  @(30, 8)
+box   = Chest<provider, limit=8>                    @(36, 22)
+
+net ore_:  ore -> smelt.f_in
+net fuel:  coal -> smelt.f_in
+lanes ore_ | fuel
+net plates: smelt.pw_out, smelt.pe_out -> cable.in_in
+net wire:   cable.out_out -> box
+```
+
+The library's cells make iron unless you say. The smelter Stack passes `plate=` and `ore=` to
+every SmelterPair, so they smelt copper; the cable line is a `kind` of `AsmCell1` with all three
+of its parameters set. Ore and coal share one belt into the smelters, a lane each, and the two
+plate belts of the SmelterPairs join into the cable line's feed. On paper: 3 ore/s make 180
+plates/min, the three cable assemblers take 180 and make 360 cable/min. The ore runs a little
+short of ten furnaces, and `fk rates` shows it where the belt does: the first four pairs at 98%,
+the last at 89%.
+
+### ribbon-bus.fk: four belts of plates, side by side
+
+```
+import SmeltColumn from "cells.fk"
+
+ore  = Chest<requester, item=iron-ore, rate=7.5/s> @(0, 4)
+cols = Stack<cell=SmeltColumn, n=4, plate=iron-plate, ore=iron-ore> @(4, 0)
+box  = Boxes @(60, 30)
+
+net feed: ore -> cols.ore_in
+net each plates: cols[*].pl -> box
+```
+
+(`Boxes` is a sealed module of four provider chests with an `in` port each; the file has it.)
+
+Cells within cells: each `SmeltColumn` is a Stack of three FurnaceCells with the ore along its
+foot, and four columns stand side by side, sharing the ore. `net each` gives each column's plates
+a net of its own, `plates_0` to `plates_3`, column k to the box's port k, and the router lays the
+four belts as one ribbon: side by side, in order, through two bus turns, 179 belts.
+`out\route.txt` has a `ribbon plates` line that says so. On paper the 12 furnaces make 450
+plates/min, 112.5 to each belt. `fk look --design --zoom 4` shows it whole:
+
+```
+    0 +^Fv^FvFF+FF....
+    4 v^Fv^FvFF+FF....
+    8 v^Fv^FvFF.FF+...
+   12 >>>>>>>>>>>>....
+   16 ...>>>>>>>>>>>>v
+   20 ............+..v
+   24 ..............+v
+   28 ...............v
+   32 ...............C
+cells: F furnace, C chest, ^ belt north, > belt east, v belt south, + pole, . free
+```
+
+On the lab, the eight-column bus this one is cut from fed each chest from its own column, traced
+back in the game.
+
+### power-shed.fk: a lab field behind a power switch
+
+```
+import LabColumn, Hysteresis from "cells.fk"
+
+power main: cover all                 # everything the labs domain doesn't name
+power labs: cover field               # the lab field, its own network
+
+s1 = Entity<name=solar-panel> @(0, 0)          # and s2, s3, s4
+acc  = Accumulator<read=A> @(0, 5)
+acc2 = Accumulator         @(3, 5)
+
+signal A = signal-A
+signal S = signal-S
+shed = Hysteresis<in=A, out=S, lo=20, hi=80> @(8, 6)
+wire level green: acc -> shed.latch.in
+sw = PowerSwitch @(12, 5) when shed.hold.S = 0
+
+copper feed: main -> sw.left
+copper load: sw.right -> labs
+
+red   = Chest<requester, item=automation-science-pack, rate=1/s> @(18, 26)
+green = Chest<requester, item=logistic-science-pack, rate=1/s>   @(18, 28)
+field = Stack<cell=LabColumn, n=2> @(24, 6)
+net r: red -> field.r_in
+net g: green -> field.g_in
+```
+
+Two power domains: `main` (the solar panels, the accumulators and everything else) and `labs`
+(twelve labs), whose only power comes through the switch. The library's `Hysteresis` is a decider
+whose output feeds back to its input: the shed signal turns on when the charge falls below 20%,
+and stays on until the charge is back above 80%, so the switch doesn't flicker round one
+threshold. The switch is closed while nothing is shed. `out\cover_power.txt` gives each domain its
+poles (`domain labs: cover power-labs ... 4 poles`) and lays the two copper lines, adding a bridge
+pole for the labs' side. No `no-source`, `power-short` or `switch-never` line: the labs have a
+source through the switch, and the switch's signal moves with the charge. On the lab the same
+latch opened its switch at 19.2% charge and closed it at 79.6%, once each way.
+
+### mall-loop.fk: a sushi mall that never stops its belt
+
+```
+import GateCell, GateCellR, MallCell, BeltEndBuffer from "cells.fk"
+
+g1 = GateCellR<item=iron-plate,     items=iron-plate|copper-plate|iron-gear-wheel> @(4, 23)
+g2 = GateCell<item=copper-plate,    items=iron-plate|copper-plate|iron-gear-wheel> @(6, 20)
+g3 = GateCell<item=iron-gear-wheel, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 17)
+m1 = MallCell<recipe=iron-gear-wheel, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 14)
+m2 = MallCell<recipe=copper-cable,    items=iron-plate|copper-plate|iron-gear-wheel> @(6, 11)
+m3 = MallCell<recipe=transport-belt,  items=iron-plate|copper-plate|iron-gear-wheel> @(6, 8)
+m4 = MallCell<recipe=pipe,            items=iron-plate|copper-plate|iron-gear-wheel> @(6, 5)
+e  = BeltEndBuffer<items=iron-plate|copper-plate|iron-gear-wheel> @(6, 2)
+
+net l1 limited "the gates hold the loop": g1.s_out -> g2.s_in
+...                                                  # l2 to l7, cell to cell
+net back limited "the end buffer feeds the head": e.o -> g1.s_in
+```
+
+One belt of iron, copper and gears runs in a loop past four makers. Each gate loads its item only
+while the whole loop (the belt, read whole, `hold-all`) holds less than its amount, and
+`amount=auto` works that out from the makers' recipes: `fk check` says `auto holds iron-plate
+below 160: 40 s of the 4/s its loop's machines take (m1/a, m3/a, m4/a)`, and 40 each of copper
+and gears. The end buffer, a belt through, feeds what passed every maker back onto the head, so
+nothing on the belt has nowhere to go. `fk rates` ends with a `BUFFER e` line per item, each
+`steady`: the gates top up what the makers take. Iron, the bulk item, has the right lane to
+itself (`GateCellR`); on one shared lane the first source along the belt takes every gap.
+
+On the lab this file ran 30 game minutes: gears at 100% of the model, cable 99%, belts 90% and
+pipes 100%, every maker crafting in every 2-minute window, so the belt never stopped. The loop held
+about each gate's amount plus a hand of each item.
+
+## More examples
+
+These are older: most are written with rows, or as one factory fed by chests, before cells had
+parameters. They still build, and they show the language's pieces one at a time. `busbase.fk`,
+`blue6.fk` and `furnace-column.fk` are bases and lines of sealed modules; the rest are single
+factories. The first three below together, next to the kit (whose grid the reactor feeds), give 9 nets,
+all routed and connected, 0 SPILL.
+
+### smelting.fk: ore to plates (26x26)
 
 ```
 ore   = MinerRow<n=4, resource=iron-ore>   @(10, 2, rot 2)
@@ -56,7 +228,7 @@ the furnaces run at 80%, short of ore. The miner rows are turned (`rot 2`) so th
 west, where the router has room. It needs ore and coal under its drills: put its plot on the
 patches.
 
-## shared-belt.fk: ore and coal on one belt (26x23) (older)
+### shared-belt.fk: ore and coal on one belt (26x23)
 
 The same smelting with one input belt: `lanes ore_ | fuel` puts the ore on the belt's left lane
 and the coal on its right.
@@ -80,7 +252,7 @@ up holds only its own item, so there is no `CLOG`. The routed rates show the ore
 its 7.5/s, and that the furnaces are served in belt order: the first 6 run at full speed, the
 7th at 40% and the last gets no ore.
 
-## smelter-array.fk: Rory's smelter stack (33x50) (current)
+### smelter-array.fk: Rory's smelter stack (33x50)
 
 ```
 ore   = MinerRow<n=16, resource=iron-ore>     @(2, 0, rot 2)
@@ -102,7 +274,7 @@ inserters as the critical connectors, at exactly their rate. At 48 furnaces it e
 belt of ore (15/s); more than that, and it grows a second unit east, with its own ore and plate
 belts.
 
-## gears.fk: plates in, gears out, robots at both ends (16x16) (older)
+### gears.fk: plates in, gears out, robots at both ends (16x16)
 
 ```
 inbox = Chest<requester, item=iron-plate, rate=1.25/s> @(2, 2)
@@ -116,7 +288,7 @@ net gear:      gears -> box
 On paper: 37.5 gears/min, limited by the 1.25 plates/s the requester asks for (`rate=`). The
 chest feeds the row with one inserter (a route of one inserter).
 
-## beltless.fk: a first cell with no belts (13x7) (older)
+### beltless.fk: a first cell with no belts (13x7)
 
 ```
 fe   = Chest<requester, item=iron-plate, request=400>  @(0, 0)
@@ -136,7 +308,7 @@ built in the lab it measured 6.00/min against the model at both a one-tile and a
 This is the shape of a first factory: chests in, nothing belted in or out. Give the machines 1 to 3
 free tiles between them and the whole cell routes itself.
 
-## red.fk: red science into labs (30x30) (older)
+### red.fk: red science into labs (30x30)
 
 ```
 iron   = Chest<requester, item=iron-plate, rate=1/s>   @(2, 2)
@@ -157,7 +329,7 @@ On paper: 18 red science/min (three assemblers at full speed), the assert passes
 belts (gears and copper); every row's head is at x = 8, so the router has the columns 0..7 for
 its belts. To grow it: more `red` (n=5), and a second `gears` row feeding the same `gear` net.
 
-## sized.fk: the same red science, counted by the build (42x32) (older)
+### sized.fk: the same red science, counted by the build (42x32)
 
 ```
 iron   = Chest<requester, item=iron-plate, rate=2/s>    @(2, 2)
@@ -183,7 +355,7 @@ its gear, 1 copper), and `size` names the requester that stops it until the `rat
 rows grow east: the 42x32 plot holds 11 of each, and `does-not-fit` says when one runs past it. On paper:
 4 nets, all routed and connected.
 
-## mall.fk: a mall of single machines (34x44) (older)
+### mall.fk: a mall of single machines (34x44)
 
 A mall doesn't need rows: `Assembler<recipe>` stands anywhere, rows and single machines mix, and
 the router lays the belts between them.
@@ -216,7 +388,7 @@ On paper: 8 nets, all routed, 179 entities (126 belts). A chest one tile from it
 around them for its belts: packed tighter, it doesn't route. A requester feeds its net through
 one inserter; a busy net can take a second requester (several drivers merge onto one net).
 
-## early-mall.fk: an early-tier mall (49x24) (older)
+### early-mall.fk: an early-tier mall (49x24)
 
 Yellow and red belts, undergrounds and splitters, inserters (plain, fast, long-handed), assemblers,
 drills, pipes and pipes-to-ground, each into its own chest (`limit=2`). It saves belts by where
@@ -238,7 +410,7 @@ and circuits. Built in the game on a test server, every inserter link moves item
 fills. The file is in `docs\examples\`; it is long, so open it there rather than copying it from
 here.
 
-## compact-mall.fk: rows packed tight, one chest for every product (50x16) (older)
+### compact-mall.fk: rows packed tight, one chest for every product (50x16)
 
 Rory's layout (2026-10-21): "a row with gaps of zero, except 1 for an ingredient dependency", in
 several rows. A well-laid mall needs a few hundred belts at most, never thousands: big gaps between
@@ -274,7 +446,7 @@ while the chest holds 50) and `set x: logistic=inserter<50` (the machine stops c
 `guard` if you switch its recipe (its input inserters take only what the recipe takes). A wire at full length is the starter reactor's fuel saver in
 `LANGUAGE.md` ("Circuits"): a red wire from the reactor's temperature to its fuel inserter.
 
-## bus4.fk: Rory's 4-belt bus, a river of iron (54x25) (older)
+### bus4.fk: Rory's 4-belt bus, a river of iron (54x25)
 
 Rory: "a river of iron, that you keep adding more iron inputs to, and pull iron out when you need
 it". Four belts run east. A load from the south merges into all four by a staircase of four
@@ -298,7 +470,7 @@ and 6 underground ends in all). `bus4.json` is his demo exactly as he placed it 
 (`Literal<file="bus4.json">` pastes it as it is). To grow it: make it longer, add loads and taps
 (`load=s11|s40`), and a net for each.
 
-## busbase.fk: a bus base, smelting, circuits, mall and science (172x82) (current)
+### busbase.fk: a bus base, smelting, circuits, mall and science (172x82)
 
 Three buses run east along the bottom: circuits (1 belt), iron (2 belts), copper (1 belt). Every
 spine factory stands north of them and runs **perpendicular** to the bus: its machines in columns
@@ -322,8 +494,8 @@ febus = Bus<belts=2, item=iron-plate>(fl: fe.plate, ci: circ.iron, mi: mall.iron
 cubus = Bus<belts=1, item=copper-plate>(kl: cu.plate, cc: circ.copper, sc2: sci.copper) @(0, 79)
 ```
 
-On paper (2.0.50): 38 nets routed in seven seconds and all of them connected, 0 SPILL, 1741
-entities composed; on the lab (2.0.47) it stands whole and by game minute 30 science runs at the
+On paper: 38 nets routed in seven seconds and all of them connected, 0 SPILL, 1741
+entities composed; on the lab it stands whole and by game minute 30 science runs at the
 model's rates (30 red and 30 green a minute), the iron stack at its full 7.5 plates/s, and the
 mall's makers have stopped with their chests full.
 `fk contract busbase.fk`:
@@ -338,7 +510,7 @@ To grow it: add a spine north of the buses, beside the last one, and an entry fo
 takes from, in order along the bus; a new item gets a bus of its own, loaded by the spine that
 makes it.
 
-## blue6.fk: blue science as a stack of cells (current)
+### blue6.fk: blue science as a stack of cells
 
 A cell is 18x6: two units of an engine assembler and an advanced circuit assembler handing straight
 into a blue science assembler (a long-handed inserter brings the red circuits over the belt of
@@ -353,11 +525,11 @@ net out: blue.t_out -> packs
 set packs.in: filter=chemical-science-pack  # the packs' chest takes packs, never the sulfur beside them
 ```
 
-On the lab (2.0.49): 223 entities, every inserter powered, sulfur on the left lane and packs on the
+On the lab: 223 entities, every inserter powered, sulfur on the left lane and packs on the
 right, the chest holding packs only. Without the filter, `feed-rides-on` says the sulfur would fill the
 packs' chest and stop the belt.
 
-## furnace-column.fk: electric furnaces, a column of your own cells (31x41) (current)
+### furnace-column.fk: electric furnaces, a column of your own cells (31x41)
 
 Your own template: a 7x3 cell of one electric furnace between an ore belt and a plate belt, and
 `Stack<cell=FurnaceCell, n=8>` lines up eight of them. The ore runs up through every cell and the
@@ -383,48 +555,7 @@ col = Stack<cell=FurnaceCell, n=8> @(10, 12)
 The same furnaces as one row: `SmelterRow<n=8, recipe=iron-plate, machine=electric-furnace>` (3
 tiles each, ore in, plates out).
 
-## The library: game\cells.fk with parameters (current)
-
-The cells in `game\cells.fk` take parameters, so one cell serves every plate and recipe. Without
-them they make iron, as before. Import the ones you use:
-
-```
-import SmelterPair, FurnacePair, AsmCell, LabColumn from "cells.fk"
-cu    = Stack<cell=SmelterPair, n=4, plate=copper-plate, ore=copper-ore> @(10, 8)
-steel = Stack<cell=FurnacePair, n=4, plate=steel-plate, ore=iron-plate> @(30, 8)
-belts = Stack<cell=AsmCell, n=4, recipe=transport-belt, ins=iron-plate|iron-gear-wheel,
-              out=transport-belt> @(50, 8)
-field = Stack<cell=LabColumn, n=2, packs=automation-science-pack|logistic-science-pack> @(70, 8)
-```
-
-- Smelting: `StoneFurnaceCell` and `SmelterPair` (coal), `FurnaceCell` and `FurnacePair`
-  (electric), `SmeltColumn` (three FurnaceCells, a cell of cells). Each takes `plate=` and `ore=`.
-- Assembling: `AsmCell` (two ingredients, one a lane), `AsmCell1` (one), `GearCell`, `CircuitCell`.
-- Science: `LabCell` and `LabColumn` (six labs), `packs=` two packs.
-- `AcidDrillCell`: one uranium drill with its acid (7x7).
-- A sushi loop: `GateCell` / `GateCellR` (a source that loads while the loop holds less than its
-  amount), `MallCell` (one maker and its box), `BeltEndBuffer` / `ChestEndBuffer`.
-- `Hysteresis<in, out, lo, hi>`: a latch, named from outside (`when shed.hold.S = 0`).
-
-On the lab each line made what its row makes, within 3% (the gear cell beat its row by 7%). A
-sushi mall from these cells:
-
-```
-import GateCell, GateCellR, MallCell, BeltEndBuffer from "cells.fk"
-g1 = GateCellR<item=iron-plate, items=iron-plate|copper-plate|iron-gear-wheel> @(4, 23)
-g2 = GateCell<item=copper-plate, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 20)
-m1 = MallCell<recipe=iron-gear-wheel, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 14)
-e  = BeltEndBuffer<items=iron-plate|copper-plate|iron-gear-wheel> @(6, 2)
-net l1 limited "the gates hold the loop": g1.s_out -> g2.s_in
-...
-net back limited "the end buffer feeds the head": e.o -> g1.s_in
-```
-
-A gate's `amount=auto` is 40 s of what the loop's machines take, from their recipes; `fk check`
-says the number. Give the bulk item a lane of its own (`GateCellR`): on one shared lane the first
-source takes every gap. `fk check` also says when a new row could be a Stack of one of these.
-
-## robot-feed.fk: the kit's robots back into a roboport (12x8) (older)
+### robot-feed.fk: the kit's robots back into a roboport (12x8)
 
 The robots the kit starts with, and the ones a build takes up with a roboport, sit in a storage
 chest as items: nothing flies. This puts them back into service.
@@ -443,7 +574,7 @@ robots; add a second chest with `item="construction-robot"` in the same way if t
 Check it with `fk stats` (robots count as items in a chest) and `fk lua` on the roboport's robot
 inventory.
 
-## steam.fk: a steam power plant, 3.6 MW (16x26) (older)
+### steam.fk: a steam power plant, 3.6 MW (16x26)
 
 ```
 pump = OffshorePump<rate=1200/s>               @(0, 17, rot 3)

@@ -18,8 +18,7 @@ fk build --to diff               a dry run: the design against the world and wha
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 fk look AREA --zoom 16 --layers all --image
-                                 zoomed out, with every layer, as a PNG (see "Zoom, layers and
-                                 images")
+                                 zoomed out, with every layer, as a PNG ("What `fk look` says")
 ```
 
 Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, and `fk wait built
@@ -60,27 +59,28 @@ are approximate. `fk rates main.fk` shows the same routed section after its nomi
 A net is one lane until it needs two. A line's inserters drop its products on one lane of its
 belt, so one line of machines on one side carries at most 7.5/s on yellow, and the routed rates
 count it so: each net's critical connector is its own lane. A net that carries more than a lane
-and has two or more makers goes on both lanes: the router puts half its makers on each (2.0.54,
-LANGUAGE.md "Nets"). Two nets can share a belt, one on each lane (`lanes ore_ | fuel`): one belt
+and has two or more makers goes on both lanes: the router puts half its makers on each (LANGUAGE.md,
+"Nets"). Two nets can share a belt, one on each lane (`lanes ore_ | fuel`): one belt
 to lay instead of two, and the two never stop each other, since a full lane holds only its own
 items. A net on both lanes (a two-sided MinerRow's ore) gets one lane when it is side-loaded onto
 a shared belt: 7.5/s there, and `too-thin` says so where it brings more. A mixed net from a
 requester of several items is the jam to avoid: write it `split` (one lane per item) or feed each
 maker by one inserter straight from the requester. An inserter that loads a belt from a chest of
-several items is filtered to its net's items (2.0.76; the route report's `unfiltered` line names
-one that can't be, a long-handed one where no fast inserter fits).
+several items is filtered to its net's items (the route report's `unfiltered` line names one that
+can't be, a long-handed one where no fast inserter fits).
 
-A ribbon (2.1: a `net each`, a `bundle`, a `width 8` net; LANGUAGE.md "Belts side by side") is
-routed as one. `out\route.txt` gives each of its nets a line, then one line for the ribbon:
+A ribbon (a `net each`, a `bundle`, a `width 8` net; LANGUAGE.md, "Belts side by side") is routed
+as one. `out\route.txt` gives each of its nets a line, then one line for the ribbon (from
+`docs\examples\ribbon-bus.fk`, shortened):
 
 ```
-routed    plates_3: 1 -> 1, belt 3 of the ribbon plates (8 belts side by side): 70 belts, 0 underground ends; its driver's way in: 6 belts, 0 underground ends, 0 splitters
-ribbon    plates: 8 belts side by side (plates_0, plates_1, ... plates_7), belts 7 6 5 4 3 2 1 0 from left to right looking along it; head 13,15 S, tail 100,33 S; 2 bus turns, 0 crossings (every belt under together), 533 belts, 0 underground ends; 1 belt starts where its driver's belt does, 7 from a belt laid to it; 8 belts end where its consumer's belt starts, 0 on in a belt of its own
+routed    plates_3: 1 -> 1, belt 3 of the ribbon plates (4 belts side by side): 30 belts, 0 underground ends; its driver's way in: 2 belts, ...
+ribbon    plates: 4 belts side by side (plates_0, plates_1, plates_2, plates_3), belts 3 2 1 0 from left to right looking along it; head 13,15 S, tail 60,29 S; 2 bus turns, 0 crossings ...; 179 belts, 0 underground ends; 1 belt starts where its driver's belt does, 3 from a belt laid to it; 4 belts end where its consumer's belt starts, 0 on in a belt of its own
 ```
 
 The net's line says which belt of the ribbon it is and how it got on and off. The ribbon's line
 says where it starts and ends, its turns and crossings, and how its belts joined and left it. A
-ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates (8 belts): ...`
+ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates (4 belts): ...`
 with the reason, and lays none of its belts.
 
 `fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
@@ -478,6 +478,9 @@ Anything in the area that the design doesn't explain is:
 
 ### Zoom, layers and images
 
+The same look zooms out, adds layers, and draws a picture. `fk look --design` takes the same
+options for the design alone.
+
 `fk look AREA --zoom N` draws N tiles in one cell (N is 1, 2, 4, 8, 16 or 32). Zoom 1 draws every
 tile, as before; without a layer it is the same text as before.
 
@@ -488,9 +491,10 @@ tile, as before; without a layer it is the same text as before.
   `#`. `?` is anything else, `.` free ground. A line under the render names the glyphs it shows.
 - **From zoom 8 up, each plot is its outline** (`*---*`, `|`) with its name and how many machines
   stand in it, like the game's map view.
-- **Zoom 8 and up, or more than 65536 tiles, is a map look.** It reads counts per cell, not every
-  entity, so a look at the whole base is quick (a base of 1024 x 1024 tiles and 87,000 entities
-  reads in about 1.3 s). It gives no verdicts: look at zoom 1 to 4 for those.
+- **Zoom 8 and up is a map look, and so is zoom 2 or 4 over more than 65536 tiles** (256 x 256).
+  It reads counts per cell, not every entity, so a look at the whole base is quick (a base of 1024
+  x 1024 tiles and 87,000 entities reads in about 1.3 s). It gives no verdicts: look at zoom 1, or
+  at 2 or 4 over a smaller area, for those. Zoom 1 always reads every entity.
 - **In play mode a zoomed-out look reads only charted chunks**, what your map view shows. An
   uncharted chunk is blank. The lab is all charted.
 
@@ -541,9 +545,9 @@ A belt that fills, machines that starve, a build that never happens. Read these 
   sink accepts (a requester beside a one-off crafter, `Lab`s around a requester of packs); the route
   step says so. A belt in between, or a second inserter, and it can clog again. Two: your design
   says it limits what goes on the net (`net NAME limited:`), which limits nothing itself. The
-  fix that holds is `net NAME split:` (2.0.76): each item on a lane of its own, loaded by its own
+  fix that holds is `net NAME split:`: each item on a lane of its own, loaded by its own
   filtered inserter, the lanes side-loaded together; a full lane then stops only itself.
-  `fk stage check` prints these lines (2.0.76), not just their count
+  `fk stage check` prints these lines, not just their count
 - `SHARED_SINK`: such a chest on a net with machines: whoever stands first on the belt gets its
   fill, so the machines can starve
 - `SUSHI_SINK`: a sushi net reaches a machine that doesn't take every item on it
@@ -558,29 +562,29 @@ A belt that fills, machines that starve, a build that never happens. Read these 
 - `NO_POWER`: a factory's poles don't reach a grid with generation (`floorplan --bridge-power`
   in the build script joins it to the plant's grid). `stop_on no-power` holds the paste until it
   does
-- `no-source` (cover power, 2.1): a power domain with no generator, and no copper line (through a
+- `no-source` (cover power): a power domain with no generator, and no copper line (through a
   switch or not) to a domain that has one. Its machines never run. The domain with `cover all`
   counts as fed, since it joins the world's grid
-- `power-short` (cover power, 2.1): with every power switch open, a domain's machines want more at
+- `power-short` (cover power): with every power switch open, a domain's machines want more at
   full load than its generators make (solar panels at their day's average, 42 kW). It names both
   numbers. Accumulators count as neither
-- `switch-never` (2.1): a power switch whose `when` can't change. Only constants drive its wire,
+- `switch-never`: a power switch whose `when` can't change. Only constants drive its wire,
   nothing does, or no driver puts the signal it reads there. The switch stays as it starts
-- `domain-overlap` (cover power, 2.1): a machine no pole of its domain can power without its
+- `domain-overlap` (cover power): a machine no pole of its domain can power without its
   supply area reaching another domain's machines; or two domains name one instance, or two
-  `cover all` lines. Give the domains a tile of room between them
+  `cover all` lines, or a domain names no instance. Give the domains a tile of room between them
+- `copper` (cover power): a copper line that can't be laid: no pole in its domain, its ends too
+  far apart, a switch side that isn't one, or a line that joins a domain to itself
 - `TILE_SHARED (x, y): N pieces`: two pieces of one net's route on one tile, so one of them is
   never laid. Splitting the net in two (or giving it room) fixes it
 - `UNREACHED` (diff, before the paste): entities the paste lays where no powered roboport's
   construction area reaches, counting the roboports the paste lays where robots reach: robots
   never build them. It names power-bridge poles among them, since a roboport powered only through
   such a bridge never gets its power
-- `REACH` (report_bom, 2.1.3): the ghosts of this paste that no construction area of a roboport
+- `REACH` (report_bom): the ghosts of this paste that no construction area of a roboport
   that stands reaches, counting a roboport the paste lays only when it stands in such an area and
   joins that network; roboports first, then by item. Robots never build them. `stop_on reach` in
   the build script holds such a paste. `fk build --to report_bom` lists them without pasting
-
-
 
 ### The rest: what is where
 
@@ -592,7 +596,7 @@ answer is the next build. Nothing here is broken by itself.
   run below speed; it names the net where the shortage starts (a short ore patch, not every step
   after it) and the `fk plan` line that sizes its drivers
 - `cannot-carry`: a net names a machine that has no endpoint for the net's items (that machine is
-  left off the route). The template's build script stops on it (2.1.3)
+  left off the route). The template's build script stops on it
 - `feed-rides-on` (report_rates): a sink at the end of a belt that brings it a product and also a
   feed, an item machines upstream on the same belt consume (sulfur riding the blue packs' belt
   into the packs' chest): what they don't take of the feed fills the sink and stops the belt for
@@ -604,8 +608,8 @@ answer is the next build. Nothing here is broken by itself.
   is limited (`net NAME limited:` says your design limits them)
 - `could-pair`: two single-item nets feed the same machines on two belts, a lane each: one belt carries
   both, one lane each (`lanes A | B`). Half of both belts is empty until you pair them. Whoever
-  drives the nets, so a lab row fed red packs on one belt and green packs on another is named too
-  (2.0.50); what is left alone is a pair into chests only, a pair a `SmelterArray` or a
+  drives the nets, so a lab row fed red packs on one belt and green packs on another is named too;
+  what is left alone is a pair into chests only, a pair a `SmelterArray` or a
   `CircuitStack` feeds (it side-loads its own two nets), and any flow that doesn't fit a lane (a
   requester without `rate=` is unbounded)
 - `no-match`: a `set` that matches nothing (no such instance, no hand whose sink is the named one,
@@ -620,10 +624,15 @@ answer is the next build. Nothing here is broken by itself.
   connector (a pipe, a beacon), or a belt reading on no wire (its reading reaches nothing until
   the belt is wired)
 - `wire-too-far` / `wires-share`: two entities of a wire further apart than a wire reaches, with
-  no chain of poles and free tiles to carry it (2.1: a longer wire hops along poles, and the build
-  adds poles in a gap) / two wires of one colour on one entity, so their signals add
+  no chain of poles and free tiles to carry it (a longer wire hops along poles, and the build adds
+  poles in a gap) / two wires of one colour on one entity, so their signals add
 - `gate-open` / `require-not-met`: a gated net the rate model takes as always open (no `behave` cycle on its
   wire) / a `behave` block's `require` that doesn't hold
+- `gate-auto`: a sushi gate's `auto` (`when W.ITEM < auto`) with no machine on its loop that takes
+  ITEM by a recipe, so there is nothing to work it out from: the gate holds at 0 until you write
+  the amount (an auto mall whose recipes change by circuit is the usual case)
+- `limited`: the string of a `limited` net, said where `CLOG` would be, so a reader sees what
+  limits it
 - `taken-up`: the build takes up a lot, and the robots need minutes for it (the structures, the items
   in them, and how long: `out\diff.txt`). It goes faster if you stop what feeds it first and let
   it run a few minutes to empty its belts and chests. When the same things come back elsewhere, a
@@ -670,7 +679,7 @@ answer is the next build. Nothing here is broken by itself.
   another one on both axes. It puts a storage chest beside each roboport it places, so what the
   robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
   the chest out). Grow outward: the next factory within reach of the last. It chains only from
-  roboports that stand, or that it lays in reach of them (2.1.3): a roboport no robot could reach
+  roboports that stand, or that it lays in reach of them: a roboport no robot could reach
   is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
   the old one is ordered out (robots take it up and carry it to the new spot), and an old roboport
   is ordered out at once when the network holds none for the new ones; otherwise the old ones
@@ -696,7 +705,27 @@ answer is the next build. Nothing here is broken by itself.
 - `needs-research`: an item to build, or a machine's recipe, isn't researched (the technology and its
   cost follow)
 
-These describe a state - what is missing, what stands elsewhere, what happened - and the usual
+### Advice: `fk check`
+
+`fk check FILE` prints the check lines, then `advice` lines. Advice is about how the source is
+written, never about what will break, and only `fk check` prints it: the build reports leave it
+out.
+
+- `limited-why`: a sushi net written `limited` with no string. Say what limits it
+  (`net mall limited "the end buffer gates the sources":`), so a reader sees it where `CLOG` would
+  be. A Stack's own nets, from one cell to the next, get none.
+- `row-cell`: a row the last build hasn't laid yet could be a Stack of a library cell. It names
+  the cell and its parameters: `a new SmelterArray could be Stack<cell=SmelterPair, n=4,
+  plate=steel-plate, ore=iron-plate> ..., a Stack of the library's SmelterPair`. A row already
+  built gets no line.
+- `gate-auto`: what each `auto` gate became and why: `auto holds iron-plate below 160: 40 s of the
+  4/s its loop's machines take (m1/a, m3/a, m4/a), and at least 2 crafts each`.
+
+A refusal is not a check: a design the language can't take stops `fk check`, `fk rates` and the
+build with one error line that names the file, the line and the fix. `no-fluidbox` is one (a
+recipe with a fluid on a building with no fluid box for it), and so are a missing module
+parameter, an index past the end of a list, and a tier line whose entities don't fit one cell.
+
 ## When you need something
 
 ```
@@ -758,16 +787,10 @@ fk stats [--items iron-plate,copper-plate] [--window 10min]
 fk stats --items iron-plate --window 1h --series 30
                                  the panel's graph too: made and used per minute in 30 points
                                  over the window, oldest first
-fk stats --history               the run's history: the research first (rate and time left),
-                                 then the latest 5-minute window (capital and how much of it
-                                 works, the top items made and used per minute, power made and
-                                 used per kind, the machines per state and the recipes that
-                                 mostly stand) and the trend (the last 30 game minutes against
-                                 the 30 before). The run keeps a sample every 5 game minutes by
-                                 itself, in game\out\stats
+fk stats --history               the run's history: research, the latest 5-minute window and
+                                 the trend ("The run's history", below)
 fk stats --page                  the run's stats page, game\out\stats\index.html: every series
-                                 over game time (research, capital, power, machine states, each
-                                 item and fluid made and used)
+                                 over game time
 fk stock                         what the base holds, per item: chests, roboports, your pack and
                                  the robots in the air (free to read). A robot in a chest is an
                                  item and does nothing; the line says how many are flying, how
@@ -810,6 +833,38 @@ A chat message is not shown once and gone: it appears at the end of every `fk` c
 ack: `fk say "on it: belting the ore now"`, do the work, `fk ack`.
 
 Every command takes `--help`.
+
+## The run's history: `fk stats --history`
+
+Every run records its own history, whatever you do. Every 5 game minutes a sample keeps what
+changed since the last one:
+
+- items and fluids made and used, per item;
+- power made per generator class (steam engines, solar panels, accumulators discharging, ...) and
+  used per machine type, and both per power domain;
+- the research under way, its progress, and the packs the labs used, by colour;
+- how many machines of each kind, and of each recipe, are working, short of input, full or
+  without power.
+
+Capital and how much of it works (`fk capital`) are read every 10 game minutes. The counts are the
+game's own totals, so a late or missed sample loses nothing: that stretch is one long window.
+
+- A map made from the fk-play scenario records in the game itself. A map made before that is read
+  over RCON; nothing is added to its save. `fk` takes a sample after your commands when one is
+  due, quietly, and the player loop does it on its own.
+- `fk stats --history` reads them: the research first (rate and time left), then the latest
+  window (capital and the share that works, the top items made and used a minute, power made and
+  used per kind with the balance, power by domain, machines per state, and the recipes whose
+  machines mostly stand), then the trend (the last 30 game minutes against the 30 before) and the
+  totals.
+- `fk stats --page` writes `game\out\stats\index.html`, a page of charts over game time: research,
+  capital, power, machine states, and every item and fluid made and used.
+- `fk stats --sample` takes a sample now if one is due (`--now`: whether due or not).
+- The samples are in `game\out\stats\` (`items.jsonl`, `power.jsonl`, `research.jsonl`, ...), and
+  the capital reads in `game\out\capital\history.jsonl`.
+
+The research line every command ends with comes from the same reads (The loop, above): a rate of
+0 with a research queued is loud, and names what stops it.
 
 ## Programming the game yourself
 
@@ -918,8 +973,8 @@ design` draws the surface as designed rather than as built.
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
 `stop_on no-route no-destination cannot-carry` holds a paste with a net unrouted, a maker whose
-product reaches no sink, or a machine on a net whose items it takes none of (the 2.1.3 upgrade
-adds `cannot-carry` to an older script); `stop_on reach` holds one with ghosts no robot reaches,
+product reaches no sink, or a machine on a net whose items it takes none of (an upgrade adds
+`cannot-carry` to an older script); `stop_on reach` holds one with ghosts no robot reaches,
 and `stop_on no-power` one whose poles reach no generation. Add `stop_on no-feed` before a big
 paste so that check stops it too (`stop_on short-stock`
 holds the paste until the network has what it lays: report_bom says when a paste would take up

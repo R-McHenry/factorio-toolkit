@@ -1,0 +1,36 @@
+# power-shed.fk: a lab field that sheds its load when the accumulators run low (toolkit 2.1)
+#
+# Two power domains. `main` is the solar panels, the accumulators and everything the other domain
+# doesn't name. `labs` is the lab field alone, and its only power comes through one power switch
+# from main. A latch (the library's Hysteresis) watches the charge: below 20% the switch opens and
+# the labs stop, and it stays open until the charge is back above 80%. On the lab the switch
+# opened at 19.2% and closed at 79.6%, once each way.
+import LabColumn, Hysteresis from "cells.fk"
+
+power main: cover all                 # everything the labs domain doesn't name
+power labs: cover field               # the lab field, its own network
+
+# -- main: solar panels and accumulators ----------------------------------------------------------
+s1 = Entity<name=solar-panel> @(0, 0)
+s2 = Entity<name=solar-panel> @(4, 0)
+s3 = Entity<name=solar-panel> @(8, 0)
+s4 = Entity<name=solar-panel> @(12, 0)
+acc  = Accumulator<read=A> @(0, 5)    # its charge, 0 to 100, as signal A
+acc2 = Accumulator         @(3, 5)    # the game charges a network's accumulators together
+
+# -- the latch and the switch ---------------------------------------------------------------------
+signal A = signal-A
+signal S = signal-S
+shed = Hysteresis<in=A, out=S, lo=20, hi=80> @(8, 6)
+wire level green: acc -> shed.latch.in        # the charge, into the latch
+sw = PowerSwitch @(12, 5) when shed.hold.S = 0  # closed while nothing is shed
+
+copper feed: main -> sw.left
+copper load: sw.right -> labs
+
+# -- labs: two columns of six labs, red and green from a chest each ------------------------------
+red   = Chest<requester, item=automation-science-pack, rate=1/s> @(18, 26)
+green = Chest<requester, item=logistic-science-pack, rate=1/s>   @(18, 28)
+field = Stack<cell=LabColumn, n=2> @(24, 6)
+net r: red -> field.r_in
+net g: green -> field.g_in
