@@ -84,8 +84,35 @@ class LabFeedTest(unittest.TestCase):
         x0, y0 = x + lab.PAD, y + lab.PAD
         for e in ents:
             ex, ey = e["at"]
-            self.assertEqual((ex % 1, ey % 1), (0.5, 0.5), e)        # a tile's centre, never half
-            self.assertFalse(x0 <= ex < x0 + 8 and y0 <= ey < y0 + 6, e)   # outside the frame
+            if e["k"] == "loader":
+                # 2.1.20: the 2x1 loader on two whole tiles, its centre the edge between them
+                along_y = e["dir"] in ("north", "south")
+                self.assertEqual((ex % 1, ey % 1), (0.5, 0.0) if along_y else (0.0, 0.5), e)
+                tiles = [(ex - 0.5, ey - 1), (ex - 0.5, ey)] if along_y else \
+                    [(ex - 1, ey - 0.5), (ex, ey - 0.5)]
+            else:
+                self.assertEqual((ex % 1, ey % 1), (0.5, 0.5), e)    # a tile's centre
+                tiles = [(ex - 0.5, ey - 0.5)]
+            for tx, ty in tiles:                                     # outside the frame
+                self.assertFalse(x0 <= tx < x0 + 8 and y0 <= ty < y0 + 6, e)
+
+    def test_loaders_face_the_way_the_game_reads_them(self):
+        # read from the game (2.0.77): an output loader facing d has its belt half on the d side;
+        # an input one its container half there
+        _ws, (x, y, _w, _h), ctx = self.built("pairt")
+        ents, _skipped = lab.feeds(ctx.flats["pairt"], ctx.layouts["pairt"], ctx.cat, x, y)
+        x0, y0 = x + lab.PAD, y + lab.PAD
+        out = next(e for e in ents if e["port"] == "pairt/cout" and e["k"] == "loader")
+        sink = next(e for e in ents if e["port"] == "pairt/cout" and e["k"] == "chest")
+        # cout @e2: the edge tile x0+7, the loader's belt half on x0+8, its box half on x0+9
+        self.assertEqual((out["dir"], out["type"], out["at"]), ("east", "input", [x0 + 9, y0 + 2.5]))
+        self.assertEqual(sink["at"], [x0 + 10.5, y0 + 2.5])
+        pin = sorted((e for e in ents if e["port"] == "pairt/pin" and e["k"] == "loader"),
+                     key=lambda e: e["at"][1])
+        # pin @w2: the belt on x0-1, a loader above and below it, each facing the belt
+        self.assertEqual([(e["dir"], e["type"], e["at"]) for e in pin],
+                         [("south", "output", [x0 - 0.5, y0 + 1]),
+                          ("north", "output", [x0 - 0.5, y0 + 4])])
 
     def test_a_fluid_port_gets_an_infinity_pipe(self):
         _ws, (x, y, _w, _h), ctx = self.built("plast")
