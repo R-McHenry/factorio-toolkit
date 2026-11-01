@@ -181,16 +181,20 @@ class FlowTest(unittest.TestCase):
             fh.write(src)
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
-        self.assertIn("40 poles (37 kept where they stand, 0 bridging, 0 existing); 185/185",
+        # 3.0: the router lays each net once, so redgreen's layout is not the old 11th pass's
+        self.assertIn("40 poles (36 kept where they stand, 0 bridging, 0 existing); 185/185",
                       self.read("out/cover_power.txt"))
-        self.assertEqual(len(first & poles()), 37)
+        self.assertEqual(len(first & poles()), 36)
+        kept = poles()
         script = self.read("nauvis.build.fkb").replace("cover power", "cover power --fresh")
         with open(self.script, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(script)
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
         self.assertNotIn("kept where they stand", self.read("out/cover_power.txt"))
-        self.assertLess(len(first & poles()), 37)
+        # 3.0: the fresh grid shares 36 poles with the first build's (also laid fresh), so
+        # compare it with the kept grid instead
+        self.assertNotEqual(poles(), kept)
 
     def test_from_and_to_use_the_checkpoints(self):
         self.build(to="tier")
@@ -237,7 +241,8 @@ class FlowTest(unittest.TestCase):
         code, ctx = self.build(frm="diff")
         self.assertEqual(code, 0, ctx.log)
         self.assertIsNotNone(ctx.composed)
-        self.assertEqual(len(ctx.composed.entities), 1014)    # 974 + the 40 poles of cover power
+        # 1011 + the 40 poles of cover power (3.0: each net laid once; the old passes laid 974)
+        self.assertEqual(len(ctx.composed.entities), 1051)
         self.assertIn("skipped, no game link", self.read("out/diff.txt"))
         self.assertIn("skipped, no game link", self.read("out/apply.txt"))
 
@@ -514,9 +519,11 @@ class FlowTest(unittest.TestCase):
 
         self.build()
         first = routes()
+        # 3.0: the row stands west of gears, where gear's belt starts; the router lays each net
+        # once now, and at (60, 34) ~cable walls the row off from gear's belt before its splits
         src = (self.read("main.fk")
                .replace("labs  = LabRow<n=10>", "gears2 = AsmRow<n=2, recipe=iron-gear-wheel> "
-                                                "@(60, 34)\nlabs  = LabRow<n=10>")
+                                                "@(2, 24)\nlabs  = LabRow<n=10>")
                .replace("iron_smelt -> gears, circ", "iron_smelt -> gears, gears2, circ")
                .replace("net gear:   gears -> red", "net gear:   gears, gears2 -> red"))
         with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8", newline="\n") as fh:
