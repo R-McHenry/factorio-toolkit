@@ -102,11 +102,11 @@ def main(argv=None):
 
     orig = route._progress
 
-    def progress(attempt, k, order, net, *more):
+    def progress(attempt, k, order, net, *more, **kw):
         now = time.monotonic()
         net_done(now)
         where["net"], where["net_at"] = f"p{attempt + 1} {net}", now
-        orig(attempt, k, order, net, *more)
+        orig(attempt, k, order, net, *more, **kw)
     route._progress = progress
 
     def sampler():

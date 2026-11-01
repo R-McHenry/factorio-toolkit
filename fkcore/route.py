@@ -133,13 +133,15 @@ _progress_at = [0.0, 0.0]                  # [the last line, the route's start] 
 _progress_net = [None, 0.0]
 
 
-def _progress(attempt, k, order, net, promo=False):
+def _progress(attempt, k, order, net, promo=False, which=None):
     if PROGRESS is None:
         return
     import time
     now = time.monotonic()
-    # 2.1.28: the promoting pass is attempt retries + 1, which read as "pass 280"
-    which = "the promoting pass" if promo else f"pass {attempt + 1}"
+    # 2.1.28: the promoting pass is attempt retries + 1, which read as "pass 280". 2.1.29: the
+    # fluid nets say so (``which``); they were silent, minutes on end
+    if which is None:
+        which = "the promoting pass" if promo else f"pass {attempt + 1}"
     last, since = _progress_net
     _progress_net[0], _progress_net[1] = net, now
     if last is not None and now - since >= PROGRESS_EVERY:

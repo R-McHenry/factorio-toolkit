@@ -317,18 +317,52 @@ def _world(flat, lay, cat, nets_all, blocked, box, keep):
 
 
 # -- the search -----------------------------------------------------------------------------------
+class _L1:
+    """Manhattan distance to the nearest goal for every tile of ``box`` (0 off it), as
+    ``.get(tile, default)``. 2.1.29: a BFS of the goals' own bounding box, not of the whole box (a
+    BFS of the 20261030-2352 world's 1636x1329 frame for every join: minutes a fluid net); a tile
+    off the goals' box is its distance to that box plus the distance at the nearest tile of it,
+    which is exact for Manhattan distance, coordinate by coordinate."""
+
+    def __init__(self, box, goals):
+        self.box = box
+        self.dist = {t: 0 for t in goals}
+        if not goals:
+            self.near = None
+            return
+        x0, y0, x1, y1 = box
+        gx0 = max(x0 - 1, min(t[0] for t in goals))
+        gy0 = max(y0 - 1, min(t[1] for t in goals))
+        gx1 = min(x1, max(t[0] for t in goals))
+        gy1 = min(y1, max(t[1] for t in goals))
+        self.near = (gx0, gy0, gx1, gy1)
+        dist = self.dist
+        todo = deque(sorted(goals))
+        while todo:
+            t = todo.popleft()
+            for n in _nbrs(t):
+                if n not in dist and gx0 <= n[0] <= gx1 and gy0 <= n[1] <= gy1:
+                    dist[n] = dist[t] + 1
+                    todo.append(n)
+
+    def get(self, t, default=0):
+        got = self.dist.get(t)
+        if got is not None:
+            return got
+        x0, y0, x1, y1 = self.box
+        if self.near is None or not (x0 - 1 <= t[0] <= x1 and y0 - 1 <= t[1] <= y1):
+            return default
+        gx0, gy0, gx1, gy1 = self.near
+        cx = gx0 if t[0] < gx0 else gx1 if t[0] > gx1 else t[0]
+        cy = gy0 if t[1] < gy0 else gy1 if t[1] > gy1 else t[1]
+        got = self.dist.get((cx, cy))
+        if got is None:
+            return default        # a goal off the box: the old map left such tiles out too
+        return abs(t[0] - cx) + abs(t[1] - cy) + got
+
+
 def _l1_map(box, goals):
-    """Manhattan distance to the nearest goal for every tile of ``box`` (a BFS on the open grid)."""
-    x0, y0, x1, y1 = box
-    dist = {t: 0 for t in goals}
-    todo = deque(sorted(goals))
-    while todo:
-        t = todo.popleft()
-        for n in _nbrs(t):
-            if n not in dist and x0 - 1 <= n[0] <= x1 and y0 - 1 <= n[1] <= y1:
-                dist[n] = dist[t] + 1
-                todo.append(n)
-    return dist
+    return _L1(box, goals)
 
 
 def _path(parent, st):
@@ -346,13 +380,14 @@ def _path(parent, st):
     return [tuple(x) for x in out]
 
 
-def _search(w, net, starts, pipes, ports, reach, limit, bans):
+def _search(w, net, starts, pipes, ports, reach, limit, bans, hmap=None):
     """A* from ``starts`` [(tile, heading)] (a group's free connection tiles, heading away from
     the machine) to the tree: a step onto one of its ``pipes`` or onto one of its free ``ports``.
     -> [(tile, kind, dir)] from the start (the tree pipe stepped onto is not in it); kind pipe,
     ug_in or ug_out, dir the step or jump that reached the tile. None: no route."""
     goals = set(pipes) | set(ports)
-    hmap = _l1_map(w.box, goals)
+    if hmap is None:
+        hmap = _l1_map(w.box, goals)
     first = {t for t, _h in starts}
     heap, best, parent = [], {}, {}
     for t, h in sorted(starts):
@@ -426,8 +461,11 @@ def _path_problem(path):
 
 def _join(w, net, starts, pipes, ports, reach, limit):
     bans = set()
+    # 2.1.29: the distance map once per join, not once per try (a BFS of the whole box: the
+    # 20261030-2352 world's frame is 1636x1329)
+    hmap = _l1_map(w.box, set(pipes) | set(ports))
     for _attempt in range(16):
-        path = _search(w, net, starts, pipes, ports, reach, limit, bans)
+        path = _search(w, net, starts, pipes, ports, reach, limit, bans, hmap)
         if path is None:
             return None
         bad = _path_problem(path)
@@ -638,12 +676,19 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000):
     order = [n for n in todo if n in ends]
     per_net = {}
     best = None
+    # 2.1.29: retries stop once one routes no more nets than the best before it; each laid every
+    # fluid net again, len(order) + 1 times (12+ min on the 20261030-2352 world)
+    last = 0
     for attempt in range(len(order) + 1):
+        if attempt > 1 and best[0][0] <= last:
+            break
+        last = best[0][0] if best else 0
         w, owners, g = _world(flat, lay, cat, fluid_all, blocked, box, keep)
         added, how, failed = {}, {}, dict(failed0)
         extra = []
         occ0 = set(w.occ)
-        for net in order:
+        for k, net in enumerate(order):
+            routemod._progress(attempt, k, order, net, which=f"fluid pass {attempt + 1}")
             if net not in per_net:
                 per_net[net] = net_frames(net)
             w.occ = occ0 | per_net[net][0]
