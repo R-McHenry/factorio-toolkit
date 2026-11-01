@@ -58,8 +58,28 @@ SURFACE, FORCE = "nauvis", "player"
 SPECTATE_PORT = 34199
 
 
+#: the mods every Factorio has (the game's own, on or off in a mod list, never in a mods folder)
+BUILT_IN = ("base", "elevated-rails", "quality", "space-age")
+
+
 class SimError(RuntimeError):
     pass
+
+
+def _link(src, dst):
+    """A mod into the planner's mods folder: a folder as a junction (Windows) or a symlink, a
+    zip as a hard link or, failing that, a copy."""
+    if os.path.isdir(src):
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(src, dst)
+        else:
+            os.symlink(src, dst)
+        return
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copyfile(src, dst)
 
 
 def _free_port(kind=socket.SOCK_STREAM):
@@ -107,6 +127,45 @@ class Sim:
         if not os.path.exists(self.pw_file):
             with open(self.pw_file, "w", encoding="utf-8") as fh:
                 fh.write(os.urandom(12).hex())
+        return self._mods()
+
+    def _mods(self):
+        """3.0: the run's pack's mods (``fkcore.pack``: FK_PACK or the game folder's ``pack``
+        file), as its catalog lists them: the built-in ones it names on and the rest off, and
+        each of its own mods linked from the pack's mod folder (env ``FK_SIM_MODS``, else
+        ``mods_dir`` in its ``pack.json``). The base game (no pack) keeps this Factorio's own.
+        -> notes for the start line."""
+        from . import pack as _pack
+        name = _pack.name()
+        mods_dir = os.path.join(self.write, "mods")
+        shutil.rmtree(mods_dir, ignore_errors=True)        # links only: rmtree leaves their mods
+        if not name:
+            return []
+        with open(_pack.path("catalog.json"), encoding="utf-8") as fh:
+            want = [m.rsplit(" ", 1) for m in json.load(fh).get("mods") or ()]
+        src = os.environ.get("FK_SIM_MODS") or _pack.facts().get("mods_dir")
+        os.makedirs(mods_dir)
+        have = sorted(os.listdir(src)) if src and os.path.isdir(src) else []
+        listed, missing, notes = [], [], []
+        for n, ver in want:
+            listed.append(n)
+            if n in BUILT_IN:
+                continue
+            got = next((f for f in have if f in (f"{n}_{ver}", f"{n}_{ver}.zip")), None) or \
+                next((f for f in have if f.startswith(f"{n}_")), None)
+            if got is None:
+                missing.append(f"{n} {ver}")
+                continue
+            if not got.startswith(f"{n}_{ver}"):
+                notes.append(f"{n} is {got}, the pack's catalog says {ver}")
+            _link(os.path.join(src, got), os.path.join(mods_dir, got))
+        if missing:
+            raise SimError(f"pack {name}: no {', '.join(missing)} in "
+                           f"{src or 'its mod folder'} (FK_SIM_MODS, or mods_dir in its pack.json)")
+        with open(os.path.join(mods_dir, "mod-list.json"), "w", encoding="utf-8") as fh:
+            json.dump({"mods": [{"name": n, "enabled": n in listed} for n in BUILT_IN]
+                      + [{"name": n, "enabled": True} for n in listed if n not in BUILT_IN]}, fh)
+        return [f"pack {name}, {len(listed)} mods"] + notes
 
     def state(self):
         try:
@@ -136,7 +195,7 @@ class Sim:
                            + (" (fk sim fetch copies the run's start)" if name == "start" else ""))
         if not os.path.exists(self.exe):
             raise SimError(f"no Factorio at {self.exe} (FK_LAPTOP_FACTORIO names another)")
-        self._files(spectate)
+        notes = self._files(spectate)
         port = SPECTATE_PORT if spectate else _free_port(socket.SOCK_DGRAM)
         rcon_port = _free_port()
         with open(self.pw_file, encoding="utf-8") as fh:
@@ -168,6 +227,7 @@ class Sim:
                 if got and got[0].isdigit():
                     tick = got[0]
                     line = (f"sim: running from save state {name}, paused at tick {tick}"
+                            + (f" ({'; '.join(notes)})" if notes else "")
                             + (f"; join to watch at {self.address()}" if spectate else ""))
                     if got[1:] == ["false"]:
                         # 2.0.64: a save written by a running server (the fetched start, a

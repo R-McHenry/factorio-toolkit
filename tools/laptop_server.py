@@ -92,12 +92,16 @@ def _free_port(kind=socket.SOCK_STREAM):
 
 
 class LaptopServer:
-    def __init__(self, name, scenario=None, save=None, map_gen=None, boot_s=40, mods=None):
+    def __init__(self, name, scenario=None, save=None, map_gen=None, boot_s=40, mods=None,
+                 mod_dir=None):
         self.name, self.scenario, self.save, self.map_gen, self.boot_s = (name, scenario, save,
                                                                           map_gen, boot_s)
         # 3.0 (walker): the built-in mods to enable besides base ("space-age", "quality",
         # "elevated-rails"); None leaves the game's default, () turns them all off
         self.mods = mods
+        # 3.0 (machines): a folder of unpacked mods (C:\fk-mods\sb-mods for Sea Block), all
+        # enabled; each is linked (a junction) into the server's own mods folder, not copied
+        self.mod_dir = mod_dir
         self.dir = os.path.join(BASE, name)
         self.write = os.path.join(self.dir, "write")
         self.pw_file = os.path.join(self.dir, "rcon.pw")
@@ -121,13 +125,22 @@ class LaptopServer:
                      '"autosave_interval": 0}')
         with open(self.pw_file, "w", encoding="utf-8") as fh:
             fh.write(secrets.token_hex(12))
-        if self.mods is not None:
-            os.makedirs(os.path.join(self.write, "mods"), exist_ok=True)
+        if self.mods is not None or self.mod_dir:
+            mods_dir = os.path.join(self.write, "mods")
+            os.makedirs(mods_dir, exist_ok=True)
             names = ["base", "space-age", "quality", "elevated-rails"]
-            with open(os.path.join(self.write, "mods", "mod-list.json"), "w",
-                      encoding="utf-8") as fh:
+            on = set(self.mods or ())
+            for d in sorted(os.listdir(self.mod_dir)) if self.mod_dir else ():
+                src = os.path.join(self.mod_dir, d)
+                if os.path.isdir(src):
+                    import _winapi
+                    _winapi.CreateJunction(src, os.path.join(mods_dir, d))
+                    n = d.rsplit("_", 1)[0]
+                    names.append(n)
+                    on.add(n)
+            with open(os.path.join(mods_dir, "mod-list.json"), "w", encoding="utf-8") as fh:
                 fh.write('{"mods": [' + ", ".join(
-                    f'{{"name": "{n}", "enabled": {"true" if n == "base" or n in self.mods else "false"}}}'
+                    f'{{"name": "{n}", "enabled": {"true" if n == "base" or n in on else "false"}}}'
                     for n in names) + "]}")
 
     def __enter__(self):
@@ -2248,6 +2261,169 @@ module FoundryLine size 17x8 {
 line = FoundryLine @(4, 3)
 """
 
+#: the same cells fed by the design's own InfinityPipe (3.0: it pastes with its fluid set)
+_FOUNDRY_PIPED = _FOUNDRY_LINE.split("module FoundryLine")[0] + """
+src = InfinityPipe<fluid=molten-iron> @(0, 10)
+line = Stack<cell=FoundryCell, n=3> @(4, 3)
+box = Chest<provider> @(24, 3)
+net molten: src -> line.mi_in
+net gears: line.g_out -> box
+"""
+
+
+_LUA_RECIPE_BOXES = r"""
+local s = game.surfaces.fkm
+if not s then
+  s = game.create_surface('fkm', {width = 64, height = 64})
+  s.request_to_generate_chunks({0, 0}, 2)
+  s.force_generate_chunk_requests()
+  local t = {}
+  for x = -16, 15 do for y = -16, 15 do t[#t + 1] = {name = 'lab-dark-1', position = {x, y}} end end
+  s.set_tiles(t)
+  game.forces.player.enable_all_recipes()
+end
+local out = {}
+for _, job in pairs(helpers.json_to_table('__JOBS__')) do
+  for _, rec in pairs(job.recipes) do
+    local row = {machine = job.machine, recipe = rec, boxes = {}}
+    local ok, e = pcall(s.create_entity, {name = job.machine, position = {0, 0}, force = 'player',
+                                          recipe = rec})
+    if ok and e and not e.get_recipe() then
+      -- Space Age: a recipe with surface conditions sets only where they hold
+      for _, c in pairs(prototypes.recipe[rec].surface_conditions or {}) do
+        local v = c.min
+        if not v or v < -1e30 then v = c.max end
+        if v and v > -1e30 and v < 1e30 then s.set_property(c.property, v) end
+      end
+      pcall(e.set_recipe, rec)
+    end
+    if ok and e and not e.get_recipe() then
+      row.error = 'the recipe would not set'
+      e.destroy()
+    elseif ok and e then
+      local fb = e.fluidbox
+      for i = 1, #fb do
+        local p, idx = fb.get_prototype(i), {}
+        if p.object_name then p = {p} end
+        for _, q in pairs(p) do idx[#idx + 1] = q.index end
+        local f = fb.get_filter(i)
+        row.boxes[#row.boxes + 1] = {fluid = f and f.name or '', idx = idx}
+      end
+      e.destroy()
+    else
+      row.error = tostring(e)
+    end
+    out[#out + 1] = row
+  end
+end
+helpers.write_file('fk5/__TAG__.json', helpers.table_to_json({rows = out}), false)
+rcon.print(#out)
+"""
+
+
+def _recipe_box_jobs(cat):
+    """{machine: [recipe ...]}: every assembling machine with fluid boxes and every recipe of its
+    crafting categories that has a fluid."""
+    from fkcore import facts
+    jobs = {}
+    for m, row in sorted((cat._fluid.get("entities") or {}).items()):
+        if row.get("type") != "assembling-machine":
+            continue
+        cats = set((facts.entity(m) or {}).get("crafting_categories") or ())
+        recs = [r for r, rec in sorted(cat._recipes.items())
+                if (rec.get("category") or "crafting") in cats
+                and any(x.get("type") == "fluid" for x in list(rec.get("ingredients") or ())
+                        + list(rec.get("products") or ()))]
+        if recs:
+            jobs[m] = recs
+    return jobs
+
+
+def check_recipe_boxes(which=None):
+    """3.0 (machines): each fluid crafter of a game built once with each of its fluid recipes on
+    a scratch surface of this test server; the fluid boxes the game makes live (fluid and
+    prototype boxes of each) against ``Catalog.fluid_boxes_at``'s recipe rule. ``which``:
+    "space-age" (base + the overlay ``fk catalog learn --mod space-age`` makes) or "seablock"
+    (FK_PACK=seablock, its mods from C:\\fk-mods\\sb-mods); argv[2], both by default. Writes the
+    disagreements to out/laptop-server/recipeboxes-<which>.json."""
+    import json as jsonmod
+    import tempfile
+    from fkcore import learn, learned
+    from fkcore.catalog import Catalog
+    which = which or (sys.argv[2] if len(sys.argv) > 2 else None)
+    pack = "seablock" if which == "seablock" else ""
+    if which is None or os.environ.get("FK_PACK", "") != pack:
+        # the catalog's pack is fixed when fkcore is imported: each game in its own process
+        return max(subprocess.call([sys.executable, os.path.abspath(__file__), "recipeboxes", g],
+                                   env=dict(os.environ, FK_PACK="seablock" if g == "seablock"
+                                            else ""))
+                   for g in ([which] if which else ["space-age", "seablock"]))
+    bad = 0
+    for game in [which]:
+        env = {k: os.environ.get(k) for k in ("FK_PACK", "FK_LEARNED")}
+        try:
+            if game == "seablock":
+                os.environ["FK_PACK"], os.environ["FK_LEARNED"] = "seablock", ""
+                srv = LaptopServer("recipeboxes-sb", scenario="fk-play", mods=(),
+                                   mod_dir=os.environ.get("FK_SB_MODS", r"C:\fk-mods\sb-mods"),
+                                   boot_s=120)
+            else:
+                os.environ["FK_PACK"] = ""
+                srv = LaptopServer("recipeboxes-sa", scenario="fk-play",
+                                   mods=("space-age", "quality", "elevated-rails"))
+            with srv:
+                with srv.rcon() as r:
+                    if game == "space-age":
+                        ov, _lines = learn.learn(r, mod="space-age")
+                        p = os.path.join(tempfile.mkdtemp(prefix="fk-rb-"), learned.NAME)
+                        learn.write(ov, p)
+                        os.environ["FK_LEARNED"] = p
+                    cat = Catalog.load()
+                    jobs = _recipe_box_jobs(cat)
+                    rows, t0 = [], time.time()
+                    for m, recs in jobs.items():
+                        for i in range(0, len(recs), 60):
+                            tag = f"rb-{os.getpid()}"
+                            lua = (_LUA_RECIPE_BOXES.replace("__TAG__", tag).replace(
+                                "__JOBS__", jsonmod.dumps([{"machine": m,
+                                                           "recipes": recs[i:i + 60]}])))
+                            got = link.read_output(r, lua, tag, "recipe boxes", keep=False)
+                            rows += got.get("rows") or []
+            dt = time.time() - t0
+            diff, same, errs, unfiltered = [], 0, [], 0
+            for x in rows:
+                if x.get("error"):
+                    errs.append((x["machine"], x["recipe"], x["error"]))
+                    continue
+                live = [b for b in (x.get("boxes") or []) if b["fluid"]]
+                unfiltered += len(x.get("boxes") or []) - len(live)
+                got = sorted((b["fluid"], sorted(b["idx"])) for b in live)
+                row = cat._fluid["entities"][x["machine"]]
+                want = sorted((f, sorted({bi for bi, _c in mem}))
+                              for f, mem in cat._recipe_boxes(x["machine"], row, x["recipe"])
+                              or [])
+                if got == want:
+                    same += 1
+                else:
+                    diff.append({"machine": x["machine"], "recipe": x["recipe"], "game": got,
+                                 "rule": want, "boxes": x.get("boxes")})
+            with open(os.path.join(BASE, f"recipeboxes-{game}.json"), "w",
+                      encoding="utf-8") as fh:
+                jsonmod.dump({"diff": diff, "errors": errs}, fh, indent=1)
+            print(f"{game}: {len(jobs)} machines, {len(rows)} recipes measured in {dt:.1f} s: "
+                  f"{same} as the rule, {len(diff)} not, {len(errs)} not buildable, "
+                  f"{unfiltered} live boxes without a fluid")
+            for d in diff[:12]:
+                print(f"  {d['machine']} {d['recipe']}: game {d['game']} rule {d['rule']}")
+            bad += len(diff)
+        finally:
+            for k, v in env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    return 0 if not bad else 1
+
 
 def check_machines(seconds=30):
     """3.0 (Rory: the setup a player needs to implement a machine): a Space Age game, ``fk
@@ -2261,12 +2437,13 @@ def check_machines(seconds=30):
     run = tempfile.mkdtemp(prefix="fk-machines-")
     game = os.path.join(run, "game")
     os.makedirs(game)
-    files = {"foundries.fk": _FOUNDRY_LINE,
+    files = {"foundries.fk": _FOUNDRY_LINE, "piped.fk": _FOUNDRY_PIPED,
              "foundry.json": jsonmod.dumps({"entities": [{"name": "foundry", "x": 2.5, "y": 2.5,
                                                          "recipe": "casting-iron-gear-wheel"}],
                                            "names": {"f": 0}}),
              "nauvis.surface": "surface  nauvis\nmode     play\nterrain  none\ncatalog  base\n\n"
-                               "place line = foundries plot 0,0 24x12\n",
+                               "place line = foundries plot 0,0 24x12\n"
+                               "place piped = piped plot 0,14 28x12\n",
              "nauvis.build.fkb": "read_surface nauvis\n"}
     for name, text in files.items():
         with open(os.path.join(game, name), "w", encoding="utf-8") as fh:
@@ -2282,14 +2459,25 @@ def check_machines(seconds=30):
                 learn.write(ov, os.path.join(game, learned.NAME))
                 lines.append(f"learned in {time.time() - t0:.2f} s")
                 lines += lab.build(r, game, "line", size=(24, 12))
+                lines += lab.build(r, game, "piped", size=(28, 12))
                 x, y, w, h = lab.slots(game)["line"]
                 q = (f"local o = {{}} for _, e in pairs(game.get_surface('lab').find_entities_filtered"
                      f"{{area = {{{{{x}, {y}}}, {{{x + w}, {y + h}}}}}, name = 'foundry'}}) do "
                      "local b = e.fluidbox[1] o[#o + 1] = {x = e.position.x, made = "
                      "e.products_finished, fluid = b and b.name or 'none'} end "
                      "rcon.print(helpers.table_to_json({tick = game.tick, f = o}))")
+                px, py, pw, ph = lab.slots(game)["piped"]
+                pq = ("local o = {pipes = {}, f = {}} local s = game.get_surface('lab') "
+                      f"local a = {{{{{px}, {py}}}, {{{px + pw}, {py + ph}}}}} "
+                      "for _, e in pairs(s.find_entities_filtered{area = a, name = 'infinity-pipe'}) "
+                      "do local f = e.get_infinity_pipe_filter() "
+                      "o.pipes[#o.pipes + 1] = f and f.name or 'none' end "
+                      "for _, e in pairs(s.find_entities_filtered{area = a, name = 'foundry'}) "
+                      "do local b = e.fluidbox[1] o.f[#o.f + 1] = b and b.name or 'none' end "
+                      "rcon.print(helpers.table_to_json(o))")
                 time.sleep(5)                         # the line fills
                 a = jsonmod.loads(r.lua(q))
+                piped = jsonmod.loads(r.lua(pq))
                 time.sleep(seconds)
                 b = jsonmod.loads(r.lua(q))
     finally:
@@ -2305,7 +2493,10 @@ def check_machines(seconds=30):
            "connected": "12 connected, 0 open, 0 unrouted" in checks,
            "three foundries": len(rates) == 3,
            "molten iron in each": all(fl == "molten-iron" for _x, _r, fl in rates),
-           "first at the model's 6/s": bool(rates) and abs(rates[0][1] - 6.0) < 0.3}
+           "first at the model's 6/s": bool(rates) and abs(rates[0][1] - 6.0) < 0.3,
+           "InfinityPipe pasted with its fluid": piped["pipes"] == ["molten-iron"]
+           and piped["f"] == ["molten-iron"] * 3}
+    print(f"piped: infinity pipes {piped['pipes']}, foundries' box 1 {piped['f']}")
     for k, v in got.items():
         print(f"{k}: {'OK' if v else 'NOT as designed'}")
     shutil.rmtree(run, True)
@@ -2323,4 +2514,5 @@ if __name__ == "__main__":
                       "circuits": check_circuits,
                       "fluidports": check_fluidports, "domains": check_domains,
                       "powershed": check_powershed, "drops": check_drops,
-                      "machines": check_machines}[what]())
+                      "machines": check_machines,
+                      "recipeboxes": check_recipe_boxes}[what]())

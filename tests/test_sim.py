@@ -57,6 +57,39 @@ class SimFilesTest(unittest.TestCase):
         with self.assertRaises(sim.SimError):
             s.save("two words")
 
+    def test_a_packs_mods(self):
+        # 3.0: a Sea Block run's planner loads Sea Block's mods, not this Factorio's defaults
+        import json
+        import shutil
+        from unittest import mock
+        run, src = tempfile.mkdtemp(prefix="fksim-"), tempfile.mkdtemp(prefix="fksim-mods-")
+        self.addCleanup(shutil.rmtree, run, True)
+        self.addCleanup(shutil.rmtree, src, True)
+        with mock.patch.dict(os.environ, {"FK_PACK": "seablock", "FK_SIM_MODS": src}):
+            with self.assertRaises(sim.SimError) as cm:
+                sim.Sim(run)._mods()
+            self.assertIn("no CircuitProcessing 2.0.0", str(cm.exception))
+            with open(os.path.join(os.path.dirname(sim.__file__), "data", "packs", "seablock",
+                                   "catalog.json"), encoding="utf-8") as fh:
+                want = [m.rsplit(" ", 1) for m in json.load(fh)["mods"]]
+            for n, ver in want:
+                if n not in sim.BUILT_IN:
+                    os.makedirs(os.path.join(src, f"{n}_{ver}"))
+                    with open(os.path.join(src, f"{n}_{ver}", "info.json"), "w") as fh:
+                        fh.write("{}")
+            notes = sim.Sim(run)._mods()
+        self.assertEqual(notes, ["pack seablock, 27 mods"])
+        mods = os.path.join(run, "sim", "write", "mods")
+        with open(os.path.join(mods, "mod-list.json"), encoding="utf-8") as fh:
+            on = {m["name"]: m["enabled"] for m in json.load(fh)["mods"]}
+        self.assertTrue(on["base"] and on["SeaBlock"] and on["angelsrefining"])
+        self.assertFalse(on["space-age"] or on["quality"] or on["elevated-rails"])
+        self.assertTrue(os.path.exists(os.path.join(mods, "SeaBlock_0.6.0", "info.json")))
+        with mock.patch.dict(os.environ, {"FK_PACK": ""}):
+            self.assertEqual(sim.Sim(run)._mods(), [])          # the base game: Factorio's own
+        self.assertFalse(os.path.exists(mods))
+        self.assertTrue(os.path.exists(os.path.join(src, "SeaBlock_0.6.0", "info.json")))
+
     def test_the_lua_is_safe(self):
         for text in (sim._lua_fill((0, 0, 10, 10)), sim._lua_clear_marked((0, 0, 10, 10)),
                      sim._lua_tiles((0, 0, 10, 10))):
