@@ -23,6 +23,30 @@ def flat_of(text):
     return elaborate(f, dict(f.modules), CAT, "t")
 
 
+def side_loads(layout):
+    """[(side-loading belt, belt)] of a layout's side-loads (2.1.24: m2m side-loads to fill a lane)."""
+    lg = lanes.build(layout, CAT)
+    return sorted({(e.src[0], e.dst[0]) for e in lg.edges() if e.via in ("side", "ug_side")})
+
+
+def into_splitter_sides(layout):
+    """[belt key] of the belts that point into a splitter from its side (a dead end)."""
+    at = {}
+    for e in layout.entities.values():
+        for t in fkp.tiles_of(CAT, e):
+            at[t] = e
+    out = []
+    for e in layout.entities.values():
+        if e.name != "transport-belt" and e.attrs.get("ug") != "out":
+            continue
+        d = e.dir // 4 % 4
+        t = (int(e.x // 1) + (0, 1, 0, -1)[d], int(e.y // 1) + (-1, 0, 1, 0)[d])
+        o = at.get(t)
+        if o is not None and o.name == "splitter" and o.dir != e.dir:
+            out.append(e.key)
+    return out
+
+
 class HourglassTest(unittest.TestCase):
     """Every case of the bench: reach, the max-flow against the demand, the waist."""
 
@@ -61,11 +85,15 @@ class HourglassTest(unittest.TestCase):
                 and e.src[0].startswith("~plates/") and e.dst[1]}
         self.assertEqual(onto, {"L", "R"})
 
-    def test_no_side_loads(self):
+    def test_side_loads_onto_plain_belts(self):
+        # a side-load fills a lane of a plain belt fed from behind (a splitter there would cut it
+        # off, and an underground keeps one lane of it): onto no splitter and no underground
         for name, m in self.rows.items():
-            lg = lanes.build(m["layout"], CAT)
+            ents = m["layout"].entities
             with self.subTest(case=name):
-                self.assertFalse([e for e in lg.edges() if e.via in ("side", "ug_side")])
+                for _a, b in side_loads(m["layout"]):
+                    self.assertEqual(ents[b].name, "transport-belt")
+                self.assertEqual(into_splitter_sides(m["layout"]), [])
 
     def test_maxflow_line(self):
         m = self.rows["16to16"]
@@ -87,8 +115,8 @@ class BigTest(unittest.TestCase):
         self.assertTrue(m["reach"], m["line"])
         self.assertGreaterEqual(m["maxflow"], m["demand"] - 1e-6, m["line"])
         self.assertGreaterEqual(m["narrow"], 4)          # 48/s over 15 a belt, rounded up
-        lg = lanes.build(m["layout"], CAT)
-        self.assertFalse([e for e in lg.edges() if e.via in ("side", "ug_side")])
+        self.assertTrue(side_loads(m["layout"]))       # runs fill the collectors' empty lanes
+        self.assertEqual(into_splitter_sides(m["layout"]), [])
 
 
 class LeftTest(unittest.TestCase):

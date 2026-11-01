@@ -44,6 +44,7 @@ import math
 import time
 
 from . import fkp as fkpmod
+from . import lanes as lanesmod
 from . import maxflow as mfmod
 from .steiner import COSTS, DX, DY, FixedSink, TapSink, Tree, _astar
 
@@ -136,6 +137,7 @@ class _Run:
 
     def __init__(self, plans, swaps, cost, start, end):
         self.plans, self.swaps, self.cost, self.start, self.end = plans, swaps, cost, start, end
+        self.leans = set()            # ids of others' belts it needs as they are (a side-load's)
 
     @property
     def ids(self):
@@ -207,7 +209,8 @@ def _head(p):
 
 def _straights(net):
     """[(id, tile, heading)] of the net's belts a splitter may replace: a plain belt fed from
-    behind by a carrier heading the same way, running on into one that takes from behind."""
+    behind by a carrier heading the same way, running on into one that takes from behind, and
+    side-loaded by none (a splitter there would cut the side-load off)."""
     at = net.at()
     out = []
     for i in sorted(net.items):
@@ -215,6 +218,8 @@ def _straights(net):
         if p["name"] != "transport-belt":
             continue
         n, d = _tile(p), _head(p)
+        if any(_into(net, at, n, (d + side) % 4) for side in (1, 3)):
+            continue
         b = at.get((n[0] - DX[d], n[1] - DY[d]))
         a = at.get((n[0] + DX[d], n[1] + DY[d]))
         if a is None or b is None:
@@ -228,6 +233,28 @@ def _straights(net):
             continue
         out.append((i, n, d))
     return out
+
+
+def _into(net, at, n, sh):
+    """Whether the net's belt on the tile beside ``n`` (heading ``sh`` from it) points into it."""
+    j = at.get((n[0] + DX[sh], n[1] + DY[sh]))
+    if j is None:
+        return False
+    q = net.items[j]
+    return q["name"] in ("transport-belt", "underground-belt") and \
+        q.get("belt_to_ground_type") != "input" and _head(q) == (sh + 2) % 4
+
+
+def _fed(lg):
+    """The lane graph's lane nodes some inserter drops reach (the lanes that carry anything)."""
+    todo = [e.dst for e in lg.edges() if e.via == "drop"]
+    seen = set(todo)
+    while todo:
+        for e in lg.out.get(todo.pop(), ()):
+            if e.via != "pickup" and e.dst not in seen:
+                seen.add(e.dst)
+                todo.append(e.dst)
+    return seen
 
 
 def _splitter(n, m, d):
@@ -369,6 +396,22 @@ class _Ctx:
                 if tree.free(m) and tree.free(a) and spare not in belts:
                     sinks.append(FixedSink(f"merge{i}.{side}", a, d))
                     ends.append(("merge", i, side, m))
+        if ln:
+            # a side-load onto a lane nothing feeds yet: the run fills a belt's empty lane (a
+            # splitter keeps the lanes, so only this puts both on one belt); a later run may feed
+            # that lane upstream, a merge the max-flow counts like any other
+            fed = _fed(lanesmod.build(net.entities() + self.machines, self.cat))
+            for i, n, d in straights:
+                for side in (1, 3):
+                    near = "R" if side == 1 else "L"
+                    if (net.key(i), near) in fed or \
+                            ((net.key(i), near), 0) not in f.lane_T:
+                        continue
+                    sh = (d + side) % 4
+                    m = (n[0] + DX[sh], n[1] + DY[sh])
+                    if tree.free(m):
+                        sinks.append(FixedSink(f"side{i}.{side}", m, (sh + 2) % 4))
+                        ends.append(("side", i, side, m))
         for key in self.consumers:
             if (key, 0) in f.T:
                 sinks.append(_EndTap(key, self.rects[key], hands, belts))
@@ -419,6 +462,11 @@ class _Ctx:
             adds += _path_plan(path, d)
             taken |= {m, (m[0] + DX[d], m[1] + DY[d])}     # its spare output points there
             cost += COSTS["split"] - COSTS["belt"]
+        elif end[0] == "side":
+            _k, i, side, m = end
+            if any(sw[0] == i for sw in swaps):
+                return None
+            adds += _path_plan(path, (_head(net.items[i]) + side + 2) % 4)
         else:
             got = sink.pick(path, tree, taken)
             if not got:
@@ -440,7 +488,14 @@ class _Ctx:
         for i, p in swaps:
             sw[i] = (net.items[i], p)
             net.items[i] = p
-        return _Run(plans, sw, cost, start, end)
+        run = _Run(plans, sw, cost, start, end)
+        if end[0] == "side":
+            # it leans on the belt it side-loads and the one behind it (without that, a turn)
+            p = net.items[end[1]]
+            n, d = _tile(p), _head(p)
+            behind = net.at().get((n[0] - DX[d], n[1] - DY[d]))
+            run.leans = {end[1]} | ({behind} if behind is not None else set())
+        return run
 
     def rip(self, net, run):
         for i in run.plans:
@@ -598,7 +653,8 @@ def _improve(ctx, net, runs):
         for idx in range(len(runs) - 1, -1, -1):
             run = runs[idx]
             mine = set(run.plans)
-            if any(o is not run and mine & set(o.swaps) for o in runs if o is not None):
+            if any(o is not run and mine & (set(o.swaps) | o.leans) for o in runs
+                   if o is not None):
                 continue
             was = ctx.flow(net).value, (ctx.flow(net, unbounded=True).value
                                         if ctx.spec["lanes"] else 0.0)
