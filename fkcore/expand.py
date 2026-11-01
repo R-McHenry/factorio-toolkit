@@ -193,7 +193,9 @@ def _point_of(flat, lay, key, cat):
     if key in flat.ports:
         if cat is None:
             return None
-        edge = port_edges(flat, lay, cat).get(key)
+        # 2.1.28: only the port's own module (port_edges of every module, for each partner, was
+        # ~30 s of the 20261030-2352 world's place step)
+        edge = _module_edges(flat, lay, key.rsplit("/", 1)[0], cat, {}).get(key)
         return None if edge is None else (edge.inside[0] + 0.5, edge.inside[1] + 0.5)
     e = lay.entities.get(key)
     return None if e is None else (float(e.x), float(e.y))
@@ -352,13 +354,19 @@ def port_edges(flat, lay, cat):
     and the belt crosses the edge between them."""
     out = {}
     for path in lay.insts:
-        inst = flat.insts.get(path)
-        if inst is None or inst.module is None or inst.size is None:
-            continue
+        _module_edges(flat, lay, path, cat, out)
+    return out
+
+
+def _module_edges(flat, lay, path, cat, out):
+    """``port_edges`` of the one placed module ``path``, added to ``out``: -> ``out``."""
+    inst = flat.insts.get(path)
+    if path in lay.insts and inst is not None and inst.module is not None \
+            and inst.size is not None:
         try:
             points = attach_points(flat, lay, path, cat)
         except FragmentError:
-            continue
+            return out
         for role, _side, _net, (x, y, d) in points:
             key = f"{path}/{role}"
             port = flat.ports.get(key)

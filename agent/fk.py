@@ -218,6 +218,18 @@ def push(cfg):
     return n
 
 
+def _same_stat(full, member):
+    """Whether the file here has the size and the mtime (to the second) of the host's ``member``:
+    a pull extracts with the host's mtime, so a file neither side touched since matches, and is
+    neither hashed nor written again (2.1.28: every pull opened all ~450 files of game\\, ~6 s a
+    host command on the 20261030-2352 run)."""
+    try:
+        st = os.stat(full)
+    except OSError:
+        return False
+    return st.st_size == member.size and int(st.st_mtime) == int(member.mtime)
+
+
 def pull(cfg, stats=False):
     """Bring what the host wrote in its copy of game\\ back here. A file whose content changed
     here since the last sync keeps the change (the next push sends it). The run's stats
@@ -240,6 +252,8 @@ def pull(cfg, stats=False):
                 while rel.startswith("./"):
                     rel = rel[2:]
                 full = os.path.join(GAME, rel)
+                if m.isfile() and rel in files and _same_stat(full, m):
+                    continue                   # 2.1.28: as the last pull left it (size, mtime)
                 if m.isfile() and (_sync_file(rel) or (
                         synced is not None and not _host_made(rel) and os.path.isfile(full)
                         and _sha(full) != synced.get(rel))):
@@ -597,9 +611,11 @@ def lua(cfg, rest):
     else:
         code = " ".join(rest)
     push(cfg)
-    rc = remote(cfg, ["lua", ".", "--file", "-"], data=code.encode("utf-8"))
-    pull(cfg)
-    return rc
+    # 2.1.28: no pull. A chunk runs in the game and writes nothing in game\ (the footer's chat and
+    # alert cursors are the host's; the next command's pull brings them), and the pull was most
+    # of a call: the 20261030-2352 player's ~230 lua calls a session took 8-10 s each, ~0.2 s of
+    # it in the game
+    return remote(cfg, ["lua", ".", "--file", "-"], data=code.encode("utf-8"))
 
 
 def _area(rest):
