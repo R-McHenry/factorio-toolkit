@@ -1,0 +1,20 @@
+# mall_chest.fk: the sushi mall with a ChestEndBuffer (2.1, the library; tools\lab_library.py measures it)
+import GateCell, GateCellR, MallCell, ChestEndBuffer from "cells.fk"
+# A sushi mall on one loop: three sources, four makers, a chest end buffer. Each source loads its
+# item while the whole loop holds less than the amount the makers' recipes need (amount=auto).
+g1 = GateCellR<item=iron-plate,     items=iron-plate|copper-plate|iron-gear-wheel> @(4, 25)
+g2 = GateCell<item=copper-plate,    items=iron-plate|copper-plate|iron-gear-wheel> @(6, 22)
+g3 = GateCell<item=iron-gear-wheel, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 19)
+m1 = MallCell<recipe=iron-gear-wheel, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 16)
+m2 = MallCell<recipe=copper-cable,    items=iron-plate|copper-plate|iron-gear-wheel> @(6, 13)
+m3 = MallCell<recipe=transport-belt,  items=iron-plate|copper-plate|iron-gear-wheel> @(6, 10)
+m4 = MallCell<recipe=pipe,            items=iron-plate|copper-plate|iron-gear-wheel> @(6, 7)
+e  = ChestEndBuffer<items=iron-plate|copper-plate|iron-gear-wheel> @(6, 2)
+net l1 limited "the gates hold the loop": g1.s_out -> g2.s_in
+net l2 limited "the gates hold the loop": g2.s_out -> g3.s_in
+net l3 limited "the gates hold the loop": g3.s_out -> m1.s_in
+net l4 limited "the gates hold the loop": m1.s_out -> m2.s_in
+net l5 limited "the gates hold the loop": m2.s_out -> m3.s_in
+net l6 limited "the gates hold the loop": m3.s_out -> m4.s_in
+net l7 limited "the gates hold the loop": m4.s_out -> e.i
+net back limited "the end buffer feeds the head": e.o -> g1.s_in

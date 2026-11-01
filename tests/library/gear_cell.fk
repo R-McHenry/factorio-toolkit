@@ -1,0 +1,8 @@
+# gear_cell.fk: GearCell, now a kind of AsmCell1 (2.1, the library; tools\lab_library.py measures it)
+import GearCell from "cells.fk"
+pl  = Chest<requester, item=iron-plate> @(10, 2)
+pl2 = Chest<requester, item=iron-plate> @(4, 2)
+col = Stack<cell=GearCell, n=4> @(10, 8)
+box = Chest<provider> @(16, 24)
+net i: pl, pl2 -> col.in_in
+net g: col.out_out -> box

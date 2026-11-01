@@ -1,0 +1,10 @@
+# brick_cell.fk: StoneFurnaceCell on bricks (2.1, the library; tools\lab_library.py measures it)
+import StoneFurnaceCell from "cells.fk"
+ore  = Chest<requester, item=stone> @(4, 2)
+coal = Chest<requester, item=coal> @(14, 2)
+col  = Stack<cell=StoneFurnaceCell, n=4, plate=stone-brick, ore=stone> @(10, 8)
+box  = Chest<provider> @(16, 24)
+net ore_: ore -> col.f_in
+net fuel: coal -> col.f_in
+lanes ore_ | fuel
+net p: col.pl_out -> box

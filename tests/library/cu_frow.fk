@@ -1,0 +1,6 @@
+# cu_frow.fk: an electric SmelterRow on copper (2.1, the library; tools\lab_library.py measures it)
+ore = Chest<requester, item=copper-ore> @(2, 2)
+smelt = SmelterRow<n=4, ore=copper-ore, machine=electric-furnace> @(4, 8)
+box = Chest<provider> @(8, 24)
+net o: ore -> smelt
+net p: smelt -> box

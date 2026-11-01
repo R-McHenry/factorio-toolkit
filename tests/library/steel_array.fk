@@ -1,0 +1,8 @@
+# steel_array.fk: the SmelterArray row on steel (2.1, the library; tools\lab_library.py measures it)
+ore  = Chest<requester, item=iron-plate> @(2, 2)
+coal = Chest<requester, item=coal> @(30, 2)
+smelt = SmelterArray<n=8, recipe=steel-plate> @(6, 8)
+box  = Chest<provider> @(8, 34)
+net ore_: ore -> smelt
+net fuel: coal -> smelt
+net p: smelt -> box

@@ -1,0 +1,6 @@
+# acid_row.fk: a uranium MinerRow of three (2.1, the library; tools\lab_library.py measures it)
+acid  = InfinityPipe<fluid=sulfuric-acid, rate=10/s> @(0, 12)
+ore   = MinerRow<n=3, resource=uranium-ore> @(2, 0)
+box   = Chest<storage> @(14, 14)
+net acid: acid -> ore
+net o: ore -> box

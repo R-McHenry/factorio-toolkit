@@ -1,0 +1,7 @@
+# cu_fcell.fk: FurnaceCell (electric) on copper (2.1, the library; tools\lab_library.py measures it)
+import FurnaceCell from "cells.fk"
+ore = Chest<requester, item=copper-ore> @(10, 2)
+col = Stack<cell=FurnaceCell, n=4, plate=copper-plate, ore=copper-ore> @(10, 8)
+box = Chest<provider> @(20, 24)
+net o: ore -> col.ore_in
+net p: col.pl_out -> box

@@ -1,0 +1,11 @@
+# belt_cell.fk: AsmCell on transport belts (iron | gears) (2.1, the library; tools\lab_library.py measures it)
+import AsmCell from "cells.fk"
+fe  = Chest<requester, item=iron-plate> @(4, 2)
+gw  = Chest<requester, item=iron-gear-wheel> @(14, 2)
+col = Stack<cell=AsmCell, n=4, recipe=transport-belt, ins=iron-plate|iron-gear-wheel, out=transport-belt> @(10, 8)
+box = Chest<provider> @(16, 24)
+box2 = Chest<provider> @(20, 24)
+net fe: fe -> col.in_in
+net gw: gw -> col.in_in
+lanes fe | gw
+net o: col.out_out -> box, box2

@@ -244,6 +244,20 @@ module GateCell<item, items, amount=auto> size 3x3 {
   net s items $items limited "loads only while the loop holds less than its amount": s_in, src -> s_out when lw.$item < $amount
 }
 
+# The same source on the loop's other lane: its chest stands west of the belt, so its inserter
+# loads the right lane (looking downstream). The belt runs up its east column: place it two tiles
+# left of the cells beside it. Give the bulk item a lane of its own: the first source along the
+# belt takes every gap it sees, so the sources after it on its lane starve.
+module GateCellR<item, items, amount=auto> size 3x3 {
+  port s_in  : in  $items @s2
+  port s_out : out $items @n2
+  stack s_in -> s_out
+  src = Chest<requester, item=$item> @(0, 1)
+  wire lw red: s
+  set s: read=hold-all
+  net s items $items limited "loads only while the loop holds less than its amount": s_in, src -> s_out when lw.$item < $amount
+}
+
 # A maker on the loop: one assembler takes what its recipe needs from the passing belt, and puts
 # its product into a provider chest for the robots.
 module MallCell<recipe, items> size 7x3 {
@@ -266,10 +280,10 @@ module BeltEndBuffer<items> buffer size 1x3 {
   net t items $items limited "a belt through: the loop's gates hold it": i -> o
 }
 
-module ChestEndBuffer<items> buffer size 3x3 {
+module ChestEndBuffer<items> buffer size 3x5 {
   port i : in  $items @s0
   port o : out $items @n2
-  c = Chest<plain, chest=steel-chest> @(1, 1)
+  c = Buffer @(2, 3)
   net a items $items limited "the loop's end, into the chest": i -> c
   net b items $items limited "the chest, back onto the loop's head": c -> o
 }

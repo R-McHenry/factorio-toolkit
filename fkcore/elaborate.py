@@ -612,8 +612,9 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
 
 #: the library's gate (2.1): `when W.ITEM < auto` on a net holds its loop to this many seconds of
 #: what the loop's machines take of ITEM at full speed, and at least GATE_CRAFTS crafts' worth of
-#: it for each machine. Measured on the lab: a loop of four AM1s held 91-100% of the model at 80
-#: iron, 40 copper and 40 gears (2.1.8), and 40 s of their take is 160, 40 and 40.
+#: it for each machine. Measured on the lab (2.1, tests/library/mall.fk, 30 game minutes): four
+#: MallCells at auto 160 iron, 40 copper and 40 gears made 90-100% of the model and never stopped,
+#: with iron on its own lane (GateCellR). On one shared lane the first source takes every gap.
 GATE_SECONDS = 40
 GATE_CRAFTS = 2
 
@@ -2299,7 +2300,7 @@ ROW_CELLS = {
                                     " (two furnaces a cell)"),
     "SmelterRow": ("StoneFurnaceCell", "Stack<cell=StoneFurnaceCell, n={n}, plate={plate}, "
                                        "ore={ore}>"),
-    "AsmRow": ("AsmCell", "Stack<cell=AsmCell, n={n}, recipe={recipe}, ins=A|B, out={out}> (two "
+    "AsmRow": ("AsmCell", "Stack<cell=AsmCell, n={n}, recipe={recipe}, ins={ins}, out={out}> (two "
                           "ingredients; AsmCell1 for one)"),
     "LabRow": ("LabCell", "Stack<cell=LabCell, n={n}, packs=A|B>, or a Stack of LabColumns for a "
                           "field"),
@@ -2330,11 +2331,27 @@ def _row_cells(flat):
             out_item = next(iter(ms[0].makes), recipe) if ms else recipe
         machine = ms[0].prototype if ms else None
         cell, how = ROW_CELLS[kind]
+        ins = "A|B"
         if kind == "SmelterRow" and machine == "electric-furnace":
             cell, how = "FurnaceCell", "Stack<cell=FurnaceCell, n={n}, plate={plate}, ore={ore}> " \
                                        "(or FurnacePair, two a cell)"
+        elif kind == "AsmRow" and ms:
+            got = [i for i in ms[0].needs]
+            if len(got) == 1:
+                cell, how = "AsmCell1", "Stack<cell=AsmCell1, n={n}, recipe={recipe}, ins={ins}, " \
+                                        "out={out}>"
+            elif len(got) != 2:
+                continue            # no library cell takes three ingredients: a cell of your own
+            ins = "|".join(got)
+            how = how.replace(" (two ingredients; AsmCell1 for one)", "")
+        elif kind == "LabRow":
+            packs = sorted({i for n2 in flat.nets.values() for k, i in n2.consumers
+                            if k in inst.machines})
+            if len(packs) == 2:
+                ins = "|".join(packs)
+            how = how.replace("packs=A|B", "packs={ins}")
         text = how.format(n=n, half=(n + 1) // 2, quarter=(n + 3) // 4, plate=plate, ore=ore,
-                          recipe=recipe, out=out_item)
+                          recipe=recipe, out=out_item, ins=ins)
         out.append(Check("row-cell", path,
                          f"a new {kind} could be {text}, a Stack of the library's {cell} "
                          "(import it from the kickoff template's game\\cells.fk). Rows still "

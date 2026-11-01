@@ -383,6 +383,47 @@ col = Stack<cell=FurnaceCell, n=8> @(10, 12)
 The same furnaces as one row: `SmelterRow<n=8, recipe=iron-plate, machine=electric-furnace>` (3
 tiles each, ore in, plates out).
 
+## The library: game\cells.fk with parameters (current)
+
+The cells in `game\cells.fk` take parameters, so one cell serves every plate and recipe. Without
+them they make iron, as before. Import the ones you use:
+
+```
+import SmelterPair, FurnacePair, AsmCell, LabColumn from "cells.fk"
+cu    = Stack<cell=SmelterPair, n=4, plate=copper-plate, ore=copper-ore> @(10, 8)
+steel = Stack<cell=FurnacePair, n=4, plate=steel-plate, ore=iron-plate> @(30, 8)
+belts = Stack<cell=AsmCell, n=4, recipe=transport-belt, ins=iron-plate|iron-gear-wheel,
+              out=transport-belt> @(50, 8)
+field = Stack<cell=LabColumn, n=2, packs=automation-science-pack|logistic-science-pack> @(70, 8)
+```
+
+- Smelting: `StoneFurnaceCell` and `SmelterPair` (coal), `FurnaceCell` and `FurnacePair`
+  (electric), `SmeltColumn` (three FurnaceCells, a cell of cells). Each takes `plate=` and `ore=`.
+- Assembling: `AsmCell` (two ingredients, one a lane), `AsmCell1` (one), `GearCell`, `CircuitCell`.
+- Science: `LabCell` and `LabColumn` (six labs), `packs=` two packs.
+- `AcidDrillCell`: one uranium drill with its acid (7x7).
+- A sushi loop: `GateCell` / `GateCellR` (a source that loads while the loop holds less than its
+  amount), `MallCell` (one maker and its box), `BeltEndBuffer` / `ChestEndBuffer`.
+- `Hysteresis<in, out, lo, hi>`: a latch, named from outside (`when shed.hold.S = 0`).
+
+On the lab each line made what its row makes, within 3% (the gear cell beat its row by 7%). A
+sushi mall from these cells:
+
+```
+import GateCell, GateCellR, MallCell, BeltEndBuffer from "cells.fk"
+g1 = GateCellR<item=iron-plate, items=iron-plate|copper-plate|iron-gear-wheel> @(4, 23)
+g2 = GateCell<item=copper-plate, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 20)
+m1 = MallCell<recipe=iron-gear-wheel, items=iron-plate|copper-plate|iron-gear-wheel> @(6, 14)
+e  = BeltEndBuffer<items=iron-plate|copper-plate|iron-gear-wheel> @(6, 2)
+net l1 limited "the gates hold the loop": g1.s_out -> g2.s_in
+...
+net back limited "the end buffer feeds the head": e.o -> g1.s_in
+```
+
+A gate's `amount=auto` is 40 s of what the loop's machines take, from their recipes; `fk check`
+says the number. Give the bulk item a lane of its own (`GateCellR`): on one shared lane the first
+source takes every gap. `fk check` also says when a new row could be a Stack of one of these.
+
 ## robot-feed.fk: the kit's robots back into a roboport (12x8) (older)
 
 The robots the kit starts with, and the ones a build takes up with a roboport, sit in a storage

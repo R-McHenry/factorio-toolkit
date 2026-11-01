@@ -1,0 +1,7 @@
+# lab_row.fk: a LabRow of six (2.1, the library; tools\lab_library.py measures it)
+red   = Chest<requester, item=automation-science-pack> @(2, 2)
+green = Chest<requester, item=logistic-science-pack> @(8, 2)
+labs  = LabRow<n=6> @(4, 8)
+net r: red -> labs
+net g: green -> labs
+lanes r | g

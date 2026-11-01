@@ -1,0 +1,7 @@
+# acid_cells.fk: three AcidDrillCells on uranium, acid through the stack (2.1, the library; tools\lab_library.py measures it)
+import AcidDrillCell from "cells.fk"
+acid  = InfinityPipe<fluid=sulfuric-acid, rate=10/s> @(0, 0)
+cells = Stack<cell=AcidDrillCell, n=3> @(2, 0)
+box   = Chest<storage> @(30, 6)
+net acid: acid -> cells.acid_in
+net ore: cells.ore_out -> box

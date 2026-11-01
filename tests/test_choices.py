@@ -76,8 +76,8 @@ class ChoicesTest(unittest.TestCase):
     def test_a_choice_in_a_cell_is_the_whole_stacks(self):
         shutil.copy(CELLS, self.dir)
         cells = open(CELLS, encoding="utf-8").read()
-        cells = cells.replace("f = Furnace<recipe=iron-plate, machine=electric-furnace>",
-                              "f = Furnace<recipe=iron-plate, machine=electric-furnace, "
+        cells = cells.replace("f = Furnace<recipe=$plate, machine=electric-furnace>",
+                              "f = Furnace<recipe=$plate, machine=electric-furnace, "
                               "modules=auto>")
         with open(os.path.join(self.dir, "cells.fk"), "w", encoding="utf-8") as fh:
             fh.write(cells)

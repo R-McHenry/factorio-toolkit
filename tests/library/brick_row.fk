@@ -1,0 +1,9 @@
+# brick_row.fk: the SmelterRow it replaces, on bricks (2.1, the library; tools\lab_library.py measures it)
+ore  = Chest<requester, item=stone> @(2, 2)
+coal = Chest<requester, item=coal> @(8, 2)
+smelt = SmelterRow<n=4, ore=stone> @(4, 8)
+box  = Chest<provider> @(8, 24)
+net ore_: ore -> smelt
+net fuel: coal -> smelt
+lanes ore_ | fuel
+net p: smelt -> box

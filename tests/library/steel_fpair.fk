@@ -1,0 +1,9 @@
+# steel_fpair.fk: FurnacePair (electric) on steel (2.1, the library; tools\lab_library.py measures it)
+import FurnacePair from "cells.fk"
+orea = Chest<requester, item=iron-plate> @(10, 2)
+oreb = Chest<requester, item=iron-plate> @(22, 2)
+col  = Stack<cell=FurnacePair, n=2, plate=steel-plate, ore=iron-plate> @(10, 8)
+box  = Chest<provider> @(16, 24)
+net a: orea -> col.oa_in
+net b: oreb -> col.ob_in
+net p: col.pl_out -> box

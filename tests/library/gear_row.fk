@@ -1,0 +1,7 @@
+# gear_row.fk: an AsmRow on gears (2.1, the library; tools\lab_library.py measures it)
+pl  = Chest<requester, item=iron-plate> @(2, 2)
+pl2 = Chest<requester, item=iron-plate> @(6, 2)
+row = AsmRow<n=4, recipe=iron-gear-wheel> @(4, 8)
+box = Chest<provider> @(8, 24)
+net i: pl, pl2 -> row
+net g: row -> box

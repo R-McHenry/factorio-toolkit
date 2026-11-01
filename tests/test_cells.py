@@ -100,8 +100,10 @@ class StarterCellsTest(unittest.TestCase):
         return elaborate_file(path, CAT)
 
     def test_the_template_declares_them(self):
-        f = lang.parse(open(CELLS, encoding="utf-8").read(), "cells.fk")
-        self.assertEqual(sorted(f.modules), sorted(LINES))
+        # 2.1, the library: more cells, and GearCell is a kind of AsmCell1
+        with open(CELLS, encoding="utf-8") as fh:
+            f = lang.parse(fh.read(), "cells.fk")
+        self.assertLessEqual(set(LINES), set(f.modules) | set(f.kinds))
 
     def test_each_line_routes_and_connects(self):
         for cell in LINES:

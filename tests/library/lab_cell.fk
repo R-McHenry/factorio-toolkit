@@ -1,0 +1,8 @@
+# lab_cell.fk: six LabCells, red | green (2.1, the library; tools\lab_library.py measures it)
+import LabCell from "cells.fk"
+red   = Chest<requester, item=automation-science-pack> @(4, 2)
+green = Chest<requester, item=logistic-science-pack> @(14, 2)
+labs  = Stack<cell=LabCell, n=6, packs=automation-science-pack|logistic-science-pack> @(10, 8)
+net r: red -> labs.p_in
+net g: green -> labs.p_in
+lanes r | g

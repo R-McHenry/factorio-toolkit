@@ -1,0 +1,6 @@
+# steel_frow.fk: an electric SmelterRow on steel (2.1, the library; tools\lab_library.py measures it)
+ore = Chest<requester, item=iron-plate> @(2, 2)
+smelt = SmelterRow<n=4, recipe=steel-plate, machine=electric-furnace> @(4, 8)
+box = Chest<provider> @(8, 24)
+net o: ore -> smelt
+net p: smelt -> box

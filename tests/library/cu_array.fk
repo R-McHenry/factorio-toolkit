@@ -1,0 +1,8 @@
+# cu_array.fk: the SmelterArray row SmelterPair replaces, on copper (2.1, the library; tools\lab_library.py measures it)
+ore  = Chest<requester, item=copper-ore> @(2, 2)
+coal = Chest<requester, item=coal> @(30, 2)
+smelt = SmelterArray<n=8, ore=copper-ore> @(6, 8)
+box  = Chest<provider> @(8, 34)
+net ore_: ore -> smelt
+net fuel: coal -> smelt
+net p: smelt -> box

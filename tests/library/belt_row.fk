@@ -1,0 +1,10 @@
+# belt_row.fk: the AsmRow it replaces (2.1, the library; tools\lab_library.py measures it)
+fe  = Chest<requester, item=iron-plate> @(2, 2)
+gw  = Chest<requester, item=iron-gear-wheel> @(8, 2)
+row = AsmRow<n=4, recipe=transport-belt> @(4, 8)
+box = Chest<provider> @(8, 24)
+box2 = Chest<provider> @(12, 24)
+net fe: fe -> row
+net gw: gw -> row
+lanes fe | gw
+net o: row -> box, box2

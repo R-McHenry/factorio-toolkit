@@ -1,0 +1,7 @@
+# lab_field.fk: two LabColumns: twelve labs (2.1, the library; tools\lab_library.py measures it)
+import LabColumn from "cells.fk"
+red   = Chest<requester, item=automation-science-pack> @(0, 19)
+green = Chest<requester, item=logistic-science-pack>   @(0, 24)
+field = Stack<cell=LabColumn, n=2> @(4, 0)
+net r items automation-science-pack: red -> field.r_in
+net g items logistic-science-pack:   green -> field.g_in

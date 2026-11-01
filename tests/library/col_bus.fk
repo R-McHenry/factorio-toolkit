@@ -1,0 +1,9 @@
+# col_bus.fk: two SmeltColumns of copper, a plate belt each (2.1, the library; tools\lab_library.py measures it)
+import SmeltColumn from "cells.fk"
+ore  = Chest<requester, item=copper-ore> @(0, 4)
+cols = Stack<cell=SmeltColumn, n=2, plate=copper-plate, ore=copper-ore> @(4, 0)
+b0   = Chest<provider> @(13, 20)
+b1   = Chest<provider> @(24, 20)
+net feed: ore -> cols.ore_in
+net p0: cols[0].pl -> b0
+net p1: cols[1].pl -> b1
