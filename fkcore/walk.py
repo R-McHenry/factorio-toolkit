@@ -887,6 +887,65 @@ def summary(w):
     return lines
 
 
+_BELT_VIA = frozenset({"belt", "curve", "sideload", "ug_sideload"})
+
+
+def crossings(w, frame):
+    """Where a module frame drawn on the base (X0,Y0,X1,Y1, tiles, X1/Y1 exclusive) is crossed:
+    -> lines. A belt over the edge is a port (``port`` line written out); an underground under
+    it, an inserter or drill reaching over it, a pipe through it and an entity standing across it
+    are what a sealed module of that frame can't have as drawn: move the frame or the piece."""
+    x0, y0, x1, y1 = frame
+    g = w.graph
+
+    def tin(t):
+        return x0 <= t[0] < x1 and y0 <= t[1] < y1
+
+    def kin(k):
+        return tin(g.nodes[k].tiles[0])
+
+    def side(t):
+        return "w" if t[0] < x0 else "e" if t[0] >= x1 else "n" if t[1] < y0 else "s"
+
+    ports, under, hands, pipes, across = [], [], [], [], []
+    for a, lst in g.succ.items():
+        for b, via in lst:
+            ia, ib = kin(a), kin(b)
+            if ia == ib:
+                continue
+            inner, outer = (b, a) if ib else (a, b)
+            way = "in" if ib else "out"
+            if via in _BELT_VIA:
+                t, o = g.nodes[inner].tiles[0], g.nodes[outer].tiles[0]
+                s = side(o)
+                pos = t[1] - y0 if s in "we" else t[0] - x0
+                name = w.net_of.get(inner) or w.net_of.get(outer)
+                net = w.nets.get(name)
+                its = sorted((net.items if net else {}) or (net.made | net.wanted if net else ()))
+                ports.append((name, way, f"@{s}{pos}", inner, its))
+            elif via == "ug":
+                under.append(f"  under  {w.net_of.get(a, '?')}: {a} -> {b} passes under the edge "
+                             f"({way})")
+            else:
+                hands.append(f"  hand   {via} {a} -> {b} reaches over the edge ({way})")
+    for (ka, _ba), (kb, _bb), via in g.joins:
+        if kin(ka) != kin(kb):
+            pipes.append(f"  pipe   {ka} -- {kb} ({via})")
+    for k, n in g.nodes.items():
+        ins = {tin(t) for t in n.tiles}
+        if len(ins) == 2:
+            across.append(f"  across {k} stands on the edge")
+    lines = [f"frame {x0},{y0},{x1},{y1} ({x1 - x0}x{y1 - y0}): {len(ports)} belt ports, "
+             f"{len(under)} undergrounds under the edge, {len(hands)} hands over it, "
+             f"{len(pipes)} pipes through it, {len(across)} entities across it"
+             + (": sealable as drawn" if not (under or hands or pipes or across) else "")]
+    for i, (name, way, at, k, its) in enumerate(sorted(ports, key=lambda p: (p[2], p[1])), 1):
+        two = (its + its)[:2] if its else ["?", "?"]
+        lines.append(f"  port p{i} : {way} {two[0]} | {two[1]} {at}    # net {name}, {k}"
+                     + (f" (+{len(its) - 2} more items)" if len(its) > 2 else ""))
+    return lines + under + hands + pipes + across
+
+
 def agreement(w):
     """How far the graph's inserter and drill edges agree with the game's own targets."""
     unit = {e.row.get("u"): k for k, e in w.ents.items() if e.row.get("u") is not None}

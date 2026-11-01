@@ -1110,8 +1110,12 @@ def _walk(a, cat):
     parts = a.what.split(",")
     box = len(parts) == 4
 
+    frame = _area(a.frame) if a.frame else None
+
     def body(dump):
         w = walk.infer(dump, cat)
+        if frame:
+            return walk.summary(w)[:1] + walk.crossings(w, frame)
         if box:
             return walk.summary(w)
         root = walk.find_root(w, a.what)
@@ -1123,7 +1127,11 @@ def _walk(a, cat):
         with open(a.frm, encoding="utf-8") as fh:
             print("\n".join(body(json.load(fh))))
         return 0
-    if box:
+    if frame:
+        # what reaches over the edge from outside: an underground's far end, a long hand
+        m = 12
+        area = (frame[0] - m, frame[1] - m, frame[2] + m, frame[3] + m)
+    elif box:
         area = _area(a.what)
     else:
         try:
@@ -1572,6 +1580,8 @@ def main(argv=None):
     wk.add_argument("--surface", default="nauvis")
     wk.add_argument("--save", metavar="FILE", help="keep the read as JSON")
     wk.add_argument("--from", dest="frm", metavar="FILE", help="walk a kept read, no game")
+    wk.add_argument("--frame", metavar="X0,Y0,X1,Y1", help="a module frame drawn on the base: "
+                    "where belts, undergrounds, hands and pipes cross it (the ports it needs)")
     cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
                         "anywhere (fkcore.capture)")
     cp.add_argument("game")

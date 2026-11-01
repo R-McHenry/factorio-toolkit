@@ -232,6 +232,190 @@ def design_rung(rows, w, rung, furnace_recipe, gdir):
     return text, held, seeds, notes
 
 
+_STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
+
+
+def module_rung(rows, w, furnace_recipe, gdir, size):
+    """The ``module`` rung: no routing inside. The piece is a sealed module framed at its
+    bounding box, every net held as extracted (its belts and its hands), a port where a belt
+    crosses the frame, poles and the rest a Literal; outside, a DNP chest a few tiles past each
+    port is the end the language can name, and only the outside nets are routed.
+    -> (main.fk text, held {net: [Entity]}, notes, frame (x0, y0, x1, y1) on the surface)."""
+    notes = []
+    W, H = size
+    frame = (MARGIN, MARGIN, MARGIN + W, MARGIN + H)
+    body, inst, outer, held = [], {}, [], {}
+    k = 0
+    for key, e in w.ents.items():
+        kind = e.row["t"]
+        if kind not in MACHINES:
+            continue
+        k += 1
+        name = f"m{k}"
+        bw, bh = abs(e.row["box"][2] - e.row["box"][0]), abs(e.row["box"][3] - e.row["box"][1])
+        tx, ty = math.floor(e.x - bw / 2 + 0.01) - MARGIN, math.floor(e.y - bh / 2 + 0.01) - MARGIN
+        if kind in ("assembling-machine", "furnace", "chemical-plant", "oil-refinery"):
+            rc = e.row.get("rc")
+            if not rc and kind == "furnace":
+                rc = furnace_recipe
+                notes.append(f"{name}: a blueprint furnace has no recipe; took {rc}")
+            if not rc:
+                notes.append(f"{name} {e.name}: no recipe in the blueprint, left out")
+                continue
+            body.append(f"  {name} = Machine<entity={e.name}, recipe={rc}> @({tx}, {ty})")
+        elif kind == "lab":
+            body.append(f"  {name} = Lab @({tx}, {ty})")
+        elif kind in ("container", "logistic-container"):
+            body.append(f"  {name} = Chest<plain> @({tx}, {ty})")
+            if e.name != "iron-chest":
+                notes.append(f"{name}: {e.name} as Chest<plain> (an iron chest)")
+        else:
+            notes.append(f"{name}: {e.name} ({kind}) has no kind here, left out")
+            continue
+        inst[key] = name
+    g = w.graph
+    used = set()
+    ports, nets = [], []
+    np_ = 0
+    occ = set()
+    for e in w.ents.values():
+        b = e.row["box"]
+        occ.update((x, y) for x in range(math.floor(b[0] + 0.01), math.ceil(b[2] - 0.01))
+                   for y in range(math.floor(b[1] + 0.01), math.ceil(b[3] - 0.01)))
+    drawn = defaultdict(list)          # net -> [(name, x, y, dir, ug)] drawn in to reach the frame
+
+    def inside(x, y):
+        return frame[0] <= x < frame[2] and frame[1] <= y < frame[3]
+
+    def port(nname, ck, head, items):
+        """A port where the line of carrier ``ck`` meets the frame (into it when ``head``),
+        drawing belts over the empty tiles between (or an underground end where the blueprint
+        cut a pair), or None when the line meets something first."""
+        nonlocal np_
+        n = g.nodes[ck]
+        dx, dy = _STEP.get(n.dir, (0, 0))
+        if head:
+            dx, dy = -dx, -dy
+        gap = (n.kind == "underground-belt" and ck not in g.pairs
+               and n.ug == ("out" if head else "in"))
+        for tx, ty in n.tiles:
+            path, (x, y) = [], (tx + dx, ty + dy)
+            while inside(x, y) and (gap or (x, y) not in occ):
+                path.append((x, y))
+                x, y = x + dx, y + dy
+            if inside(x, y):
+                continue                       # it meets an entity: an end inside the frame
+            belt = n.name.replace("underground-belt", "transport-belt").replace(
+                "splitter", "transport-belt")
+            if gap:
+                reach = int(CAT.entity(n.name).get("max_distance") or 5)
+                if not path or path[-1] in occ or len(path) > reach:
+                    notes.append(f"{nname}: {ck} pairs under the frame's edge with an end "
+                                 f"outside the piece; no tile on the edge for its partner")
+                    return None
+                ex, ey = path[-1]
+                drawn[nname].append((n.name, ex + 0.5, ey + 0.5, n.dir,
+                                     "in" if head else "out"))
+            else:
+                drawn[nname] += [(belt, px + 0.5, py + 0.5, n.dir, None) for px, py in path]
+            side = "w" if x < frame[0] else "e" if x >= frame[2] else "n" if y < frame[1] \
+                else "s"
+            ix, iy = x - dx, y - dy                         # the tile just inside
+            pos = (iy - frame[1]) if side in "we" else (ix - frame[0])
+            np_ += 1
+            pn = f"p{np_}"
+            its = (items + items)[:2] if items else ["iron-plate", "iron-plate"]
+            ports.append(f"  port {pn} : {'in' if head else 'out'} {its[0]} | {its[1]} "
+                         f"@{side}{pos}")
+            # the DNP chest: three tiles past the edge, in line (belt, hand, chest); a source is
+            # a requester, which can drive a net
+            cx, cy = x + 2 * dx, y + 2 * dy
+            xe = f"x{np_}"
+            if head:
+                want = ",".join(sorted(set(its)))
+                outer.append(f'{xe} = Chest<requester, item="{want}", dnp> @({cx}, {cy})')
+                outer.append(f"net o{np_} items {', '.join(sorted(set(its)))}: {xe} -> "
+                             f"blk.{pn}")
+            else:
+                outer.append(f"{xe} = Chest<plain, dnp> @({cx}, {cy})")
+                outer.append(f"net o{np_}: blk.{pn} -> {xe}")
+            return pn
+        return None
+
+    for nname, net in sorted(w.nets.items(), key=lambda kv: fkp._natural_key(kv[0])):
+        if net.fluid:
+            notes.append(f"{nname}: a fluid net, left out")
+            continue
+        drv = [inst[d] for d in net.drivers if d in inst]
+        con = [inst[c] for c in net.consumers if c in inst]
+        made_here = {p for k_ in inst for p in walk._products(w.ents[k_], {}, CAT)}
+        items = sorted(set(net.wanted) - made_here) or sorted(net.made) or sorted(net.items)
+        if any((CAT.entity(w.ents[c].name).get("energy") or {}).get("source") == "burner"
+               for c in net.consumers if c in inst):
+            items = sorted(set(items) | {"coal"})      # a burner's fuel: a blueprint can't say
+        # every belt end on the frame's edge is a port, whatever else the net has (a tileable
+        # piece passes its belts through); an end inside the frame is just an end
+        pin = [p for p in (port(nname, hk, True, items) for hk in net.carriers
+                           if not g.pred.get(hk)) if p]
+        pout = [p for p in (port(nname, tk, False, sorted(set(items) | net.made |
+                                                        set(net.items)))
+                            for tk in net.carriers if not g.succ.get(tk)) if p]
+        drv, con = pin + drv, con + pout
+        if not drv or not con:
+            notes.append(f"{nname}: no end on one side, left out")
+            continue
+        itxt = f" items {', '.join(sorted(set(items) | net.made))}" if pin and items else ""
+        nets.append(f"  net {nname}{itxt}: {', '.join(dict.fromkeys(drv))} -> "
+                    f"{', '.join(dict.fromkeys(con))}")
+        hands = sorted({v for m, lst in w.ins.items() for n_, v in lst if n_ == nname} |
+                       {v for m, lst in w.outs.items() for n_, v in lst if n_ == nname})
+        mine = list(net.carriers) + hands
+        used.update(mine)
+        held[f"blk/{nname}"] = [_entity(w, c, f"blk/{nname}", i) for i, c in enumerate(mine)]
+        for j, (dn, x, y, d, ug) in enumerate(drawn.get(nname, ())):
+            held[f"blk/{nname}"].append(fkp.Entity(
+                f"~blk/{nname}/d{j}", dn, x, y, d,
+                dict({"net": f"blk/{nname}"}, **({"ug": ug} if ug else {}))))
+        if drawn.get(nname):
+            notes.append(f"{nname}: drew {len(drawn[nname])} carriers in to reach the frame")
+    # hands machine -> machine: one net per giving machine, a hand to each taker
+    nh = 0
+    by_src = defaultdict(list)
+    for m, lst in w.outs.items():
+        for n_, v in lst:
+            if n_.startswith("hand:") and m in inst and n_[5:] in inst:
+                by_src[m].append((n_[5:], v))
+    for m, lst in by_src.items():
+        nh += 1
+        hn = f"h{nh}"
+        nets.append(f"  net {hn}: {inst[m]} -> {', '.join(dict.fromkeys(inst[t] for t, _ in lst))}")
+        held[f"blk/{hn}"] = [_entity(w, v, f"blk/{hn}", i) for i, (_, v) in enumerate(lst)]
+        used.update(v for _, v in lst)
+    # everything else (poles, lamps, combinators, hands and belts of no net) as one Literal
+    rest = [e for key, e in w.ents.items() if key not in inst and key not in used
+            and e.row["t"] not in MACHINES]
+    if rest:
+        x0 = min(math.floor(e.row["box"][0] + 0.01) for e in rest)
+        y0 = min(math.floor(e.row["box"][1] + 0.01) for e in rest)
+        lrows = []
+        for e in rest:
+            row = {"name": e.name, "x": _num(e.x - x0), "y": _num(e.y - y0), "direction": e.dir}
+            if e.attrs.get("ug"):
+                row["ug"] = e.attrs["ug"]
+            lrows.append(row)
+        with open(os.path.join(gdir, "rest.json"), "w", encoding="utf-8") as fh:
+            json.dump({"entities": lrows}, fh)
+        body.append(f'  rest = Literal<file="rest.json"> @({x0 - MARGIN}, {y0 - MARGIN})')
+        kinds = defaultdict(int)
+        for e in rest:
+            kinds[e.name] += 1
+        notes.append("in the rest Literal: " + ", ".join(f"{v} {k}" for k, v in
+                                                          sorted(kinds.items())))
+    text = (f"module Piece size {W}x{H} {{\n" + "\n".join(ports + body + nets) + "\n}\n\n"
+            f"blk = Piece @({MARGIN}, {MARGIN})\n" + "\n".join(outer) + "\n")
+    return text, held, notes, frame
+
+
 def _edge_lit(w, key, name, gdir, lines, edge, head, notes):
     """A Literal of the belts where a net enters (``head``) or leaves the piece, named at its
     first plain belt: only a belt can be a named net end, so a splitter or an underground at
@@ -302,14 +486,17 @@ def build(gdir, fk_text, held, seeds, size):
     return code, took, lay, log
 
 
-def score(rows, lay):
-    """{category: {exact, other, missing}} plus extra: the original against the layout."""
+def score(rows, lay, frame=None):
+    """{category: {exact, other, missing}} plus extra: the original against the layout (within
+    ``frame`` when one is given: what a module rung lays outside it is its DNP ends)."""
     want = []
     for r in rows:
         want.append((r["name"], r["x"] + MARGIN, r["y"] + MARGIN, r.get("direction", 0),
                      r.get("ug")))
     got = []
     for e in (lay.entities.values() if lay else ()):
+        if frame and not (frame[0] <= float(e.x) < frame[2] and frame[1] <= float(e.y) < frame[3]):
+            continue
         got.append((e.name, float(e.x), float(e.y), int(e.dir or 0), e.attrs.get("ug")))
     tiles = {}
     for g in got:
@@ -359,7 +546,7 @@ def main(argv=None):
     ap.add_argument("label")
     ap.add_argument("out")
     ap.add_argument("--furnace-recipe", default="iron-plate")
-    ap.add_argument("--rungs", default="literal,held,seeded,routed")
+    ap.add_argument("--rungs", default="literal,module,held,seeded,routed")
     a = ap.parse_args(argv)
     with open(a.post, encoding="utf-8") as fh:
         post = json.load(fh)
@@ -369,6 +556,9 @@ def main(argv=None):
         return 2
     label, version, ents = bps[0]
     rows, unknown = normalise(version, ents)
+    for r in rows:              # a blueprint furnace has no recipe: the walk needs the guess too
+        if CAT.kind(r["name"]) == "furnace" and not r.get("recipe"):
+            r["recipe"] = a.furnace_recipe
     os.makedirs(a.out, exist_ok=True)
     w = walk.infer(as_dump(rows), CAT)
     size = (max(math.ceil(r["x"] + 1) for r in rows) + 2 * MARGIN,
@@ -384,14 +574,21 @@ def main(argv=None):
         gdir = os.path.join(a.out, rung)
         shutil.rmtree(gdir, ignore_errors=True)
         os.makedirs(gdir)
-        fk_text, held, seeds, notes = design_rung([dict(r) for r in rows], wm, rung,
-                                                  a.furnace_recipe, gdir)
-        if rung != "held":
+        frame = None
+        if rung == "module":
+            fk_text, held, notes, frame = module_rung(
+                [dict(r) for r in rows], wm, a.furnace_recipe, gdir,
+                (size[0] - 2 * MARGIN, size[1] - 2 * MARGIN))
+            seeds = {}
+        else:
+            fk_text, held, seeds, notes = design_rung([dict(r) for r in rows], wm, rung,
+                                                      a.furnace_recipe, gdir)
+        if rung not in ("held", "module"):
             held = {}
         if rung != "seeded":
             seeds = {}
         code, took, lay, log = build(gdir, fk_text, held, seeds, size)
-        res, extra = score(rows, lay)
+        res, extra = score(rows, lay, frame)
         line = [f"## {rung}: build exit {code}, {took:.1f} s"]
         for cat in ("machine", "carrier", "other"):
             r = res.get(cat, {})

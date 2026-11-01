@@ -82,6 +82,18 @@ class TestWorldMode(unittest.TestCase):
     def test_agreement_with_the_game(self):
         self.assertTrue(walk.agreement(self.w).startswith("hands: 6 of 6"), walk.agreement(self.w))
 
+    def test_frame_crossings(self):
+        # around the gear assembler, the two belts cut at x=1: two ports, nothing else
+        lines = walk.crossings(self.w, (1, 0, 5, 7))
+        self.assertIn("2 belt ports", lines[0])
+        self.assertTrue(lines[0].endswith("sealable as drawn"), lines[0])
+        self.assertIn("port p1 : in iron-plate | iron-plate @w0", lines[1])
+        # the assembler alone: its two inserters reach over the edge
+        lines = walk.crossings(self.w, (1, 2, 5, 5))
+        self.assertIn("2 hands over it", lines[0])
+        # a frame through the assembler: it stands across the edge
+        self.assertIn("1 entities across it", walk.crossings(self.w, (2, 2, 5, 5))[0])
+
     def test_net_root(self):
         text = walk.tree(self.w, "n1", up=1, down=1)
         self.assertTrue(text[0].startswith("net n1 iron-plate"))
