@@ -218,7 +218,7 @@ Each is a sealed module (ports and one net), so the router lays each half of the
 | piece | what | ports |
 |---|---|---|
 | `Waypoint<item>` | one belt, 1x3: the net passes here (`net a: x -> wp.i`, `net b: wp.o -> y`) | `i`, `o` |
-| `Merge<a, b>` | two belts into one, a on one lane, b on the other (the same item twice: both lanes) | `a`, `b`, `o` |
+| `Merge<a, b>` | two belts into one by a splitter; each item stays on the lane it came in on | `a`, `b`, `o` |
 | `Split<item>` | one belt into two, by a splitter | `i`, `a`, `b` |
 
 They run north to south; `rot 1` turns one to run east to west, `rot 3` west to east.

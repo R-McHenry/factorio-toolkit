@@ -10,7 +10,7 @@
 #   net gear:  gears -> wp.i
 #   net gear2: wp.o -> red, belts, ins
 #
-# Two belts into one, where you want the join (red packs on one lane, green on the other):
+# Two belts into one, where you want the join:
 #
 #   mg = Merge<a=automation-science-pack, b=logistic-science-pack> @(4, 40)
 #   net pk_r:  red -> mg.a
@@ -36,7 +36,8 @@ module Waypoint<item> size 1x3 {
   net p: i -> o
 }
 
-# Two belts into one: a on one lane, b on the other (the same item twice: both lanes).
+# Two belts into one, by a splitter. A splitter keeps lanes: each item leaves on the lane it came
+# in on, so this does not put a and b on lanes of their own (`lanes`, in LANGUAGE.md, does).
 module Merge<a, b> size 2x3 {
   port a : in  $a @n0
   port b : in  $b @n1
