@@ -92,13 +92,15 @@ local function contents(inv)
   return next(c) and c or nil
 end
 local function lines(e)
-  local r = {{}}
+  local r, n = {{}}, {{}}
   for i = 1, e.get_max_transport_line_index() do
     local c = {{}}
-    for _, x in pairs(e.get_transport_line(i).get_contents()) do c[x.name] = (c[x.name] or 0) + x.count end
+    local l = e.get_transport_line(i)
+    for _, x in pairs(l.get_contents()) do c[x.name] = (c[x.name] or 0) + x.count end
     r[i] = c
+    n[i] = #l.get_detailed_contents()
   end
-  return r
+  return r, n
 end
 local function recipe(r)
   if r and not recipes[r.name] then
@@ -124,7 +126,7 @@ for _, e in pairs(s.find_entities_filtered{{area = {{{{{x0}, {y0}}}, {{{x1}, {y1
     row.inp = contents(e.get_inventory(defines.inventory.crafter_input))
     row.out = contents(e.get_inventory(defines.inventory.crafter_output))
   elseif t == 'transport-belt' or t == 'underground-belt' or t == 'splitter' or t == 'loader' or t == 'loader-1x1' or t == 'linked-belt' then
-    row.ln = lines(e)
+    row.ln, row.ls = lines(e)
     if t == 'underground-belt' then row.ug = e.belt_to_ground_type end
     if t == 'splitter' then
       row.sp = {{e.splitter_input_priority, e.splitter_output_priority, e.splitter_filter and e.splitter_filter.name and e.splitter_filter.name.name or (e.splitter_filter and e.splitter_filter.name)}}
@@ -309,7 +311,15 @@ def _uf(keys):
 
 
 def _lanes(row):
-    """(left, right) items of a belt-ish entity's transport lines (odd lines left, even right)."""
+    """(left, right) of a belt-ish entity's transport lines (odd lines left, even right): the
+    item stacks on them where the read has them (``ls``: Space Age stacks up to 4 items on a
+    belt), else the items."""
+    ls = row.get("ls")
+    if ls:
+        if isinstance(ls, dict):
+            ls = [ls[k] for k in sorted(ls, key=int)]
+        return (sum(v for i, v in enumerate(ls) if i % 2 == 0),
+                sum(v for i, v in enumerate(ls) if i % 2 == 1))
     ln = row.get("ln") or []
     if isinstance(ln, dict):
         ln = [ln[k] for k in sorted(ln, key=int)]
