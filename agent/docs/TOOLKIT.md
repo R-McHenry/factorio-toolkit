@@ -494,6 +494,25 @@ says `compiled  P: k inner nets from its stored inside`).
 - Change anything inside and the key changes: the module routes again and stores the new
   inside. `--with "route --compiled no"` routes every inside afresh.
 
+## Saving, loading and starting over: `fk map`
+
+The live map is yours to save, load, start over and pause:
+
+```
+fk map save NAME        the live map saved as NAME (the game goes on)
+fk map saves            the run's start, the map the server runs, and your saves
+fk map load NAME        your map saved first (before-load-STAMP), then the server restarted on
+                        NAME; start is the run's own start
+fk map restart          load start, set up the way the kickoff set it up (landfill, roboport,
+                        robots, kit chests, starter research); kept as save start-set-up too
+fk map pause | resume   the whole game stands still (machines, robots, research), or goes on
+```
+
+A load or restart restarts the server: it takes about half a minute, and anyone watching is
+dropped and joins again. Your designs in `game\` stay as they are, so after a restart the next
+`fk build` builds `world.fk` from the kit, as the robots get to it. Try a start-over in the
+planner first (`fk sim load start`); `fk map restart` is the live one.
+
 ## The speedrun planner: `fk sim`
 
 A second game of your own map, on this machine: same seed, same first tick, yours to try a plan in

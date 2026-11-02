@@ -87,6 +87,9 @@ use the game link, and only with FK_LINK=on)
     lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
                                           a factory (or a stage's) built on its own lab slot,
                                           powered and stocked; then what it really makes
+    map GAME_DIR save NAME | saves | load NAME | restart | pause | resume
+                                          the live map: saved, loaded (the server restarted on
+                                          it), started over, paused (fkcore.mapctl; the host)
     sim GAME_DIR start [NAME] | stop | status | kickoff [NAME] | save NAME | load NAME | saves | speed X |
          run N | until T | place FILE @X,Y | paste FILE @X,Y | remove AREA | decon AREA |
          play SCRIPT | env      the speedrun planner: the run's own map on this machine, paused
@@ -973,6 +976,19 @@ def _lab(a, cat):
     return 0
 
 
+def _map(a):
+    """fk map (3.0): the live map's saves, loads, start-over and pause (fkcore.mapctl), on the
+    game host."""
+    from . import link, mapctl
+    from . import pack as packmod
+    try:
+        print("\n".join(mapctl.run(a.game, a.verb, list(a.rest), pack=packmod.name() or None)))
+    except (mapctl.MapError, OSError, link.LinkError) as exc:
+        print(f"map: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _sim(a, cat):
     """fk sim (2.0.61): the speedrun planner (fkcore.sim), on this machine."""
     from . import link
@@ -1564,6 +1580,10 @@ def main(argv=None):
     sm.add_argument("game")
     sm.add_argument("verb")
     sm.add_argument("rest", nargs=argparse.REMAINDER)
+    mp = sub.add_parser("map")
+    mp.add_argument("game")
+    mp.add_argument("verb")
+    mp.add_argument("rest", nargs=argparse.REMAINDER)
     lb = sub.add_parser("lab")
     lb.add_argument("game")
     lb.add_argument("name", nargs="?")
@@ -1695,6 +1715,8 @@ def main(argv=None):
         return _measure(a, cat)
     if a.cmd == "sim":
         return _sim(a, cat)
+    if a.cmd == "map":
+        return _map(a)
     if a.cmd == "lab":
         return _lab(a, cat)
     if a.cmd == "capture":

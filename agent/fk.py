@@ -68,7 +68,7 @@ STEP_CMDS = {"route", "place", "report"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capital",
         "read-terrain", "measure", "adopt", "sense", "research", "tech", "recipes", "lua", "fresh",
-        "avail", "decon", "request", "walk"}
+        "avail", "decon", "request", "walk", "map"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
 AREA_FIRST = ("fresh", "measure", "decon")
 #: files only the host writes: pulled, never pushed
@@ -628,6 +628,13 @@ def main(argv):
         return code
     if cmd == "sim":
         return sim(cfg, rest)
+    if cmd == "map" and (not rest or rest[0] in ("-h", "--help")):
+        print("fk map save NAME | saves | load NAME | restart | pause | resume: the live map. "
+              "load saves the map as it stands first (before-load-STAMP), then restarts the "
+              "server on NAME (start: the run's start); restart is load start, set up as the "
+              "kickoff set it up; pause stands the whole game still until resume "
+              "(docs\\TOOLKIT.md, \"Saving, loading and starting over\")")
+        return 0
     if cmd == "capture":
         # 2.0.62: a design's instance is read here; a lab slot or an area, in the game
         if rest and rest[0] == "design":
