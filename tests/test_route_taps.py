@@ -65,7 +65,14 @@ class TapsTest(unittest.TestCase):
         n = self.route(fast=False)
         k = route._TAPS[("h/k", "h/a1/m0")]
         self.assertIn(k, (2, 3))
-        self.assertEqual(n["h/k"], 2 * k + 1)    # k out of each assembler, 1 into the chest
+        self.assertGreaterEqual(n["h/k"], 2 * k + 1)   # k out of each assembler, 1+ into the chest
+
+    def test_one_chest_loads_its_belt_from_two_sides(self):
+        # Rory, 11-01: "one chest can definately fill one belt from multiple sides": the belt
+        # wraps the 1x1 requester and takes a plain inserter on each side it passes
+        n = self.route(fast=False)
+        self.assertGreaterEqual(route._TAPS[("h/cu", "h/q/c0")], 2)
+        self.assertGreaterEqual(n["h/cu"], 4)     # 2+ loaders, 1 into each assembler
 
     def test_one_fast_inserter_is_enough(self):
         self.route(fast=True)

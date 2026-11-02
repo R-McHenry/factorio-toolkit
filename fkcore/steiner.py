@@ -180,7 +180,8 @@ class TapSink:
         ``taken`` (the tiles the path's start move lays, a splitter's)."""
         on = {(s[0], s[1]) for s in path}
         got = []
-        for s in reversed(path[-6:]):
+        # 3.0: k taps may wrap a belt round the machine (three sides of a 1x1 chest): a longer tail
+        for s in reversed(path[-(6 + 4 * (self.k - 1)):]):
             used = {g[0] for g in got}
             for q, name, direction in self.taps_at((s[0], s[1]), lambda q: tree.free(q) and q not in on
                                                    and q not in used and q not in taken):
@@ -552,8 +553,8 @@ def _astar(tree, starts, sinks, targets, limit=60000):
     def blocked(t):
         return grid.blocked(t) or t in tiles or t in res or t in spare
 
-    def crosses_own_spare(path):
-        how = how_of[path[0]]
+    def crosses_own_spare(path, first):
+        how = how_of[first]
         if not grid.drop_taps or how[0] != "split":
             return False
         return Tree.spare_tile(how[1], how[2]) in {(p[0], p[1]) for p in path}
@@ -567,8 +568,23 @@ def _astar(tree, starts, sinks, targets, limit=60000):
             r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
             tapped.add((q[0] + DX[g0] * r, q[1] + DY[g0] * r))
 
+    # 3.0: a tap sink that wants k > 1 inserters (route._TAPS) needs a path that passes k tap
+    # tiles, a wrap round a 1x1 chest say, which costs more than the straight path to the same
+    # state: near such a sink a state carries how many taps its own path has (up to k), so the
+    # costlier path isn't dropped. A search with none of them keeps its four-part states.
+    multi = [sinks[i] for i in targets if getattr(sinks[i], "k", 1) > 1]
+
+    def key(x, y, d, ex, prev=None):
+        if not multi:
+            return (x, y, d, ex)
+        if all(s.h(x, y) > 0 for s in multi):
+            return (x, y, d, ex, prev[4] if prev else 0)
+        path = ([p[:4] for p in _trace(parent, prev)] if prev else []) + [(x, y, d, ex)]
+        return (x, y, d, ex, max(min(len(s.pick(path, tree)), s.k) for s in multi))
+
     heap, g, parent, how_of, taken_of = [], {}, {}, {}, {}
     for st, g0, how, *taken in starts:
+        st = key(*st[:4]) if multi else st      # a start has no path behind it
         if g0 < g.get(st, INF):
             g[st] = g0
             parent[st] = None
@@ -585,21 +601,25 @@ def _astar(tree, starts, sinks, targets, limit=60000):
         done.add(st)
         if len(done) > limit:
             return None
-        path = None
+        path = keys = None
+        here = st[:4]
         for i in targets:
             if sinks[i].terminal:
-                hit = sinks[i].goal(st, tree)
+                hit = sinks[i].goal(here, tree)
             elif sinks[i].h(st[0], st[1]) > 0:
                 hit = False          # too far for any tap: skip the path trace
             else:
-                path = path or _trace(parent, st)
-                hit = sinks[i].goal(st, tree, path, taken_of[path[0]])
+                keys = keys or _trace(parent, st)
+                path = path or [p[:4] for p in keys]
+                hit = sinks[i].goal(here, tree, path, taken_of[keys[0]])
             if hit:
-                path = path or _trace(parent, st)
+                keys = keys or _trace(parent, st)
+                path = path or [p[:4] for p in keys]
                 if len({(p[0], p[1]) for p in path}) == len(path) and \
-                        not crosses_own_spare(path):
-                    return path, how_of[path[0]], i, gs
-        x, y, d, ex = st
+                        not crosses_own_spare(path, keys[0]):
+                    return path, how_of[keys[0]], i, gs
+        x, y, d, ex = here
+
         if (x, y) in sink_tiles and parent[st] is not None:
             continue   # nothing continues through a port's link tile
         for nd in range(4):
@@ -610,7 +630,7 @@ def _astar(tree, starts, sinks, targets, limit=60000):
             nx, ny = x + DX[nd], y + DY[nd]
             step = k["belt"] + (k["turn"] if nd != d else 0.0)
             if not blocked((nx, ny)):
-                _push(heap, g, parent, (nx, ny, nd, 0), st, gs + step, hh)
+                _push(heap, g, parent, key(nx, ny, nd, 0, st), st, gs + step, hh)
             if ex or nd != d or (x, y) in tapped:
                 continue
             seen_block = False
@@ -625,7 +645,7 @@ def _astar(tree, starts, sinks, targets, limit=60000):
                 if span & grid.spans[_axis(d)] or span & spans[_axis(d)]:
                     break
                 if seen_block and not blocked((tx, ty)):
-                    _push(heap, g, parent, (tx, ty, d, 1), st, gs + k["ug"], hh)
+                    _push(heap, g, parent, key(tx, ty, d, 1, st), st, gs + k["ug"], hh)
     return None
 
 

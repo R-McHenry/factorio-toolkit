@@ -802,7 +802,8 @@ def _tap_counts(flat, cat):
     return out
 
 
-def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None, net=None):
+def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None, net=None,
+          cap=TAPS_MAX):
     """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
     inserters, or long-handed ones where only those reach. ``sources``: the machines are drivers,
     and one in ``_FILTERED`` is tried with fast inserters alone before a long-handed one may load
@@ -820,19 +821,21 @@ def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=
     machines = [(k, r) for k, r in machines if k not in drops or first[drops[k]] == k]
     for hands in passes:
         sinks = fixed + [DropSink(key, drops[key]) if key in drops else
-                         tap(key, rect, _TAPS.get((net, key), 1),
+                         tap(key, rect, min(_TAPS.get((net, key), 1), cap),
                              _HANDS[0] if hands is None and key in _FILTERED
                              else hands or _HANDS[-1]) for key, rect in machines]
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
             break
-    if res["problems"] and net is not None and any((net, k) in _TAPS for k, _r in machines):
-        # 3.0: k inserters into a machine don't fit here: one each, as before (too-thin says so)
-        return _grow(grid, root, fixed, machines, limit, sources, tap, drops)
+    if res["problems"] and cap > 1 and any(_TAPS.get((net, k), 1) > 1 for k, _r in machines):
+        # 3.0: k inserters on a machine don't fit here: one fewer, down to one each as before
+        # (too-thin says what that costs)
+        return _grow(grid, root, fixed, machines, limit, sources, tap, drops, net,
+                     min(cap, max(_TAPS.get((net, k), 1) for k, _r in machines)) - 1)
     if res["problems"] and any(getattr(t, "hand", False) for t in drops.values()):
         # 3.0: a recycler whose drop tile no belt reaches is emptied by an inserter instead
         return _grow(grid, root, fixed, machines, limit, sources, tap,
-                     {k: t for k, t in drops.items() if not getattr(t, "hand", False)}, net)
+                     {k: t for k, t in drops.items() if not getattr(t, "hand", False)}, net, cap)
     return res, sinks
 
 

@@ -101,14 +101,13 @@ circuits and bricks. Those 1200 plates and 200 circuits are the budget for the f
 
 Early on, only plain inserters (1.2/s) are available, and many Sea Block machines need more than
 that. Where the best inserter the network can build is too slow for a machine on a belt, the
-router lays 2 or 3 of them into or out of it. A cable assembler gets two out of it, and a liquifier
-eating 10 stone/s gets three in (still short: `too-thin` says by how much).
+router lays 2 or 3 of them into or out of it. A cable assembler gets two out of it. A requester
+chest gets up to three loaders, its belt wrapping round it. A liquifier eating 10 stone/s gets
+three in. That's still short (`too-thin` says by how much): three plain inserters move 3.6/s, so
+feed it from more chests.
 
-Two things it can't fix:
-- A 1x1 chest at the end of a net keeps one inserter. Use two requesters, or a silo, where a
-  feed needs more.
-- A route that already stands keeps its inserters. `fk route NET` (or `route --again NET`) lays a
-  net again with the extra ones.
+A route that already stands keeps its inserters. `fk route NET` (or `route --again NET`) lays a
+net again with the extra ones.
 
 ## Huge chests: buffers that feed many machines
 
