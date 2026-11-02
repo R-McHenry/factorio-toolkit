@@ -77,7 +77,7 @@ class Map:
                 st = os.stat(p)
                 out.append(f"  {name:28} {time.strftime('%m-%d %H:%M', time.gmtime(st.st_mtime))} "
                            f"UTC  {st.st_size // 1024} kB"
-                           + ("  (the map the server runs; it saves here on its own)"
+                           + ("  (the save the server runs: written when it stops)"
                               if name == "live" else ""))
         return ["map: saves of this run (fk map load NAME):"] + out
 
