@@ -320,9 +320,21 @@ class Sim:
         for _ in range(60):
             if os.path.exists(path) and os.path.getmtime(path) > before:
                 time.sleep(0.5)
-                return f"sim: saved state {name} at tick {tick}"
+                return f"sim: saved state {name} at tick {tick}" + self._lineage(name)
             time.sleep(0.5)
         raise SimError(f"the game did not write {path}")
+
+    def _lineage(self, name):
+        """3.0 (``fkcore.simview``): NAME's parent (the state the running game came from), its
+        stats and map into ``sim\\lineage.json``; then NAME is the head the next save comes from."""
+        from . import simview
+        st = self.state() or {}
+        note = simview.record(self, name, st.get("head") or st.get("save"))
+        if st:
+            st["head"] = name
+            with open(self.state_file, "w", encoding="utf-8") as fh:
+                json.dump(st, fh)
+        return note
 
     def load(self, name):
         if self.archive().on:
