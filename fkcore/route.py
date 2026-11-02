@@ -2557,7 +2557,7 @@ def _filter_loads(flat, lay, cat):
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                  blocked=(), hand=None, patch=None, ug=None, m2m=False, group_budget=None,
                  group_max=None, first=(), skip=(), memo=None, again=(), on_net=None,
-                 on_reach=None, seeds=None, retry="changed") -> Routed:
+                 on_reach=None, seeds=None, retry="changed", pipe=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2581,13 +2581,16 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     ``seeds``: {net: carriers the player pinned} (``fk seed``), each such net laid through its
     seed (``_route_seeded``). ``retry`` (``route --retry-failed``): a net that failed last build is
     searched again when its ground ``changed`` (the default), ``always``, or ``never`` (until
-    ``again`` names it or the player unroutes it)."""
+    ``again`` names it or the player unroutes it). ``pipe``: (pipe, pipe-to-ground) the fluid
+    nets are laid with (``fluid_route.material``; default the iron ones)."""
     global _HANDS, _M2M
     policy = dict(group_budget=group_budget, group_max=group_max, first=tuple(first or ()),
                   skip=tuple(skip or ()), memo=memo or {}, fresh=tuple(again or ()),
                   on_net=on_net, on_reach=on_reach, seeds=dict(seeds or {}), retry=retry)
     from . import ribbons as ribmod
-    saved_ug, saved_m2m = ribmod._UG, _M2M
+    from . import fluid_route as fluidmod
+    saved_ug, saved_m2m, saved_pipe = ribmod._UG, _M2M, list(fluidmod._LAY)
+    fluidmod._LAY[:] = list(pipe or (fluidmod.PIPE, fluidmod.PTG))
     ribmod._UG = ribmod.ug_tiers(cat, ug or "yellow")
     _M2M = "left" if m2m == "left" else bool(m2m)
     try:
@@ -2606,6 +2609,7 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     finally:
         ribmod._UG = saved_ug
         _M2M = saved_m2m
+        fluidmod._LAY[:] = saved_pipe
 
 
 def _named(net, patterns):

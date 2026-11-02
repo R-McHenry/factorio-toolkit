@@ -52,6 +52,31 @@ from .catalog import FluidBox, PipeConn
 __all__ = ["route", "reserved", "why_not", "PIPE", "PTG"]
 
 PIPE, PTG = "pipe", "pipe-to-ground"
+#: 3.0 (Rory, 11-02: "the ability to choose material for pipes"): the pipe and pipe-to-ground
+#: this router lays (``route --pipe``, else the pack's ``pipe``); PIPE and PTG stay the kinds
+_LAY = [PIPE, PTG]
+
+
+def material(word, cat):
+    """(pipe, pipe-to-ground) for ``word``: a pipe entity (``bob-copper-pipe``) or a material
+    (``copper``, ``stone``, ``iron``); empty: the pack's default (pack.json ``pipe``), else iron.
+    ValueError when the catalog has no such pipe or no pipe-to-ground of it."""
+    from . import pack as packmod
+    asked = str(word or "").strip()
+    word = asked or packmod.facts().get("pipe") or "iron"
+    names = [PIPE] if word == "iron" else [word, f"bob-{word}-pipe", f"sb-{word}-pipe",
+                                             f"{word}-pipe"]
+    for n in names:
+        if cat.has_entity(n) and cat.kind(n) == "pipe":
+            g = f"{n}-to-ground"
+            if cat.has_entity(g) and cat.kind(g) == "pipe-to-ground":
+                return n, g
+            if asked:
+                raise ValueError(f"route --pipe {word}: {n} has no {g} in the catalog")
+    if not asked:
+        return PIPE, PTG             # the pack's default, on a catalog without it: iron
+    raise ValueError(f"route --pipe {word}: no pipe of that name or material in the catalog "
+                     "(iron, copper, stone, or an entity such as bob-copper-pipe)")
 _CARRIERS = ("pipe", "pipe-to-ground", "pump")
 _STEP = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
 _DIR_OF = {v: k for k, v in _STEP.items()}
@@ -602,11 +627,11 @@ def _entities(net, placed):
     for tile, kind, d in placed:
         x, y = tile[0] + 0.5, tile[1] + 0.5
         if kind == PIPE:
-            out.append(fkpmod.Entity(f"~{net}/p{count['p']}", PIPE, x, y, None, {"net": net}))
+            out.append(fkpmod.Entity(f"~{net}/p{count['p']}", _LAY[0], x, y, None, {"net": net}))
             count["p"] += 1
         else:
             facing = (d + 8) % 16 if kind == "ug_in" else d       # the open side
-            out.append(fkpmod.Entity(f"~{net}/g{count['g']}", PTG, x, y, facing, {"net": net}))
+            out.append(fkpmod.Entity(f"~{net}/g{count['g']}", _LAY[1], x, y, facing, {"net": net}))
             count["g"] += 1
     return out
 
@@ -711,7 +736,7 @@ def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000, budget=None):
         return blocked, (frames[inner] if inside else box)
     fluid_all = sorted(routemod.fluid_nets(flat, cat))
     edges = port_edges(flat, lay, cat)
-    reach = int(cat.entity(PTG).get("max_distance") or 10)
+    reach = int(cat.entity(_LAY[1]).get("max_distance") or 10)
     base = list(lay.entities.values())
     todo = list(nets)
     ends = {}

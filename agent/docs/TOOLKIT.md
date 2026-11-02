@@ -115,6 +115,12 @@ longer than yellow's 5 tiles adds its length and tier, `(7 tiles red)`. `route -
 reach that far. A ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates
 (4 belts): ...` with the reason, and lays none of its belts.
 
+`route --pipe copper` lays fluid nets in copper pipes and copper pipes-to-ground. The word is a
+material (`iron`, `copper`, `stone`, `steel`, ...) or a pipe entity (`bob-copper-pipe`). The
+default is the pack's: copper in Sea Block, iron elsewhere. Pipes of any material join each other,
+and a pipe that stands stays as it is. A material the network hasn't researched falls back to
+iron, and `out\route.txt` says so (`pipe: ...`).
+
 `route --m2m` lays a net with several drivers and several consumers whose flow is above one
 lane as a network of runs, not one trunk. The hub comes first, without side-loads, each driver
 dropping on the left lane. Then runs are added, each split off a belt or from a driver with

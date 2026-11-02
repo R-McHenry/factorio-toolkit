@@ -121,6 +121,13 @@ again with the new reach. In the .fkp a hand with its own vectors reads `pick=0,
 (tiles from its own tile, x east, y south). The paste writes them, and robot-built ghosts keep
 them. A vector the force hasn't researched is a `needs-research` line that names the tech.
 
+## Pipes
+
+The router lays copper pipes (`bob-copper-pipe`, 1 copper plate) and copper pipes-to-ground
+(an underground reach of 11, as iron's). That keeps iron for everything else. `route --pipe
+stone` lays Sea Block's stone pipes (stone bricks), and `--pipe iron` the vanilla ones. Pipes of
+every material join each other.
+
 ## Several inserters on one machine
 
 Early on, only plain inserters (1.2/s) are available, and many Sea Block machines need more than

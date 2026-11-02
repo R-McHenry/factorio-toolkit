@@ -970,6 +970,22 @@ def _ribbon_ug(word):
     return "yellow", None
 
 
+def _pipe(ctx, word, lines):
+    """(pipe, pipe-to-ground) for ``route --pipe`` (a material or a pipe entity; empty: the
+    pack's default, else iron); an unresearched one falls back to iron, with a line."""
+    from . import fluid_route as fluidmod
+    try:
+        pipe = fluidmod.material(word, ctx.cat)
+    except ValueError as exc:
+        raise FlowError(str(exc)) from None
+    if pipe[0] != fluidmod.PIPE and (availmod.locked(pipe[0]) or availmod.locked(pipe[1])):
+        lines.append(f"pipe: {pipe[0]} is not researched here: iron pipes instead")
+        return fluidmod.PIPE, fluidmod.PTG
+    if pipe[0] != fluidmod.PIPE:
+        lines.append(f"pipe: {pipe[0]} and {pipe[1]}")
+    return pipe
+
+
 def s_route(ctx, args):
     # 3.0: the routing policy is the build script's: --group-budget S (a failed net's group try,
     # 0 = every net once and alone), --group-max N, --first NET,... (patterns too: mall/*), and
@@ -979,7 +995,7 @@ def s_route(ctx, args):
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
               m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
               skip="", retry_failed="changed", failed="keep", area="", compiled="yes",
-              reuse_lab=False, compile="", **{"try": ""})
+              reuse_lab=False, compile="", pipe="", **{"try": ""})
     if o["try"]:
         return _route_try(ctx, str(o["try"]))
     if o["compile"]:
@@ -994,6 +1010,7 @@ def s_route(ctx, args):
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
     lines, checks = [], []
     ug, ug_note = _ribbon_ug(str(o["ug"]))
+    pipe = _pipe(ctx, o["pipe"], lines)
     for factory, lay in list(ctx.layouts.items()):
         flat = ctx.flats[factory]
         pinned, again, comp = {}, {}, {}
@@ -1101,7 +1118,7 @@ def s_route(ctx, args):
             return rec["ents"] if rec and rec["status"] == "held" else None
         try:
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
-                                   blocked=blocked, hand=hand, patch=pinned, ug=ug,
+                                   blocked=blocked, hand=hand, patch=pinned, ug=ug, pipe=pipe,
                                    m2m="left" if o["m2m"] == "left"
                                    else o["m2m"] not in (False, "no"),
                                    group_budget=float(o["group_budget"]),
@@ -1184,7 +1201,7 @@ def _route_compile(ctx, module, hand_word):
                 continue
             nets = set(compiledmod.inner_nets(flat, path))
             began = time.time()
-            r = route.route_layout(flat, lay, ctx.cat, hand=hand,
+            r = route.route_layout(flat, lay, ctx.cat, hand=hand, pipe=_pipe(ctx, "", []),
                                    blocked=_frame_blocked(ctx, factory, lay.size),
                                    skip=[n for n in flat.nets if n not in nets])
             took = time.time() - began
