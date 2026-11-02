@@ -99,6 +99,15 @@ ExecStart=/bin/bash -c '$BIN \\
 EOF
 }
 
+fresh_save() {   # $1 = $SAVE's mtime before the save: wait until a newer one stands
+  # 3.0 (11-02): it waited for $SAVE to exist, which step 6's second save always did already, so
+  # the run's start (v1-RUN-start.zip) was the bare map, without the setup
+  for _ in $(seq 1 30); do
+    [ "$(stat -c %Y "$SAVE" 2>/dev/null || echo 0)" -gt "$1" ] && { sleep 2; return 0; }
+    sleep 1
+  done
+  say "no new save at $SAVE"; exit 1
+}
 up_wait() {   # $1 = what to say when the server does not answer within 40 s
   [ "$DRY" = "--dry" ] && return 0
   SECONDS=0
@@ -146,12 +155,12 @@ run systemctl start factorio
 up_wait "the server did not answer RCON within 40 s"
 run python3 $K/joins.py restore-file
 pin() {    # save the running map and make v1.conf start that save from now on (no restart)
+  was=$(stat -c %Y "$SAVE" 2>/dev/null || echo 0)
   run su computah -c "'$AS timeout 10 python3 $TK/kickoff/save_map.py v1-$RUN'"
   if [ "$DRY" = "--dry" ]; then
     echo "  would rewrite $D/v1.conf to start $SAVE"
   else
-    for _ in $(seq 1 30); do [ -f "$SAVE" ] && break; sleep 1; done
-    [ -f "$SAVE" ] || { say "no save at $SAVE"; exit 1; }
+    fresh_save "$was"
     conf "--start-server $SAVE" > $D/v1.conf
     systemctl daemon-reload
   fi
@@ -178,12 +187,12 @@ say "3. no join password: nobody else joins the test server"
 sb_start
 up_wait "the Sea Block test server did not answer RCON within 40 s"
 pin() {    # save the running map and make start.sh start that save from now on (no restart)
+  was=$(stat -c %Y "$SAVE" 2>/dev/null || echo 0)
   run su computah -c "'$AS timeout 10 python3 $TK/kickoff/save_map.py v1-$RUN'"
   if [ "$DRY" = "--dry" ]; then
     echo "  would write $SB/current-map to start $SAVE"
   else
-    for _ in $(seq 1 30); do [ -f "$SAVE" ] && break; sleep 1; done
-    [ -f "$SAVE" ] || { say "no save at $SAVE"; exit 1; }
+    fresh_save "$was"
     echo "--start-server $SAVE" > $SB/current-map
     chown computah:computah $SB/current-map
   fi

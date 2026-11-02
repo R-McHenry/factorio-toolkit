@@ -503,12 +503,17 @@ gives the same game every time. It runs as fast as the machine allows: about 20 
 on this laptop.
 
 ```
-fk sim fetch                     your map as it stood right after the kickoff, as save state start
+fk sim fetch                     your map as it stood right after the kickoff, as save state start,
+                                 with the live game's own mods and mod settings
 fk sim fetch --live now          the live game as it stands now, as save state now
 fk sim start [NAME]              the planner from a save state (default start), paused
+fk sim kickoff                   the kickoff's setup on a bare start (landfill, roboport, robots,
+                                 kit chests, starter research), saved as start; the bare map is
+                                 kept as bare
 fk sim speed 100                 ticks run up to 100 times as fast (1 is real time)
 fk sim run 3600 | until T        move the game on 3600 ticks (a minute), or to tick T
-fk sim save NAME | load NAME     a save state of the game as it stands; back to one
+fk sim save NAME | load NAME     a save state of the game as it stands; back to one (at the
+                                 speed it ran at)
 fk sim saves | status | stop
 fk sim place FILE @X,Y           a design built at once and free: a laid-out .fkp (game\world.fkp,
                                  a factory's), a blueprint string (.txt) or {"bp": ...} (.json),
@@ -537,6 +542,10 @@ save after-smelt
 `fk sim play` prints each action with its tick. The game still refuses what it refuses in the
 run: a building on a cliff or an enemy base, or a drill off its ore. `place` says how many didn't
 stand and why. The planner's own files are in `sim\` of your run folder.
+
+Runs kicked off before toolkit 3.0 fetch a `start` from before the kickoff's setup: `fk sim start`
+says it stands at tick ~100, with no robots. `fk sim kickoff` sets it up as the live game was set
+up. A playback's paths are relative to the `.sim` file.
 
 - A `.fkp` is in its design's own tiles: `world.fkp` goes in at `@-1000,-1000` (the world plot's
   corner on the map), a factory's at its plot's corner.
@@ -1187,7 +1196,9 @@ plates/s in) gets fast ones. `hands maximize` takes the top rung everywhere; `ha
 is skipped and the line says so. Where even the best hand the network can build is too slow for a
 machine (a cable assembler's 2 cable/s against a plain inserter's 1.2/s), the router lays 2 or 3
 inserters between that machine and its belt, into it or out of it, where they fit; a belt from a
-1x1 chest wraps round it to take a loader on each side it passes. A route that already
+1x1 chest wraps round it to take a loader on each side it passes. Two machines side by side on a
+net get the same: what flows between them over what one hand carries, so a crusher feeding the
+liquifier next to it gets 2 or 3 hands across the gap. A route that already
 stands keeps its carriers, so `--hand any` renames the standing hands robots cannot build to the one
 they can (`out\route.txt`: `rehanded 2 standing inserters robots cannot build, to inserter`), and
 leaves a hand that stands built alone. `cover power --pole

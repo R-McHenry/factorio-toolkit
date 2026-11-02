@@ -310,6 +310,51 @@ def remote(cfg, args, footer=True, data=None):
     return _ssh(cfg, cmd, data=data).returncode
 
 
+def _sim_mods(cfg, saves):
+    """3.0 (11-02): the planner plays with the live game's own mods. ``fk sim fetch`` copies the
+    host's mod list (``sim\\live-mods.json``, which ``fkcore.sim`` links by) and its
+    ``mod-settings.dat`` (``sim\\mod-settings.dat``), and any mod version the pack's mod folder
+    lacks into it (a fk-early-bots 0.2.1 sim against a 0.4.0 game ran its robots flat)."""
+    mods = posixpath.join(posixpath.dirname(saves), "mods")
+    got = _ssh(cfg, f"ls {shlex.quote(mods)}", capture=True)
+    if got.returncode != 0:
+        return [f"sim: no mod folder at {cfg['host']}:{mods}; the planner keeps the pack's mods"]
+    names = [n for n in got.stdout.decode().split() if n not in ("mod-list.json", "mod-settings.dat")]
+    root = os.path.join(RUN, "sim")
+    os.makedirs(root, exist_ok=True)
+    with open(os.path.join(root, "live-mods.json"), "w", encoding="utf-8") as fh:
+        json.dump({"from": f"{cfg['host']}:{mods}", "mods": names}, fh, indent=1)
+    out = [f"sim: {len(names)} mods as the live game has them"]
+    st = _ssh(cfg, f"cat {shlex.quote(mods + '/mod-settings.dat')}", capture=True)
+    if st.returncode == 0 and st.stdout:
+        with open(os.path.join(root, "mod-settings.dat"), "wb") as fh:
+            fh.write(st.stdout)
+        out.append("sim: the live game's mod settings")
+    local = os.environ.get("FK_SIM_MODS")
+    if not local:
+        try:
+            with open(os.path.join(RUN, ".toolkit", "fkcore", "data", "packs", cfg.get("pack") or "",
+                                   "pack.json"), encoding="utf-8") as fh:
+                local = json.load(fh).get("mods_dir")
+        except (OSError, ValueError):
+            local = None
+    if not local:
+        return out
+    have = set(os.listdir(local)) if os.path.isdir(local) else set()
+    for n in names:
+        if n in have:
+            continue
+        tar = _ssh(cfg, f"tar -cf - -C {shlex.quote(mods)} {shlex.quote(n)}", capture=True)
+        if tar.returncode != 0:
+            out.append(f"sim: could not copy {n} from {cfg['host']}")
+            continue
+        os.makedirs(local, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as tf:
+            tf.extractall(local, filter="data")
+        out.append(f"sim: {n} copied into {local}")
+    return out
+
+
 def footer(cfg):
     return remote(cfg, ["poll", "."], footer=False)
 
@@ -325,7 +370,7 @@ def sim(cfg, rest):
     fkcore game command (stats, look, lua, research...) against the planner instead of the live
     game. Nothing here touches the live game but ``fetch --live``'s save."""
     if not rest or rest[0] in ("-h", "--help"):
-        print("fk sim fetch [--live NAME] | start [NAME] | stop | status | save NAME | load NAME | "
+        print("fk sim fetch [--live NAME] | start [NAME] | stop | status | kickoff [NAME] | save NAME | load NAME | "
               "saves | speed X | run N | until T | place FILE @X,Y | paste FILE @X,Y | remove "
               "X0,Y0,X1,Y1 | decon X0,Y0,X1,Y1 | play SCRIPT | game CMD ... | explore on|next|"
               "status|archive|best|off  (docs\\TOOLKIT.md, \"The speedrun planner\")")
@@ -359,6 +404,11 @@ def sim(cfg, rest):
         with open(os.path.join(dest, f"{name}.zip"), "wb") as fh:
             fh.write(got.stdout)
         print(f"sim: save state {name} from {cfg['host']}:{path} ({len(got.stdout) // 1024} kB)")
+        for line in _sim_mods(cfg, os.path.dirname(path)):
+            print(line)
+        if not live:
+            print("sim: if that start is the map from before the kickoff (fk sim start says tick "
+                  "~100, no robots): fk sim start, then fk sim kickoff")
         return 0
     if rest[0] == "game":
         env_json = subprocess.run([sys.executable, "-m", "fkcore", "sim", ".", "env"], cwd=GAME,

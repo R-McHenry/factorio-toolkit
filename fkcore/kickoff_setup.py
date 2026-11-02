@@ -1,4 +1,8 @@
-"""setup_v1: the starter world of a V1 run, on a map just made from the fk-play scenario.
+"""fkcore.kickoff_setup: the starter world of a V1 run, on a map just made from the fk-play scenario.
+
+3.0 (11-02): moved here from ``kickoff/setup_v1.py`` (still its command) so a run's own toolkit
+has it: ``fk sim kickoff`` sets the planner's bare map up the same way (``run`` takes anything
+with a ``lua(text)``: an RCON link or a ``fkcore.sim.Sim``).
 
 Copied from the kickoff (v4-hand/kickoff/setup.py and starter_rules.py, 2026-10-18: Rory's kit and
 rules), changed for V1:
@@ -47,10 +51,7 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-
-from fkcore import link  # noqa: E402
+from . import link
 
 BOOTSTRAP = (
     [("roboport", 8, 8)]

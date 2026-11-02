@@ -87,7 +87,7 @@ use the game link, and only with FK_LINK=on)
     lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
                                           a factory (or a stage's) built on its own lab slot,
                                           powered and stocked; then what it really makes
-    sim GAME_DIR start [NAME] | stop | status | save NAME | load NAME | saves | speed X |
+    sim GAME_DIR start [NAME] | stop | status | kickoff [NAME] | save NAME | load NAME | saves | speed X |
          run N | until T | place FILE @X,Y | paste FILE @X,Y | remove AREA | decon AREA |
          play SCRIPT | env      the speedrun planner: the run's own map on this machine, paused
                                           between actions (fkcore.sim)
@@ -991,6 +991,8 @@ def _sim(a, cat):
             print(s.start(names[0] if names else "start", spectate=spectate))
         elif v == "stop":
             print(s.stop())
+        elif v == "kickoff":
+            print("\n".join(s.kickoff(rest[0] if rest else "start")))
         elif v == "status":
             st = s.state()
             print("sim: not running" if st is None else
@@ -1034,7 +1036,7 @@ def _sim(a, cat):
                 raise simmod.SimError("fk sim add-save FILE NAME")
             print(s.add_save(rest[0], rest[1]))
         else:
-            raise simmod.SimError(f"fk sim {v}: start, stop, status, save, load, saves, speed, "
+            raise simmod.SimError(f"fk sim {v}: start, stop, status, kickoff, save, load, saves, speed, "
                                   "run, until, place, paste, remove, decon, play, explore")
     except (simmod.SimError, OSError, link.LinkError, ValueError) as exc:
         print(f"sim: {exc}", file=sys.stderr)

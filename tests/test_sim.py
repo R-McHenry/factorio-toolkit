@@ -85,6 +85,21 @@ class SimFilesTest(unittest.TestCase):
         self.assertTrue(on["base"] and on["SeaBlock"] and on["angelsrefining"])
         self.assertFalse(on["space-age"] or on["quality"] or on["elevated-rails"])
         self.assertTrue(os.path.exists(os.path.join(mods, "SeaBlock_0.6.0", "info.json")))
+        # 11-02: the live game's versions (fk sim fetch's live-mods.json) and its mod settings win
+        # over the catalog's (a 0.2.1 sim against a 0.4.0 game ran its robots flat)
+        for v in ("0.2.1", "0.4.0"):
+            os.makedirs(os.path.join(src, f"fk-early-bots_{v}"), exist_ok=True)
+        with open(os.path.join(run, "sim", "live-mods.json"), "w", encoding="utf-8") as fh:
+            json.dump({"mods": ["fk-early-bots_0.4.0", "SeaBlock_0.6.0"]}, fh)
+        with open(os.path.join(run, "sim", "mod-settings.dat"), "wb") as fh:
+            fh.write(b"\x01")
+        with mock.patch.dict(os.environ, {"FK_PACK": "seablock", "FK_SIM_MODS": src}):
+            notes = sim.Sim(run)._mods()
+        self.assertTrue(os.path.exists(os.path.join(mods, "fk-early-bots_0.4.0")))
+        self.assertFalse(os.path.exists(os.path.join(mods, "fk-early-bots_0.2.1")))
+        self.assertTrue(os.path.exists(os.path.join(mods, "mod-settings.dat")))
+        self.assertIn("the live game's mod settings", notes)
+        self.assertEqual(sim._mod_version("fk-early-bots_0.10.0.zip"), (0, 10, 0))
         with mock.patch.dict(os.environ, {"FK_PACK": ""}):
             self.assertEqual(sim.Sim(run)._mods(), [])          # the base game: Factorio's own
         self.assertFalse(os.path.exists(mods))

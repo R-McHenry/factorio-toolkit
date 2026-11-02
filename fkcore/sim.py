@@ -19,6 +19,7 @@ the machine allows, not in real time.
 
     start [NAME]        the server from save state NAME (default start), paused
     stop | status
+    kickoff [NAME]      the run's kickoff setup on a bare map, saved as NAME (default start)
     save NAME | load NAME | saves
     speed X             ticks run X times as fast (game.speed)
     run N | until T     move the game on N ticks, or to tick T
@@ -146,17 +147,30 @@ class Sim:
         src = os.environ.get("FK_SIM_MODS") or _pack.facts().get("mods_dir")
         os.makedirs(mods_dir)
         have = sorted(os.listdir(src)) if src and os.path.isdir(src) else []
+        # 3.0 (11-02): the live game's own versions (``fk sim fetch`` lists them), else the
+        # catalog's, else the newest there
+        live = {}
+        try:
+            with open(os.path.join(self.root, "live-mods.json"), encoding="utf-8") as fh:
+                for f in json.load(fh).get("mods") or ():
+                    live[f.rsplit("_", 1)[0]] = f
+        except (OSError, ValueError):
+            pass
         listed, missing, notes = [], [], []
         for n, ver in want:
             listed.append(n)
             if n in BUILT_IN:
                 continue
-            got = next((f for f in have if f in (f"{n}_{ver}", f"{n}_{ver}.zip")), None) or \
-                next((f for f in have if f.startswith(f"{n}_")), None)
+            got = (live.get(n) if live.get(n) in have else None) or \
+                next((f for f in have if f in (f"{n}_{ver}", f"{n}_{ver}.zip")), None) or \
+                next((f for f in sorted(have, key=_mod_version, reverse=True)
+                      if f.startswith(f"{n}_")), None)
+            if n in live and got != live[n]:
+                notes.append(f"{n}: the live game runs {live[n]}, this machine has {got or 'none'}")
             if got is None:
                 missing.append(f"{n} {ver}")
                 continue
-            if not got.startswith(f"{n}_{ver}"):
+            if not got.startswith(f"{n}_{ver}") and n not in live:
                 notes.append(f"{n} is {got}, the pack's catalog says {ver}")
             _link(os.path.join(src, got), os.path.join(mods_dir, got))
         if missing:
@@ -165,6 +179,10 @@ class Sim:
         with open(os.path.join(mods_dir, "mod-list.json"), "w", encoding="utf-8") as fh:
             json.dump({"mods": [{"name": n, "enabled": n in listed} for n in BUILT_IN]
                       + [{"name": n, "enabled": True} for n in listed if n not in BUILT_IN]}, fh)
+        settings = os.path.join(self.root, "mod-settings.dat")
+        if os.path.exists(settings):
+            shutil.copyfile(settings, os.path.join(mods_dir, "mod-settings.dat"))
+            notes.append("the live game's mod settings")
         return [f"pack {name}, {len(listed)} mods"] + notes
 
     def state(self):
@@ -313,8 +331,39 @@ class Sim:
         if not os.path.exists(self.save_path(name)):
             raise SimError(f"no save state {name} (fk sim saves)")
         st = self.state()
+        # 3.0 (11-02, the seablock player: "fk sim load resets speed to 1"): a server save
+        # doesn't keep game.speed, so the speed it ran at is set again after the load
+        speed = None
+        if st is not None and not st.get("spectate"):
+            try:
+                speed = float(self.lua("rcon.print(game.speed)").strip())
+            except (OSError, link.LinkError, ValueError):
+                speed = None
         self.stop()
-        return self.start(name, spectate=bool(st and st.get("spectate")))
+        line = self.start(name, spectate=bool(st and st.get("spectate")))
+        if speed and speed != 1:
+            self.lua(f"game.speed = {speed} rcon.print('ok')")
+            line += f", speed {speed:g} as before"
+        return line
+
+    def kickoff(self, name="start"):
+        """3.0 (11-02): the run's kickoff setup (``fkcore.kickoff_setup``: landfill, bootstrap,
+        robots, kit chests, starter research, the pack's own) on the bare map the planner runs,
+        then saved as ``name``. For a run whose fetched start is the map from before its kickoff
+        (``kickoff-v1.sh`` copied the start before its second save landed, up to 3.0). The map
+        refuses a second setup. -> report lines."""
+        from . import kickoff_setup
+        from . import pack as _pack
+        if self.state() is None:
+            raise SimError("the planner is not running (fk sim start)")
+        got = kickoff_setup.run(self, pack=_pack.name() or None)
+        out = [f"sim: kickoff {k}: {v}" for k, v in got.items()]
+        if any("REFUSED" in str(v) for v in got.values()):
+            return out + ["sim: this map was set up already; nothing saved"]
+        if os.path.exists(self.save_path(name)) and not os.path.exists(self.save_path("bare")):
+            shutil.copyfile(self.save_path(name), self.save_path("bare"))
+            out.append(f"sim: the map before it kept as save state bare")
+        return out + [self.save(name)]
 
     def add_save(self, src, name):
         """Copy a save file in as save state ``name`` (the run's start, fetched from the host)."""
@@ -647,6 +696,15 @@ rcon.print('sim: removed ' .. n .. ' entities')
             arch.write()
             return True
         return False
+
+
+def _mod_version(f):
+    """``name_1.2.3[.zip]`` -> (1, 2, 3), for the newest of a mod's versions."""
+    v = f[:-4] if f.endswith(".zip") else f
+    try:
+        return tuple(int(p) for p in v.rsplit("_", 1)[1].split("."))
+    except (IndexError, ValueError):
+        return ()
 
 
 def _lua_clear_marked(area):
