@@ -19,15 +19,15 @@ CAT = Catalog.load()
 
 #: a requester chest diagonal to a provider: no straight inserter links them
 DIAG = """module Diag size 8x8 {
-  q  = Chest<requester, item=iron-plate, rate=1> @(2, 2)
+  q  = Chest<requester, item=iron-plate, rate=0.5> @(2, 2)
   b  = Chest<provider> @(3, 3)
   net x: q -> b
 }
 h = Diag @(2, 2)
 """
-#: two chests three tiles apart: one inserter between them reaches 1 and 2
+#: two chests three tiles apart: one inserter between them reaches 1 and 2 (0.5/s: one hand carries it)
 FAR = """module Far size 10x6 {
-  q  = Chest<requester, item=iron-plate, rate=1> @(1, 2)
+  q  = Chest<requester, item=iron-plate, rate=0.5> @(1, 2)
   b  = Chest<provider> @(4, 2)
   net x: q -> b
 }

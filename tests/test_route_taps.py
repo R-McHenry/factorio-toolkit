@@ -83,6 +83,35 @@ class TapsTest(unittest.TestCase):
         self.assertEqual(route._TAPS, {})
         self.assertEqual(n["h/k"], 3)
 
+    def test_two_machines_side_by_side_take_two_hands(self):
+        # Rory, 11-02: "two machines next to eachother that need more than 1 inserter? Like a ore
+        # crusher next to a liquefier": a direct link is sized like a tap, 2 cable/s over 1.2/s
+        with open(os.path.join(self.dir, "t.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(PAIR)
+        n = self.route(fast=False)
+        self.assertGreaterEqual(n["h/k"], 2)
+        self.assertEqual(route._link_k("h/k", "h/a/m0", "h/c/m0"), n["h/k"])
+
+    def test_two_machines_side_by_side_one_fast_hand(self):
+        with open(os.path.join(self.dir, "t.fk"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(PAIR)
+        self.assertEqual(self.route(fast=True)["h/k"], 1)
+
+
+PAIR = """module Pair size 16x10 {
+  q  = Chest<requester, item=copper-plate, rate=2> @(1, 3)
+  fe = Chest<requester, item=iron-plate, rate=2> @(14, 3)
+  a  = Assembler<recipe=copper-cable> @(4, 2)
+  c  = Assembler<recipe=electronic-circuit> @(8, 2)
+  net cu: q -> a
+  net fe: fe -> c
+  b  = Chest<provider> @(9, 8)
+  net k: a -> c
+  net ec: c -> b
+}
+h = Pair @(2, 2)
+"""
+
 
 if __name__ == "__main__":
     unittest.main()

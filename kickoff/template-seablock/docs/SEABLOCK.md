@@ -137,6 +137,10 @@ chest gets up to three loaders, its belt wrapping round it. A liquifier eating 1
 three in. That's still short (`too-thin` says by how much): three plain inserters move 3.6/s, so
 feed it from more chests.
 
+Two machines side by side work the same way. A crusher that feeds the liquifier next to it gets 2
+or 3 inserters across the gap: what moves between them divided by what one inserter carries
+straight across (0.86/s for a plain one).
+
 A route that already stands keeps its inserters. `fk route NET` (or `route --again NET`) lays a
 net again with the extra ones.
 

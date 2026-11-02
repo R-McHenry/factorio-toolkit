@@ -750,6 +750,12 @@ _FILTERED = frozenset()
 #: inserters there, and one where k don't fit
 _TAPS = {}
 TAPS_MAX = 3
+#: 3.0 (Rory, 11-02: "ideally our throughput fix is more general"): what flows through each
+#: machine's side of a net, {(net, machine, "in"|"out"): items/s}, and what one hand of the best
+#: the force can build carries: every inserter link the router lays (a tap off a belt, a drop onto
+#: one, a machine straight into a machine) is sized by them (``_link_k``)
+_NEED = {}
+_HAND = 0.0
 #: 3.0 (Bob's adjustable inserters, ``fkcore.arms``): the vectors the force may set an inserter to,
 #: or None (the base game). ``_route_layout`` sets it from the build's stock read; nothing read:
 #: the pack's base set (range 1, 4 ways). Taps and direct inserters then turn corners, and reach
@@ -758,10 +764,30 @@ _ARMS = None
 INF_RATE = float("inf")
 
 
-def _tap_counts(flat, cat):
+def _link_k(net, src=None, dst=None, need=None):
+    """How many inserters one link of ``net`` needs: what flows through it (the lesser of what
+    machine ``src`` puts on the net and what ``dst`` takes from it; ``need`` when given) over what
+    one hand of the best the force can build carries, 1 to TAPS_MAX. 1 when nothing is known."""
+    r = need if need is not None else min(_NEED.get((net, src, "out"), INF_RATE),
+                                          _NEED.get((net, dst, "in"), INF_RATE))
+    if not _HAND or not 0 < r < INF_RATE:
+        return 1
+    return max(1, min(TAPS_MAX, math.ceil(r / _HAND - 1e-9)))
+
+
+def _sizing(flat, cat):
+    """``_tap_counts`` and the flows behind it: (taps, need, hand) for ``_TAPS``, ``_NEED`` and
+    ``_HAND``. Nothing read: ({}, {}, 0.0)."""
+    need, hand = {}, [0.0]
+    taps = _tap_counts(flat, cat, need, hand)
+    return taps, need, hand[0]
+
+
+def _tap_counts(flat, cat, need=None, hand=None):
     """{(net, machine): k} for every machine on a belt net whose take (a consumer) or put (a
     driver) is more than one inserter of the best hand the force can build carries: k of them, at
-    most TAPS_MAX. Nothing read (a lab, a paper game): {} (one hand each; ``hands`` raises it)."""
+    most TAPS_MAX. Nothing read (a lab, a paper game): {} (one hand each; ``hands`` raises it).
+    ``need`` (a dict) gets every machine's flow, ``hand`` (a one-item list) the one hand's rate."""
     from . import avail as availmod
     from . import lanes as lanesmod
     from . import routed as routedmod
@@ -773,6 +799,8 @@ def _tap_counts(flat, cat):
     put = lanesmod.inserter_rate(best, onto_belt=True, cat=cat)
     if not take or not put:
         return {}
+    if hand is not None:
+        hand[0] = take
     model = routedmod.sizing_model(flat)
     out = {}
     for name, net in flat.nets.items():
@@ -802,6 +830,8 @@ def _tap_counts(flat, cat):
             if r > 0:
                 want[(key, "out")] = want.get((key, "out"), 0.0) + r
         for (key, side), r in want.items():
+            if need is not None:
+                need[(name, key, side)] = r
             k = min(TAPS_MAX, math.ceil(r / (take if side == "in" else put) - 1e-9))
             if k > 1:
                 out[(name, key)] = k
@@ -1017,12 +1047,28 @@ def _direct_pair(src, dst, grid, taken=()):
     return None
 
 
+def _direct_link(src, dst, grid, taken=(), k=1):
+    """Up to ``k`` inserters from machine rect ``src`` into ``dst`` (``_direct_pair``, each on a
+    tile of its own): [] when none fits, fewer than k where only those fit."""
+    got, held = [], set(taken)
+    for _ in range(max(1, k)):
+        one = _direct_pair(src, dst, grid, held)
+        if one is None:
+            break
+        got.append(one)
+        held.add((math.floor(one["x"]), math.floor(one["y"])))
+    return got
+
+
+def _tiles_of(plans):
+    return {(math.floor(p["x"]), math.floor(p["y"])) for p in plans}
+
+
 def _direct(cat, job, grid):
     """One machine driver into one machine: a single inserter between them, if one fits."""
-    (_sk, src), = job.sources
-    (_tk, dst), = job.taps
-    got = _direct_pair(src, dst, grid)
-    return [got] if got else None
+    (sk, src), = job.sources
+    (tk, dst), = job.taps
+    return _direct_link(src, dst, grid, (), _link_k(job.net, sk, tk)) or None
 
 
 def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
@@ -1037,10 +1083,9 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
             continue
         grid = _Bounded(_ground(cat, ents, frames, js, net, terrain), box)
         mine, ends = set(), set(js[net].ends())
-        for src, dst in pairs:
-            got = _direct_pair(src, dst, grid, taken | mine | ends)
-            if got:
-                mine.add((math.floor(got["x"]), math.floor(got["y"])))
+        for (sk, src), (tk, dst) in pairs:
+            mine |= _tiles_of(_direct_link(src, dst, grid, taken | mine | ends,
+                                           _link_k(net, sk, tk)))
         if mine:
             out[net] = mine
             taken |= mine
@@ -1048,15 +1093,15 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
 
 
 def _direct_pairs_of(job):
-    """[(driver rect, consumer rect)] a direct inserter may join: one machine driver and each
+    """[((driver, rect), (consumer, rect))] a direct inserter may join: one machine driver and each
     consumer machine, or (1.4) each of several machine drivers and one consumer machine (two
     cable assemblers beside one circuit assembler). [] for any other net."""
     if job.starts or job.goals:
         return []
     if len(job.sources) == 1 and job.taps:
-        return [(job.sources[0][1], rect) for _k, rect in job.taps]
+        return [(job.sources[0], tap) for tap in job.taps]
     if len(job.taps) == 1 and len(job.sources) > 1:
-        return [(rect, job.taps[0][1]) for _k, rect in job.sources]
+        return [(src, job.taps[0]) for src in job.sources]
     return []
 
 
@@ -1073,13 +1118,13 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
     # nets' claims took every side of the driver), the whole net is laid as a tree, as before 1.4
     ends = set(job.ends())
     if len(job.sources) == 1 and not job.starts and job.taps:
-        (_sk, src), = job.sources
+        (sk, src), = job.sources
         taken, direct, rest = set(), [], []
         for key, rect in job.taps:
-            got = _direct_pair(src, rect, grid, taken | ends)
+            got = _direct_link(src, rect, grid, taken | ends, _link_k(job.net, sk, key))
             if got:
-                direct.append(got)
-                taken.add((math.floor(got["x"]), math.floor(got["y"])))
+                direct += got
+                taken |= _tiles_of(got)
             else:
                 rest.append((key, rect))
         if direct:
@@ -1098,13 +1143,13 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
     if len(job.taps) == 1 and len(job.sources) > 1 and not job.starts and not job.goals:
         # several machine drivers beside one consumer machine: each hands to it by an inserter
         # of its own (1.4); only the drivers left are laid as a belt tree into it
-        (_tk, dst), = job.taps
+        (tk, dst), = job.taps
         taken, direct, rest = set(), [], []
         for key, rect in job.sources:
-            got = _direct_pair(rect, dst, grid, taken | ends)
+            got = _direct_link(rect, dst, grid, taken | ends, _link_k(job.net, key, tk))
             if got:
-                direct.append(got)
-                taken.add((math.floor(got["x"]), math.floor(got["y"])))
+                direct += got
+                taken |= _tiles_of(got)
             else:
                 rest.append((key, rect))
         if direct:
@@ -1724,18 +1769,20 @@ def _straight(job, grid):
     laid = [t for t in tiles if kind[t] is not None]
     taken = set(tiles)
     for want, pairs in ((job.taps, False), (job.sources, True)):
-        for _key, rect in want:
-            got = None
+        for key, rect in want:
+            k, n = _TAPS.get((job.net, key), 1), 0
             for x, y in laid:
                 belt = (x, y, x + 1, y + 1)
                 got = _direct_pair(rect, belt, grid, taken) if pairs else \
                     _direct_pair(belt, rect, grid, taken)
                 if got:
-                    break
-            if not got:
+                    taken.add((math.floor(got["x"]), math.floor(got["y"])))
+                    plan.append(got)
+                    n += 1
+                    if n >= k:
+                        break
+            if not n:
                 return None
-            taken.add((math.floor(got["x"]), math.floor(got["y"])))
-            plan.append(got)
     return plan
 
 
@@ -2162,11 +2209,11 @@ class _Patch:
         grid, _others = self.grid(None)
         plan, taken = [], set()
         for d, m in drivers:
-            got = _direct_pair(rects[d], machine[1], grid, taken)
-            if got is None:
+            got = _direct_link(rects[d], machine[1], grid, taken, _link_k(m, d, machine[0]))
+            if not got:
                 return None
-            plan.append((got, m))
-            taken.add((math.floor(got["x"]), math.floor(got["y"])))
+            plan += [(g, m) for g in got]
+            taken |= _tiles_of(got)
         for got, m in plan:
             self.lay(_carriers(self.job, [got], self.net), [m])
         names = [d for d, _m in drivers]
@@ -2285,11 +2332,11 @@ class _Patch:
         grid, _others = self.grid(None)
         plan, taken = [], set()
         for c in consumers:
-            got = _direct_pair(machine[1], rects[c], grid, taken)
-            if got is None:
+            got = _direct_link(machine[1], rects[c], grid, taken, _link_k(m, machine[0], c))
+            if not got:
                 return None
-            plan.append(got)
-            taken.add((math.floor(got["x"]), math.floor(got["y"])))
+            plan += got
+            taken |= _tiles_of(got)
         laid = self.lay(_carriers(self.job, plan, m), [m])
         return f"{len(laid)} inserter{'s' if len(laid) != 1 else ''} into {', '.join(consumers)}"
 
@@ -2632,12 +2679,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     3.0: each net is laid once, in order, and keeps what it laid; a net that fails gets its group
     try (GROUP_BUDGET), then one promoting search of its own. ``retries`` is not used any more
     (kept for callers)."""
-    global _FILTERED, _TAPS, _ARMS
+    global _FILTERED, _TAPS, _ARMS, _NEED, _HAND
     _ARMS = armsmod.of()
     _FILTERED = frozenset(k for net in flat.nets.values() for k, _i in net.drivers
                           if k in flat.machines
                           and not set(flat.machines[k].makes) <= set(net.items))
-    _TAPS = _tap_counts(flat, cat)
+    _TAPS, _NEED, _HAND = _sizing(flat, cat)
     js = jobs(flat, lay, cat)
     flat._port_edges = port_edges(flat, lay, cat)   # 2.0.48: a port is an edge of its frame
     for name, job in js.items():                      # 2.0.49: a stack cell's nets go straight first
