@@ -26,8 +26,11 @@ A change to the game's rules goes in FAIR-PLAY.md and nowhere else.
 
 ## Building it
 
-- **Tests:** `python -m unittest discover -s tests -t .` from this folder takes about 100 s, so run
-  it in the background. Stdlib only.
+- **Tests:** stdlib only, run from this folder.
+  - While working, run the modules that cover the change (`python -m unittest tests.test_x`).
+  - The full suite (`python -m unittest discover -s tests -t .`) has about 1,650 tests and takes
+    about 6 minutes. Run it once before a merge to main, in the background, and keep working; never
+    wait on it. Small fixes can share one release.
 - **Core ideas:**
   - a net is a declared object (name, items, drivers -> consumers), and machines join nets;
   - one source owns every tile;
