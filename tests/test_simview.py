@@ -87,6 +87,41 @@ class SimViewTest(unittest.TestCase):
         self.assertEqual(g["unmeasured"], ["old"])
         self.assertTrue([n for n in g["nodes"] if n["name"] == "a"][0]["view"])
 
+    def _game(self):
+        game = os.path.join(self.root, "game")
+        os.makedirs(game)
+        files = {
+            "nauvis.fkp": "fkp 1 surface nauvis\nplot world at -1000,-1000 rot 0 size 2000x2000 module=world\n",
+            "world.fkp": "fkp 1 factory world\nsize 40x40\n"
+                         "inst gear Gear at 1000,1000 rot 0 sig 1\n"
+                         "inst gear/a Assembler recipe=iron-gear-wheel at 1001,1000 rot 0 sig 2\n"
+                         "port gear.plate at 0,1 dir E lane R items iron-plate\n"
+                         "e gear/a/m0 assembling-machine-1 1002.5,1001.5 recipe=iron-gear-wheel\n"
+                         "e ~plate/b0 transport-belt 1000.5,1001.5 E net=plate\n",
+            "gear.fk": "# gears\nmodule Gear size 5x4 {\n  a = Assembler<recipe=iron-gear-wheel> @(1, 0)  # {braces} in a note\n}\n",
+            "old.fk": "module Gear size 9x9 {\n}\n",
+        }
+        for f, text in files.items():
+            with open(os.path.join(game, f), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        return game
+
+    def test_module_defs_read_each_block_and_its_own_file_wins(self):
+        d = simview.module_defs(self._game())["Gear"]
+        self.assertEqual((d["file"], d["line"], d["w"], d["h"]), ("gear.fk", 2, 5, 4))
+        self.assertTrue(d["text"].startswith("module Gear") and d["text"].endswith("}"))
+
+    def test_the_build_in_map_coordinates_with_frames_and_ports(self):
+        b = simview.build_view(self._game())
+        self.assertEqual(sorted(e[0] for e in b["e"]), ["assembling-machine-1", "transport-belt"])
+        belt = [e for e in b["e"] if e[0] == "transport-belt"][0]
+        self.assertEqual((belt[1], belt[2], belt[3], belt[4]), ("transport-belt", 0.5, 1.5, 4))
+        self.assertEqual(b["plots"][0]["box"], [-1000, -1000, 1000, 1000])
+        f = b["frames"][0]
+        self.assertEqual((f["name"], f["kind"], f["box"], f["n"], f["module"]), ("gear", "Gear", [0, 0, 5, 4], 1, True))
+        self.assertEqual(f["ports"], [["plate", 0.5, 1.5, 4, "iron-plate"]])
+        self.assertIsNone(simview.build_view(os.path.join(self.root, "nothing")))
+
 
 if __name__ == "__main__":
     unittest.main()

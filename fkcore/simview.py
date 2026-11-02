@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import threading
@@ -246,6 +247,110 @@ def graph(sim, live=True):
             "live": run, "now": time.strftime("%H:%M:%S")}
 
 
+# -- the build ----------------------------------------------------------------------------------------
+_MODULE = re.compile(r"^\s*module\s+(\w+)(<[^>]*>)?\s*((?!size\b)\w+\s+)?(?:size\s+(\d+)x(\d+))?")
+
+
+def _catalog(game):
+    """The pack's catalog with the run's learned machines (``game\\learned.json``)."""
+    from . import catalog as catmod
+    from . import learned
+    with open(catmod.DEFAULT_PATH, encoding="utf-8") as fh:
+        data = json.load(fh)
+    p = os.path.join(game, "learned.json")
+    return catmod.Catalog.from_dict(learned.merge_catalog(data, learned.load(p) if os.path.exists(p) else None))
+
+
+def module_defs(game):
+    """{NAME: {file, line, w, h, text}}: every ``module NAME ... {`` block in the run's .fk files."""
+    out = {}
+    for f in sorted(os.listdir(game)) if os.path.isdir(game) else []:
+        if not f.endswith(".fk"):
+            continue
+        try:
+            with open(os.path.join(game, f), encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        for i, ln in enumerate(lines):
+            m = _MODULE.match(ln)
+            # a name in several files (a copy kept aside): its own file wins, else the first
+            if not m or (m.group(1) in out and f != m.group(1).lower() + ".fk"):
+                continue
+            depth, j, seen = 0, i, False
+            while j < len(lines):
+                code = lines[j].split("#", 1)[0]
+                depth += code.count("{") - code.count("}")
+                seen = seen or "{" in code
+                if seen and depth <= 0:
+                    break
+                j += 1
+            out[m.group(1)] = {"file": f, "line": i + 1, "w": int(m.group(4) or 0),
+                               "h": int(m.group(5) or 0), "text": "\n".join(lines[i:j + 1])}
+    return out
+
+
+def build_view(game, surface="nauvis", cat=None):
+    """The latest fk build (the plots' ``.fkp`` layouts, what the next paste puts down) as a map
+    view in map coordinates, with its plots and the frames and ports of their top-level instances."""
+    from . import fkp
+    sp = os.path.join(game, f"{surface}.fkp")
+    if not os.path.exists(sp):
+        return None
+    cat = cat or _catalog(game)
+    defs = module_defs(game)
+    es, plots, frames, at = [], [], [], os.path.getmtime(sp)
+    for p in fkp.load(sp).plots.values():
+        plots.append({"name": p.factory, "box": [p.x, p.y, p.x + p.w, p.y + p.h],
+                      "module": p.params.get("module", p.factory)})
+        path = os.path.join(game, f"{p.factory}.fkp")
+        if not os.path.exists(path):
+            continue
+        at = max(at, os.path.getmtime(path))
+        lay = fkp.load(path)
+        boxes = {}
+        for e in lay.entities.values():
+            try:
+                typ, (w, h) = cat.kind(e.name), cat.size(e.name)
+            except Exception:           # noqa: BLE001
+                typ, w, h = "", 1, 1
+            x, y = float(e.x) + p.x, float(e.y) + p.y
+            es.append([e.name, typ, x, y, e.dir or 0, w, h, False, e.key])
+            top = e.key.split("/", 1)[0]
+            if (e.dir or 0) in (4, 12):
+                w, h = h, w
+            b = boxes.setdefault(top, [x - w / 2, y - h / 2, x + w / 2, y + h / 2])
+            b[:] = [min(b[0], x - w / 2), min(b[1], y - h / 2), max(b[2], x + w / 2), max(b[3], y + h / 2)]
+        ports = {}
+        for k, r in lay.ports.items():
+            ports.setdefault(k.rpartition(".")[0], []).append([k.rpartition(".")[2], r.x, r.y, r.dir, r.items])
+        for i in lay.insts.values():
+            if "/" in i.path:
+                continue
+            d = defs.get(i.kind)
+            x0, y0 = i.x + p.x, i.y + p.y
+            if d and d["w"] and i.rot == 0:
+                box = [x0, y0, x0 + d["w"], y0 + d["h"]]
+            elif i.path in boxes:
+                box = [round(v, 1) for v in boxes[i.path]]
+            else:
+                continue
+            frames.append({"name": i.path, "kind": i.kind, "plot": p.factory, "at": [x0, y0], "rot": i.rot,
+                           "box": box, "module": bool(d),
+                           "params": {k: v for k, v in i.params.items()},
+                           "n": sum(1 for e in lay.entities if e.split("/", 1)[0] == i.path),
+                           "ports": [[n, x0 + px + .5, y0 + py + .5, pd, it] for n, px, py, pd, it in ports.get(i.path, [])]
+                           if i.rot == 0 else []})
+    if es:
+        xs, ys = [e[2] for e in es], [e[3] for e in es]
+        box = [math.floor(min(xs)) - 12, math.floor(min(ys)) - 12, math.ceil(max(xs)) + 12, math.ceil(max(ys)) + 12]
+    else:
+        box = [-16, -16, 16, 16]
+    frames.sort(key=lambda f: (not f["module"], f["name"]))
+    return {"tick": None, "built": time.strftime("%m-%d %H:%M", time.localtime(at)), "box": box, "e": es,
+            "land": {}, "plots": plots, "frames": frames}
+
+
 # -- the page ---------------------------------------------------------------------------------------
 PAGE = r"""<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -256,9 +361,16 @@ PAGE = r"""<!doctype html>
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px system-ui,sans-serif}
 header{display:flex;gap:16px;align-items:baseline;padding:10px 16px;border-bottom:1px solid var(--grid)}
 header h1{font-size:15px;margin:0}header .m{color:var(--muted)}
-main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1fr);gap:12px;padding:12px 16px;height:calc(100vh - 46px)}
-@media (max-width:900px){main{grid-template-columns:1fr;height:auto}}
+main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1fr);grid-template-rows:calc(100vh - 70px) auto;gap:12px;padding:12px 16px}
+@media (max-width:900px){main{grid-template-columns:1fr;grid-template-rows:auto}}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:8px;padding:8px;display:flex;flex-direction:column;min-height:420px}
+.wide{grid-column:1/-1;min-height:0}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row h2{margin:0;flex:1}
+.seg{display:inline-flex;border:1px solid var(--grid);border-radius:6px;overflow:hidden}.seg button{background:none;border:0;color:var(--muted);padding:3px 10px;font:inherit;cursor:pointer}
+.seg button.on{background:#2d3340;color:var(--ink)}label.ck{color:var(--muted);font-size:12px;cursor:pointer}
+.mods{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1.2fr);gap:12px;align-items:start}.mods>div{min-width:0}@media (max-width:900px){.mods{grid-template-columns:1fr}}
+table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;padding:3px 6px;border-bottom:1px solid var(--grid);white-space:nowrap}
+th{color:var(--muted);font-weight:600}tbody tr{cursor:pointer}tbody tr:hover{background:#262a32}tbody tr.sel{background:#2d3340}td.k{color:var(--best)}td.d{color:var(--muted)}
+.tw{max-height:420px;overflow:auto}pre{margin:0;background:#15171b;border:1px solid var(--grid);border-radius:6px;padding:8px;font:12px ui-monospace,Consolas,monospace;max-height:420px;overflow:auto;white-space:pre}
 .card h2{font-size:13px;margin:0 0 6px;color:var(--muted);font-weight:600}
 svg,canvas{flex:1;width:100%;min-height:360px;display:block}
 .info{font-size:12px;color:var(--muted);min-height:3.2em;margin-top:6px;white-space:pre-wrap}
@@ -276,15 +388,31 @@ svg,canvas{flex:1;width:100%;min-height:360px;display:block}
 <div class="legend"><span><i style="background:var(--best)"></i>best line</span><span><i style="background:var(--node)"></i>state</span>
 <span><i style="background:var(--live)"></i>running game</span><span><i style="background:#555"></i>save file gone</span></div>
 <svg id="g"></svg><div class="info" id="ginfo">Click a state to see its map.</div></div>
-<div class="card"><h2 id="mtitle">Map</h2><canvas id="map"></canvas><div class="info" id="minfo">Wheel to zoom, drag to pan.</div></div>
+<div class="card"><div class="row"><h2 id="mtitle">Map</h2><span class="seg"><button id="mlive" class="on">Live / state</button><button id="mbuild">Latest fk build</button></span>
+<label class="ck"><input type="checkbox" id="mframes" checked> module frames</label></div><canvas id="map"></canvas><div class="info" id="minfo">Wheel to zoom, drag to pan.</div></div>
+<div class="card wide"><h2 id="dtitle">Plots and modules (the latest fk build)</h2><div class="info" id="plots" style="min-height:0;margin:0 0 6px"></div>
+<div class="mods"><div class="tw"><table><thead><tr><th>instance</th><th>module</th><th>at (map)</th><th>size</th><th>entities</th><th>ports</th></tr></thead><tbody id="mtab"></tbody></table></div>
+<div><div class="info" id="dhead" style="min-height:0;margin:0 0 6px">Click a module (here or on the map) to see its definition.</div><pre id="dsrc"></pre></div></div></div>
 </main>
 <script>
-var G=null,SEL='(live)',VIEW=null,cam={s:6,x:0,y:0},fit=true;
+var G=null,SEL='(live)',VIEW=null,cam={s:6,x:0,y:0},fit=true,MODE='live',BUILD=null,SELMOD=null,FRAMES=true;
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
 function poll(){fetch('api/graph').then(function(r){return r.json()}).then(function(d){G=d;draw();
  var L=d.live;document.getElementById('status').textContent=(d.running?('running '+(L&&L.head?'from '+L.head:'')+(L&&L.tick!=null?', tick '+L.tick.toLocaleString():'')+(L&&L.paused?', paused':'')+(L&&L.speed?', speed '+L.speed:'')):'planner stopped')
  +' · '+d.nodes.length+' states'+(d.unmeasured.length?' · not measured yet: '+d.unmeasured.join(', '):'')+(d.exact?'':' · V is rough (no tech tree yet)')+' · '+d.now;
- if(SEL==='(live)')loadView()}).catch(function(){document.getElementById('status').textContent='no answer from the viewer'})}
+ if(SEL==='(live)')loadView()}).catch(function(){document.getElementById('status').textContent='no answer from the viewer'});loadBuild()}
+function loadBuild(){fetch('api/build').then(function(r){return r.ok?r.json():null}).then(function(b){var first=!BUILD;BUILD=b;mods();if(MODE==='build'){if(first)fit=true;title()}paint()})}
+function title(){var v=MODE==='build'?BUILD:VIEW;document.getElementById('mtitle').textContent=MODE==='build'?('Map: latest fk build'+(v?'  ('+v.built+', '+v.e.length+' entities)':'  (none)')):('Map: '+SEL+(v?'  (tick '+v.tick.toLocaleString()+', '+v.e.length+' entities)':''))}
+function mode(m){MODE=m;if(!(m==='build'?VIEW:BUILD))fit=true;document.getElementById('mlive').className=m==='live'?'on':'';document.getElementById('mbuild').className=m==='build'?'on':'';title();paint()}
+function mods(){var b=BUILD,t=document.getElementById('mtab');if(!b){t.innerHTML='<tr><td colspan="6" class="d">no build yet (game\\nauvis.fkp)</td></tr>';return}
+ document.getElementById('plots').textContent='Plots: '+b.plots.map(function(p){return p.name+' (module '+p.module+') '+p.box[0]+','+p.box[1]+' to '+p.box[2]+','+p.box[3]}).join(' · ')+'   ·   built '+b.built;
+ t.innerHTML=b.frames.map(function(f){var w=f.box[2]-f.box[0],h=f.box[3]-f.box[1];return '<tr data-m="'+esc(f.name)+'"'+(f.name===SELMOD?' class="sel"':'')+'><td'+(f.module?' class="k"':'')+'>'+esc(f.name)+'</td><td>'+esc(f.kind)+(f.rot?' (rot '+f.rot+')':'')+'</td><td class="d">'+f.at[0]+', '+f.at[1]+'</td><td class="d">'+w+'x'+h+'</td><td>'+f.n+'</td><td class="d">'+(f.ports.map(function(p){return p[0]}).join(', ')||'')+'</td></tr>'}).join('');
+ t.querySelectorAll('tr').forEach(function(r){r.onclick=function(){pick(r.getAttribute('data-m'),true)}})}
+function pick(name,go){SELMOD=name;var f=BUILD&&BUILD.frames.filter(function(f){return f.name===name})[0];if(!f)return;mods();
+ if(go){var c=document.getElementById('map');cam.x=(f.box[0]+f.box[2])/2;cam.y=(f.box[1]+f.box[3])/2;cam.s=Math.max(4,Math.min(40,.8*Math.min(c.clientWidth/(f.box[2]-f.box[0]+2),c.clientHeight/(f.box[3]-f.box[1]+2))));fit=false}paint();
+ var hd=document.getElementById('dhead'),src=document.getElementById('dsrc');hd.textContent=f.name+' = '+f.kind+' at map '+f.at[0]+', '+f.at[1]+(f.rot?' rot '+f.rot:'')+', '+f.n+' entities'+(Object.keys(f.params).length?'  ·  '+Object.keys(f.params).map(function(k){return k+'='+f.params[k]}).join(' '):'')+(f.ports.length?'\nports: '+f.ports.map(function(p){return p[0]+' '+p[4]}).join(' · '):'');src.textContent='';
+ if(!f.module){src.textContent='(not a module: a '+f.kind+' placed in the plot)';return}
+ fetch('api/def?kind='+encodeURIComponent(f.kind)).then(function(r){return r.ok?r.json():null}).then(function(d){if(SELMOD!==name)return;src.textContent=d?('# '+d.file+':'+d.line+'\n'+d.text):'(no definition found in the run\'s .fk files)'})}
 function draw(){var svg=document.getElementById('g'),W=svg.clientWidth,H=svg.clientHeight,P=36;
  var ns=G.nodes;if(!ns.length){svg.innerHTML='<text x="20" y="30" class="axt">no recorded states yet: fk sim save NAME records one</text>';return}
  var hx=Math.max(1,Math.max.apply(null,ns.map(function(n){return n.H}))),vlo=Math.min.apply(null,ns.map(function(n){return n.V})),vhi=Math.max.apply(null,ns.map(function(n){return n.V}));
@@ -302,17 +430,17 @@ function draw(){var svg=document.getElementById('g'),W=svg.clientWidth,H=svg.cli
  ns.forEach(function(n){var cls='n'+(n.best?' best':'')+(n.name==='(live)'?' live':'')+(!n.on_disk?' gone':'')+(n.name===SEL?' sel':'');
   s+='<g class="'+cls+'" data-n="'+esc(n.name)+'" style="cursor:pointer"><circle cx="'+n._x+'" cy="'+n._y+'" r="'+(n.name==='(live)'?7:6)+'"/>'+(n._lab?'<text x="'+(n._x+9+(at[n._lab].length-1)*9)+'" y="'+(n._y+4)+'">'+esc(labs[n._lab])+'</text>':'')+'<title>'+esc(n.name)+'</title></g>'});
  svg.innerHTML='<defs><marker id="a" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0L10,5L0,10z" fill="#667"/></marker></defs>'+s;
- svg.querySelectorAll('.n').forEach(function(g){g.onclick=function(){SEL=g.getAttribute('data-n');fit=true;draw();info();loadView()}});info()}
+ svg.querySelectorAll('.n').forEach(function(g){g.onclick=function(){SEL=g.getAttribute('data-n');fit=true;if(MODE!=='live')mode('live');draw();info();loadView()}});info()}
 function info(){var n=(G.nodes.filter(function(n){return n.name===SEL})[0]);if(!n)return;
  document.getElementById('ginfo').textContent=n.name+(n.parent?'  <- '+n.parent:'  (no parent)')+'   tick '+n.tick.toLocaleString()+' ('+(n.tick/216000).toFixed(2)+' h)   V '+n.V.toFixed(2)+'  H '+n.H+'   '+n.items+' items made'+(n.backfilled?'   (measured afterwards)':'')+'\n'+n.top.map(function(t){return t[0]+' '+t[1].toLocaleString()}).join(' · ')}
 function loadView(){var n=SEL;fetch('api/view?name='+encodeURIComponent(n)).then(function(r){return r.ok?r.json():null}).then(function(v){if(n!==SEL)return;VIEW=v;
- document.getElementById('mtitle').textContent='Map: '+n+(v?'  (tick '+v.tick.toLocaleString()+', '+v.e.length+' entities)':'');if(!v){document.getElementById('minfo').textContent='no map for '+n;}paint()})}
+ if(MODE==='live'){title();if(!v){document.getElementById('minfo').textContent='no map for '+n;}}paint()})}
 var COL={'transport-belt':'#c8a03a','underground-belt':'#a8822a','splitter':'#d08a30','inserter':'#9aa0b0','pipe':'#5b7fa8','pipe-to-ground':'#4a6a90',
  'assembling-machine':'#6d7f5a','furnace':'#a0603a','electric-pole':'#8a7050','roboport':'#b05a8a','container':'#8d6a3d','logistic-container':'#c07040',
  'mining-drill':'#7a6a4a','offshore-pump':'#3a8aa0','boiler':'#a05030','generator':'#708090','solar-panel':'#304a70','accumulator':'#506070','lab':'#4a9a8a',
  'storage-tank':'#4a6a7a','pump':'#3a7a90','reactor':'#9a6a40','burner-generator':'#806040','electric-energy-interface':'#555'};
 function paint(){var c=document.getElementById('map'),W=c.clientWidth,H=c.clientHeight,dpr=window.devicePixelRatio||1;c.width=W*dpr;c.height=H*dpr;var g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);
- g.fillStyle='#1b3a52';g.fillRect(0,0,W,H);var v=VIEW;if(!v)return;var b=v.box;
+ g.fillStyle='#1b3a52';g.fillRect(0,0,W,H);var v=MODE==='build'?BUILD:VIEW;if(!v)return;var b=v.box;
  if(fit){cam.s=Math.max(1,Math.min(W/(b[2]-b[0]),H/(b[3]-b[1])));cam.x=(b[0]+b[2])/2;cam.y=(b[1]+b[3])/2;fit=false}
  var S=cam.s,ox=W/2-cam.x*S,oy=H/2-cam.y*S;g.fillStyle='#3b3a30';
  for(var y in v.land){v.land[y].forEach(function(r){g.fillRect(ox+r[0]*S,oy+(+y)*S,(r[1]-r[0]+1)*S,S)})}
@@ -329,11 +457,20 @@ function paint(){var c=document.getElementById('map'),W=c.clientWidth,H=c.client
   else if(type==='inserter'){g.fillStyle=col;var q=S*.5;g.fillRect(ox+x*S-q/2,oy+y*S-q/2,q,q);var d2=D[dir%16]||D[0];g.strokeStyle=col;g.lineWidth=Math.max(1,S/10);g.beginPath();g.moveTo(ox+x*S-d2[0]*S*.45,oy+y*S-d2[1]*S*.45);g.lineTo(ox+x*S+d2[0]*S*.45,oy+y*S+d2[1]*S*.45);g.stroke()}
   else if(type==='pipe'||type==='pipe-to-ground'){g.fillStyle=col;g.fillRect(px+S*.3,py+S*.3,S*.4,S*.4)}
   else{g.fillStyle=col;g.fillRect(px+.06*S,py+.06*S,w*S-.12*S,h*S-.12*S);if(S*w>=40){g.fillStyle='#fffc';g.font=Math.min(12,S*.45)+'px system-ui';g.fillText(name.replace(/-/g,' ').slice(0,Math.floor(w*S/6)),px+3,py+12)}}});
- g.globalAlpha=1;document.getElementById('minfo').textContent='Wheel to zoom, drag to pan. '+v.e.filter(function(e){return e[7]}).length+' ghosts drawn faint.'}
+ g.globalAlpha=1;
+ if(FRAMES&&BUILD){g.font='11px system-ui';BUILD.frames.forEach(function(f){var on=f.name===SELMOD;if(!f.module&&!on)return;var x=ox+f.box[0]*S,y=oy+f.box[1]*S,w=(f.box[2]-f.box[0])*S,h=(f.box[3]-f.box[1])*S;
+  g.strokeStyle=on?'#ffffff':'rgba(240,170,110,.75)';g.lineWidth=on?2.5:1.3;g.setLineDash(on?[]:[5,3]);g.strokeRect(x,y,w,h);g.setLineDash([]);
+  if(w>24){g.fillStyle=on?'#fff':'#f0aa6e';g.fillText(f.name+(f.kind!==f.name?' : '+f.kind:''),x+3,y-4)}
+  f.ports.forEach(function(p){g.fillStyle='#9ece6a';g.beginPath();g.arc(ox+p[1]*S,oy+p[2]*S,Math.max(2.5,S*.3),0,7);g.fill();if(on&&S>=6){g.fillStyle='#9ece6a';g.fillText(p[0],ox+p[1]*S+S*.4,oy+p[2]*S+4)}})})}
+ document.getElementById('minfo').textContent='Wheel to zoom, drag to pan, click a frame to see its module. '+(MODE==='build'?'The build is what fk last compiled (game\\world.fkp): the next paste puts it down.':v.e.filter(function(e){return e[7]}).length+' ghosts drawn faint.')}
 (function(){var c=document.getElementById('map'),drag=null;c.onwheel=function(ev){ev.preventDefault();var k=ev.deltaY<0?1.25:.8,r=c.getBoundingClientRect(),W=c.clientWidth,H=c.clientHeight;
  var wx=cam.x+(ev.clientX-r.left-W/2)/cam.s,wy=cam.y+(ev.clientY-r.top-H/2)/cam.s;cam.s=Math.max(.5,Math.min(64,cam.s*k));cam.x=wx-(ev.clientX-r.left-W/2)/cam.s;cam.y=wy-(ev.clientY-r.top-H/2)/cam.s;paint()};
- c.onmousedown=function(ev){drag=[ev.clientX,ev.clientY]};window.onmouseup=function(){drag=null};
- window.onmousemove=function(ev){if(!drag)return;cam.x-=(ev.clientX-drag[0])/cam.s;cam.y-=(ev.clientY-drag[1])/cam.s;drag=[ev.clientX,ev.clientY];paint()}})();
+ var moved=0;c.onmousedown=function(ev){drag=[ev.clientX,ev.clientY];moved=0};
+ window.onmouseup=function(ev){if(drag&&moved<4&&ev.target===c&&BUILD){var r=c.getBoundingClientRect(),wx=cam.x+(ev.clientX-r.left-c.clientWidth/2)/cam.s,wy=cam.y+(ev.clientY-r.top-c.clientHeight/2)/cam.s;
+  var hit=BUILD.frames.filter(function(f){return wx>=f.box[0]&&wx<=f.box[2]&&wy>=f.box[1]&&wy<=f.box[3]}).sort(function(a,b){return (a.box[2]-a.box[0])*(a.box[3]-a.box[1])-(b.box[2]-b.box[0])*(b.box[3]-b.box[1])})[0];if(hit)pick(hit.name,false)}drag=null};
+ window.onmousemove=function(ev){if(!drag)return;moved+=Math.abs(ev.clientX-drag[0])+Math.abs(ev.clientY-drag[1]);cam.x-=(ev.clientX-drag[0])/cam.s;cam.y-=(ev.clientY-drag[1])/cam.s;drag=[ev.clientX,ev.clientY];paint()}})();
+document.getElementById('mlive').onclick=function(){mode('live')};document.getElementById('mbuild').onclick=function(){mode('build')};
+document.getElementById('mframes').onchange=function(ev){FRAMES=ev.target.checked;paint()};
 window.onresize=function(){if(G)draw();paint()};poll();setInterval(poll,4000);
 </script></body></html>"""
 
@@ -343,6 +480,7 @@ def serve(run, port=8791, host="127.0.0.1"):
     from urllib.parse import parse_qs, urlparse
     from . import sim as simmod
     s = simmod.Sim(run)
+    game = os.path.join(os.path.abspath(run), "game")
     lock = threading.Lock()                 # one RCON read at a time
     cache = {}
 
@@ -384,6 +522,13 @@ def serve(run, port=8791, host="127.0.0.1"):
                     else:
                         v = Lineage(s.root).view(name)
                     return self._send(200 if v else 404, json.dumps(v or {}))
+                if u.path == "/api/build":
+                    v = cached("build", 5, lambda: build_view(game))
+                    return self._send(200 if v else 404, json.dumps(v or {}))
+                if u.path == "/api/def":
+                    kind = (parse_qs(u.query).get("kind") or [""])[0]
+                    d = cached("defs", 5, lambda: module_defs(game)).get(kind)
+                    return self._send(200 if d else 404, json.dumps(d or {}))
                 return self._send(404, "{}")
             except Exception as exc:        # noqa: BLE001
                 return self._send(500, json.dumps({"error": str(exc)}))
