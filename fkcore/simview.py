@@ -163,21 +163,41 @@ def _tree(sim_root):
         return None
 
 
+_V = {}      # (name, tick, items) -> V: a state's worth doesn't change, and the tree walk is slow
+
+
+def _v(name, row, lv, tree, base):
+    """explore's V (log2 of the worth), not floored at 0 (worth 1): an early state made little,
+    and the view tells those apart. Without a tree: log2 of the items made."""
+    key = (name, row.get("tick"), len(lv), sum(lv.values()))
+    if key in _V:
+        return _V[key]
+    if tree is not None:
+        try:
+            w = explore.Worth(tree, base, lv)
+            worth = w.made + w.research
+            return _keep(name, key, math.log2(worth) if worth > 0 else None)
+        except Exception:               # noqa: BLE001 - an item the tree doesn't know
+            pass
+    total = sum(float(c) for c in (row.get("made") or {}).values())
+    return _keep(name, key, math.log2(total) if total > 0 else None)
+
+
+def _keep(name, key, v):
+    if name != "(live)":
+        _V[key] = v
+    return v
+
+
 def place(rows, tree, base=2.0):
     """{name: {made, parent}} -> ({name: (V, H)}, best line, exact). The best line: the parents
     up from the highest V. H as explore's ``positions``: the Manhattan distance in cell levels to
     the nearest state of the best line no higher than itself."""
     levels = {n: explore.cell(r.get("made") or {}, base) for n, r in rows.items()}
-    v = {}
-    for n, lv in levels.items():
-        if tree is not None:
-            try:
-                v[n] = explore.vertical(lv, tree, base)
-                continue
-            except Exception:           # noqa: BLE001 - an item the tree doesn't know
-                pass
-        total = sum(float(c) for c in (rows[n].get("made") or {}).values())
-        v[n] = math.log2(total) if total > 1 else 0.0
+    v = {n: _v(n, rows[n], lv, tree, base) for n, lv in levels.items()}
+    # a state that made nothing has no worth: one below the lowest that made something
+    low = min([x for x in v.values() if x is not None] or [1.0]) - 1
+    v = {n: low if x is None else x for n, x in v.items()}
     if not v:
         return {}, [], tree is not None
     top = max(v, key=lambda n: (v[n], -int(rows[n].get("tick") or 0)))
@@ -269,11 +289,11 @@ function draw(){var svg=document.getElementById('g'),W=svg.clientWidth,H=svg.cli
  var ns=G.nodes;if(!ns.length){svg.innerHTML='<text x="20" y="30" class="axt">no recorded states yet: fk sim save NAME records one</text>';return}
  var hx=Math.max(1,Math.max.apply(null,ns.map(function(n){return n.H}))),vlo=Math.min.apply(null,ns.map(function(n){return n.V})),vhi=Math.max.apply(null,ns.map(function(n){return n.V}));
  if(vhi-vlo<1){vhi=vlo+1}
- var X=function(h){return P+(W-2*P)*Math.sqrt(h/hx)},Y=function(v){return H-P-(H-2*P)*(v-vlo)/(vhi-vlo)};
+ var R=Math.min(170,W*.3),X=function(h){return P+(W-P-R)*Math.sqrt(h/hx)},Y=function(v){return H-P-(H-2*P)*(v-vlo)/(vhi-vlo)};
  var by={};ns.forEach(function(n){by[n.name]=n});
  var s='';for(var i=0;i<=4;i++){var v=vlo+(vhi-vlo)*i/4;s+='<line class="ax" x1="'+P+'" x2="'+(W-P)+'" y1="'+Y(v)+'" y2="'+Y(v)+'"/><text class="axt" x="2" y="'+(Y(v)+3)+'">V '+v.toFixed(1)+'</text>'}
- [1,4,16,64,256,1024].forEach(function(h){if(h<hx)s+='<line class="ax" x1="'+X(h)+'" x2="'+X(h)+'" y1="'+P+'" y2="'+(H-P)+'"/><text class="axt" x="'+X(h)+'" y="'+(H-8)+'" text-anchor="middle">'+h+'</text>'});
- s+='<text class="axt" x="'+(W-P)+'" y="'+(H-8)+'" text-anchor="end">H '+hx+'</text><text class="axt" x="'+P+'" y="'+(H-8)+'">H 0 (square-root scale)</text>';
+ [4,16,64,256,1024].forEach(function(h){if(h<hx*.8&&X(h)-P>40)s+='<line class="ax" x1="'+X(h)+'" x2="'+X(h)+'" y1="'+P+'" y2="'+(H-P)+'"/><text class="axt" x="'+X(h)+'" y="'+(H-8)+'" text-anchor="middle">'+h+'</text>'});
+ s+='<text class="axt" x="'+X(hx)+'" y="'+(H-8)+'" text-anchor="middle">H '+hx+'</text><text class="axt" x="'+P+'" y="'+(H-8)+'">H 0</text><text class="axt" x="'+(W-4)+'" y="'+(H-8)+'" text-anchor="end">(square-root scale)</text>';
  // a few states can share a spot: spread them a little
  var at={};ns.forEach(function(n){var k=Math.round(X(n.H)/8)+','+Math.round(Y(n.V)/8);(at[k]=at[k]||[]).push(n);n._x=X(n.H)+(at[k].length-1)*9;n._y=Y(n.V);n._lab=at[k].length===1?k:null});
  var labs={};for(var k in at)labs[k]=at[k].map(function(n){return n.name}).join(', ');
