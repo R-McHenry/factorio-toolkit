@@ -90,6 +90,13 @@ maker by one inserter straight from the requester. An inserter that loads a belt
 several items is filtered to its net's items (the route report's `unfiltered` line names one that
 can't be, a long-handed one where no fast inserter fits).
 
+With Bob's inserters (Sea Block; the pack's `SEABLOCK.md`), an inserter may pick up and drop off
+on any side, and reach further after research. The router turns corners and reaches 2 with a
+plain inserter once the force has `bob-long-inserters-1`, before it lays a long-handed one. It
+lays only what the force has researched, as the last stock read saw it (`out\avail.json`). The
+routed rates count a corner swing as about twice a straight one, and the .fkp keeps such a hand's
+own vectors (`pick=0,-1 drop=1,0`).
+
 A ribbon (a `net each`, a `bundle`, a `width 8` net; LANGUAGE.md, "Belts side by side") is routed
 as one. `out\route.txt` gives each of its nets a line, then one line for the ribbon (from
 `docs\examples\ribbon-bus.fk`, shortened):

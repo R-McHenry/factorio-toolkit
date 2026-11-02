@@ -22,7 +22,7 @@ class SplitTapTest(unittest.TestCase):
         tree = res["tree"]
         self.assertEqual(sorted(t[3] for t in tree.taps), ["red1", "red2"])
         laid = set(tree.tiles())
-        for q, _n, _d, _s in tree.taps:
+        for q, _n, _d, _s, _a in tree.taps:
             self.assertEqual(len(tree.tiles()[q]), 1, f"tap {q} shares its tile")
         self.assertTrue(laid)
 

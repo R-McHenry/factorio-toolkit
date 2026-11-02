@@ -66,7 +66,7 @@ _DIRS = {0, 4, 8, 12}
 _PIPES = ("pipe", "pipe-to-ground", "pump")
 _BELTS = ("transport-belt", "underground-belt", "splitter", "loader", "loader-1x1")
 #: the attrs of a blueprint row that are the game's own settings (net and tags.fkp are not)
-_SETTINGS = ("recipe", "ug", "config")
+_SETTINGS = ("recipe", "ug", "config", "pick", "drop")   # 3.0: an inserter's own vectors
 
 
 class LiteralError(ValueError):

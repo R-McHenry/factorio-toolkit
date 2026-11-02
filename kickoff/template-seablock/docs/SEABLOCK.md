@@ -97,6 +97,30 @@ circuits and bricks. Those 1200 plates and 200 circuits are the budget for the f
   - They're yours: reach one with roboport coverage (landfill and poles out to it), then
     `fk decon` it, and the robots bring its contents home.
 
+## Inserters turn corners and reach further
+
+Bob's inserters let every inserter pick up from and drop onto any tile beside it, each chosen on
+its own. There's no special item for it:
+- **From the start:** an inserter can turn a corner, picking from the north and dropping east,
+  say. A corner swing is a quarter turn, so it's about twice as fast as a straight one (measured
+  in this game: a plain inserter 1.2/s straight, 2.5/s round a corner; fast 3.75 and 7.5).
+- **`bob-long-inserters-1`** (20 red, after logistics): any inserter reaches 1 or 2 tiles for each
+  end. No long-handed item is needed. `bob-long-inserters-2` (50 red, green and blue) reaches 3.
+- `bob-more-inserters-1` adds the diagonals, and `bob-near-inserters` the belt's near lane. The
+  router doesn't use those yet.
+
+The build reads which of these the force has (`fk avail --save` and every `report_bom --stock
+live`, into `out\avail.json`). The router uses what's there:
+- a straight plain hand first;
+- then a corner, or a reach of 2 once long-1 is in;
+- a long-handed inserter only where none of those fits.
+
+So two chests on a diagonal take one corner inserter and no belt. After long-1, two chests three
+tiles apart take one plain inserter. A route that stands keeps its hands; `fk route NET` lays it
+again with the new reach. In the .fkp a hand with its own vectors reads `pick=0,-1 drop=1,0`
+(tiles from its own tile, x east, y south). The paste writes them, and robot-built ghosts keep
+them. A vector the force hasn't researched is a `needs-research` line that names the tech.
+
 ## Several inserters on one machine
 
 Early on, only plain inserters (1.2/s) are available, and many Sea Block machines need more than

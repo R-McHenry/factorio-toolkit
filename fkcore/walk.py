@@ -38,6 +38,7 @@ import os
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from . import connect
 from .catalog import Catalog
 from .fkp import _natural_key as natural_key
@@ -235,6 +236,11 @@ def entities(dump):
                     if v in ("left", "right")}
             if conf:
                 attrs["config"] = json.dumps(conf)
+        if row.get("t") == "inserter" and row.get("pk") and row.get("dp"):
+            # 3.0: the game's own vectors (Bob's adjustable inserters), whole tiles from its own
+            off = lambda p: (round(float(p[0]) - float(row["x"])), round(float(p[1]) - float(row["y"])))
+            attrs.update(armsmod.canon(row["n"], int(row.get("d") or 0), off(row["pk"]),
+                                       off(row["dp"])))
         key = f"{_ABBR.get(row['t'], row['t'])}@{_num(row['x'])},{_num(row['y'])}"
         tiles = _tiles(row["box"]) if row.get("box") else ()
         out.append(Ent(key, row["n"], float(row["x"]), float(row["y"]), int(row.get("d") or 0),

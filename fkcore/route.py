@@ -109,6 +109,7 @@ import time
 from fnmatch import fnmatchcase
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from . import connect as connectmod
 from . import fkp as fkpmod
 from .expand import attach_points, frame_of, port_edges, record_misfit
@@ -520,13 +521,10 @@ def _hand_tiles(cat, ents):
             continue
         kind = cat.kind(e.name)
         if kind == "inserter":
-            h = _heading(e)
-            if h is None:
-                continue
-            r = connectmod.REACH.get(e.name, 1)
-            (tx, ty), = fkpmod.tiles_of(cat, e)
-            for s in (r, -r):
-                out.setdefault((tx + _DX[h] * s, ty + _DY[h] * s), e.net)
+            (tile,) = fkpmod.tiles_of(cat, e)
+            got = armsmod.tiles(e.name, e.dir, e.attrs, tile)
+            for t in got or ():
+                out.setdefault(t, e.net)
         else:
             t = _drop_tile(cat, e)
             if t is not None:          # its own net may still lay on it: it is that net's end
@@ -729,6 +727,9 @@ def _carriers(job, tree_ents, net):
             attrs["ug"] = "in" if p["belt_to_ground_type"] == "input" else "out"
         if p.get("config"):                        # 2.1.24: an m2m split's output priority
             attrs["config"] = p["config"]
+        for k in ("pick", "drop"):                 # 3.0: an inserter's own vectors
+            if p.get(k):
+                attrs[k] = p[k]
         x, y = p["x"], p["y"]
         out.append(fkpmod.Entity(key, p["name"], _clean(x), _clean(y), int(p["direction"]), attrs))
     return out
@@ -749,6 +750,11 @@ _FILTERED = frozenset()
 #: inserters there, and one where k don't fit
 _TAPS = {}
 TAPS_MAX = 3
+#: 3.0 (Bob's adjustable inserters, ``fkcore.arms``): the vectors the force may set an inserter to,
+#: or None (the base game). ``_route_layout`` sets it from the build's stock read; nothing read:
+#: the pack's base set (range 1, 4 ways). Taps and direct inserters then turn corners, and reach
+#: further with a short hand, before a long-handed one is laid.
+_ARMS = None
 INF_RATE = float("inf")
 
 
@@ -823,7 +829,7 @@ def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=
         sinks = fixed + [DropSink(key, drops[key]) if key in drops else
                          tap(key, rect, min(_TAPS.get((net, key), 1), cap),
                              _HANDS[0] if hands is None and key in _FILTERED
-                             else hands or _HANDS[-1]) for key, rect in machines]
+                             else hands or _HANDS[-1], arms=_ARMS) for key, rect in machines]
         res = grow(grid, root, sinks, limit=limit)
         if not res["problems"] or not machines:
             break
@@ -961,10 +967,41 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink)
     return rtree.cost() + ftree.cost(), plan, rres["counts"], fres["counts"]
 
 
+def _arm_plan(name, q, arm, role="ins"):
+    """A plan inserter on tile ``q`` with its own (pick, drop) vectors (3.0, ``fkcore.arms``): it
+    faces its pickup, and keeps the vectors that are not that direction's own."""
+    direction = armsmod.heading(arm[0])
+    return dict({"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5, "direction": direction,
+                 "role": role}, **armsmod.canon(name, direction, arm[0], arm[1]))
+
+
+def _passes():
+    """The hand passes of a direct inserter: ``_HANDS``, with the force's vectors (``_ARMS``)
+    after the first: (names, None) for a straight swing, (names, pairs) for vectors."""
+    out = [(_HANDS[0], None)]
+    if _ARMS is not None:
+        short = [n for n in _HANDS[0] if _REACH.get(n) == 1]
+        if short:
+            out.append(((short[0],), armsmod.pairs(_ARMS, straight=False)))
+    return out + [(hands, None) for hands in _HANDS[1:]]
+
+
 def _direct_pair(src, dst, grid, taken=()):
     """An inserter from machine rect ``src`` into machine rect ``dst`` on a free tile not in
-    ``taken`` (one this plan already holds), if one fits: a short hand first, else a long one."""
-    for hands in _HANDS:
+    ``taken`` (one this plan already holds), if one fits: a short hand first, then (3.0) one with
+    the force's vectors (round a corner, further out), else a long one."""
+    for hands, arms in _passes():
+        if arms is not None:
+            for pick, drop in arms:
+                for x in range(src[0], src[2]):
+                    for y in range(src[1], src[3]):
+                        q = (x - pick[0], y - pick[1])
+                        d = (q[0] + drop[0], q[1] + drop[1])
+                        if q in taken or grid.blocked(q) or not (dst[0] <= d[0] < dst[2]
+                                                                 and dst[1] <= d[1] < dst[3]):
+                            continue
+                        return _arm_plan(hands[0], q, (pick, drop))
+            continue
         for name in hands:
             r = _REACH[name]
             for x in range(src[0], src[2]):
@@ -1456,9 +1493,8 @@ def _route_seeded(cat, job, ents, frames, js, box, limit, terrain, avoid, seed,
     on = {t for e in belts for t in fkpmod.tiles_of(cat, e)}
     reach = []                                          # (pickup tile, drop tile) per hand
     for e in hands:
-        h, r = _heading(e), connectmod.REACH.get(e.name, 1)
-        (tx, ty), = fkpmod.tiles_of(cat, e)
-        reach.append(((tx + _DX[h] * r, ty + _DY[h] * r), (tx - _DX[h] * r, ty - _DY[h] * r)))
+        (tile,) = fkpmod.tiles_of(cat, e)
+        reach.append(armsmod.tiles(e.name, e.dir, e.attrs, tile))
 
     def inside(t, rect):
         return rect[0] <= t[0] < rect[2] and rect[1] <= t[1] < rect[3]
@@ -2065,7 +2101,7 @@ class _Patch:
         if not starts:
             return None
         sinks = ([FixedSink(role, belt[0], belt[1])] if belt is not None else
-                 [TapSink(machine[0], machine[1], 1, hands) for hands in _HANDS])
+                 [TapSink(machine[0], machine[1], 1, hands, arms=_ARMS) for hands in _HANDS])
         for sink in sinks:
             got = _new_branch(grid, starts, sink, self.net, False, self.limit)
             if got is not None:
@@ -2101,15 +2137,17 @@ class _Patch:
         grid, _others = self.grid(None)
         free = lambda q: not grid.blocked(q) and q not in self.g.at
         for hands in _HANDS:
-            sink = TapSink(mkey, rect, 1, hands)
+            sink = TapSink(mkey, rect, 1, hands, arms=_ARMS)
             for key in sorted(keys, key=fkpmod.natural_key):
                 n = self.g.nodes[key]
                 if n.kind not in _BELT_KINDS or (n.kind == "underground-belt" and not n.ug):
                     continue
                 for tile in n.tiles:
-                    for q, name, direction in sink.taps_at(tile, free):
+                    for q, name, direction, arm in sink.taps_at(tile, free):
+                        p = _arm_plan(name, q, arm) if arm else {"direction": direction}
                         e = fkpmod.Entity(f"~{self.net}/i0", name, q[0] + 0.5, q[1] + 0.5,
-                                          direction, {})
+                                          p["direction"], {k: p[k] for k in ("pick", "drop")
+                                                           if k in p})
                         laid = self.lay([e], nets)
                         return f"an inserter from {key} ({laid[0].key})"
         return None
@@ -2183,7 +2221,7 @@ class _Patch:
         if not roots:
             return None
         sinks = ([FixedSink(role, belt[0], (belt[1] + 2) % 4)] if belt is not None else
-                 [TapSink(machine[0], machine[1], 1, hands) for hands in _HANDS])
+                 [TapSink(machine[0], machine[1], 1, hands, arms=_ARMS) for hands in _HANDS])
         for sink in sinks:
             got = _new_branch(grid, roots, sink, m, True, self.limit)
             if got is not None:
@@ -2204,14 +2242,26 @@ class _Patch:
         a pair's belt)."""
         mkey, rect = machine
         grid, _others = self.grid(None)
-        for hands in _HANDS:
+        for hands, arms in _passes():
             for key in sorted(keys, key=fkpmod.natural_key):
                 n = self.g.nodes[key]
                 if n.nets != (m,) or (n.kind not in _BELTY and not (
                         n.kind == "underground-belt" and n.ug == "in")):
                     continue
                 for (tx, ty) in n.tiles:
-                    for h in range(4):
+                    for pick, drop in arms or ():       # 3.0: the force's vectors
+                        q = (tx - drop[0], ty - drop[1])
+                        p = (q[0] + pick[0], q[1] + pick[1])
+                        if grid.blocked(q) or q in self.g.at or not (
+                                rect[0] <= p[0] < rect[2] and rect[1] <= p[1] < rect[3]):
+                            continue
+                        plan = _arm_plan(hands[0], q, (pick, drop))
+                        e = fkpmod.Entity(f"~{self.net}/i0", hands[0], q[0] + 0.5, q[1] + 0.5,
+                                          plan["direction"],
+                                          {k: plan[k] for k in ("pick", "drop") if k in plan})
+                        laid = self.lay([e], [m])
+                        return f"an inserter onto {key} ({laid[0].key})"
+                    for h in range(4) if arms is None else ():
                         for name in hands:
                             r = _REACH[name]
                             q = (tx + _DX[h] * r, ty + _DY[h] * r)
@@ -2578,7 +2628,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     3.0: each net is laid once, in order, and keeps what it laid; a net that fails gets its group
     try (GROUP_BUDGET), then one promoting search of its own. ``retries`` is not used any more
     (kept for callers)."""
-    global _FILTERED, _TAPS
+    global _FILTERED, _TAPS, _ARMS
+    _ARMS = armsmod.of()
     _FILTERED = frozenset(k for net in flat.nets.values() for k, _i in net.drivers
                           if k in flat.machines
                           and not set(flat.machines[k].makes) <= set(net.items))

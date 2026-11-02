@@ -57,6 +57,10 @@ Checks it can run on its own (each starts a server, checks, stops it):
                                             uranium patch, acid in through a fluid port: acid
                                             in every drill, the ore rate against the model,
                                             the acid an ore takes
+    python tools/laptop_server.py bobinserters
+                                            3.0: Sea Block's adjustable inserters: robots build
+                                            pasted and single ghosts with their vectors, a diff
+                                            reads them back unchanged, a hand edit is named
     python tools/laptop_server.py machines
                                             3.0: a player adds a machine. With Space Age on,
                                             fk catalog learn foundry, then fk lab builds three
@@ -2503,6 +2507,129 @@ def check_machines(seconds=30):
     return 0 if all(got.values()) else 1
 
 
+#: 3.0 (Bob's adjustable inserters): a corner inserter (picks north, drops east), a plain
+#: inserter reaching 1 west and 2 east (bob-long-inserters-1's range), and one with no vectors
+BOBINS = """\
+fkp 1 factory bi
+size 20x8
+e box/a wooden-chest 2.5,2.5
+e ~n/i0 inserter 2.5,3.5 N net=n pick=0,-1 drop=1,0
+e box/b wooden-chest 3.5,3.5
+e box/c wooden-chest 6.5,2.5
+e ~n/i1 inserter 7.5,2.5 W net=n pick=-1,0 drop=2,0
+e box/d wooden-chest 9.5,2.5
+e box/e wooden-chest 12.5,2.5
+e ~n/i2 inserter 12.5,3.5 N net=n
+e box/f wooden-chest 12.5,4.5
+"""
+_BOB_BASE = """
+local s, f = game.get_surface('lab'), game.forces['lab']
+local tiles = {}
+for x = -30, 30 do for y = -30, 30 do tiles[#tiles + 1] = {name = 'sand-3', position = {x, y}} end end
+s.set_tiles(tiles)
+local eei = s.create_entity{name = 'electric-energy-interface', position = {-20, -20}, force = f}
+eei.electric_buffer_size = 1e12
+eei.power_production = 1e9
+eei.energy = 1e12
+s.create_entity{name = 'substation', position = {-17, -20}, force = f}
+s.create_entity{name = 'substation', position = {-17, -4}, force = f}
+local rp = s.create_entity{name = 'roboport', position = {-12, -10}, force = f}
+rp.insert{name = 'construction-robot', count = 30}
+local st = s.create_entity{name = 'storage-chest', position = {-8.5, -12.5}, force = f}
+for _, n in pairs({'wooden-chest', 'inserter'}) do st.insert{name = n, count = 20} end
+rcon.print('ok')"""
+_BOB_READ = """
+local s = game.get_surface('lab')
+local o = {}
+for _, e in pairs(s.find_entities_filtered{area = {{-2, -2}, {22, 12}}, type = 'inserter'}) do
+  local p, q, d = e.pickup_position, e.drop_position, e.position
+  o[#o + 1] = string.format('%s %.1f,%.1f dir %d pick %g,%g drop %.2f,%.2f', e.name, d.x, d.y,
+    e.direction, p.x - d.x, p.y - d.y, q.x - d.x, q.y - d.y)
+end
+table.sort(o)
+rcon.print(helpers.table_to_json(o))"""
+
+
+def check_bobinserters():
+    """3.0 (Bob's adjustable inserters, PLAN-BOB-INSERTERS): on a Sea Block server (its mods from
+    C:\\fk-mods\\sb-mods), robots build a pasted corner inserter, a range-2 plain inserter and a
+    plain one, and one single ghost (the refused-paste path) with vectors; each stands with the
+    design's vectors, a diff finds all ok and no setting changed, and the area's blueprint reads
+    back as the design's ``pick``/``drop``. Then a hand edit of the plain one's drop: the diff
+    names it, and a paste of the design sets it back (or says it doesn't)."""
+    import json
+    from fkcore import apply as applymod, codec, compose, fkp
+    from fkcore.catalog import Catalog
+    env = {k: os.environ.get(k) for k in ("FK_PACK", "FK_LEARNED")}
+    os.environ["FK_PACK"], os.environ["FK_LEARNED"] = "seablock", ""
+    try:
+        cat, s, f = Catalog.load(), "lab", "lab"
+        watch = {"plots": "keep", "sanctioned": "mark 2h", "notify": "off"}
+        lay = fkp.loads(BOBINS)
+        v1 = compose.compose(fkp.loads("fkp 1 surface lab\nplot bi at 0,0 rot 0 size 20x8\n"),
+                             {"bi": lay}, cat)
+        area = (-2, -2, 22, 12)
+        alone = codec.entity_json({"src": "lab:alone/i3", "name": "inserter", "x": 16.5, "y": 3.5,
+                                   "direction": 0, "attrs": {"pick": "0,-1", "drop": "1,0"}}, 1)
+        with LaptopServer("bobins", scenario="fk-play", mods=(),
+                          mod_dir=os.environ.get("FK_SB_MODS", r"C:\fk-mods\sb-mods"),
+                          boot_s=150) as srv:
+            with srv.rcon() as r:
+                r.lua(link.lua_generate_area(s, f, (-64, -64, 64, 64)))
+                print("base:", r.lua(_BOB_BASE).strip())
+                rep = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch)
+                print("\n".join(rep.lines()))
+                print("single ghost:", link.ghosts(r, s, f, [alone]))
+                left, secs = _robots_wait(r, area)
+                print(f"robots built it: {left} left after {secs:.0f} game s")
+                built = json.loads(r.lua(_BOB_READ).strip())
+                for line in built:
+                    print("  ", line)
+                d1 = applymod.diff(r, v1, cat, area, watch, force=f, own=rep.own)
+                verdicts = {}
+                for v in d1.verdicts:
+                    verdicts[v.verdict] = verdicts.get(v.verdict, 0) + 1
+                print("a diff after the robots:", verdicts, [x.line() for x in d1.settings])
+                bp = r.lua("local s = game.get_surface('lab') local inv = game.create_inventory(1) "
+                           "inv.insert{name = 'blueprint'} inv[1].create_blueprint{surface = s, "
+                           "force = 'lab', area = {{-2, -2}, {22, 12}}} "
+                           "rcon.print(inv[1].export_stack()) inv.destroy()").strip()
+                rows, _d, _w = codec.parse_blueprint(bp)
+                back = {(r_["x"], r_["y"]): {k: v for k, v in r_["attrs"].items()
+                                             if k in ("pick", "drop")}
+                        for r_ in rows if r_["name"] == "inserter"}
+                print("read back:", back)
+                r.lua("local s = game.get_surface('lab') local i = s.find_entity('inserter', {12.5, 3.5}) "
+                      "i.drop_position = {13.7, 3.5} rcon.print('ok')")
+                d2 = applymod.diff(r, v1, cat, area, watch, force=f, own=rep.own)
+                hand = [x.line() for x in d2.settings]
+                print("a diff after a hand edit of i2's drop:", hand)
+                rep2 = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch, own=rep.own)
+                print("\n".join(rep2.lines()))
+                _robots_wait(r, area)
+                after = json.loads(r.lua(_BOB_READ).strip())
+                print("after a paste of the design:", [x for x in after if "12.5,3.5" in x])
+    finally:
+        for k, v in env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    want = {(2.5, 3.5): {"pick": "0,-1", "drop": "1,0"}, (7.5, 2.5): {"pick": "-1,0", "drop": "2,0"},
+            (12.5, 3.5): {}, (16.5, 3.5): {"pick": "0,-1", "drop": "1,0"}}
+    got = {"built": left == 0,
+           "vectors stand": any("2.5,3.5 dir 0 pick 0,-1 drop 1.20,0.00" in x for x in built)
+           and any("7.5,2.5 dir 12 pick -1,0 drop 2.20,0.00" in x for x in built)
+           and any("16.5,3.5 dir 0 pick 0,-1 drop 1.20,0.00" in x for x in built),
+           "diff all ok": verdicts.get("ok") == len(v1.entities) and not d1.settings,
+           "read back as designed": back == want,
+           "hand edit named": len(hand) == 1 and "vectors" not in hand[0] and "drop=1,0" in hand[0],
+           "paste sets it back": any("12.5,3.5 dir 0 pick 0,-1 drop 0.00,1.20" in x for x in after)}
+    for k, v in got.items():
+        print(f"{k}: {'OK' if v else 'NOT as designed'}")
+    return 0 if all(got.values()) else 1
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "chat"
     raise SystemExit({"chat": check_chat, "own": check_own, "ghosts": check_ghosts,
@@ -2515,4 +2642,5 @@ if __name__ == "__main__":
                       "fluidports": check_fluidports, "domains": check_domains,
                       "powershed": check_powershed, "drops": check_drops,
                       "machines": check_machines,
-                      "recipeboxes": check_recipe_boxes}[what]())
+                      "recipeboxes": check_recipe_boxes,
+                      "bobinserters": check_bobinserters}[what]())

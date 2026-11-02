@@ -894,6 +894,7 @@ local CB_OF = {
 }
 local FIELD = {input_priority = 'splitter_input_priority', output_priority = 'splitter_output_priority',
   filter = 'splitter_filter'}
+local VEC = {pickup_position = 1, drop_position = 1}
 local DONE = {entity_number = 1, name = 1, position = 1, direction = 1, tags = 1, recipe = 1, type = 1,
   quality = 1, control_behavior = 1, use_filters = 1, filters = 1, request_filters = 1, items = 1}
 local function slot(f, min, max)
@@ -968,7 +969,8 @@ for _, e in ipairs(d.e) do
     if e.request_filters then requests(g, e.request_filters) end
     if e.items then try('items', function() g.insert_plan = e.items end) end
     for k, v in pairs(e) do
-      if not DONE[k] then try(k, function() g[FIELD[k] or k] = v end) end
+      if VEC[k] then try(k, function() g[k] = {g.position.x + v[1], g.position.y + v[2]} end)
+      elseif not DONE[k] then try(k, function() g[FIELD[k] or k] = v end) end
     end
   else
     miss('ghost not placed: ' .. e.name)

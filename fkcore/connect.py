@@ -82,6 +82,7 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from .catalog import FluidBox
 from .elaborate import Check
 from .fkp import CARRIER_TYPES, map_nets, net_names
@@ -106,7 +107,7 @@ HOLDER_TYPES = frozenset({"assembling-machine", "furnace", "mining-drill", "lab"
                           "cargo-landing-pad", "space-platform-hub", "cargo-bay",
                           "agricultural-tower"})
 #: Tiles from an inserter to its pickup and drop tile; every other inserter reaches 1.
-REACH = {"long-handed-inserter": 2}
+REACH = armsmod.REACH
 _FLUID_DRILLS = frozenset({"pumpjack"})
 _UG_REACH = 5                      # a tier the catalog gives no max_distance
 _SHOW = 4
@@ -129,6 +130,7 @@ class Node:
     recipe: str | None = None      # a crafting machine's recipe (it decides its fluid boxes)
     prio: tuple | None = None      # a splitter's (input, output) priority: left, right or None
     resource: str | None = None    # a drill's ore (2.1: on uranium ore its fluid box is live)
+    arms: dict | None = None       # an inserter's own vectors: {"pick": "dx,dy", "drop": ...}
 
     @property
     def carrier(self):
@@ -419,7 +421,9 @@ def _add_node(g, e, cat):
             ug = None
     g.nodes[e.key] = Node(e.key, e.name, kind, net, float(e.x), float(e.y), d, tiles, ug,
                           e.attrs.get("recipe"), _priority(e) if kind == "splitter" else None,
-                          e.attrs.get("resource") if kind == "mining-drill" else None)
+                          e.attrs.get("resource") if kind == "mining-drill" else None,
+                          {k: e.attrs[k] for k in ("pick", "drop") if k in e.attrs}
+                          if kind == "inserter" else None)
     for t in tiles:
         if t in g.at:
             g.problems.append(f"{e.key}: tile {t[0]},{t[1]} is already {g.at[t]}")
@@ -561,12 +565,9 @@ def _fluid_join(g, a, b, via, done):
 
 
 def _hand(n):
-    step = _STEP.get(n.dir)
-    if step is None:
-        return None
-    r = REACH.get(n.name, 1)
-    tx, ty = n.tiles[0]
-    return (tx + step[0] * r, ty + step[1] * r), (tx - step[0] * r, ty - step[1] * r)
+    """(pickup tile, drop tile) of an inserter node: its own vectors (``pick=``/``drop=``, 3.0:
+    Bob's adjustable inserters, ``fkcore.arms``) where it has them, else its direction and reach."""
+    return armsmod.tiles(n.name, n.dir, n.arms, n.tiles[0])
 
 
 def _gives(m):

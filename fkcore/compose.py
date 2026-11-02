@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from . import fkp as fkpmod
 
 __all__ = ["Placed", "Surface", "compose", "turn", "render"]
@@ -103,7 +104,7 @@ def compose(surface: fkpmod.Layout, factories: dict, cat) -> Surface:
             if _overlap(surface.plots[a].box(), surface.plots[b].box()):
                 s.problems.append(f"plots {a} and {b} overlap")
 
-    def place(key, e, x, y, d, plot, box):
+    def place(key, e, x, y, d, plot, box, attrs=None):
         try:
             tiles = tuple(sorted(cat.tiles(e.name, float(x), float(y), d if d is not None else 0)))
         except (ValueError, KeyError) as exc:
@@ -116,7 +117,8 @@ def compose(surface: fkpmod.Layout, factories: dict, cat) -> Surface:
                 s.tiles[t] = key
             if box is not None and not (box[0] <= t[0] < box[2] and box[1] <= t[1] < box[3]):
                 s.problems.append(f"{key}: tile {t[0]},{t[1]} is outside plot {plot}")
-        s.entities[key] = Placed(key, e.name, x, y, d, dict(e.attrs), plot, tiles)
+        s.entities[key] = Placed(key, e.name, x, y, d, dict(e.attrs if attrs is None else attrs),
+                                 plot, tiles)
 
     for name in names:
         p = surface.plots[name]
@@ -136,7 +138,7 @@ def compose(surface: fkpmod.Layout, factories: dict, cat) -> Surface:
             e = fac.entities[key]
             x, y, d = turn(float(e.x), float(e.y), e.dir, p.rot, fac.size)
             place(f"{surface.name}:{name}/{key}", e, _clean(x + p.x), _clean(y + p.y), d, name,
-                  p.box())
+                  p.box(), armsmod.turned(e.attrs, p.rot))
         s.wires += [fkpmod.Wire(f"{name}/{w.net}", w.colour, f"{surface.name}:{name}/{w.a}",
                                 f"{surface.name}:{name}/{w.b}") for w in fac.wires]
     s.problems.extend(f"{surface.name}: {msg}" for msg in fkpmod.invariants(surface, cat))

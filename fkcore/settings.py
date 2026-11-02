@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import arms as armsmod
 from . import codec
 from . import fkp as fkpmod
 
@@ -48,7 +49,11 @@ __all__ = ["KEYS", "Drift", "lua_read", "read", "design", "live", "drifts", "des
 #: the blueprint fields a diff compares (the recipe also makes a DRIFT verdict; here it is a hand
 #: edit with who made it)
 KEYS = ("recipe", "control_behavior", "use_filters", "filters", "filter_mode", "request_filters",
-        "bar")
+        "bar", "vectors")
+#: 3.0: an inserter's pickup_position / drop_position (Bob's adjustable inserters), compared as
+#: whole tiles (``vectors``, ``fkcore.arms``): the game keeps a drop of 1.2 as 1.19921875, and
+#: exports only the one that is not the prototype's
+_VECTORS = ("pickup_position", "drop_position")
 #: fields at the game's defaults: what the game exports when nobody set them (2.0.77: every
 #: inserter on a wire reads stack size from signal-S; 2.1: a belt's read mode, a lamp's colour
 #: signals, a drill's resource read, on any of them with a control behaviour), and the codec's
@@ -188,9 +193,13 @@ def _fields(entity, extra=()):
     2.1); ``extra=None`` keeps every field but those that place it (what stands, which the
     design's fields pick from)."""
     if extra is None:
-        got = {k: x for k, x in entity.items() if k not in _PLACE}
+        got = {k: x for k, x in entity.items() if k not in _PLACE and k not in _VECTORS}
     else:
         got = {k: entity[k] for k in tuple(KEYS) + tuple(extra) if k in entity}
+    vec = armsmod.from_blueprint(entity.get("name"), entity.get("direction") or 0,
+                                 {k: entity[k] for k in _VECTORS if k in entity})
+    if vec:
+        got["vectors"] = f"pick={vec['pick']} drop={vec['drop']}"
     return codec._normal(_clean(got))
 
 
@@ -307,6 +316,8 @@ def describe(fields, wires=None):
         parts.append("requests " + (", ".join(got) or "none"))
     if fields.get("bar") is not None:
         parts.append(f"limit {fields['bar']} slots")
+    if fields.get("vectors"):
+        parts.append(fields["vectors"])
     if wires is not None:
         parts.append(", ".join(f"{_COLOUR.get(c, c)} wire to {o[0]} at {_fmt(o[1])},{_fmt(o[2])}"
                                for c, o, _oc in sorted(wires)) or "no circuit wires")

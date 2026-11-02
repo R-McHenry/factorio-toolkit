@@ -46,6 +46,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from . import connect as connectmod
 
 __all__ = ["Node", "Edge", "LaneGraph", "build", "lane_rate", "inserter_rate", "ROTATION",
@@ -84,16 +85,19 @@ def _proto(cat, name):
     return rot, bool(bulk), int(row.get("stack_size_bonus", _OWN_HAND.get(name, 0)) or 0)
 
 
-def inserter_rate(name, hand=1, bulk_hand=1, onto_belt=False, cat=None):
+def inserter_rate(name, hand=1, bulk_hand=1, onto_belt=False, cat=None, turn=0.5):
     """Items/s an inserter moves: one hand per swing. ``hand`` is the non-bulk hand size (1 + the
     force's inserter bonus), ``bulk_hand`` the bulk one (1 + the bulk bonus); a stack inserter
-    adds its own 4. The prototype from ``cat`` (the catalog), else ``ROTATION``. None for an
-    inserter whose rotation speed is unknown."""
+    adds its own 4. ``turn``: the share of a full turn from pickup to drop (3.0, Bob's vectors,
+    ``fkcore.arms.turn``): a corner's 0.25 swings in about half the ticks (measured on a Sea Block
+    laptop server: a plain inserter 1.198/s straight, 2.5/s round a corner). The prototype from
+    ``cat`` (the catalog), else ``ROTATION``. None for an inserter whose rotation speed is
+    unknown."""
     rot, bulk, own = _proto(cat, name)
     if rot is None:
         return None
     n = (bulk_hand if bulk else hand) + own
-    swing = 2 * math.floor(0.5 / rot + 1e-9)            # ticks per pick-and-drop
+    swing = max(2, 2 * math.floor(turn / rot + 1e-9))   # ticks per pick-and-drop
     rate = 60.0 / swing * n
     if onto_belt:
         rate *= _ONTO_BELT.get(n, 0.6)
@@ -235,7 +239,8 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
             belts[key] = n
         elif n.kind == "inserter":
             onto = any(g.nodes[b].kind in _BELTS for b, via in g.succ.get(key, ()) if via == "drop")
-            rate = inserter_rate(n.name, hand, bulk_hand, onto_belt=onto, cat=cat)
+            rate = inserter_rate(n.name, hand, bulk_hand, onto_belt=onto, cat=cat,
+                                 turn=_turn_of(n))
             if rate is None:
                 lg.problems.append(f"{key}: {n.name} has no known rotation speed")
                 rate = INF
@@ -315,13 +320,24 @@ def _turn(g, b, side):
     return None
 
 
+def _turn_of(n):
+    """The share of a full turn inserter node ``n`` swings: 0.5 but for its own vectors."""
+    if not n.arms:
+        return 0.5
+    v = armsmod.vectors(n.name, n.dir, n.arms)
+    return armsmod.turn(*v) if v else 0.5
+
+
 def _drop(lg, g, belts, a, b):
     na, nb = g.nodes[a], g.nodes[b]
     if b in belts:
         # onto a turn by its sides (2.1.25, measured: 2.0.77); an inserter faces its pickup, on
-        # its side of the belt
-        lane = _turn(g, b, na.dir) if nb.kind == "transport-belt" else None
-        lane = lane or _drop_lane((na.dir + 8) % 16, nb.dir)    # an inserter faces its pickup
+        # its side of the belt: with its own vectors (3.0), the way its drop vector points
+        v = armsmod.vectors(na.name, na.dir, na.arms) if na.arms else None
+        drop_dir = (armsmod.heading(v[1]) if v else None)
+        drop_dir = (na.dir + 8) % 16 if drop_dir is None else drop_dir
+        lane = _turn(g, b, (drop_dir + 8) % 16) if nb.kind == "transport-belt" else None
+        lane = lane or _drop_lane(drop_dir, nb.dir)
         lg.add((a, ""), (b, lane), "drop", 3)
     else:
         lg.add((a, ""), (b, ""), "drop", 0)

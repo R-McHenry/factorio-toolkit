@@ -37,6 +37,7 @@ import math
 import re
 from dataclasses import dataclass
 
+from . import arms as armsmod
 from . import avail as availmod
 from . import fkp as fkpmod
 from . import placer
@@ -849,7 +850,7 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
             carry = _port_carriers(flat, path, ents)
             for e in ents:
                 x, y, d = turn(float(e.x), float(e.y), e.dir, rot, size)
-                attrs = dict(e.attrs)
+                attrs = dict(armsmod.turned(e.attrs, rot))
                 if attrs.get("net") in carry:
                     attrs["net"] = carry[attrs["net"]]
                 placed = fkpmod.Entity(e.key, e.name, _clean(x + x0), _clean(y + y0), d, attrs)
@@ -915,7 +916,7 @@ def _put(lay, path, inst, frag, binding, at, notes, cat=None):
     added = []
     for fe in frag.entities:
         x, y, d = turn(float(fe.x), float(fe.y), fe.dir, rot, frag.size)
-        attrs = dict(fe.attrs)
+        attrs = dict(armsmod.turned(fe.attrs, rot))
         if fe.role is not None:
             net = role_net(binding, fe.role)
             if net is None:

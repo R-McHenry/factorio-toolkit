@@ -57,6 +57,7 @@ import shlex
 import time
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from . import avail as availmod
 from . import compiled as compiledmod
 from . import compose, connect, design, expand, fkp, placer, rates, route, snapshot
@@ -1993,6 +1994,14 @@ def _bom_live(ctx):
                       used)
     availmod.save(ctx.root, sup, "report_bom --stock live")
     lines, checks = supply.bom(need, sup, used)
+    # 3.0 (fair play): an inserter set to vectors the force has not researched (Bob's adjustable
+    # inserters: the GUI's own limits) waits on that research like an unresearched entity
+    for tech, keys in sorted(armsmod.locked(ctx.composed.entities.values() if ctx.composed
+                                            else (), armsmod.of(sup)).items()):
+        checks.append(Check("needs-research", f"inserter vectors ({tech})",
+                            f"{len(keys)} inserter{'s' if len(keys) != 1 else ''} "
+                            f"({', '.join(keys[:4])}{' ...' if len(keys) > 4 else ''}) reach "
+                            f"further or wider than the force may set: research {tech}"))
     lines = ([lines[0], f"  to build: {what}; {sum(need.values())} entities",
               f"  {supply.research_line(sup.research)}"] + lines[1:])
     # the first lead run (2026-10-21): a paste took up the burner row before the 137 belts its

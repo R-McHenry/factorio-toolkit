@@ -65,6 +65,8 @@ import heapq
 import math
 import time
 
+from . import arms as armsmod
+
 __all__ = ["Grid", "Tree", "FixedSink", "TapSink", "grow", "dw", "COSTS", "ribbon"]
 
 DX = (0, 1, 0, -1)
@@ -154,25 +156,47 @@ class FixedSink:
 
 
 class TapSink:
-    """A machine (tile rectangle) fed by ``k`` inserters picking off the net's belt."""
+    """A machine (tile rectangle) fed by ``k`` inserters picking off the net's belt. ``arms``
+    (3.0, ``fkcore.arms.Arms``): the vectors the force may set an inserter to (Bob's adjustable
+    inserters), or None (the base game: pickup and drop opposite, a long-handed one reaching 2)."""
     terminal = False
 
-    def __init__(self, name, rect, k=1, inserters=("inserter", "long-handed-inserter")):
+    def __init__(self, name, rect, k=1, inserters=("inserter", "long-handed-inserter"),
+                 arms=None):
         self.name, self.rect, self.k, self.inserters = name, rect, k, inserters
+        self.arms = arms
 
     def inside(self, t):
         x0, y0, x1, y1 = self.rect
         return x0 <= t[0] < x1 and y0 <= t[1] < y1
 
     def taps_at(self, tile, free):
-        """(inserter tile, name, direction) taps from a belt on ``tile`` into this machine."""
+        """(inserter tile, name, direction, arm) taps from a belt on ``tile`` into this machine;
+        ``arm`` is None, or (pick, drop) offsets from the inserter's tile (``self.arms``): first
+        the plain straight ones, then a short hand with vectors (round a corner, then further
+        out), then a long-handed one."""
         out = []
+        short = [n for n in self.inserters if armsmod.REACH.get(n, 1) == 1]
+        names = self.inserters if self.arms is None else short
         for h in range(4):
-            for name in self.inserters:
+            for name in names:
                 r = 2 if name == "long-handed-inserter" else 1
                 q = (tile[0] + DX[h] * r, tile[1] + DY[h] * r)
                 if free(q) and self.inside((q[0] + DX[h] * r, q[1] + DY[h] * r)):
-                    out.append((q, name, _fdir((h + 2) % 4)))
+                    out.append((q, name, _fdir((h + 2) % 4), None))
+        if self.arms is None:
+            return out
+        if short:
+            for pick, drop in armsmod.pairs(self.arms, straight=False):
+                q = (tile[0] - pick[0], tile[1] - pick[1])
+                if free(q) and self.inside((q[0] + drop[0], q[1] + drop[1])):
+                    out.append((q, short[0], armsmod.heading(pick), (pick, drop)))
+        for name in self.inserters:
+            if name not in short:
+                for h in range(4):
+                    q = (tile[0] + DX[h] * 2, tile[1] + DY[h] * 2)
+                    if free(q) and self.inside((q[0] + DX[h] * 2, q[1] + DY[h] * 2)):
+                        out.append((q, name, _fdir((h + 2) % 4), None))
         return out
 
     def pick(self, path, tree, taken=()):
@@ -183,9 +207,9 @@ class TapSink:
         # 3.0: k taps may wrap a belt round the machine (three sides of a 1x1 chest): a longer tail
         for s in reversed(path[-(6 + 4 * (self.k - 1)):]):
             used = {g[0] for g in got}
-            for q, name, direction in self.taps_at((s[0], s[1]), lambda q: tree.free(q) and q not in on
-                                                   and q not in used and q not in taken):
-                got.append((q, name, direction, self.name))
+            for q, name, direction, arm in self.taps_at((s[0], s[1]), lambda q: tree.free(q) and q not in on
+                                                        and q not in used and q not in taken):
+                got.append((q, name, direction, self.name, arm))
                 break
             if len(got) >= self.k:
                 break
@@ -201,7 +225,9 @@ class TapSink:
         x0, y0, x1, y1 = self.rect
         dx = max(x0 - x, 0, x - (x1 - 1))
         dy = max(y0 - y, 0, y - (y1 - 1))
-        return max(0, dx + dy - 3)    # a long-handed tap reaches 3 tiles from the footprint
+        # a long-handed tap reaches 3 tiles from the footprint; with vectors (3.0) any short hand
+        # reaches its range twice over
+        return max(0, dx + dy - max(3, 2 * self.arms.range - 1 if self.arms else 3))
 
 
 class DropSink:
@@ -262,7 +288,7 @@ class Tree:
                     own.setdefault(m, []).append(("splitter", s))
                     if self.grid.drop_taps:
                         spare.add(self.spare_tile(s, mv[1]))
-            for q, _n, _d, _s in self.taps:
+            for q, _n, _d, _s, _a in self.taps:
                 own.setdefault(q, []).append(("tap", q))
             self._tiles, self._spare = own, spare
         return self._tiles
@@ -333,9 +359,8 @@ class Tree:
                 ents.append(_ent("underground-belt", x, y, d, net, "output"))
             else:
                 ents.append(_ent("transport-belt", x, y, out, net))
-        for q, name, direction, sink in self.taps:
-            ents.append({"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5, "direction": direction,
-                         "role": "ins", "link": f"{net}~{sink}"})
+        for q, name, direction, sink, arm in self.taps:
+            ents.append(_tap_ent(name, q, direction, arm, f"{net}~{sink}"))
         return ents
 
     def _entities_reversed(self, net):
@@ -355,9 +380,10 @@ class Tree:
                 ents.append(_ent("underground-belt", x, y, back, net, "input"))
             else:
                 ents.append(_ent("transport-belt", x, y, back, net))
-        for q, name, direction, sink in self.taps:
-            ents.append({"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5, "direction": (direction + 8) % 16,
-                         "role": "ins", "link": f"{sink}->{net}"})
+        for q, name, direction, sink, arm in self.taps:
+            # laid reversed, the tap picks from the machine and drops onto the belt
+            ents.append(_tap_ent(name, q, (direction + 8) % 16, arm and (arm[1], arm[0]),
+                                 f"{sink}->{net}"))
         return ents
 
     def counts(self):
@@ -384,7 +410,7 @@ class Tree:
         c, k = self.counts(), self.costs
         return round(c["belts"] * k["belt"] + c["turns"] * k["turn"] + c["undergrounds"] / 2 * k["ug"]
                      + c["splitters"] * k["split"]
-                     + sum(k["long_tap"] if n == "long-handed-inserter" else k["tap"] for _q, n, _d, _s in self.taps), 3)
+                     + sum(k["long_tap"] if n == "long-handed-inserter" else k["tap"] for _q, n, _d, _s, _a in self.taps), 3)
 
     def problems(self, sinks):
         """What would break in the game: shared tiles, blocked tiles, unreached sinks, tunnels
@@ -410,6 +436,17 @@ class Tree:
             if mine[ax] & self.grid.spans[ax]:
                 out.append(f"UG_INTERLEAVE axis {ax}: {sorted(mine[ax] & self.grid.spans[ax])[:3]}")
         return out
+
+
+def _tap_ent(name, q, direction, arm, link):
+    """A tap's plan entity; with its own vectors (3.0), ``pick``/``drop`` where they are not its
+    direction's own (``fkcore.arms.canon``), and it faces its pickup."""
+    e = {"name": name, "x": q[0] + 0.5, "y": q[1] + 0.5, "direction": direction, "role": "ins",
+         "link": link}
+    if arm:
+        e["direction"] = armsmod.heading(arm[0])
+        e.update(armsmod.canon(name, e["direction"], arm[0], arm[1]))
+    return e
 
 
 def _ent(name, x, y, h, net, ug=None):
@@ -564,9 +601,10 @@ def _astar(tree, starts, sinks, targets, limit=60000):
 
     tapped = set()           # laid reversed, a tapped belt takes a drop: it starts no tunnel
     if grid.drop_taps:
-        for q, name, direction, _s in tree.taps:
+        for q, name, direction, _s, arm in tree.taps:
             r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
-            tapped.add((q[0] + DX[g0] * r, q[1] + DY[g0] * r))
+            tapped.add((q[0] + arm[0][0], q[1] + arm[0][1]) if arm else
+                       (q[0] + DX[g0] * r, q[1] + DY[g0] * r))
 
     # 3.0: a tap sink that wants k > 1 inserters (route._TAPS) needs a path that passes k tap
     # tiles, a wrap round a 1x1 chest say, which costs more than the straight path to the same

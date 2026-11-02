@@ -1055,6 +1055,14 @@ machine is refused when a net uses it. An entity whose centre doesn't fit its si
 blueprints put some half a tile off) is moved to the nearest centre that does, with a
 `literal-snap` line naming it.
 
+**An inserter's own pickup and drop (Bob's inserters, Sea Block).** Where every inserter takes
+custom vectors, a Literal's inserter keeps the ones it was built with. A blueprint string carries
+them as `pickup_position` / `drop_position`. A listed entity writes them as tiles from its own
+tile (x east, y south): `{"name": "inserter", "x": 4.5, "y": 5.5, "direction": 0, "pick": "0,-1",
+"drop": "1,0"}` picks from the north and drops east. Write them as the force may set them (range
+1, or 2 after `bob-long-inserters-1`); one it can't is a `needs-research` line. The router lays
+its own hands this way where it helps, so a design needs no vectors written.
+
 **Ports of a Literal.** A JSON Literal file may also name its ports, the way a module declares
 them: `"ports": {"heavy": {"carrier": 12, "side": "e"}}`, a pipe, pipe-to-ground or belt of the
 file (its index, from 0) and the edge of the frame it meets (`n`, `e`, `s`, `w`, in the file's own
