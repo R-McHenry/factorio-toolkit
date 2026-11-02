@@ -528,8 +528,10 @@ rcon.print('sim: removed ' .. n .. ' entities')
         path = os.path.join(arch.root, "techtree.json")
         if os.path.exists(path):
             tree = techcost.Tree.load(path)
-            # a 2.0.66 read has no recipe amounts, and worth (2.0.67) needs them: read it again
-            if any(isinstance(r.get("ina"), dict) and r["ina"] for r in tree.recipes.values()):
+            # a 2.0.66 read has no recipe amounts, and worth (2.0.67) needs them; one from before
+            # 3.0 has no recipe energy, which worth's power cost needs: read it again
+            if any(isinstance(r.get("ina"), dict) and r["ina"] and "energy" in r
+                   for r in tree.recipes.values()):
                 return tree
             os.remove(path)
         if not os.path.exists(path):
