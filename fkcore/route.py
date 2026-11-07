@@ -174,6 +174,7 @@ class NetJob:
     pin: str | None = None                         # 2.0.54: the lane it ends on (L or R)
     drv: list = field(default_factory=list)        # [(start or source, instance path)]
     m2m: dict | None = None                        # 2.1 route --m2m: fkcore.m2m.spec_of
+    no_bend: list = field(default_factory=list)    # 2.1.31: tiles whose belt runs straight on
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved)
@@ -666,6 +667,7 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
     """forward or reverse: one tree. -> (plan entities, report text) or (None, reason)."""
     reverse = job.mode == "reverse"
     grid = _Bounded(blocked, box, spans, clear if reverse else None)
+    grid.no_bend = set(job.no_bend)
     if reverse:
         (gtile, gh), = job.goals
         root = (gtile[0], gtile[1], (gh + 2) % 4, 0)
@@ -2128,8 +2130,202 @@ def _filter_loads(flat, lay, cat):
     return out
 
 
+#: PLAN-3.0 §4: the router's version a compiled module was laid by; a compiled module of another
+#: version is laid again. Bump it when a change to the router would lay a module otherwise.
+COMPILE_VERSION = "route-2.1.31"
+
+
+def _unit(net, sealed):
+    """The compile unit of ``net``: the innermost sealed module it is inside, "" for none (a lane
+    pair ``a|b`` by its first net)."""
+    parts = fkpmod.net_names(net)[0].split("/")[:-1] if net else []
+    best = ""
+    for i in range(1, len(parts) + 1):
+        pre = "/".join(parts[:i])
+        if pre in sealed:
+            best = pre
+    return best
+
+
+def _renamed(net, src, dst):
+    """``net`` (a net of unit ``src``, or a lane pair of them) as the same net of unit ``dst``;
+    ``dst`` "" gives the name relative to ``src``. None when a part is outside ``src``."""
+    out = []
+    for part in re.split(r"([|+])", net):
+        if part in ("|", "+", ""):
+            out.append(part)
+        elif part.startswith(src + "/"):
+            out.append((dst + "/" if dst else "") + part[len(src) + 1:])
+        else:
+            return None
+    return "".join(out)
+
+
+def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
+    """The compile key of sealed unit ``u`` (PLAN-3.0 §4): a hash of everything its own nets
+    ``mine`` are laid to, relative to its frame -- the router's version, the frame's size, the
+    instances placed in it, every entity standing in it (machines, Literals, its children's
+    routes), the terrain in it, and each net's ends and items. Two units with one key are laid
+    the same. -> the key, or None when a net's name is not the unit's own."""
+    import hashlib
+    x0, y0, x1, y1, _tiles = sealed[u]
+    rec = lay.insts.get(u)
+    rel = {n: _renamed(n, u, "") for n in mine}
+    if rec is None or any(r is None for r in rel.values()):
+        return None
+
+    def key_of(k):
+        return k[len(u) + 1:] if k.startswith(u + "/") else "^" + k
+
+    def tile(t):
+        return (t[0] - x0, t[1] - y0)
+
+    def rect(r):
+        return (r[0] - x0, r[1] - y0, r[2] - x0, r[3] - y0)
+
+    parts = [COMPILE_VERSION, x1 - x0, y1 - y0, rec.kind, rec.rot]
+    parts.append(sorted((p[len(u) + 1:], r.kind, sorted(r.params.items()), r.x - x0, r.y - y0,
+                         r.rot)
+                        for p, r in lay.insts.items() if p.startswith(u + "/")))
+    parts.append(sorted((e.name, e.x - x0, e.y - y0, e.dir if e.dir is not None else -1)
+                        for e in ground if x0 <= e.x < x1 and y0 <= e.y < y1))
+    if terrain:
+        parts.append([(x - x0, y - y0) for x in range(x0, x1) for y in range(y0, y1)
+                      if (x, y) in terrain])
+    for n in sorted(mine, key=lambda m: rel[m]):
+        j = js[n]
+        items = sorted(i for m in fkpmod.net_names(n) if m in flat.nets for i in flat.nets[m].items)
+        parts.append((rel[n], items,
+                      sorted((tile(t), h) for t, h in j.starts),
+                      sorted((tile(t), h) for t, h in j.goals),
+                      sorted((key_of(k), rect(r)) for k, r in j.taps),
+                      sorted((key_of(k), rect(r)) for k, r in j.sources),
+                      sorted(tile(t) for t in j.reserved), sorted(tile(t) for t in j.no_bend),
+                      j.skip, j.fluid, j.straight, j.wide, j.pin, j.m2m is not None,
+                      len(j.parts)))
+    return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:20]
+
+
+def _moved_entity(e, net, new_net, dx, dy, src, dst):
+    """Carrier ``e`` of ``net`` (unit ``src``'s) as the same carrier of ``new_net`` (unit
+    ``dst``'s), moved by (dx, dy); None when its key or its ``net=`` is not the unit's own. The
+    ``net=`` is renamed as written: an inserter of a lane pair says ``a+b``, its belts ``a|b``."""
+    head = f"~{net}"
+    if not e.key.startswith(head):
+        return None
+    attrs = dict(e.attrs)
+    if "net" in attrs:
+        attrs["net"] = _renamed(attrs["net"], src, dst)
+        if attrs["net"] is None:
+            return None
+    return fkpmod.Entity(f"~{new_net}{e.key[len(head):]}", e.name, e.x + dx, e.y + dy, e.dir,
+                         attrs)
+
+
+def _moved_routes(added, nets, src, src_frame, dst, dst_frame):
+    """The routes unit ``src`` laid this build (``added``, its ``nets``), moved to unit ``dst``'s
+    frame and renamed to its nets: -> {net: carriers}, or None when one is missing."""
+    dx, dy = dst_frame[0] - src_frame[0], dst_frame[1] - src_frame[1]
+    out = {}
+    for n in nets:
+        new = _renamed(n, src, dst)
+        if n not in added or new is None:
+            return None
+        ents = [_moved_entity(e, n, new, dx, dy, src, dst) for e in added[n]]
+        if any(e is None for e in ents):
+            return None
+        out[new] = ents
+    return out
+
+
+def _fits(cat, got, ground, frame, blocked, terrain, claimed, mine):
+    """True when the moved routes ``got`` ({net: carriers}) stand in ``frame`` on free tiles: no
+    entity of ``ground`` there, no terrain, no blocked frame, no tile another net's direct
+    insertion claims (``claimed``: tile -> nets; ``mine``: the unit's own nets)."""
+    x0, y0, x1, y1, _tiles = frame
+    occ = set()
+    for e in ground:
+        if x0 - 3 <= e.x < x1 + 3 and y0 - 3 <= e.y < y1 + 3:
+            occ |= fkpmod.tiles_of(cat, e)
+    for ents in got.values():
+        for e in ents:
+            for t in fkpmod.tiles_of(cat, e):
+                if not (x0 <= t[0] < x1 and y0 <= t[1] < y1) or t in occ or t in terrain \
+                        or t in blocked or claimed.get(t, mine) - mine:
+                    return False
+    return True
+
+
+def _prefixed(rel, u):
+    """A net name relative to unit ``u`` (``x|y``, ``x+y``) as ``u``'s own (``u/x|u/y``)."""
+    return re.sub(r"(^|[|+])", lambda m: m.group(1) + u + "/", rel)
+
+
+def _store_path(store, ckey):
+    import os
+    return os.path.join(store, f"{ckey}.json")
+
+
+def _store_save(store, ckey, u, frame, routes):
+    """Write sealed unit ``u``'s routes ({net: carriers}) to the compiled store, relative to its
+    frame, under its compile key. -> 1 when written, 0 when the key was there already or the
+    store can't be written."""
+    import json
+    import os
+    path = _store_path(store, ckey)
+    if os.path.exists(path):
+        return 0
+    x0, y0 = frame[0], frame[1]
+    nets = {}
+    for n, ents in routes.items():
+        rel = _renamed(n, u, "")
+        head = f"~{n}"
+        if rel is None or any(not e.key.startswith(head) for e in ents):
+            return 0
+        own = [_renamed(e.attrs["net"], u, "") if "net" in e.attrs else "" for e in ents]
+        if any(o is None for o in own):
+            return 0
+        nets[rel] = [[e.key[len(head):], e.name, e.x - x0, e.y - y0, e.dir,
+                      {k: v for k, v in e.attrs.items() if k != "net"}, o]
+                     for e, o in zip(ents, own)]
+    try:
+        os.makedirs(store, exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump({"version": COMPILE_VERSION, "module": u, "nets": nets}, fh)
+        os.replace(tmp, path)
+    except OSError:
+        return 0
+    return 1
+
+
+def _store_load(store, ckey, u, frame):
+    """Sealed unit ``u``'s routes from the compiled store under ``ckey``, moved to its frame:
+    -> {net: carriers}, or None when the store has none."""
+    import json
+    try:
+        with open(_store_path(store, ckey), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if data.get("version") != COMPILE_VERSION:
+        return None
+    x0, y0 = frame[0], frame[1]
+    out = {}
+    for rel, ents in data.get("nets", {}).items():
+        net = _prefixed(rel, u)
+        got = []
+        for tag, name, x, y, d, attrs, own in ents:
+            attrs = dict(attrs)
+            if own:
+                attrs["net"] = _prefixed(own, u)
+            got.append(fkpmod.Entity(f"~{net}{tag}", name, x + x0, y + y0, d, attrs))
+        out[net] = got
+    return out
+
+
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                 blocked=(), hand=None, patch=None, ug=None, m2m=False) -> Routed:
+                 blocked=(), hand=None, patch=None, ug=None, m2m=False, store=None) -> Routed:
     """``_route_layout`` with direct insertion by ``hand`` (a short inserter) instead of the
     fast one; long-handed ones still go where only they reach. ``ug``: the fastest belt tier a
     ribbon's tunnels may have (yellow, red, blue, turbo; default yellow): a ribbon reaches as far
@@ -2137,7 +2333,8 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     ``m2m`` (2.1, ``route --m2m``): a net with two or more drivers and two or more consumers
     whose flow is above one lane (or whose ``width`` above 2 asks for that many lanes) is laid by
     ``fkcore.m2m`` and gets a ``MAXFLOW`` line; without it nothing changes. ``m2m="left"``: on
-    the left lane only (version 1); otherwise on both lanes (2.1.21)."""
+    the left lane only (version 1); otherwise on both lanes (2.1.21). ``store`` (a folder, or
+    None): the compiled sealed modules (PLAN-3.0 §4), read and written (``_route_layout``)."""
     global _HANDS, _M2M
     from . import ribbons as ribmod
     saved_ug, saved_m2m = ribmod._UG, _M2M
@@ -2145,13 +2342,15 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
     _M2M = "left" if m2m == "left" else bool(m2m)
     try:
         if not hand or hand == "fast-inserter":
-            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch,
+                                 store)
         if _REACH.get(hand) != 1:
             raise ValueError(f"hand is a short inserter (inserter, fast-inserter, "
                              f"burner-inserter), got {hand!r}")
         saved, _HANDS = _HANDS, ((hand,), (hand, "long-handed-inserter"))
         try:
-            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch)
+            return _route_layout(flat, lay, cat, bounds, margin, retries, limit, blocked, patch,
+                                 store)
         finally:
             _HANDS = saved
     finally:
@@ -2160,8 +2359,13 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
 
 
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
-                  blocked=(), patch=None) -> Routed:
+                  blocked=(), patch=None, store=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
+
+    The nets route per compile unit (PLAN-3.0 §4): each sealed module's own nets in passes of
+    their own, innermost first, then the rest; ``retries`` counts passes per unit (default:
+    its nets). A sealed module routed whole is compiled: a twin of it later in the build, or in
+    a later build through ``store`` (a folder), takes its routes moved to the twin's frame.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
     tiles east and south (the frame starts at 0, 0). ``blocked``: ground no carrier may use,
@@ -2258,7 +2462,6 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         todo += [n for n in again if js[n].skip is None and not js[n].fluid]
     kept = sorted(n for n in js if n in have or n in standing)
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
-    retries = len(todo) if retries is None else retries
     claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
     # 2.1: ribbons (a net each, a bundle, a wide net) are routed as one, first: they need the
     # widest ways. A ribbon is routed whole only when every net of it is laid this run.
@@ -2269,29 +2472,17 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     ribs = ribmod.plan(flat, cat, js, pending)
     ribs = {k: r for k, r in ribs.items() if any(n in todo for n in r.nets)}
     rib_of = {n: k for k, r in ribs.items() for n in r.nets}
-    rib_lines, rib_seen = {}, {}
-    best = None
-    order = list(ribs) + [n for n in todo if n not in rib_of]
+    rib_seen = {}
 
     def unrouted(key, failed):
         if key in ribs:
             return any(n in failed for n in ribs[key].nets)
         return key in failed
 
-    repeats = False
-    # 2.1.30: a pass laid in the order of the one before it lays the same routes on the same
-    # ground, net by net, until a promotion changes the ground: those nets take the last pass's
-    # answer (the promoting pass re-laid all 278 nets of the 20261030-2352 world, ~60 s, to try
-    # promoting its four that failed)
-    prev_order, prev_plain = None, {}
-    for attempt in range(retries + 2):
-        # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
-        promo = attempt == retries + 1
-        if promo and (best is None or not best[2]):
-            break
-        if repeats and not promo:
-            continue
-        ents = list(base.entities.values())
+    def one_pass(attempt, order, ground, prev_order, prev_plain, promo):
+        """One pass over ``order`` on ``ground``: -> (added, failed, how, swaps, ribbon lines,
+        each plain net's (carriers, how))."""
+        ents = list(ground)
         added, failed, how, swaps, rlines = {}, {}, {}, [], {}
         plain, same = {}, prev_order is not None
         for k, net in enumerate(order):
@@ -2305,7 +2496,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 rib = ribs[net]
                 fnet, bnet = net_frames(rib.nets[0])
                 # the same ground as a pass before (the same nets laid first): the same answer
-                seen = (net, tuple(sorted(added)), tuple(s[2] for s in swaps))
+                seen = (net, len(ground), tuple(sorted(added)), tuple(s[2] for s in swaps))
                 if seen not in rib_seen:
                     rib_seen[seen] = ribmod.route(cat, rib, ents, fnet, js, bnet, limit,
                                                   terrain, avoid, joints)
@@ -2347,22 +2538,104 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             added[net] = got
             how[net] = why
             ents += got
-        prev_order, prev_plain = list(order), plain
-        score = (len(added), -len(swaps), -attempt)
-        if best is None or score > best[0]:
-            best = (score, added, failed, how, attempt + 1, list(order), swaps, rlines)
-        if not failed:
-            break
-        reordered = [n for n in order if unrouted(n, failed)] + \
-            [n for n in order if not unrouted(n, failed)]
-        # 2.1.26: the same order on the same ground lays the same routes, and the score keeps the
-        # first of equal passes: go on to the promoting pass. The 20261030-2352 world's coal
-        # failed first in order, so each of its 45 passes (~13 s) repeated the one before
-        repeats = reordered == order
-        order = reordered
-    _score, added, failed, how, passes, order, swaps, rlines = best
-    added, failed, how, rib_lines = dict(added), dict(failed), dict(how), dict(rlines)
-    order = [m for n in order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
+        return added, failed, how, swaps, rlines, plain
+
+    def passes_of(order, ground):
+        """Lay ``order`` (the net names and ribbon keys of one compile unit) on ``ground`` (the
+        entities laid so far) in passes, the failed ones first each time, then one promoting pass
+        while a net is left. -> the best pass's (added, failed, how, passes, order, swaps,
+        ribbon lines)."""
+        tries = len(order) if retries is None else retries
+        best, repeats = None, False
+        # 2.1.30: a pass laid in the order of the one before it lays the same routes on the same
+        # ground, net by net, until a promotion changes the ground: those nets take the last
+        # pass's answer (the promoting pass re-laid all 278 nets of the 20261030-2352 world,
+        # ~60 s, to try promoting its four that failed)
+        prev_order, prev_plain = None, {}
+        for attempt in range(tries + 2):
+            # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
+            promo = attempt == tries + 1
+            if promo and (best is None or not best[1][1]):
+                break
+            if repeats and not promo:
+                continue
+            added, failed, how, swaps, rlines, plain = one_pass(attempt, order, ground,
+                                                                prev_order, prev_plain, promo)
+            prev_order, prev_plain = list(order), plain
+            score = (len(added), -len(swaps), -attempt)
+            if best is None or score > best[0]:
+                best = (score, (added, failed, how, attempt + 1, list(order), swaps, rlines))
+            if not failed:
+                break
+            reordered = [n for n in order if unrouted(n, failed)] + \
+                [n for n in order if not unrouted(n, failed)]
+            # 2.1.26: the same order on the same ground lays the same routes, and the score keeps
+            # the first of equal passes: go on to the promoting pass. The 20261030-2352 world's
+            # coal failed first in order, so each of its 45 passes (~13 s) repeated the one before
+            repeats = reordered == order
+            order = reordered
+        return best[1]
+
+    # PLAN-3.0 §4 (sealed modules compile once): each sealed module is a compile unit. Its own
+    # nets (those whose innermost sealed module it is) are laid in passes of their own, the
+    # innermost units first, then the nets outside every sealed module; a unit's failed net
+    # never rips up another unit's routes. A unit whose twin (the same module, the same ground
+    # in its frame) routed earlier in this build, or in an earlier build (``store``), takes the
+    # twin's routes moved to its frame, and the judge (``_repair``) checks them as any route.
+    groups = {}
+    for key in list(ribs) + [n for n in todo if n not in rib_of]:
+        groups.setdefault(_unit(ribs[key].nets[0] if key in ribs else key, sealed),
+                          []).append(key)
+    nets_of = {u: [m for k in keys for m in (dict.fromkeys(ribs[k].nets) if k in ribs else [k])]
+               for u, keys in groups.items()}
+    units = sorted(groups, key=lambda u: (-(u.count("/") + 1) if u else 1, u))
+    ground = list(base.entities.values())
+    added, failed, how, swaps, rib_lines, order, passes = {}, {}, {}, [], {}, [], 1
+    claimed = {}
+    for other, tiles in claims.items():
+        for t in tiles:
+            claimed.setdefault(t, set()).add(other)
+    twins, compiled, reused = {}, {}, {}
+    for u in units:
+        mine = nets_of[u]
+        ckey = _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain) if u else None
+        if ckey is not None:
+            got, src = None, None
+            if ckey in twins:
+                src = twins[ckey]
+                got = _moved_routes(added, nets_of[src], src, sealed[src], u, sealed[u])
+            elif store:
+                got = _store_load(store, ckey, u, sealed[u])
+                src = "the compiled store" if got is not None else None
+            if got is not None and set(got) == set(mine) \
+                    and _fits(cat, got, ground, sealed[u], net_frames(mine[0])[0], terrain,
+                              claimed, set(mine)):
+                for net in mine:
+                    added[net] = got[net]
+                    how[net] = f"laid as {src} laid it (compiled once, PLAN-3.0 §4)"
+                    ground += got[net]
+                order += mine
+                reused[u] = src
+                continue
+        u_added, u_failed, u_how, u_passes, u_order, u_swaps, u_rlines = passes_of(
+            list(groups[u]), ground)
+        if u_swaps:
+            gone = {k for s in u_swaps for k in s[0]}
+            ground = [e for e in ground if e.key not in gone] + [e for s in u_swaps for e in s[1]
+                                                                 if e.owner[1:] not in u_added]
+            _swap_added(added, u_swaps)
+        for net, laid in u_added.items():
+            ground += laid
+        added.update(u_added)
+        failed.update(u_failed)
+        how.update(u_how)
+        swaps += u_swaps
+        rib_lines.update(u_rlines)
+        order += [m for n in u_order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
+        passes = max(passes, u_passes)
+        if ckey is not None and not u_failed and not u_swaps:
+            twins.setdefault(ckey, u)
+            compiled[u] = ckey
     new = base.copy()
     for gone, _new, _text in swaps:
         for k in gone:
@@ -2430,6 +2703,21 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             lines.append(text)
             if why:
                 short[net] = why
+    sealed_units = [u for u in units if u]
+    if sealed_units:
+        stored = 0
+        for u, ckey in compiled.items():
+            if store and all(n in added and n not in failed for n in nets_of[u]):
+                stored += _store_save(store, ckey, u, sealed[u],
+                                      {n: [new.entities.get(e.key, e) for e in added[n]]
+                                       for n in nets_of[u]})
+        twin = sum(1 for s in reused.values() if s != "the compiled store")
+        lines.append(f"compile   {len(sealed_units)} sealed module{'s' if len(sealed_units) != 1 else ''}"
+                     f", each routed on its own in its frame "
+                     f"({sum(len(nets_of[u]) for u in sealed_units)} nets): {twin} laid as a twin "
+                     "laid this build, "
+                     f"{len(reused) - twin} from the compiled store"
+                     + (f", {stored} stored" if store else ""))
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)

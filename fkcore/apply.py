@@ -537,7 +537,12 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
             rep.present = len(want & (set(seen) | up_now))
     if mode == "lab":
-        got = r.lua(link.lua_revive(s.name, area)).split()
+        said = r.lua(link.lua_revive(s.name, area))
+        got = said.split()
+        # 2.1.31: a game error ("Cannot execute command ...") stopped the build after its route
+        if got and not all(g.isdigit() for g in got[:2]):
+            rep.notes.append(f"revive: {said.strip()}")
+            got = []
         rep.revived = int(got[0]) if got else 0
         rep.revive_failed = int(got[1]) if len(got) > 1 else 0
     # 2.1: the wires as the design has them, quietly (the hand edits above named any made by hand)

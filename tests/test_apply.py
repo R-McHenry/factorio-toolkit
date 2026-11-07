@@ -61,6 +61,18 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual(len(r.pastes), 1)
         self.assertFalse(any("register" in c or "on_event" in c for c in r.calls))
 
+    def test_a_revive_error_is_a_note_not_a_crash(self):
+        # 2.1.31: a ghost another revive removed ended a 1300-net loop's build after its route
+        self.assertIn("if g.valid then", link.lua_revive("lab", (0, 0, 10, 10)))
+        r = FakeRcon(self.want)
+        said = "Cannot execute command. Error: LuaEntity API call when LuaEntity was invalid."
+        lua = r.lua
+        r.lua = lambda body: said if "g.revive()" in body else lua(body)
+        with mock.patch.object(link, "snapshot", fake_snapshot(self.want)):
+            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"], mode="lab")
+        self.assertEqual(rep.revived, 0)
+        self.assertIn(f"revive: {said}", rep.notes)
+
     def test_lab_shifted_paste_is_measured_and_pasted_again(self):
         shifted = [(n, x + 1, y) for n, x, y in self.want]
         r, rep = self.run_apply(shifted, "lab")

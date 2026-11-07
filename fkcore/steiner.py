@@ -98,6 +98,7 @@ class Grid:
         self.spans = spans or {0: set(), 1: set()}
         self.keep_clear = set()      # no split's spare (reversed) output may point at these
         self.drop_taps = False       # laid reversed: taps drop onto their belt
+        self.no_bend = set()         # 2.1.31: tiles whose belt runs straight on (a pair's join)
 
     def blocked(self, t):
         return t in self.occ or t in self.fronts
@@ -550,6 +551,9 @@ def _astar(tree, starts, sinks, targets, limit=60000):
         return min(sinks[i].h(x, y) for i in targets)
 
     tapped = set()           # laid reversed, a tapped belt takes a drop: it starts no tunnel
+    # 2.1.31: tiles whose belt must run straight on, neither turning nor starting a tunnel (a lane
+    # pair's join: an underground there is side-loaded from both sides, and drops a lane)
+    nobend = getattr(grid, "no_bend", ()) or ()
     if grid.drop_taps:
         for q, name, direction, _s in tree.taps:
             r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
@@ -595,11 +599,13 @@ def _astar(tree, starts, sinks, targets, limit=60000):
                 continue
             if nd == (d + 2) % 4:
                 continue
+            if nd != d and (x, y) in nobend:
+                continue
             nx, ny = x + DX[nd], y + DY[nd]
             step = k["belt"] + (k["turn"] if nd != d else 0.0)
             if not blocked((nx, ny)):
                 _push(heap, g, parent, (nx, ny, nd, 0), st, gs + step, hh)
-            if ex or nd != d or (x, y) in tapped:
+            if ex or nd != d or (x, y) in tapped or (x, y) in nobend:
                 continue
             seen_block = False
             for j in jumps:

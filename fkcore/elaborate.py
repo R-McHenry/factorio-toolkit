@@ -258,17 +258,22 @@ def load(path):
     return f, modules
 
 
-def _imports(f, folder, modules, seen, kinds=None, tiers=None):
+def _imports(f, folder, modules, seen, kinds=None, tiers=None, parsed=None):
     kinds = f.kinds if kinds is None else kinds
     tiers = f.tiers if tiers is None else tiers
+    # 2.1.31: one parse a file, so two files importing one cell file (a PU chain and an LDS
+    # chain, both of pucells.fk's FurnB) bring the same module, not "FurnB is defined twice"
+    parsed = {} if parsed is None else parsed
     for names, rel, line in f.imports:
         target = os.path.abspath(os.path.join(folder, rel))
         if not os.path.exists(target):
             raise ElabError(f.path, line, f"import: no file {rel}")
-        g = lang.parse(snapshot.read(target), target)
+        g = parsed.get(target)
+        if g is None:
+            g = parsed[target] = lang.parse(snapshot.read(target), target)
         if target not in seen:
             seen.add(target)
-            _imports(g, os.path.dirname(target), modules, seen, kinds, tiers)
+            _imports(g, os.path.dirname(target), modules, seen, kinds, tiers, parsed)
         for name, k in g.kinds.items():     # 2.1: an imported file's kinds come with it
             kinds.setdefault(name, k)
         for name, t in g.tiers.items():     # and its tiers
@@ -1087,6 +1092,9 @@ def _literal_names(flat, path, imported, keys, inst, src, duty=1.0):
             names[name] = ekey
         else:
             other[name] = ent.name if ent is not None else "?"
+            if ent is not None:     # 2.1.31: a wire may end at it (a Literal's combinator)
+                flat._lit_ends = getattr(flat, "_lit_ends", {})
+                flat._lit_ends.setdefault(path, {})[name] = (ekey, ent.name)
     flat.literal_names[path] = names
     if other:
         flat._lit_other = getattr(flat, "_lit_other", {})

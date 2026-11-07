@@ -131,6 +131,31 @@ class LiteralImportTest(unittest.TestCase):
                          [("cell/transport-belt0", "cell/belt0"), ("cell/transport-belt1", "cell/belt0"),
                           ("cell/iron-chest0", None)])
 
+    def test_a_capture_in_world_tiles_cuts_into_literals_that_line_up(self):
+        # 2.1.31: fk capture world writes world positions, so a box is in world tiles and two
+        # Literals cut from one capture sit as the build stood
+        from fkcore import capture
+        rows = [{"src": None, "name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 4,
+                 "attrs": {}},
+                {"src": None, "name": "assembling-machine-2", "x": 3.5, "y": 1.5,
+                 "direction": None, "attrs": {"recipe": "iron-gear-wheel"}}]
+        bp = codec.blueprint(rows)
+        at = [[1400.5, -380.5, "transport-belt"], [1403.5, -379.5, "assembling-machine-2"]]
+        listed = capture.world_list(bp, at)
+        self.assertEqual([(e["wx"], e["wy"]) for e in listed], [(1400.5, -380.5), (1403.5, -379.5)])
+        self.assertIsNone(capture.world_list(bp, at[:1]))
+        self.assertIsNone(capture.world_list(bp, [at[1], at[0]]))     # names out of order
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "demo.json")
+            with open(path, "w") as fh:
+                json.dump({"bp": bp, "entities": listed}, fh)
+            belt, size, corner = literal.import_entities(path, "w", CAT, box="1398,-382,1402,-378")
+            asm, _s, corner2 = literal.import_entities(path, "e", CAT, box="1402,-382,1406,-378")
+        self.assertEqual(corner, (1398, -382))
+        self.assertEqual([(e.name, e.x, e.y, e.dir) for e in belt], [("transport-belt", 2.5, 1.5, 4)])
+        self.assertEqual([(e.name, e.attrs.get("recipe")) for e in asm],
+                         [("assembling-machine-2", "iron-gear-wheel")])
+
     def test_a_blueprint_string_keeps_settings_and_wires_inside_the_box(self):
         rows = [{"src": None, "name": "inserter", "x": 0.5, "y": 0.5, "direction": 4,
                  "attrs": {"config": '{"control_behavior":{"circuit_enabled":true}}'}},

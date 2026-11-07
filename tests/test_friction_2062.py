@@ -141,6 +141,28 @@ class FrictionTest(unittest.TestCase):
         self.assertIn("['electric-energy-interface'] = true", text)
         self.assertIn("export_stack", text)
 
+    def test_capture_world_reads_the_surface_it_is_told(self):
+        # 2.1.31: a design on the lab surface (Rory's demo) could not be captured: `world` read
+        # the run's own surface only
+        from unittest import mock
+        from fkcore import __main__ as cli
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        seen = []
+
+        def got(_r, surface, force, area, tag="capture"):
+            seen.append((surface, force, area))
+            return {"bp": "", "n": 1, "names": {"belt": 1}}
+        for extra, want in (([], ("nauvis", "player")), (["--surface", "lab"], ("lab", "lab")),
+                            (["--surface", "lab", "--force", "player"], ("lab", "player"))):
+            with mock.patch.object(cli, "_game_link", return_value=mock.MagicMock()), \
+                    mock.patch.object(cli, "_force_surface", return_value=("player", "nauvis")), \
+                    mock.patch.object(capture, "from_game", side_effect=got), \
+                    mock.patch.object(capture, "names_of_bp", return_value={}):
+                rc = cli.main(["capture", tmp, "world", "0,0,4,4", "--to", "c.json"] + extra)
+            self.assertIn(rc, (0, None))
+            self.assertEqual(seen[-1][:2], want)
+
     def test_with_adds_options_for_one_build(self):
         lines = flow.parse("route --only stale\ncover robots\n")
         got = flow.with_options(lines, ["cover robots --fresh", "route --effort high"])

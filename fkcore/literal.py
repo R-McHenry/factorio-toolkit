@@ -108,6 +108,8 @@ def read_entities(path):
             x, y = e["position"]["x"], e["position"]["y"]
         d = e.get("d", e.get("direction"))
         k = at.get((e["name"], float(e.get("bx", x)), float(e.get("by", y))))
+        if d is None and k is not None:
+            d = got[k]["direction"]          # 2.1.31: a capture's list leaves it to the blueprint
         if k is not None:
             row_of[k] = len(rows)
         own = _own_settings(e)
@@ -283,8 +285,7 @@ def names_of(path, ents, box=None):
             raise LiteralError(f"{path}: names {name}: {idx!r} is no entity's index (the file has "
                                f"{len(rows)}, from 0)")
         if idx not in pos:
-            raise LiteralError(f"{path}: names {name}: entity {idx} ({rows[idx][0]}) lies outside "
-                               f"box {box}")
+            continue        # 2.1.31: outside this Literal's box; one capture cuts into several
         out[str(name)] = ents[pos[idx]].key
     return out
 

@@ -422,11 +422,20 @@ def _module_fragment(flat, path, cat):
         belt = _port_belt(port, out)          # the way the items cross the edge
         ox, oy = x + _STEP[out][0], y + _STEP[out][1]
         inside_role, outside_role = port.name, port.name + "!"
+        # 2.1.31: a paired port's nets are looked up by each of its items, so a net on its right
+        # lane alone binds it too (a line's far end whose left lane runs out there: the PU bay's
+        # red | processing-unit belt, whose units leave and whose red circuits end)
+        def held(hold):
+            for it in list(port.items or [None]) + list(port.right or []):
+                got = hold.get((key, it), [])
+                if got:
+                    return got
+            return []
         if port.dir == "in":
-            inner, outer = flat._out_hold.get((key, item), []), flat._in_hold.get((key, item), [])
+            inner, outer = held(flat._out_hold), held(flat._in_hold)
             inside_side, outside_side = "out", "in"
         else:
-            inner, outer = flat._in_hold.get((key, item), []), flat._out_hold.get((key, item), [])
+            inner, outer = held(flat._in_hold), held(flat._out_hold)
             inside_side, outside_side = "in", "out"
         roles[inside_role] = Role(inside_role, inside_side, [item] if item else [], [key],
                                   [(ox + 0.5, oy + 0.5, belt)])

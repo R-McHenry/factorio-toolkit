@@ -103,6 +103,13 @@ class MinerLineTest(unittest.TestCase):
         chosen, _notes = self.choose("yellow")
         self.assertEqual(red_tiles(chosen), [])
 
+    def test_maximize_all_takes_the_belts_that_carry_nothing_on_paper(self):
+        # 2.1.31: a lab's fed ports and Literal belts have no rate on paper, so plain maximize
+        # left the whole PU bay yellow; --all (every=True) takes the top tier everywhere
+        chosen, _notes = tiers.choose(self.lg, self.req, CAT, self.lay.entities, "maximize",
+                                      ("yellow", "red"), every=True)
+        self.assertEqual(red_tiles(chosen), list(range(112)))
+
     def test_more_than_the_fastest_allowed(self):
         chosen, notes = self.choose(allow=("yellow",))
         self.assertEqual(red_tiles(chosen), [])

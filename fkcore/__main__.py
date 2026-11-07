@@ -741,9 +741,18 @@ def _capture(a, cat):
                 else:
                     area = _area(a.what)
                     force, surface = _force_surface(a.game)
+                    if getattr(a, "surface", None):
+                        surface = a.surface
+                        if surface == lab.SURFACE:
+                            force = lab.FORCE
+                    if getattr(a, "force_name", None):
+                        force = a.force_name
                 got = capture.from_game(r, surface, force, area)
             n, names = got["n"], got.get("names") or {}
             data = {"bp": got["bp"], "from": f"{a.source} {a.what} on {surface}"}
+            listed = capture.world_list(got["bp"], got.get("at"))
+            if listed:
+                data["entities"] = listed
             named = capture.names_of_bp(got["bp"], cat)
             if named:
                 data["names"] = named
@@ -929,7 +938,7 @@ def _lab(a, cat):
             elif a.measure is not None:
                 lines = lab.measure_lab(r, a.game, a.name, a.measure, cat)
             else:
-                lines = lab.build(r, a.game, a.name, a.src, size, cat)
+                lines = lab.build(r, a.game, a.name, a.src, size, cat, extra=a.extra)
     except lab.LabError as exc:
         print(f"lab: {exc}", file=sys.stderr)
         return 2
@@ -1404,6 +1413,8 @@ def main(argv=None):
     lb.add_argument("--from", dest="src")
     lb.add_argument("--size")
     lb.add_argument("--measure", type=float)
+    lb.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'",
+                    help="a step's options for this build only, as fk build --with")
     lb.add_argument("--clear", action="store_true")
     lb.add_argument("--list", action="store_true")
     lb.add_argument("--ore")                      # 2.0.56: RESOURCE over --area
@@ -1453,6 +1464,10 @@ def main(argv=None):
                     "[FACTORY/]INST")
     cp.add_argument("--to", help="the file (default captured/<what>.json, in GAME_DIR)")
     cp.add_argument("--fkp", help="design: the layout to read (default the committed one)")
+    cp.add_argument("--surface", help="world: the surface to read (default the run's own; the "
+                    "lab's is `lab`, force `lab`)")
+    cp.add_argument("--force", dest="force_name", help="world: the force whose build it is "
+                    "(default the run's own, or `lab` on the lab surface)")
     lu = sub.add_parser("lua")
     lu.add_argument("game")
     lu.add_argument("code", nargs="?")

@@ -359,7 +359,10 @@ class RelayTest(unittest.TestCase):
     def test_the_snapshot_reads_the_fluid_in_a_pipe(self):
         lua = link.lua_snapshot("nauvis", (0, 0, 4, 4))
         self.assertIn("t == 'pipe' or t == 'pipe-to-ground' or t == 'pump'", lua)
-        self.assertIn("e.fluidbox[i]", lua)
+        # 2.1.31: through fluidbox where the game has it, else get_fluid_contents (2.1.24 has no
+        # LuaEntity.fluidbox, and the lab's diff crashed on it)
+        self.assertIn("fbx[i]", lua)
+        self.assertIn("e.get_fluid_contents()", lua)
 
 
 class FlowSeedTest(unittest.TestCase):

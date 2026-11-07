@@ -107,6 +107,8 @@ _CHEST_ROLES = ("provider", "storage", "buffer", "plain")
 PROP_ATTRS = ("if", "logistic", "filter", "read", "signal", "signals")
 #: the combinators with an input and an output side (2.1: ``Decider``, ``Arithmetic``)
 COMBINATORS = frozenset({"decider-combinator", "arithmetic-combinator"})
+#: what has an input and an output side (2.1.31: a captured selector combinator is a wire end)
+SIDED = COMBINATORS | {"selector-combinator"}
 #: the wildcards as a combinator string may write them
 _EACH = {"each": "signal-each", "anything": "signal-anything", "everything": "signal-everything"}
 #: an arithmetic combinator's operations, as the game names them
@@ -289,6 +291,7 @@ class _Resolver:
         self.flat, self.cat, self.Check = flat, cat, Check
         self.c = Circuit()
         self.declared = {}                 # scoped name -> lang.Signal
+        self.lit_proto = {}                # a Literal's wire end -> its entity (2.1.31)
 
     def check(self, code, where, msg, line=0):
         self.flat.checks.append(self.Check(code, where, msg, line))
@@ -347,15 +350,35 @@ class _Resolver:
     # wires
     def combinator(self, key):
         m = self.flat.machines.get(key)
-        return m is not None and m.prototype in COMBINATORS
+        if m is None:
+            return self.lit_proto.get(key) in SIDED
+        return m.prototype in COMBINATORS
+
+    def literal_end(self, parts, scope):
+        """2.1.31: ``E2.pcomb``, a named entity of Literal E2 that is no machine of the netlist (a
+        combinator, a chest, a pole): a wire end, its entity key. None when ``parts`` names none."""
+        if len(parts) != 2:
+            return None
+        ends = getattr(self.flat, "_lit_ends", {})
+        for s in _chain(scope):
+            got = ends.get(_join(s, parts[0]), {}).get(parts[1])
+            if got is not None:
+                self.lit_proto[got[0]] = got[1]
+                return got[0]
+        return None
 
     def member(self, ref, scope, where, line, role="driver"):
         """A wire end as written -> [("machine", key), ...] or [("net", name)]; [] and a no-wire
         line when it names nothing. 2.1: a combinator's side, ``X.in`` or ``X.out``: a driver
         puts its signals on the wire from its output side, a consumer reads at its input side, so
         the side written must be the one its role uses."""
+        lit = None if ref.star else self.literal_end(list(ref.parts), scope)
+        if lit is not None:
+            return [("machine", lit)]
         if len(ref.parts) >= 2 and ref.parts[-1] in ("in", "out") and not ref.star:
-            node, keys = self.flat.resolve_ref(lang.Ref(ref.parts[:-1], False, line), scope)
+            lit = self.literal_end(list(ref.parts[:-1]), scope)
+            keys = [lit] if lit is not None else \
+                self.flat.resolve_ref(lang.Ref(ref.parts[:-1], False, line), scope)[1]
             if keys and all(self.combinator(k) for k in keys):
                 want = "out" if role == "driver" else "in"
                 if ref.parts[-1] != want:
@@ -665,7 +688,9 @@ class _Resolver:
     def driver_signals(self, kind, ref):
         if kind == "net":
             return set(self.flat.nets[ref].items)
-        m = self.flat.machines[ref]
+        m = self.flat.machines.get(ref)
+        if m is None:
+            return None                 # a Literal's combinator: what its own circuit makes
         if ref in self.c.emits:
             return set(self.c.emits[ref])
         got = self.c.settings.get(ref, {})
@@ -874,7 +899,9 @@ class _Layer:
         """A wire end's port: a combinator drives from its output side and reads at its input
         side (2.1); anything else has one side."""
         m = self.flat.machines.get(key)
-        if m is None or m.prototype not in COMBINATORS:
+        proto = m.prototype if m is not None else \
+            (self.lay.entities[key].name if key in self.lay.entities else None)   # a Literal's
+        if proto not in SIDED:
             return None
         return "out" if role == "driver" else "in"
 
@@ -1229,7 +1256,29 @@ class _Layer:
             if other != net and any(k == key for k, _p in ends) and \
                     (self.wires[other].colour if other in self.wires else "red") == colour:
                 return True
-        return False
+        return colour in self._literal_colours().get(key, ())
+
+    def _literal_colours(self):
+        """2.1.31: {entity key: wire colours} of the wires a Literal brought (``wire`` attrs,
+        ``c,k,d``; an odd connector is red, an even one green). A hop over a pole of a captured
+        sorter's green chain joined the new wire's signals to it."""
+        if getattr(self, "_litcol", None) is None:
+            got = {}
+            for e in self.lay.entities.values():
+                text = e.attrs.get("wire")
+                if not text:
+                    continue
+                head = e.key.rsplit("/", 1)[0]
+                for part in str(text).split(";"):
+                    try:
+                        c, k, d = part.split(",")
+                        c, d = int(c), int(d)
+                    except ValueError:
+                        continue
+                    got.setdefault(e.key, set()).add("red" if c % 2 else "green")
+                    got.setdefault(f"{head}/{k}", set()).add("red" if d % 2 else "green")
+            self._litcol = got
+        return self._litcol
 
     def _hop_pole(self):
         """The pole a gap gets: the power cover's, else a medium pole."""

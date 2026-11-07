@@ -29,7 +29,7 @@ from . import fkp as fkpmod
 
 #: what the lab adds for itself, never part of a design
 LAB_OWN = ("electric-energy-interface", "infinity-chest", "infinity-pipe", "loader",
-           "loader-1x1")
+           "loader-1x1", "fast-loader", "express-loader", "turbo-loader")
 
 
 class CaptureError(ValueError):
@@ -60,10 +60,12 @@ local function inside(e)
   local p = e.position
   return p.x >= {x0} and p.x < {x1} and p.y >= {y0} and p.y < {y1}
 end
-local drop, names, kept = {{{drop}}}, {{}}, {{}}
+local drop, names, kept, at = {{{drop}}}, {{}}, {{}}, {{}}
 for _, b in pairs(st.is_blueprint_setup() and st.get_blueprint_entities() or {{}}) do
   if not drop[b.name] and inside(src[b.entity_number]) then
     kept[#kept + 1] = b
+    local w = src[b.entity_number]
+    at[#kept] = w and w.valid and {{w.position.x, w.position.y, b.name}} or false
     names[b.name] = (names[b.name] or 0) + 1
   end
 end
@@ -73,9 +75,29 @@ if #kept > 0 then
   bp = st.export_stack()
 end
 inv.destroy()
-helpers.write_file('fk5/{tag}.json', helpers.table_to_json({{bp = bp, n = #kept, names = names}}), false)
+helpers.write_file('fk5/{tag}.json', helpers.table_to_json({{bp = bp, n = #kept, names = names, at = at}}), false)
 rcon.print(#kept)
 """
+
+
+def world_list(bp, at):
+    """2.1.31: the captured entities in world positions, ``[{name, wx, wy, bx, by}]`` in the
+    blueprint's order, ``at`` the game's world position of each (Lua's ``at``). With it in the
+    file, a Literal's ``box`` is in world tiles and its corner is where the build stood, so a
+    Literal placed at that corner (or several Literals cut from one capture) sits as it did.
+    None when the two do not line up (then the file keeps the blueprint alone)."""
+    from . import codec
+    if not bp or not isinstance(at, list):
+        return None
+    try:
+        rows, _desc, _wires = codec.parse_blueprint(bp)
+    except codec.CodecError:
+        return None
+    if len(rows) != len(at) or not all(isinstance(p, list) and len(p) == 3 and p[2] == r["name"]
+                                       for r, p in zip(rows, at)):
+        return None
+    return [{"name": r["name"], "wx": _num(p[0]), "wy": _num(p[1]), "bx": _num(r["x"]),
+             "by": _num(r["y"])} for r, p in zip(rows, at)]
 
 
 def from_game(r, surface, force, area, tag="capture"):
