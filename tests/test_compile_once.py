@@ -53,6 +53,12 @@ pa = Pair @(0, 0)
 pb = Pair @(0, 20)
 """
 
+# 2.1.32: gb is ga turned 180 degrees (a `>` bay's chain): one key, its routes ga's turned
+TURNED = CELL + """
+ga = Gears @(0, 0)
+gb = Gears @(0, 12, rot 2)
+"""
+
 
 def placed(text):
     f = lang.parse(text, "t.fk")
@@ -82,6 +88,25 @@ class CompileOnceTest(unittest.TestCase):
         self.assertEqual(fkpmod.invariants(r.layout, CAT), [])
         self.assertEqual(route.seal_checks(flat, r.layout, CAT), [])
         self.assertIn("compiled once", next(ln for ln in r.lines if ln.startswith("routed    gb/g")))
+
+    def test_a_twin_turned_180_takes_the_first_ones_routes_turned(self):
+        flat, lay = placed(TURNED)
+        r = route.route_layout(flat, lay, CAT)
+        self.assertEqual(r.failed, {})
+        self.assertIn("1 laid as a twin", compile_line(r))
+        # gb's frame is (0, 12)-(20, 22): ga's carriers turned about the frame's centre
+        turned = sorted((k, n, 20 - x, 10 - (y - 12), None if d is None else (d + 8) % 16)
+                        for k, n, x, y, d in carriers(r.layout, "gb/"))
+        self.assertEqual(carriers(r.layout, "ga/"), turned)
+        self.assertEqual(fkpmod.invariants(r.layout, CAT), [])
+        self.assertEqual(route.seal_checks(flat, r.layout, CAT), [])
+        with tempfile.TemporaryDirectory() as store:
+            first = route.route_layout(flat, lay, CAT, store=store)
+            self.assertEqual(first.failed, {})
+            # the next build: both come from the store, ga's unturned and gb's turned back
+            again = route.route_layout(flat, lay, CAT, store=store)
+            self.assertIn("2 from the compiled store", compile_line(again))
+            self.assertEqual(carriers(again.layout, "gb/"), carriers(r.layout, "gb/"))
 
     def test_another_ground_is_laid_on_its_own(self):
         flat, lay = placed(ODD)

@@ -67,6 +67,7 @@ from __future__ import annotations
 import heapq
 import json
 import math
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -1465,9 +1466,10 @@ def lay(flat, layout, cat, keep_out=()):
     # 2.1: the copper lines between power domains are the power step's, and stay
     out.wirenets = {n: w for n, w in out.wirenets.items() if w.colour == "copper"}
     out.wires = [w for w in out.wires if w.colour == "copper"]
+    cut_lines, cut_checks = cut_wires(flat, out, cat)
     c = getattr(flat, "circuit", None)
     if c is None or c.empty:
-        return out, [], []
+        return out, cut_lines, cut_checks
     L = _Layer(flat, out, cat, keep_out)
     L.machine_settings()
     L.gates()
@@ -1479,4 +1481,99 @@ def lay(flat, layout, cat, keep_out=()):
     L.wire_up()
     L.unwired()
     L.leaks()
-    return out, c.notes + L.lines, L.checks
+    return out, c.notes + cut_lines + L.lines, cut_checks + L.checks
+
+
+_COMBINATORS = frozenset({"arithmetic-combinator", "decider-combinator", "selector-combinator"})
+
+
+def _literal_fit(lay, keys, rows):
+    """The one rigid move (quarter turns ``r`` clockwise, then an offset) that takes a Literal's
+    capture positions to where its entities stand in ``lay``, or None. ``keys`` {row: key}."""
+    pairs = [(rows[k], lay.entities[key]) for k, key in sorted(keys.items())
+             if key in lay.entities][:24]
+    if not pairs:
+        return None
+    for r in range(4):
+        def turn(x, y, r=r):
+            for _ in range(r):
+                x, y = -y, x
+            return x, y
+        fx, fy = turn(pairs[0][0][1], pairs[0][0][2])
+        off = (pairs[0][1].x - fx, pairs[0][1].y - fy)
+        if all(abs(e.x - (turn(row[1], row[2])[0] + off[0])) < 1e-6 and
+               abs(e.y - (turn(row[1], row[2])[1] + off[1])) < 1e-6 for row, e in pairs):
+            return r, round(off[0], 6), round(off[1], 6)
+    return None
+
+
+def cut_wires(flat, lay, cat):
+    """2.1.33 (lab FRICTION 20): a captured circuit wire whose two ends a box cut put in two
+    Literals of one file, laid again when both stand as the capture did (one rigid move takes
+    both). The demo's green wire from the petroleum chest to the hub sorter's combinator crossed
+    the E1/E2 cut, stage 1 never moved a barrel, and the hub train made 141 visits without
+    unloading. Two Literals that don't line up get a ``wire-cut`` line naming the wire. Appends to
+    ``lay.wires`` and ``lay.wirenets`` (net ``cut/<file>``) -> (lines, checks)."""
+    from . import literal
+    from .elaborate import Check
+    by_file = {}
+    for path, (fpath, keys) in sorted(getattr(flat, "_lit_rows", {}).items()):
+        by_file.setdefault(fpath, []).append((path, keys))
+    lines, checks = [], []
+    for fpath, lits in sorted(by_file.items()):
+        if len(lits) < 2:
+            continue
+        try:
+            rows, wires = literal.read_entities(fpath)
+        except (literal.LiteralError, OSError):
+            continue
+        where = {}
+        for path, keys in lits:
+            for k, key in keys.items():
+                where.setdefault(k, []).append((path, key))
+        fits = {path: _literal_fit(lay, keys, rows) for path, keys in lits}
+        net = f"cut/{os.path.basename(fpath)}"
+        laid, lost, done = 0, [], set()
+
+        def end(key, c):
+            if lay.entities[key].name in _COMBINATORS:
+                return f"{key}.{'out' if c > 2 else 'in'}"
+            return key
+        for i, ci, j, cj in wires:
+            if ci in codec.COPPER or cj in codec.COPPER:
+                continue
+            colour = "red" if ci % 2 else "green"
+            # a twin (the same box placed again) holds the same rows: each end is wired to the
+            # other end's Literal that stands with it, and none other
+            for (pa, ka), others, c_own, c_other in (
+                    (a, where.get(j, ()), ci, cj) for a in where.get(i, ())):
+                if ka not in lay.entities or any(p == pa for p, _k in others):
+                    continue                    # the Literal keeps this wire itself
+                cands = [(pb, kb) for pb, kb in others if kb in lay.entities]
+                if not cands:
+                    continue                    # the other end is in no Literal: cut on purpose
+                ok = [(pb, kb) for pb, kb in cands if fits[pa] is not None and fits[pb] == fits[pa]]
+                if not ok:
+                    lost.append(f"{ka} to {cands[0][1]}")
+                    continue
+                for _pb, kb in ok:
+                    w = fkpmod.Wire(net, colour, end(ka, c_own), end(kb, c_other)).canonical()
+                    if (w.a, w.b, colour) in done:
+                        continue
+                    done.add((w.a, w.b, colour))
+                    lay.wires.append(w)
+                    lay.wirenets.setdefault(net, fkpmod.WireNet(net, colour))
+                    laid += 1
+        if laid:
+            lines.append(f"wire {net}: {laid} captured wire{'s' if laid != 1 else ''} across "
+                         "Literal cuts, laid as the capture had them")
+        if lost:
+            checks.append(Check("wire-cut", f"file {os.path.basename(fpath)}",
+                                f"{len(lost)} captured wire{'s' if len(lost) != 1 else ''} cross "
+                                "between Literals that don't stand as the capture did, so "
+                                f"{'they are' if len(lost) != 1 else 'it is'} not laid: "
+                                + ", ".join(lost[:4]) + (" ..." if len(lost) > 4 else "")
+                                + "; declare a wire, or place the Literals as captured"))
+    if lines or checks:
+        lay.wires = fkpmod.sort_wires(lay.wires)
+    return lines, checks

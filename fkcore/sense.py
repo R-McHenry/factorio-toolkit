@@ -443,6 +443,10 @@ def _wrong(net, t, net_items):
     return sorted(set(t["items"]) - ok)
 
 
+#: 2.1.32: kinds whose piece facing d is the one facing d + 8
+_HALF_TURN_SAME = frozenset({"straight-rail", "half-diagonal-rail", "legacy-straight-rail"})
+
+
 def turn(cat, name, want_dir, want_ug, got_dir, got_ug):
     """How an entity standing on a design entity's position, of its name, is turned against it:
     [``faces 12, designed 4``] and [``underground input, designed output``], or [] when it faces
@@ -450,8 +454,11 @@ def turn(cat, name, want_dir, want_ug, got_dir, got_ug):
     (in, out); ``got_dir`` / ``got_ug``: what the game reports (None: unread, not judged)."""
     out = []
     want = want_dir or 0
+    # 2.1.32: a straight rail facing d is the piece facing d + 8 (the game stores the lower one), so
+    # a Literal turned 180 degrees read every one of its lane rails as turned
+    same = 8 if cat.kind(name) in _HALF_TURN_SAME else 16
     if (cat.kind(name) in _DIRECTIONAL or want_dir is not None) and got_dir is not None \
-            and int(got_dir) != int(want):
+            and int(got_dir) % same != int(want) % same:
         out.append(f"faces {int(got_dir)}, designed {int(want)}")
     ug = {"in": "input", "out": "output"}.get(want_ug)
     if ug and got_ug and got_ug != ug:

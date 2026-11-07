@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zlib
 
-from fkcore import codec, fkp, literal
+from fkcore import codec, fkp, lang, literal
 from fkcore.catalog import Catalog
 
 CAT = Catalog.load()
@@ -156,6 +156,35 @@ class LiteralImportTest(unittest.TestCase):
         self.assertEqual([(e.name, e.attrs.get("recipe")) for e in asm],
                          [("assembling-machine-2", "iron-gear-wheel")])
 
+    def test_a_box_that_cuts_an_entity_says_so(self):
+        # 2.1.33 (lab FRICTION 30): the station unit's box cut the last curve of each turn
+        rows = [{"src": None, "name": "transport-belt", "x": 0.5, "y": 0.5, "direction": 4,
+                 "attrs": {}},
+                {"src": None, "name": "assembling-machine-2", "x": 4.5, "y": 1.5,
+                 "direction": None, "attrs": {"recipe": "iron-gear-wheel"}}]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.txt")
+            with open(path, "w") as fh:
+                fh.write(codec.blueprint(rows))
+            # the machine at 4.5 spans tiles 3..5: kept by its position in 0..5, left out of 0..4
+            self.assertEqual(literal.box_cuts(path, "0,0,5,3", CAT),
+                             [("assembling-machine-2", 4.5, 1.5, True)])
+            self.assertEqual(literal.box_cuts(path, "0,0,7,3", CAT), [])
+            self.assertEqual([c[3] for c in literal.box_cuts(path, "0,0,4,3", CAT)], [False])
+            src = f'lit = Literal<file="{path.replace(chr(92), "/")}", box="0,0,4,3">\n'
+            f = lang.parse(src, os.path.join(d, "t.fk"))
+            from fkcore.elaborate import elaborate
+            flat = elaborate(f, dict(f.modules), CAT)
+            # a second Literal of the file whose box holds the machine's position: no hole
+            f2 = lang.parse(src + src.replace("lit =", "lit2 =").replace("0,0,4,3", "4,0,8,3"),
+                            os.path.join(d, "t.fk"))
+            flat2 = elaborate(f2, dict(f2.modules), CAT)
+        self.assertEqual([c.msg for c in flat.checks if c.code == "literal-box"],
+                         ["box 0,0,4,3 cuts assembling-machine-2 at 4.5,1.5 and leaves it out (a "
+                          "Literal keeps an entity by its position), and no other Literal of the "
+                          "file keeps it"])
+        self.assertNotIn("literal-box", [c.code for c in flat2.checks])
+
     def test_a_blueprint_string_keeps_settings_and_wires_inside_the_box(self):
         rows = [{"src": None, "name": "inserter", "x": 0.5, "y": 0.5, "direction": 4,
                  "attrs": {"config": '{"control_behavior":{"circuit_enabled":true}}'}},
@@ -193,6 +222,23 @@ class LiteralImportTest(unittest.TestCase):
             rows, _wires = literal.read_entities(path)
             self.assertEqual([r[0] for r in rows], ["selector-combinator", "infinity-chest"])
             literal.import_entities(path, "m", CAT)
+
+    def test_a_north_stop_turns_with_its_literal(self):
+        # 2.1.32: a blueprint leaves a north stop's direction out; None stayed north under rot 2,
+        # so a turned bay's stops faced the wrong side of their rails and no train reached them
+        from fkcore.compose import turn
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "st.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump([{"name": "train-stop", "x": 1, "y": 1},
+                           {"name": "straight-rail", "x": 3, "y": 1},
+                           {"name": "wooden-chest", "x": 5.5, "y": 0.5}], fh)
+            ents, size, _corner = literal.import_entities(path, "s", CAT)
+        by = {e.name: e for e in ents}
+        self.assertEqual(by["train-stop"].dir, 0)
+        self.assertIsNone(by["wooden-chest"].dir)             # nothing to face
+        self.assertEqual(turn(float(by["train-stop"].x), float(by["train-stop"].y),
+                              by["train-stop"].dir, 2, size)[2], 8)
 
     def test_errors(self):
         with self.assertRaises(literal.LiteralError):

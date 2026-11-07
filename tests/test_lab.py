@@ -77,9 +77,12 @@ class LabTest(unittest.TestCase):
         ws, _ = lab.prepare(self.game, "iron")
         self.write("lab/iron/smelting.fkp", "fkp 1 module smelting\n")
         self.write("lab/iron/stale.txt", "x")
+        self.write("lab/iron/lab.fkp", "fkp 1 surface lab\n")
         ws, _ = lab.prepare(self.game, "iron")
         self.assertEqual(self.read(ws, "smelting.fkp"), "fkp 1 module smelting\n")
         self.assertNotIn("stale.txt", os.listdir(ws))
+        # 2.1.32: not the lab surface's own, which holds the old slot
+        self.assertNotIn("lab.fkp", os.listdir(ws))
         # a layout the source has of its own wins
         self.write("game/smelting.fkp", "fkp 1 module smelting # game\n")
         ws, _ = lab.prepare(self.game, "iron")

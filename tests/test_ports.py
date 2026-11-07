@@ -368,6 +368,39 @@ net y: both.out_ -> box
         self.assertEqual(sorted(flat.machines["both/both"].makes), ["iron-plate"])
         self.assertEqual(codes(flat), [])
 
+    BOTH2 = """
+module Both size 8x6 {
+  port both : in iron-plate | iron-plate @s
+  port out_ : out iron-gear-wheel @n
+  g = AsmRow<n=1, recipe=iron-gear-wheel> @(1, 1)
+  net a: both -> g
+  net b: g -> out_
+}
+f1 = Chest<requester, item=iron-plate, rate=2> @(0, 0)
+f2 = Chest<requester, item=iron-plate, rate=2> @(0, 4)
+both = Both @(20, 0)
+box = Chest<provider, limit=8> @(40, 0)
+net x: f1, f2 -> both.both
+net y: both.out_ -> box
+"""
+
+    def test_two_drivers_on_one_lane_of_a_both_port_are_named(self):
+        # 2.1.33 (lab FRICTION 19): green from g1 and g2 into pu.g_in as one net, one lane
+        flat = flat_of(self.BOTH2)
+        msgs = [c.msg for c in flat.checks if c.code == "width"]
+        self.assertEqual(msgs, ["port both.both takes iron-plate on both lanes, and net x fills "
+                                "one: give it `width 2`, or split it into two nets and "
+                                "`lanes A | B`"])
+
+    def test_two_nets_in_lanes_or_width_2_say_nothing(self):
+        flat = flat_of(self.BOTH2.replace("net x: f1, f2 -> both.both",
+                                          "net x1: f1 -> both.both\nnet x2: f2 -> both.both\n"
+                                          "lanes x1 | x2"))
+        self.assertNotIn("width", codes(flat))
+        flat = flat_of(self.BOTH2.replace("net x:", "net x width 2:"))
+        self.assertNotIn("both lanes, and net",
+                         " ".join(c.msg for c in flat.checks if c.code == "width"))
+
     def test_a_pair_of_a_fluid_is_refused(self):
         with self.assertRaises(ElabError) as cm:
             flat_of("module M {\n  port w : in water | steam @s\n}\nm = M\n")

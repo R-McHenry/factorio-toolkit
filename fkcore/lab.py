@@ -195,7 +195,9 @@ def prepare(game, name, src=None, size=None):
     kept = {}
     if os.path.isdir(ws):
         for f in os.listdir(ws):
-            if f.endswith(".fkp") and not os.path.exists(os.path.join(source, f)):
+            # the modules' layouts, not the lab surface's own (lab.fkp: it holds the old slot, and
+            # a slot moved took the old slot's area into the next apply and diff)
+            if f.endswith(".fkp") and f != "lab.fkp" and not os.path.exists(os.path.join(source, f)):
                 with open(os.path.join(ws, f), encoding="utf-8") as fh:
                     kept[f] = fh.read()
         shutil.rmtree(ws)

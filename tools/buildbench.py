@@ -2,6 +2,7 @@
 
     python tools/buildbench.py GAME_DIR [--from STEP] [--to STEP] [--cap S] [--no-stop]
                                [--keep] [--in-place] [--slow S] [--tree PATH]
+                               [--script lab.build.fkb]
 
 Copies GAME_DIR (a run's ``game\\``, without ``out/fkp-history``) to a temporary folder and runs
 PATH's fkcore build there (default: this tree), offline, from STEP (default ``read_surface``; a
@@ -44,6 +45,8 @@ def main(argv=None):
     ap.add_argument("--no-stop", action="store_true")
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--in-place", action="store_true")
+    # 2.1.32: a lab workspace (fk lab) builds by lab.build.fkb
+    ap.add_argument("--script", default="nauvis.build.fkb")
     a = ap.parse_args(argv)
     sys.path.insert(0, os.path.abspath(a.tree))
     from fkcore import flow, route
@@ -56,7 +59,7 @@ def main(argv=None):
         game = os.path.join(tmp, "game")
         shutil.copytree(a.game, game, ignore=shutil.ignore_patterns("fkp-history"))
     if a.no_stop:
-        script = os.path.join(game, "nauvis.build.fkb")
+        script = os.path.join(game, a.script)
         with open(script, encoding="utf-8") as fh:
             keep = [ln for ln in fh if not ln.lstrip().startswith("stop_on")]
         with open(script, "w", encoding="utf-8") as fh:
@@ -137,7 +140,7 @@ def main(argv=None):
 
     os.chdir(game)
     with contextlib.redirect_stdout(io.StringIO()):
-        code = fkmain(["build", "nauvis.build.fkb", "--from", a.frm, "--to", a.to])
+        code = fkmain(["build", a.script, "--from", a.frm, "--to", a.to])
     say(f"done to {a.to}: exit {code}")
     os.chdir(HERE)
     finish()

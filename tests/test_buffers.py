@@ -108,8 +108,10 @@ net done: red -> out
         self.assertNotIn("cannot-carry", codes(flat))
         self.assertEqual(flat.nets["ec2"].drivers, [("gbuf/c0", "electronic-circuit")])
         flat2 = flat_of(src.replace("gbuf = Buffer", "gbuf = Chest<plain>"))
-        self.assertIn("driver gbuf makes no item", [c.msg for c in flat2.checks
-                                                    if c.code == "cannot-carry"])
+        msgs = [c.msg for c in flat2.checks if c.code == "cannot-carry"]
+        # 2.1.33 (lab FRICTION 3): the line says a relay chest is a Buffer
+        self.assertIn("driver gbuf makes no item: it is a chest that only takes; a chest one net "
+                      "fills and another drains is a Buffer (Chest<plain, hold>)", msgs)
 
     def test_buffers_chain_and_item_is_explicit(self):
         flat = flat_of("""

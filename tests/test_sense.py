@@ -224,5 +224,16 @@ class SenseTest(unittest.TestCase):
             sense.duration_ticks("soon")
 
 
+
+
+class HalfTurnTest(unittest.TestCase):
+    def test_a_straight_rail_turned_half_round_is_the_same_piece(self):
+        # 2.1.32: a Literal at rot 2 designs its lane rails facing 12; the game stores 4
+        self.assertEqual(sense.turn(CAT, "straight-rail", 12, None, 4, None), [])
+        self.assertEqual(sense.turn(CAT, "straight-rail", 4, None, 0, None),
+                         ["faces 0, designed 4"])
+        self.assertEqual(sense.turn(CAT, "train-stop", 8, None, 0, None), ["faces 0, designed 8"])
+
+
 if __name__ == "__main__":
     unittest.main()
