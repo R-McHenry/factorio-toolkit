@@ -126,9 +126,16 @@ use the game link, and only with FK_LINK=on)
     recipes GAME_DIR [NAME...] [--enabled]
                                           the locked recipes (or the enabled ones) and what
                                           unlocks each (a free read)
-    read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map] [--replace]
+    read-terrain GAME_DIR --surface S --area X0,Y0,X1,Y1 [--name map] [--replace] [--entities]
                                           a free read of the bare world (ore, water, cliffs;
-                                          trees and rocks counted) into GAME_DIR/<name>.terrain.json
+                                          trees and rocks counted) into GAME_DIR/<name>.terrain.json;
+                                          --entities (3.1): what stands there and the design
+                                          does not own becomes blocked tiles too, so the design
+                                          routes round it (only when asked; the file says when)
+    robots GAME_DIR [--area X0,Y0,X1,Y1] [--force F]
+                                          3.1: the roboports that stand against the design's
+                                          logistic chests: covered chests, redundant roboports,
+                                          and how few would do (a free read, changes nothing)
 """
 from __future__ import annotations
 
@@ -1297,15 +1304,33 @@ def _read_terrain(a):
     if len(area) != 4 or area[2] <= area[0] or area[3] <= area[1]:
         print(f"error: --area X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0, got {a.area}", file=sys.stderr)
         return 2
+    owned = None
+    if a.entities:
+        # 3.1: the design's tiles (the diff's business) and the toolkit's own record are not
+        # obstacles; everything else built in the area is
+        from . import look, own
+        cat = Catalog.load()
+        try:
+            sf, _lay, _path, composed = look.composed(a.game, cat)
+            record = own.load(a.game, sf.name) if sf.name == a.surface else None
+            owned = terrain.owned_tiles(composed if sf.name == a.surface else None,
+                                        (record or {}).values(), cat)
+        except (surfacemod.SurfaceError, OSError, ValueError, KeyError) as exc:
+            print(f"read-terrain --entities: no design read ({exc}): every standing entity "
+                  "there is an obstacle", file=sys.stderr)
+            owned = set()
     try:
         with link.Rcon() as r:
             data = terrain.read(r, a.surface, area)
+            ents = terrain.read_entities(r, a.surface, area, owned) if a.entities else None
     except (OSError, link.LinkError) as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     os.makedirs(a.game, exist_ok=True)
     path = os.path.join(a.game, f"{a.name}.terrain.json")
     got, note = terrain.from_dict(data), None
+    if ents is not None:
+        got = terrain.with_entities(got, *ents)
     # 2.1.3: an area is read into the file, never over it (the 10-29 run's north read dropped the
     # whole base's terrain); --replace writes the one area alone, as before
     if os.path.exists(path) and not a.replace:
@@ -1324,6 +1349,25 @@ def _read_terrain(a):
         print(note)
     print(f"wrote {path}")
     return 0
+
+
+def _robots(a, cat):
+    """``robots [--area A] [--force F]`` (3.1, fkcore.robots.report): the roboports that stand,
+    read once, against the design's logistic chests. A read and a report; it changes nothing."""
+    from . import link, robots
+    from .apply import force_for
+    area = _area(a.area)
+    sf, _lay, _path, s = _composed(a.game, cat)
+    force = a.force or sf.force or force_for(sf.mode)
+    chests = [(k, e.name, float(e.x), float(e.y)) for k, e in s.entities.items()
+              if e.name in robots.LOGISTIC_CHESTS and not e.attrs.get("dnp")]
+
+    def body(r):
+        tag = f"robots-{os.getpid()}"
+        rows = link.read_output(r, robots.lua_standing(sf.name, force, tag), tag, "roboports",
+                                keep=False)
+        return robots.report(robots.standing_rows(rows, cat), chests, cat, area).lines(sf.name)
+    return _world(a, cat, "robots", body)
 
 
 def _plan(a, cat):
@@ -1728,6 +1772,14 @@ def main(argv=None):
     rt.add_argument("--area", required=True)
     rt.add_argument("--name", default="map")
     rt.add_argument("--replace", action="store_true")
+    rt.add_argument("--entities", action="store_true",
+                    help="3.1: standing entities the design does not own become blocked tiles")
+    rb = sub.add_parser("robots", description="3.1: the roboports standing on the surface against "
+                        "the design's logistic chests: coverage, redundancy, a minimal set (a free "
+                        "read; nothing in the world or the design changes)")
+    rb.add_argument("game")
+    rb.add_argument("--area")
+    rb.add_argument("--force")
     sg = sub.add_parser("stage", add_help=False)
     sg.add_argument("game")
     sg.add_argument("rest", nargs=argparse.REMAINDER)
@@ -1758,6 +1810,8 @@ def main(argv=None):
     if a.cmd == "catalog":
         return _catalog(a)
     cat = Catalog.load()
+    if a.cmd == "robots":
+        return _robots(a, cat)
     if a.cmd == "migrate-surface":
         return _migrate_surface(a)
     if a.cmd == "migrate-origins":

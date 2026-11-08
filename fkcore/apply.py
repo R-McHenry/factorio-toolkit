@@ -617,7 +617,6 @@ rcon.print(helpers.table_to_json(out))
 
 
 #: why an old roboport is not held up (2.1.3)
-MOVED_OUT = "the toolkit's own, moved or dropped in the design"
 STOCK_OUT = "since the network holds too few roboports to build the design's: theirs build them"
 
 
@@ -695,18 +694,17 @@ def _upgrade(r, surface, force, cands, batch=40):
 
 
 def _released(before, s, cat, area, held):
-    """{why: how many} of the built unowned roboports :func:`scaffold` would have held before
-    2.1.3 and orders out now."""
-    old = scaffold(before, s, cat, area, moved=False)
+    """{why: how many} of the built unowned roboports :func:`scaffold` would have held but for
+    the stock rule (2.1.3) and orders out now."""
+    old = scaffold(before, s, cat, area)
     out = {}
     for v in before.verdicts:
         if (v.name, v.x, v.y) in old and (v.name, v.x, v.y) not in held:
-            why = MOVED_OUT if v.action == "own" else STOCK_OUT
-            out[why] = out.get(why, 0) + 1
+            out[STOCK_OUT] = out.get(STOCK_OUT, 0) + 1
     return out
 
 
-def scaffold(before, s, cat, area, stock=None, moved=True):
+def scaffold(before, s, cat, area, stock=None):
     """What an apply leaves standing for now (1.7, Rory 2026-10-21: old poles and roboports stay
     up until the new grid stands, so a rebuild doesn't cut power or the robot network; both
     overnight players lost power to a re-laid grid): the built ``unowned`` poles and roboports on
@@ -714,12 +712,13 @@ def scaffold(before, s, cat, area, stock=None, moved=True):
     yet (a ghost, missing, or under something else). One under a design tile goes as before (the
     paste needs its ground). ``before``: the diff before the paste. -> {(name, x, y)}.
 
-    2.1.3: a roboport the design moved or dropped (the toolkit's own) is never held: it goes as
-    any unowned entity does (the 10-31 run's moved roboports stood after two applies; ``moved``
-    False keeps the 1.7 rule). ``stock``: {roboport name: items in the network} for the design's
-    roboports waiting; no old roboport is held while the network holds fewer than they need: the
-    old ones are taken up first and their items build the new (10-29: the replacements waited as
-    ghosts for the scaffold's own items, a deadlock)."""
+    3.1 (Rory 11-08): a roboport the design moved or dropped is held like any other old one
+    (2.1.3 had ordered the toolkit's own moved roboports out at once, a rule read off the own
+    record: the design says where roboports go, what stands is a difference, and the 1.7 rule
+    holds it until the design's own stand). ``stock``: {roboport name: items in the network} for
+    the design's roboports waiting; no old roboport is held while the network holds fewer than
+    they need: the old ones are taken up first and their items build the new (10-29: the
+    replacements waited as ghosts for the scaffold's own items, a deadlock)."""
     def kind(name):
         return _kind(cat, name)
 
@@ -738,8 +737,6 @@ def scaffold(before, s, cat, area, stock=None, moved=True):
     out = set()
     for v in before.verdicts:
         if v.verdict != "unowned" or v.ghost or kind(v.name) not in waiting:
-            continue
-        if moved and kind(v.name) == "roboport" and v.action == "own":
             continue
         tiles = {tuple(t) for t in cat.tiles(v.name, float(v.x), float(v.y), 0)}
         if not tiles & taken:

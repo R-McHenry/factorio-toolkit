@@ -160,19 +160,10 @@ class RequestTest(unittest.TestCase):
 
 
 class StandingRoboportsTest(unittest.TestCase):
-    def test_the_diff_keeps_them_for_the_next_cover_step(self):
-        folder = tempfile.mkdtemp(prefix="fkstanding-")
-        try:
-            ctx = flow.Ctx(folder, "x.fkb", None, folder)
-            ctx.surface = mock.Mock(name="surface")
-            self.assertIsNone(flow._standing_roboports(ctx))
-            rep = mock.Mock(verdicts=[])
-            flow._save_standing(ctx, rep, [(8.0, 8.0, 25.0, 55.0)])
-            self.assertEqual(flow._standing_roboports(ctx), [(8.0, 8.0, 25.0, 55.0)])
-            flow._save_standing(ctx, rep)                    # a diff that read none keeps them
-            self.assertEqual(flow._standing_roboports(ctx), [(8.0, 8.0, 25.0, 55.0)])
-        finally:
-            shutil.rmtree(folder, ignore_errors=True)
+    def test_the_diff_keeps_nothing_for_the_cover_steps(self):
+        # 3.1 (Rory 11-08): out/standing.json is gone; no cover step reads what the diff found
+        for name in ("_save_standing", "_standing_roboports", "_standing", "_STANDING_FILE"):
+            self.assertFalse(hasattr(flow, name), name)
 
 
 class DryRunTest(unittest.TestCase):

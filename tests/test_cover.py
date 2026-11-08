@@ -5,6 +5,7 @@ Each case is a small hand-built layout in .fkp text. A medium pole powers the 7x
 (supply 3.5) and wires to poles up to 9 tiles away. :func:`audit` re-checks every result from
 scratch, without the module's own geometry.
 """
+import inspect
 import math
 import os
 import random
@@ -123,23 +124,17 @@ class CoverTest(unittest.TestCase):
         self.assertTrue(all(int(p.key.rsplit("p", 1)[1]) >= len(first) for p in new))
         self.assertIn(f"{len(first)} kept where they stand", rep.summary())
 
-    def test_switching_the_pole_kind_keeps_the_built_ones(self):
-        # 2.0.1 (the first lead run: medium poles SHORT before steel; switching to small dropped
-        # every medium pole, the built ones too): a pinned pole of the other kind stays when the
-        # last diff found it built, and the new kind goes only where it never stood
+    def test_switching_the_pole_kind_lays_the_new_kind_everywhere(self):
+        # 3.1 (Rory 11-08: the world never feeds a step): nothing the diff found built reaches
+        # the cover, so a pinned pole of another kind is laid again in the new kind (2.0.1 had
+        # kept a built medium pole from out/standing.json; what stands is the diff's difference)
         lay = L(ROW, "12x7")
         first, _rep = cover_power(lay, CAT)                       # medium poles
-        built = {first[0].key}
-        poles, rep = cover_power(lay, CAT, pole="small-electric-pole", pinned=first,
-                                 standing=built)
-        by = {p.key: p for p in poles}
-        self.assertEqual(by[first[0].key].name, MEDIUM)            # built: it stays, medium
-        self.assertEqual((by[first[0].key].x, by[first[0].key].y), (first[0].x, first[0].y))
-        self.assertTrue(all(p.name == "small-electric-pole" for p in poles if p.key not in built))
-        self.assertEqual(audit(lay, poles), ([], 1))
-        # without the diff's word, as before: none of the other kind stays
-        poles, _rep = cover_power(lay, CAT, pole="small-electric-pole", pinned=first)
+        poles, rep = cover_power(lay, CAT, pole="small-electric-pole", pinned=first)
         self.assertTrue(all(p.name == "small-electric-pole" for p in poles))
+        self.assertEqual(rep.pinned, 0)
+        self.assertEqual(audit(lay, poles), ([], 1))
+        self.assertNotIn("standing", repr(inspect.signature(cover_power)))
 
     def test_a_pinned_pole_under_a_new_entity_goes(self):
         lay = L("e m/a assembling-machine-1 1.5,1.5 recipe=iron-gear-wheel", "6x6")

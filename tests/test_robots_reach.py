@@ -1,18 +1,18 @@
-"""2.1.3, robots that can't reach (the runs of 10-29 to 10-31):
+"""2.1.3, robots that can't reach (the runs of 10-29 to 10-31), as 3.1 leaves it:
 
-- ``cover robots`` lays a roboport only where one that stands (or one it lays in reach of them)
-  builds it and takes it into its network, chaining toward chests out of reach;
 - ``REACH`` in report_bom: the ghosts a paste lays out of every construction area that stands or
-  that its own roboports give it;
-- the apply's scaffold: a moved roboport of the toolkit's goes, and no old roboport is held while
-  the network holds none for the design's.
-The game side of each is checked on a laptop server (``tools/laptop_server.py fixes``)."""
+  that its own roboports give it (the diff's read, this build only);
+- the apply's scaffold: no old roboport is held while the network holds none for the design's.
+3.1 (Rory 11-08: the world never feeds a step) took out the rest: ``cover robots`` no longer
+chains new roboports from the last diff's read, and a moved roboport of the toolkit's is held
+like any other old one (``fk robots`` is where standing roboports are judged, tests/test_robots).
+The game side is checked on a laptop server (``tools/laptop_server.py fixes``)."""
+import inspect
 import types
 import unittest
 
 from fkcore import apply as applymod
 from fkcore import compose, fkp, flow, robots
-from fkcore import surface as surfacemod
 from fkcore.catalog import Catalog
 from fkcore.sense import Verdict
 
@@ -25,46 +25,18 @@ def ports(lay):
     return sorted((float(e.x), float(e.y)) for e in lay.entities.values() if e.name == "roboport")
 
 
-class CoverReachTest(unittest.TestCase):
-    def test_without_a_read_nothing_changes(self):
+class CoverIsPureTest(unittest.TestCase):
+    def test_the_roboport_goes_by_the_chest_whatever_stands(self):
+        # 3.1: nothing of the world comes in; the design says, and a rerun says the same
         out, rep = robots.apply_robots(fkp.loads(WIDE), CAT)
         self.assertEqual(len(ports(out)), 1)
         self.assertGreater(ports(out)[0][0], 200)             # by the chest, wherever it is
-        again, _ = robots.apply_robots(fkp.loads(WIDE), CAT, reach=None)
-        self.assertEqual(fkp.dumps(again), fkp.dumps(out))
-
-    def test_a_chain_from_the_roboport_that_stands(self):
-        # the 10-29 run: one laid 52 tiles from the hub made a network with no robots
-        standing = [(10.0, 10.0, 25.0, 55.0)]
-        out, rep = robots.apply_robots(fkp.loads(WIDE), CAT, reach=standing)
-        got = ports(out)
-        self.assertGreater(len(got), 1)
         self.assertEqual((rep.covered, rep.checks), (1, []))
-        seen = [(10.0, 10.0)]
-        for x, y in sorted(got):                               # each joins one before it
-            self.assertTrue(any(abs(x - sx) <= 50 and abs(y - sy) <= 50 for sx, sy in seen),
-                            (x, y, seen))
-            seen.append((x, y))
-        self.assertTrue(any(abs(250.5 - x) <= 25 for x, _y in got))
-        self.assertEqual(fkp.invariants(out, CAT), [])
-
-    def test_one_in_reach_joins_it(self):
-        out, _rep = robots.apply_robots(fkp.loads(WIDE), CAT, reach=[(220.0, 10.0, 25.0, 55.0)])
-        (x, y), = ports(out)
-        self.assertLessEqual(abs(x - 220), 50)
-
-    def test_nothing_stands_nothing_laid(self):
-        out, rep = robots.apply_robots(fkp.loads(WIDE), CAT, reach=[])
-        self.assertEqual(ports(out), [])
-        self.assertEqual(rep.covered, 0)
-        self.assertIn("from a roboport that stands", rep.checks[0].msg)
-
-    def test_the_read_in_the_factory_frame(self):
-        lay = fkp.loads(WIDE)
-        places = {"t": surfacemod.Place("t", "t", 100, -50, 300, 20, 0)}
-        self.assertEqual(robots.in_frame(places, {"t": lay}, "t", [(110, -40, 25, 55)]),
-                         [(10.0, 10.0, 25.0, 55.0)])
-        self.assertIsNone(robots.in_frame(places, {"t": lay}, "t", None))
+        again, _ = robots.apply_robots(fkp.loads(WIDE), CAT)
+        self.assertEqual(fkp.dumps(again), fkp.dumps(out))
+        for fn in (robots.cover_robots, robots.apply_robots):
+            self.assertNotIn("reach", inspect.signature(fn).parameters)
+        self.assertFalse(hasattr(robots, "in_frame"))
 
 
 class ReachTest(unittest.TestCase):
@@ -120,8 +92,9 @@ def _design(text):
 
 
 class ScaffoldTest(unittest.TestCase):
-    """10-31: a roboport moved in the design stood after two applies; 10-29: the scaffold's own
-    items were what its replacements waited for."""
+    """1.7: an old roboport stays up until the design's own stand; 10-29: the scaffold's own
+    items were what its replacements waited for. 3.1: a moved roboport of the toolkit's is no
+    exception any more (2.1.3 had ordered it out at once)."""
     S = _design("e robots/r0 roboport 18,6\n")
     AREA = (0, 0, 40, 20)
 
@@ -130,22 +103,21 @@ class ScaffoldTest(unittest.TestCase):
             Verdict("not-placed", "roboport", 18, 6, "lab:sa/robots/r0"),
             Verdict("unowned", "roboport", 6, 6, None, "", None, action)])
 
-    def test_the_old_rule_holds_it(self):
-        self.assertEqual(applymod.scaffold(self.before("revert"), self.S, CAT, self.AREA),
-                         {("roboport", 6, 6)})
-        self.assertEqual(applymod.scaffold(self.before("own"), self.S, CAT, self.AREA,
-                                           moved=False), {("roboport", 6, 6)})
-
-    def test_a_moved_roboport_of_the_toolkits_goes(self):
-        b = self.before("own")
-        held = applymod.scaffold(b, self.S, CAT, self.AREA)
-        self.assertEqual(held, set())
-        self.assertEqual(applymod._released(b, self.S, CAT, self.AREA, held),
-                         {applymod.MOVED_OUT: 1})
+    def test_the_old_rule_holds_it_moved_or_not(self):
+        for action in ("revert", "own"):
+            b = self.before(action)
+            held = applymod.scaffold(b, self.S, CAT, self.AREA)
+            self.assertEqual(held, {("roboport", 6, 6)}, action)
+            self.assertEqual(applymod._released(b, self.S, CAT, self.AREA, held), {})
+        self.assertNotIn("moved", inspect.signature(applymod.scaffold).parameters)
+        self.assertFalse(hasattr(applymod, "MOVED_OUT"))
 
     def test_no_stock_no_scaffold(self):
         b = self.before("revert")
-        self.assertEqual(applymod.scaffold(b, self.S, CAT, self.AREA, {"roboport": 0}), set())
+        held = applymod.scaffold(b, self.S, CAT, self.AREA, {"roboport": 0})
+        self.assertEqual(held, set())
+        self.assertEqual(applymod._released(b, self.S, CAT, self.AREA, held),
+                         {applymod.STOCK_OUT: 1})
         self.assertEqual(applymod.scaffold(b, self.S, CAT, self.AREA, {"roboport": 1}),
                          {("roboport", 6, 6)})
 
