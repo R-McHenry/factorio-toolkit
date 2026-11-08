@@ -807,7 +807,88 @@ def _detach(tree, sink_i, sinks):
 
 
 def grow(grid, root, sinks, costs=None, improve=8, order=None, limit=60000):
-    """Forward tree search; {"tree", "cost", "counts", "problems", "seconds", "log"}."""
+    """Forward tree search; {"tree", "cost", "counts", "problems", "seconds", "log"}.
+    Runs whole in fkroute when it can (plain FixedSink / TapSink sinks on a Grid it knows), else
+    in Python (``_grow_py``, whose steps still use the native A*). FK_NATIVE=check runs both and
+    raises if the trees differ."""
+    mode = os.environ.get("FK_NATIVE", "1")
+    if _native is not None and mode != "0":
+        t0 = time.time()
+        try:
+            got = _grow_native(grid, root, sinks, costs, improve, order, limit)
+        except (TypeError, OverflowError):     # a non-integer tile: the kernel takes ints only
+            got = _UNSUPPORTED
+        if got is not _UNSUPPORTED:
+            if mode == "check":
+                py = _grow_py(grid, root, sinks, costs, improve, order, limit)
+                a, b = _tree_key(got["tree"]), _tree_key(py["tree"])
+                if a != b or got["log"] != py["log"]:
+                    raise AssertionError(f"fkroute.grow differs from _grow_py: {a!r} {got['log']} "
+                                         f"!= {b!r} {py['log']}")
+            got["seconds"] = round(time.time() - t0, 2)
+            return got
+    return _grow_py(grid, root, sinks, costs, improve, order, limit)
+
+
+def _tree_key(t):
+    return (list(t.succ.items()), list(t.sink_at.items()), list(t.taps), sorted(t.reserved),
+            dict(getattr(t, "sink_terminal", {})))
+
+
+_MOVES = ("step", "jump", "split")
+
+
+def _grow_native(grid, root, sinks, costs, improve, order, limit):
+    ng = _native_grid(grid)
+    if ng is None:
+        return _UNSUPPORTED
+    spec, ks, ins = [], [], []
+    for s in sinks:
+        if type(s) is FixedSink:
+            spec.append((0, s.tile[0], s.tile[1], int(s.edir), 0))
+            ks.append(0)
+            ins.append([])
+        elif type(s) is TapSink:
+            x0, y0, x1, y1 = s.rect
+            spec.append((1, x0, y0, x1, y1))
+            ks.append(int(s.k))
+            ins.append([str(n) for n in s.inserters])
+        else:
+            return _UNSUPPORTED        # a sink of its own (m2m's): _grow_py, on the native A*
+    if not sinks:
+        return _UNSUPPORTED
+    names = [s.name for s in sinks]
+    if any(not isinstance(n, str) for n in names):
+        return _UNSUPPORTED
+    tree = Tree(grid, root, costs)
+    k = tree.costs
+    kk = (float(k["belt"]), float(k["turn"]), float(k["ug"]), float(k["split"]), float(k["tap"]),
+          float(k["long_tap"]), int(k["max_ug"]))
+    succ, sink_at, taps, reserved, last, log = _native.grow(
+        ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names, ks, ins, kk,
+        int(improve), None if order is None else [int(i) for i in order], int(limit))
+    for s, (kind, side, c1, c2) in succ:
+        tree.succ[tuple(s)] = ("split", side, tuple(c1), tuple(c2)) if kind == 2 else \
+            (_MOVES[kind], tuple(c1))
+    tree.sink_at = {tuple(s): i for s, i in sink_at}
+    tree.taps = [(tuple(q), name, direction, names[si]) for q, name, direction, si in taps]
+    tree.reserved = {tuple(t) for t in reserved}
+    tree.sink_terminal = {tuple(last[0]): last[1]} if last else {}
+    tree.touch()
+    text = []
+    for kind, targets, i, how, a, b in log:
+        if kind == 0:
+            text.append(f"cannot reach {[sinks[t].name for t in targets]}")
+        elif kind == 1:
+            text.append(f"+{sinks[i].name} via {('leaf', 'split')[how]} ({a:.1f})")
+        else:
+            text.append(f"reroute {sinks[i].name}: {a:.1f} -> {b:.1f}")
+    return {"tree": tree, "cost": tree.cost(), "counts": tree.counts(),
+            "problems": tree.problems(sinks), "seconds": 0.0, "log": text}
+
+
+def _grow_py(grid, root, sinks, costs=None, improve=8, order=None, limit=60000):
+    """The Python grow: grow's original, and its fallback."""
     t0 = time.time()
     tree = Tree(grid, root, costs)
     tree.sink_terminal = {}

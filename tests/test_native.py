@@ -40,11 +40,27 @@ def _case(seed):
     return Grid(occ, (), spans), root, sinks
 
 
-def _run(mode, grid, root, sinks):
+def _run(mode, grid, root, sinks, order=None):
     with mock.patch.dict(os.environ, {"FK_NATIVE": mode}):
-        out = steiner.grow(grid, root, sinks, limit=20000)
+        out = steiner.grow(grid, root, sinks, limit=20000, order=order)
     t = out["tree"]
-    return sorted(t.succ.items()), sorted(t.sink_at.items()), sorted(t.taps), out["log"]
+    return (list(t.succ.items()), list(t.sink_at.items()), t.taps, sorted(t.reserved),
+            t.sink_terminal, out["log"], out["cost"], out["counts"], out["problems"])
+
+
+def _reversed_case(seed):
+    """_case laid reversed (a collector): taps drop onto the belt, merges keep their spare
+    outputs clear of the belts that stand; taps of k 1-2 with either inserter."""
+    grid, root, sinks = _case(seed)
+    rnd = random.Random(seed + 7)
+    grid.drop_taps = True
+    grid.keep_clear = {(rnd.randrange(24), rnd.randrange(18)) for _ in range(15)}
+    for s in sinks:
+        if isinstance(s, TapSink):
+            s.k = rnd.randrange(1, 3)
+            if rnd.random() < 0.3:
+                s.inserters = ("long-handed-inserter", "inserter")
+    return grid, root, sinks
 
 
 @unittest.skipUnless(steiner._native is not None, "fkroute not installed")
@@ -57,6 +73,23 @@ class NativeParity(unittest.TestCase):
                 continue
             with self.subTest(seed=seed):
                 self.assertEqual(_run("1", grid, root, sinks), _run("0", grid, root, sinks))
+
+    def test_grow_runs_native(self):
+        grid, root, sinks = _case(1)
+        with mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")):
+            with mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
+                steiner.grow(grid, root, sinks, limit=20000)
+
+    def test_reversed_and_ordered(self):
+        """Laid reversed (drop_taps, keep_clear), k > 1, long-handed first, a fixed order."""
+        for seed in range(150):
+            grid, root, sinks = _reversed_case(seed)
+            if not sinks:
+                continue
+            order = list(range(len(sinks)))[::-1] if seed % 3 == 0 else None
+            with self.subTest(seed=seed):
+                self.assertEqual(_run("1", grid, root, sinks, order),
+                                 _run("0", grid, root, sinks, order))
 
     def test_walk_and_hubs(self):
         """route._walk and route._hubs: the same dict (in the same order) and the same hubs."""
@@ -87,7 +120,20 @@ class NativeParity(unittest.TestCase):
         def off(tree, starts, sinks_, targets, limit):
             got = real(tree, starts, sinks_, targets, limit)
             return None if got and got is not steiner._UNSUPPORTED else got
-        with mock.patch.object(steiner, "_astar_native", off):
+        with mock.patch.object(steiner, "_astar_native", off), \
+                mock.patch.object(steiner, "_grow_native", lambda *a: steiner._UNSUPPORTED):
+            with self.assertRaises(AssertionError):
+                _run("check", grid, root, sinks)
+
+    def test_check_mode_compares_grow(self):
+        grid, root, sinks = _case(3)
+        real = steiner._grow_native
+
+        def off(*a):
+            got = real(*a)
+            got["tree"].succ.popitem()
+            return got
+        with mock.patch.object(steiner, "_grow_native", off):
             with self.assertRaises(AssertionError):
                 _run("check", grid, root, sinks)
 
