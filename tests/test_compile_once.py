@@ -1,11 +1,12 @@
 """PLAN-3.0 §4, sealed modules compile once: each sealed module routes alone in its frame, a twin
 (the same module on the same ground) takes the routes the first one laid, moved to its frame, and
 the compiled store keeps them for the next build."""
+import json
 import os
 import tempfile
 import unittest
 
-from fkcore import expand, fkp as fkpmod, lang, route
+from fkcore import compiled, expand, fkp as fkpmod, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -140,16 +141,72 @@ class CompileOnceTest(unittest.TestCase):
             self.assertEqual(fkpmod.invariants(r.layout, CAT), [])
 
     def test_a_stored_module_of_another_router_version_is_laid_again(self):
+        # 3.1: compiled.ROUTER is the one version; it is in the key, so a stored entry of another
+        # router is never found (and one found under the key is checked too)
         with tempfile.TemporaryDirectory() as store:
             flat, lay = placed(CELL + "ga = Gears @(0, 0)\n")
-            route.route_layout(flat, lay, CAT, store=store)
-            saved = route.COMPILE_VERSION
-            route.COMPILE_VERSION = saved + "-next"
+            first = route.route_layout(flat, lay, CAT, store=store)
+            self.assertEqual(first.compiled["ga"]["stored"], 1)
+            saved = compiled.ROUTER
+            compiled.ROUTER = saved + "-next"
             try:
                 r = route.route_layout(flat, lay, CAT, store=store)
             finally:
-                route.COMPILE_VERSION = saved
+                compiled.ROUTER = saved
             self.assertIn("0 from the compiled store", compile_line(r))
+            self.assertNotEqual(r.compiled["ga"]["key"], first.compiled["ga"]["key"])
+            self.assertEqual(len(os.listdir(os.path.join(store, "Gears"))) , 3)  # 2 + current
+            # the same router again: the first entry is found and laid
+            again = route.route_layout(flat, lay, CAT, store=store)
+            self.assertEqual(again.compiled["ga"]["from"], "store")
+
+    def test_two_builds_of_an_unchanged_module_reuse_the_entry(self):
+        # 3.1: one store, one entry per key; the second build writes nothing and lays from it
+        with tempfile.TemporaryDirectory() as store:
+            flat, lay = placed(CELL + "ga = Gears @(0, 0)\n")
+            first = route.route_layout(flat, lay, CAT, store=store)
+            key = first.compiled["ga"]["key"]
+            self.assertEqual(first.compiled["ga"]["from"], "routed")
+            self.assertEqual(sorted(os.listdir(os.path.join(store, "Gears"))),
+                             sorted([f"{key}.json", "current"]))
+            with open(os.path.join(store, "Gears", "current"), encoding="utf-8") as fh:
+                self.assertEqual(fh.read().strip(), key)
+            with open(os.path.join(store, "Gears", f"{key}.json"), encoding="utf-8") as fh:
+                entry = json.load(fh)
+            self.assertEqual((entry["router"], entry["module"], entry["key"], entry["unit"]),
+                             (compiled.ROUTER, "Gears", key, "ga"))
+            self.assertEqual(sorted(entry["nets"]), ["fe", "g"])
+            self.assertEqual(entry["inputs"]["frame"], [20, 10])
+            second = route.route_layout(flat, lay, CAT, store=store)
+            self.assertEqual(second.compiled["ga"], dict(first.compiled["ga"], **{
+                "from": "store", "stored": 0}))
+            self.assertEqual(sorted(os.listdir(os.path.join(store, "Gears"))),
+                             sorted([f"{key}.json", "current"]))
+            self.assertEqual(carriers(first.layout, "ga/"), carriers(second.layout, "ga/"))
+            self.assertIn("1 from the compiled store, 0 stored", compile_line(second))
+
+    def test_an_old_store_is_not_read_and_said_once(self):
+        # Rory: old material is reference. The 2.1 router store (flat out/compiled/*.json) and
+        # the 3.0 design store (out/design/modules/*/*.fkp) are not read; one line says so
+        with tempfile.TemporaryDirectory() as out:
+            store = os.path.join(out, "compiled")
+            os.makedirs(store)
+            with open(os.path.join(store, "abc.json"), "w", encoding="utf-8") as fh:
+                fh.write('{"version": "route-3.0.3", "module": "ga", "nets": {}}')
+            old = os.path.join(out, "design", "modules", "Gears")
+            os.makedirs(old)
+            with open(os.path.join(old, "def.fkp"), "w", encoding="utf-8") as fh:
+                fh.write("fkp 1 factory @\n")
+            self.assertEqual(compiled.old_material(out), (1, 1))
+            flat, lay = placed(CELL + "ga = Gears @(0, 0)\n")
+            r = route.route_layout(flat, lay, CAT, store=store)
+            self.assertEqual(r.compiled["ga"]["from"], "routed")
+            old_lines = [ln for ln in r.lines if ln.startswith("compiled  old")]
+            self.assertEqual(len(old_lines), 1)
+            self.assertIn("1 of the 2.1 router store", old_lines[0])
+            self.assertIn("1 of the 3.0 design store", old_lines[0])
+            self.assertIn("compiled: 1 module, 1 entry", compiled.status_lines(out)[0])
+            self.assertIn("old entries not read", compiled.status_lines(out)[-1])
 
     def test_a_twin_that_does_not_fit_is_laid_on_its_own(self):
         flat, lay = placed(THREE)
@@ -191,9 +248,11 @@ class CompileOnceTest(unittest.TestCase):
         got = route._moved_entity(e, "u/x|u/y", "v/x|v/y", 10, 0, "u", "v")
         self.assertEqual((got.key, got.attrs["net"], got.x), ("~v/x|v/y/i0", "v/x+v/y", 11.5))
         with tempfile.TemporaryDirectory() as store:
-            self.assertEqual(route._store_save(store, "k", "u", (0, 0, 9, 9, None),
+            st = compiled.Store(store)
+            self.assertEqual(route._store_save(st, "k", "M", "u", (0, 0, 9, 9, None),
                                                {"u/x|u/y": [e]}), 1)
-            back = route._store_load(store, "k", "w", (5, 5, 14, 14, None))
+            self.assertTrue(os.path.exists(os.path.join(store, "M", "k.json")))
+            back = route._store_load(st, "k", "M", "w", (5, 5, 14, 14, None))
             self.assertEqual(back["w/x|w/y"][0].attrs["net"], "w/x+w/y")
             self.assertEqual(back["w/x|w/y"][0].key, "~w/x|w/y/i0")
 
