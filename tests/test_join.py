@@ -74,7 +74,7 @@ class JoinBigTest(_Joined, unittest.TestCase):
     works split 5 against 10, so the two-work lane is asked 10/s and the trunk brings 12.5/s (it
     brought 7.5 on one lane); a work shared by both lanes would bring the last 2.5."""
     NAME = "join-big"
-    JOINED = "join"
+    JOINED = "trunk"   # 2.1.35: the lane goal (was the join)
 
     def test_the_trunk_binds(self):
         self.assertAlmostEqual(self.plates(), 12.5, places=3)

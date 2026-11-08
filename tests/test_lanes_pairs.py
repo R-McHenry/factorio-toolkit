@@ -263,7 +263,7 @@ class ExampleTest(unittest.TestCase):
         lay, notes = expand.expand_factory(flat, CAT)
         r = route.route_layout(flat, lay, CAT)
         self.assertEqual((notes, r.failed), ([], {}))
-        self.assertIn("join 8,8 E (ore_ on the left lane, fuel on the right)",
+        self.assertIn("trunk 8,8 E (ore_ on the left lane, fuel on the right)",
                       next(x for x in r.lines if x.startswith(f"routed    {PAIR}")))
         self.assertEqual(connect.connect(r.layout, CAT, connect.endpoints(flat)).checks, [])
         rr = routed.solve(flat, r.layout, CAT)

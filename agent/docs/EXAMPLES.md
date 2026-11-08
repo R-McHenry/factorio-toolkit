@@ -248,8 +248,8 @@ net plates: smelt -> box
 lanes ore_ | fuel
 ```
 
-The router joins the two nets once, side-loading each onto its lane (`out\route.txt`: `routed
-ore_|fuel: ... join 8,8 E (ore_ on the left lane, fuel on the right)`), and lays one belt on to
+The router brings the two nets together once, side-loading each onto its lane (`out\route.txt`:
+`routed ore_|fuel: ... trunk 8,8 E (ore_ on the left lane, fuel on the right)`), and lays one belt on to
 the row; each furnace's one inserter takes both. Two nets, not one sushi net: a lane that backs
 up holds only its own item, so there is no `CLOG`. The routed rates show the ore's lane at 2 of
 its 7.5/s, and that the furnaces are served in belt order: the first 6 run at full speed, the

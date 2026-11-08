@@ -52,7 +52,7 @@ from . import connect as connectmod
 from . import lanephys as phys
 
 __all__ = ["Node", "Edge", "LaneGraph", "build", "lane_rate", "inserter_rate", "ROTATION",
-           "HOLDERS", "INF"]
+           "HOLDERS", "INF", "reach"]
 
 INF = float("inf")
 _BELTS = frozenset({"transport-belt", "underground-belt", "splitter"})
@@ -272,6 +272,30 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
                 and g.nodes[b].kind == "underground-belt" and g.nodes[b].ug == "out":
             _drop(lg, g, belts, key, b)
     return lg
+
+
+def reach(lg, seeds):
+    """{node: labels} the labelled items reach (PLAN-LANES phase 3): ``seeds`` [(node, label)]
+    (an inserter that drops a net's items, a lane a net's belt end carries) flow along every edge
+    of the lane graph, each lane as the physics says (a side-load onto the near lane, a closed
+    underground lane nowhere, a turn keeping its lanes); a machine takes items in and passes none
+    on. What a router's own belts carry, by the same rules the judge reads."""
+    out, todo = {}, []
+    for node, label in seeds:
+        if node in lg.nodes and label not in out.setdefault(node, set()):
+            out[node].add(label)
+            todo.append((node, label))
+    while todo:
+        node, label = todo.pop()
+        for e in lg.out.get(node, ()):
+            if lg.nodes[e.dst].kind == "machine":
+                out.setdefault(e.dst, set()).add(label)
+                continue
+            got = out.setdefault(e.dst, set())
+            if label not in got:
+                got.add(label)
+                todo.append((e.dst, label))
+    return out
 
 
 def _turn(g, b, side):
