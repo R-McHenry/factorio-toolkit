@@ -5,7 +5,8 @@ A **connector** is one lane of one belt, underground or splitter, ``(key, "L")``
 ``(key, "")``. A machine (anything an inserter reaches, a drill) is an endpoint node ``(key, "")``.
 An edge is one way items move from one node into another, built over ``fkcore.connect``'s
 carrier graph (V1's geometry: tiles, underground pairing, inserter reach) with the rules of
-docs/LAB-LANES-20261020.md (2.0.77):
+docs/LAB-LANES-20261020.md (2.0.77). The rules themselves live in ``fkcore.lanephys`` (one table
+the router reads too, PLAN-LANES); this module finds where they apply:
 
 - ``straight``: a belt, an underground exit or a splitter onto the next belt, underground
   entrance or splitter from behind; a ``turn`` (V1's ``curve``: fed from one side, nothing
@@ -48,6 +49,7 @@ from dataclasses import dataclass, field
 
 from . import arms as armsmod
 from . import connect as connectmod
+from . import lanephys as phys
 
 __all__ = ["Node", "Edge", "LaneGraph", "build", "lane_rate", "inserter_rate", "ROTATION",
            "HOLDERS", "INF"]
@@ -159,23 +161,8 @@ class LaneGraph:
         self.inn.setdefault(dst, []).append(e)
 
 
-def _left(d):
-    """The direction on the left of heading ``d`` (0 N, 4 E, 8 S, 12 W)."""
-    return (d + 12) % 16
-
-
-def _right(d):
-    return (d + 4) % 16
-
-
-def _near(src_dir, dst_dir):
-    """The lane of a belt heading ``dst_dir`` nearest to a carrier moving ``src_dir`` into its
-    side: from its left side (moving towards its right) the left lane."""
-    if src_dir == _right(dst_dir):
-        return "L"
-    if src_dir == _left(dst_dir):
-        return "R"
-    return None
+# the rules' helpers, from the table (PLAN-LANES phase 1)
+_left, _right, _near, _drop_lane = phys.left, phys.right, phys.near, phys.drop_lane
 
 
 def _halves(n):
@@ -213,14 +200,6 @@ def _priorities(g, a, b):
     return rank, first
 
 
-def _drop_lane(drop_dir, belt_dir):
-    """The lane an inserter dropping in direction ``drop_dir`` fills on a belt heading
-    ``belt_dir``: the far lane across it, the right lane in line."""
-    if drop_dir % 8 == belt_dir % 8:
-        return "R"
-    return "R" if drop_dir == _right(belt_dir) else "L"
-
-
 def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
     """The lane graph of a Layout, a Surface, a list of entities or a ``connect.Graph``."""
     g = ents if isinstance(ents, connectmod.Graph) else connectmod.graph(ents, cat)
@@ -253,28 +232,19 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
         if via in ("belt", "curve"):
             if a in belts and b in belts:
                 rank, first = _priorities(g, a, b)
-                for lane in ("L", "R"):
-                    lg.add((a, lane), (b, lane), "straight" if via == "belt" else "turn", rank,
-                           first)
+                kind = "straight" if via == "belt" else "turn"
+                for la, lb, _r in phys.moves(kind)[0]:
+                    lg.add((a, la), (b, lb), kind, rank, first)
         elif via == "ug":
-            for lane in ("L", "R"):
-                lg.add((a, lane), (b, lane), "tunnel", 0)
-        elif via == "sideload":
-            near = _near(na.dir, nb.dir)
-            if near is None:
-                continue
-            first = "L" if _left(na.dir) == (nb.dir + 8) % 16 else "R"   # enters further upstream
-            lg.add((a, first), (b, near), "side", 1)
-            lg.add((a, "R" if first == "L" else "L"), (b, near), "side", 2)
-        elif via == "ug_sideload":
-            near = _near(na.dir, nb.dir)
-            if near is None:
-                continue
-            open_dir = (nb.dir + 8) % 16 if nb.ug == "in" else nb.dir
-            lane = "L" if _left(na.dir) == open_dir else "R"
-            lg.add((a, lane), (b, near), "ug_side", 1)
-            if (a, "R" if lane == "L" else "L") in lg.nodes:
-                lg.closed.append(((a, "R" if lane == "L" else "L"), b))
+            for la, lb, rank in phys.moves("tunnel")[0]:
+                lg.add((a, la), (b, lb), "tunnel", rank)
+        elif via in ("sideload", "ug_sideload"):
+            kind = "side" if via == "sideload" else "ug_side"
+            edges, blocked = phys.moves(kind, na.dir, nb.dir, nb.ug)
+            for la, lb, rank in edges:
+                lg.add((a, la), (b, lb), kind, rank)
+            if edges and blocked is not None and (a, blocked) in lg.nodes:
+                lg.closed.append(((a, blocked), b))
         elif via == "pickup":
             if a in belts:
                 for lane in ("L", "R"):
@@ -286,9 +256,7 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
             _drop(lg, g, belts, a, b)
         elif via == "mine":
             if b in belts:
-                side = (na.dir + 8) % 16                 # the half of the tile towards the drill
-                lane = "L" if side == _left(nb.dir) else "R"
-                lg.add((a, ""), (b, lane), "mine", 3)
+                lg.add((a, ""), (b, phys.mine_lane(na.dir, nb.dir)), "mine", phys.DROP_RANK)
             else:
                 lg.add((a, ""), (b, ""), "mine", 0)
     # an underground exit takes drops too (measured); connect has the edge since 3.0, so this
@@ -312,11 +280,7 @@ def _turn(g, b, side):
     where the belt comes in or goes out, the outside lane."""
     for a, via in g.pred.get(b, ()):
         if via == "curve":
-            come, go = g.nodes[a].dir, g.nodes[b].dir
-            inside = "L" if go == _left(come) else "R"
-            if side in ((come + 8) % 16, go):
-                return "R" if inside == "L" else "L"
-            return inside
+            return phys.turn_drop_lane(g.nodes[a].dir, g.nodes[b].dir, side)
     return None
 
 
@@ -337,7 +301,7 @@ def _drop(lg, g, belts, a, b):
         drop_dir = (armsmod.heading(v[1]) if v else None)
         drop_dir = (na.dir + 8) % 16 if drop_dir is None else drop_dir
         lane = _turn(g, b, (drop_dir + 8) % 16) if nb.kind == "transport-belt" else None
-        lane = lane or _drop_lane(drop_dir, nb.dir)
-        lg.add((a, ""), (b, lane), "drop", 3)
+        lane = lane or phys.drop_lane(drop_dir, nb.dir)
+        lg.add((a, ""), (b, lane), "drop", phys.DROP_RANK)
     else:
         lg.add((a, ""), (b, ""), "drop", 0)
