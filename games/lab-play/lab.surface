@@ -4,7 +4,7 @@
 # pastes the factories as ghosts and the lab force's robots build them, as in a play run.
 # The lab surface is 2048x2048 (x and y from -1024 to 1023).
 surface  lab
-mode     play
+# (3.1) `mode play` was here: a surface has properties now, and this one implied none
 force    lab
 terrain  none
 catalog  base

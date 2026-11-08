@@ -4,7 +4,9 @@
 # its nauvis plot moved by the same offset; the .fk files are the same. lab.terrain.json is a
 # read-terrain of the lab region 460,400..700,640 after the transplant (its iron patch is #1).
 surface  lab
-mode     lab
+# (3.1) `mode lab` was here: a surface has properties now: free, and the paste's force
+free
+force    lab
 terrain  lab
 catalog  base
 

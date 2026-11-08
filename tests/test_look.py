@@ -271,7 +271,7 @@ class LookTest(unittest.TestCase):
             "another output, so it points the same way)"])
 
     def test_policy_overrides(self):
-        sf = surfacemod.loads("surface lab\nmode lab\nwatch sanctioned: mark 2h\n")
+        sf = surfacemod.loads("surface lab\nfree\nforce lab\nwatch sanctioned: mark 2h\n")
         self.assertEqual(look.policy(sf), {"plots": "keep", "sanctioned": "mark 2h",
                                            "notify": "all"})
         self.assertEqual(look.policy(sf, "nearby", "plots=revert,sanctioned=mark 30min"),

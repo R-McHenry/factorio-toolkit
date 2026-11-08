@@ -23,6 +23,22 @@ The examples that import cells take them from `cells.fk` beside them. `docs\exam
 the library as the toolkit ships it; in `game\` your own `cells.fk` is used, with whatever you
 changed in it. Each example also builds where it stands (`fk rates docs\examples\mall-loop.fk`).
 
+## On the lab surface
+
+Every example also builds alone on the lab, where things are free (TOOLKIT.md, "Building on the
+lab surface"): `fk lab plastic-cell` builds `game\plastic-cell.fk` on its own lab slot, powers it
+and feeds every open port, and `fk lab plastic-cell --measure 60` reads what it makes. A blueprint
+you hold (a capture, a blueprint string) goes on the lab the same way, as a Literal in a file of
+its own:
+
+```
+# game\try.fk
+x = Literal<file="captured/x.json"> @(0, 0)
+```
+
+Then `fk lab try`: the apply pastes it on the slot and revives it. When you have changed it there,
+`fk capture slot try` writes it back as a file.
+
 ## Five pieces of a base
 
 These five use the language as it stands: lines are Stacks of cells, most of them from the
@@ -62,8 +78,8 @@ A cell is yours to write when the library has none for the machine. `Machine` ta
 building, and a `kind` gives it a name. The gas runs up through all four cells on one pipe (a
 fluid port pair: each cell's pipe meets the next one's at their shared edge, and the nets between
 them lay nothing), the coal up the west belt, the plastic back down the east one. On paper: four
-plants at full speed, 480 plastic/min, on 80 gas/s and 4 coal/s. The `InfinityPipe` is the lab's
-free gas: in the base the gas comes from a refinery's net. A cell names its machine: for an
+plants at full speed, 480 plastic/min, on 80 gas/s and 4 coal/s. The `InfinityPipe` is a
+stand-in, free gas for a try on the lab surface: in the base the gas comes from a refinery's net. A cell names its machine: for an
 assembler, write another cell.
 
 ### library-lines.fk: two lines of library cells

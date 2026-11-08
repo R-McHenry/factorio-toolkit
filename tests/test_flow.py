@@ -485,7 +485,7 @@ class FlowTest(unittest.TestCase):
             "t.fk": "mine = MinerRow<n=1, resource=iron-ore> @(0, 0)\n"
                     "dst  = Chest<provider>                  @(20, 3)\n"
                     "net p: mine -> dst\n",
-            "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+            "nauvis.surface": "surface nauvis\nterrain none\n"
                               "place t = t plot 0,0 30x12\n",
             "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
                                 "place --keep pinned\nroute --only stale\nfloorplan\n"
@@ -569,7 +569,7 @@ class FlowTest(unittest.TestCase):
                 "net xin:  rx -> X\n")
         files = {
             "shop.fk": shop + "net packs: X -> lab\n",
-            "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+            "nauvis.surface": "surface nauvis\nterrain none\n"
                               "place shop = shop plot 0,0 20x8\n",
             "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
                                 "place --keep pinned\nroute --only stale\nfloorplan\n"
@@ -617,7 +617,7 @@ class FlowTest(unittest.TestCase):
                     "box  = Chest<provider>                              @(15, 30)\n"
                     + extra
                     + "\nnet fuel: coal -> box\nnet iron: fe -> ug, gear\n",
-            "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+            "nauvis.surface": "surface nauvis\nterrain none\n"
                               "place boot = t plot 0,0 50x40\n",
             "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\nplace\n"
                                 "route\nreport_checks\nwrite_layout\n",

@@ -56,7 +56,7 @@ class Build:
     def __init__(self, src, size="40x16", files=None):
         self.dir = tempfile.mkdtemp(prefix="fkdomains-")
         for name, text in dict(files or {}, **{"t.fk": src, "nauvis.build.fkb": SCRIPT,
-                                               "nauvis.surface": "surface nauvis\nmode play\n"
+                                               "nauvis.surface": "surface nauvis\n"
                                                f"terrain none\nplace t = t plot 0,0 {size}\n"}).items():
             with open(os.path.join(self.dir, name), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(text)

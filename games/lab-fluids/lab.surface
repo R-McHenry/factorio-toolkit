@@ -4,7 +4,9 @@
 # are the offshore pumps' water: lab ground has none, so tools/lab_fluids.py sets their tiles to
 # water before the apply, and nothing (a bridge pole) is ever planned on them.
 surface  lab
-mode     lab
+# (3.1) `mode lab` was here: a surface has properties now: free, and the paste's force
+free
+force    lab
 terrain  none
 catalog  base
 

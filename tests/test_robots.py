@@ -161,7 +161,7 @@ class SurfaceNetworkTest(unittest.TestCase):
         d = tempfile.mkdtemp(prefix="fkrobots-")
         self.addCleanup(shutil.rmtree, d, True)
         files = {"gears.fk": GEARS,
-                 "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+                 "nauvis.surface": "surface nauvis\nterrain none\n"
                                    "place gears = gears plot 14,-14 20x16\n",
                  "nauvis.fkp": "fkp 1 surface nauvis\ncover kit robots\ne kit/r0 roboport 8,8\n",
                  "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"

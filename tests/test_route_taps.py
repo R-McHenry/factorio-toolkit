@@ -35,7 +35,7 @@ class TapsTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
         os.makedirs(os.path.join(self.dir, "out"))
         for name, text in (("t.fk", CABLE),
-                           ("nauvis.surface", "surface nauvis\nmode play\nterrain none\n"
+                           ("nauvis.surface", "surface nauvis\nterrain none\n"
                                               "place t = t plot 0,0 30x30\n"),
                            ("nauvis.build.fkb", "read_surface nauvis\nread_terrain none\n"
                                                 "elaborate\nplace --keep pinned\n"

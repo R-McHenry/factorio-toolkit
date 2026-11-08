@@ -28,7 +28,7 @@ class PipeTest(unittest.TestCase):
                         else os.environ.__setitem__("FK_PACK", old))
         os.environ["FK_PACK"] = "seablock"
         for name, text in (("t.fk", LIQ),
-                           ("nauvis.surface", "surface nauvis\nmode play\nterrain none\n"
+                           ("nauvis.surface", "surface nauvis\nterrain none\n"
                                               "place t = t plot 0,0 40x30\n")):
             with open(os.path.join(self.dir, name), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(text)

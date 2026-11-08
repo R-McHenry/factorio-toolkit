@@ -49,7 +49,7 @@ class FrictionTest(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="fk2062-")
         self.addCleanup(shutil.rmtree, self.dir, True)
         self.write("t.fk", MALL)
-        self.write("nauvis.surface", "surface nauvis\nmode play\nterrain none\n"
+        self.write("nauvis.surface", "surface nauvis\nterrain none\n"
                                      "place t = t plot 0,0 50x50\n")
         self.write("nauvis.build.fkb", "read_surface nauvis\nread_terrain none\nelaborate\n"
                                        "place --keep pinned\nroute --only stale\nfloorplan\n"

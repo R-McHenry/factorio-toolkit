@@ -6,7 +6,7 @@
 #   gears: the map's one cliff wall (x 181..182, y 270..288): plates from a requester chest on
 #          its west side to a gear assembler on its east side.
 surface  nauvis
-mode     play
+# (3.1) `mode play` was here: a surface has properties now, and this one implied none
 terrain  map                                    # map.terrain.json: -176,56 .. 216,288
 catalog  base
 

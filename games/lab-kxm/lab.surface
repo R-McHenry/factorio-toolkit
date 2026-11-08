@@ -2,7 +2,9 @@
 # router worker's lab region (x 880..1010, y 400..640), so fk build's diff and apply can be
 # watched live (/lab). The lab rules: free materials, direct building.
 surface  lab
-mode     lab
+# (3.1) `mode lab` was here: a surface has properties now: free, and the paste's force
+free
+force    lab
 terrain  none
 catalog  base
 

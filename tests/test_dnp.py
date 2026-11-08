@@ -43,7 +43,7 @@ class DnpBuildTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
         shutil.copy(CELLS, self.dir)
         self.write("t.fk", SRC)
-        self.write("nauvis.surface", "surface nauvis\nmode play\nterrain none\n"
+        self.write("nauvis.surface", "surface nauvis\nterrain none\n"
                                      "place t = t plot 0,0 60x60\n")
         self.write("nauvis.build.fkb", "read_surface nauvis\nread_terrain none\nelaborate\n"
                                        "report_rates\nplace --keep pinned\nroute --only stale\n"

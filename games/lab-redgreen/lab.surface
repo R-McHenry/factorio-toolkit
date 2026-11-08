@@ -3,7 +3,9 @@
 # Rory powered it with the editor (an energy interface at 217,200, on the plot's top edge): kept as
 # a mark of his (lab.fkp), never reverted.
 surface  lab
-mode     lab
+# (3.1) `mode lab` was here: a surface has properties now: free, and the paste's force
+free
+force    lab
 terrain  none
 catalog  base
 

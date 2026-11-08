@@ -84,7 +84,7 @@ class LabsFromAChestTest(unittest.TestCase):
         far = LABS.replace("@(1, 4)", "@(1, 20)").replace("@(7, 4)", "@(7, 20)").replace(
             "@(4, 7)", "@(13, 20)")
         script = os.path.join(d, "nauvis.build.fkb")
-        files = {"nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+        files = {"nauvis.surface": "surface nauvis\nterrain none\n"
                                    "place t = t plot 0,0 30x30\n",
                  "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
                                      "place\nroute\nfloorplan\nreport_checks\n"}
