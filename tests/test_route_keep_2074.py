@@ -45,7 +45,7 @@ class KeepTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="fk2074-")
         self.addCleanup(shutil.rmtree, self.dir, True)
-        self.write("nauvis.surface", "surface nauvis\nmode play\nterrain none\n"
+        self.write("nauvis.surface", "surface nauvis\nterrain none\n"
                                      "place t = t plot 0,0 60x60\n")
         self.write("nauvis.build.fkb", "read_surface nauvis\nread_terrain none\nelaborate\n"
                                        "place --keep pinned\nroute --only stale\nfloorplan\n"

@@ -2,7 +2,7 @@
 # red-green main, each on its own plot; the pole chain from the plant (nauvis.fkp's bridge) and the
 # poles floorplan adds to it are the only shared infrastructure.
 surface  nauvis
-mode     play
+# (3.1) `mode play` was here: a surface has properties now, and this one implied none
 terrain  none                                   # a paper surface: no ore, water or cliffs yet
 catalog  base
 

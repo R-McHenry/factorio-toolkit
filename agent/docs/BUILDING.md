@@ -69,8 +69,9 @@ with the starter base still running beside it until the new one carries the load
   modules: a Stack inside, a module or two beside it, its own trunks. The last run's LabArea, 72
   nets, routed in 12 s on its own; its flat world of 1,000 nets took minutes a build and pasted
   all or nothing.
-- **Lab every module first.** `fk lab NAME`, let it run, `fk lab NAME --measure 60`. A module that
-  builds clean alone goes into the world, and only its trunks are new there. Three of the last
+- **Build every module alone first.** `fk lab NAME` (the lab surface, where things are free),
+  let it run, `fk lab NAME --measure 60`. A module that builds clean alone goes into the world,
+  and only its trunks are new there. Three of the last
   run's regions routed on the first try this way.
 - **Leave room for the next size.** Frame each line for its next doubling (a Stack's `built=K`)
   without moving its ports, so growing it re-routes nothing outside.
@@ -80,8 +81,9 @@ with the starter base still running beside it until the new one carries the load
   seals (only belts cross it).
 - **A new consumer gets its own branch.** Adding a far consumer to a main net re-lays the main
   (the coal belt by the boilers, once): give it a tap, a hub requester, or a net of its own.
-- A sealed module's inside routes once: the build (or `fk compile MODULE`) stores it, and every
-  later build, copy or move lays the stored inside (TOOLKIT.md, "Compiled modules").
+- A sealed module's inside routes once: the build (or `fk compile MODULE`) stores it in the one
+  compile store, and every later build, copy or move lays the stored inside, a lab build's
+  included (TOOLKIT.md, "Sealed modules compile once").
   `--with "route --area ..."` reworks one region and leaves the rest standing.
 
 ## Lines are Stacks of cells

@@ -1,6 +1,6 @@
 # nauvis.surface: the paper surface of the redgreen game codebase (CORE-V1.md §11).
 surface  nauvis
-mode     play                                   # fair play on: attention-scoped, notify nearby
+# (3.1) `mode play` was here: a surface has properties now, and this one implied none
 terrain  none                                   # a paper surface: no ore, water or cliffs yet
 catalog  base
 

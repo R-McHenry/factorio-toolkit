@@ -205,7 +205,7 @@ class LookTest(unittest.TestCase):
     def test_fair_play_a_play_look_needs_an_area(self):
         path = os.path.join(self.dir, "lab.surface")
         with open(path, encoding="utf-8") as fh:
-            text = fh.read().replace("mode     lab", "mode     play")
+            text = fh.read().replace("\nfree\n", "\n")       # 3.1: not free, so fair play applies
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         with mock.patch.object(link, "snapshot", lambda *a, **k: self.fail("no snapshot")):
@@ -271,7 +271,7 @@ class LookTest(unittest.TestCase):
             "another output, so it points the same way)"])
 
     def test_policy_overrides(self):
-        sf = surfacemod.loads("surface lab\nmode lab\nwatch sanctioned: mark 2h\n")
+        sf = surfacemod.loads("surface lab\nfree\nforce lab\nwatch sanctioned: mark 2h\n")
         self.assertEqual(look.policy(sf), {"plots": "keep", "sanctioned": "mark 2h",
                                            "notify": "all"})
         self.assertEqual(look.policy(sf, "nearby", "plots=revert,sanctioned=mark 30min"),

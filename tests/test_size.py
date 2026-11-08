@@ -318,7 +318,7 @@ class FlowTest(unittest.TestCase):
 
     def game(self, fk, surface_extra="", script=None, plot="96x64"):
         files = {"main.fk": fk,
-                 "nauvis.surface": f"surface nauvis\nmode play\nterrain none\n"
+                 "nauvis.surface": f"surface nauvis\nterrain none\n"
                                    f"place main = main plot 0,0 {plot}\n{surface_extra}",
                  "nauvis.build.fkb": script or ("read_surface nauvis\nread_terrain none\n"
                                                 "elaborate\nsize\nreport_rates\n"

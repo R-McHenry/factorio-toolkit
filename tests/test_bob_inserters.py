@@ -57,7 +57,7 @@ class Paper(unittest.TestCase):
     def route(self, text, techs=None, pack="seablock"):
         os.environ["FK_PACK"] = pack
         for name, body in (("t.fk", text),
-                           ("nauvis.surface", "surface nauvis\nmode play\nterrain none\n"
+                           ("nauvis.surface", "surface nauvis\nterrain none\n"
                                               "place t = t plot 0,0 30x30\n"),
                            ("nauvis.build.fkb", "read_surface nauvis\nread_terrain none\n"
                                                 "elaborate\nplace --keep pinned\n"

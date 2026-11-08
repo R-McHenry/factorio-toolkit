@@ -1,6 +1,6 @@
 # nauvis.surface: two small factories linked by robots (CORE-V1 step 7, on paper).
 surface  nauvis
-mode     play
+# (3.1) `mode play` was here: a surface has properties now, and this one implied none
 terrain  none
 catalog  base
 

@@ -3,7 +3,9 @@
 # games/lab-merge with its plots moved. The lab rules: free materials, direct building.
 # The lab surface is 2048x2048 (x and y from -1024 to 1023): every plot stays inside it.
 surface  lab
-mode     lab
+# (3.1) `mode lab` was here: a surface has properties now: free, and the paste's force
+free
+force    lab
 terrain  none
 catalog  base
 

@@ -1,35 +1,41 @@
-# v5: the V1 core toolkit
+# v5: the Factorio toolkit
 
-The Factorio V1 core (`..\CORE-V1.md`, decisions 1-12). The one-page spec is [CORE.md](CORE.md).
-Python stdlib only; nothing here talks to the game.
+The toolkit Rory's AI players build with: a factory language (`.fk`), a rate model, a router, a
+build flow that pastes ghosts into the game, and the commands around them. 3.1 is the current
+line (`docs\RELEASE-3.1.md`); `fkcore.__version__` says which release this checkout is, and
+`CLAUDE.md` says how the repo is worked on. Python stdlib only; the Rust router kernel
+(`native\fkroute`) is optional, with a Python fallback.
 
-## Where V1 lives
+## Where things are
 
-- **This repo** (`C:\Users\Admin\zybo\factorio-design\v5`, its own git repo like `v4-hand`): the
-  toolkit. `fkcore/` is the core (catalog, `.fk` parser, elaborator, templates and fragments, rate
-  model, `.fkp`, blueprint codec, compose, connectivity, router, power cover, flow runner, surface
-  file, literal import, merge/rewire, scene and sense); `scenario/fk-play/` the lab scenario (not
-  deployed); `tests/` the tests.
-- **A game codebase** (one per game, CORE-V1 §4.1): `.fk` factories, their `.fkp` layouts, the
-  surface file, `build.fkb`, `out/`. Kickoff will create one per run. Until then, on paper:
-  `games/spm10` (spm10 as one V1 factory, rates only), `games/redgreen` (the red-green part placed
-  and built through the flow), `games/nauvis` (plant + boot + main on one surface),
-  `games/merge` (two factories linked by robots, for merge and rewiring), `games/nauvis-terrain`
-  (two factories on the test map's real terrain, `@patch` on real ore, on paper) and
-  `games/lab-terrain` (the same, on that terrain transplanted to the lab, built live).
-- **The components codebase** (one, shared): starts as `components/` here when the first component
-  exists, and moves to its own repo when a second game needs it.
-
-Copied, not imported, from `C:\fk-lead\repo` at d6018d3: `fk/catalog.py` and `fk/catalog-v5.json`,
-the tokenizer of `fkc/lang.py`, the blueprint codec of `fk/trace.py`, the rate model's approach in
-`fkc/flow.py`, the stamp geometry in `fk/stamps/`. Each file says what it took.
+- **`fkcore/`**: the core. `lang` and `elaborate` (the language), `flow` (the build steps),
+  `route` and `compiled` (the router and the one compile store, `out\compiled\<module>\<key>.json`),
+  `design` (the per-net route files), `surface` (surface files and their properties: `free`,
+  `force`), `alone` and `standin` (a module built alone on a slot of any surface; god-mode
+  stand-ins where things are free), `lab` (the thin `fk lab` alias), `terrain` (bare ground and,
+  on request, standing entities as obstacles), `robots` and `cover` (roboports and poles from the
+  design alone), `apply`, `look`, `sim`, `stage`, `capture`.
+- **`agent/`**: what players get. `docs/` holds `FAIR-PLAY.md` (the game's rules), `STRATEGY.md`
+  and `BUILDING.md` (advice), `TOOLKIT.md`, `LANGUAGE.md` and `EXAMPLES.md` (how the toolkit
+  works); `prompts/` the briefs; `fk.py` the player's `fk` command.
+- **`kickoff/`**: new runs (`new_run.py`, the template game folder), the player loop and live
+  upgrades (`upgrade_run.py`).
+- **`games/`**: paper games the tests build (`spm10`, `redgreen`, `nauvis`, the `lab-*` ones on a
+  free surface). **`scenario/fk-play`**: the lab scenario. **`tools/`**: laptop server and live
+  checks. **`docs/`**: one `RELEASE-X.Y.md` per release and the design notes per branch.
+- **Specs**: `CORE.md` (V1), `CORE-V2.md` (lanes and throughput), `..\CORE-V1.md`; the plans and
+  reviews in `..\assessment-*`.
 
 ## Run
 
 ```
-python -m unittest                                   # from this folder
-python -m fkcore rates games/spm10/main.fk
-python -m fkcore build games/nauvis/nauvis.build.fkb   # the whole flow; reports in out/
+python -m fkcore --help                              # every command, one line each
+python -m fkcore rates games/spm10/main.fk           # the rate model on paper
+python -m fkcore build games/nauvis/nauvis.build.fkb # the whole flow; reports in out/
+python -m fkcore status games/nauvis                 # the nets as routed, the compile store
 python -m fkcore look games/nauvis --source design
-FK_LINK=on python3 -m fkcore read-terrain GAME_DIR --surface nauvis --area -176,56,216,288   # on the game host
+python -m unittest tests.test_flow                   # one module at a time, never the whole suite
 ```
+
+With the game link (`FK_LINK=on`, on the game host): `alone`, `standin`, `lab`, `robots`,
+`read-terrain --entities`, `look --source world`, `measure`, `capture`, `sim`, `map`.

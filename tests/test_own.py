@@ -372,7 +372,7 @@ class FlowSeedTest(unittest.TestCase):
         files = {"t.fk": "mine = MinerRow<n=1, resource=iron-ore> @(0, 0)\n"
                          "dst  = Chest<provider>                  @(20, 3)\n"
                          "net p: mine -> dst\n",
-                 "nauvis.surface": "surface nauvis\nmode play\nterrain none\n"
+                 "nauvis.surface": "surface nauvis\nterrain none\n"
                                    "place t = t plot 0,0 30x12\n",
                  "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
                                      "place --keep pinned\nroute --only stale\nfloorplan\n"

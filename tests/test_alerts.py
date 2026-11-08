@@ -124,7 +124,7 @@ class FreeReadsNeverAlertTest(unittest.TestCase):
         game = tempfile.mkdtemp(prefix="fkalerts-")
         try:
             with open(os.path.join(game, "lab.surface"), "w", encoding="utf-8") as fh:
-                fh.write("surface lab\nmode lab\nnotify nearby\n")
+                fh.write("surface lab\nfree\nforce lab\nnotify nearby\n")
             calls = []
             with mock.patch.object(link, "alerts", lambda r, f, tag="a": calls.append(f) or
                                    raw(5000)), \
@@ -158,7 +158,7 @@ class PollTest(unittest.TestCase):
 
     def write_surface(self, notify):
         with open(os.path.join(self.game, "lab.surface"), "w", encoding="utf-8") as fh:
-            fh.write(f"surface lab\nmode lab\nnotify {notify}\nremind 20s\n")
+            fh.write(f"surface lab\nfree\nforce lab\nnotify {notify}\nremind 20s\n")
 
     def poll(self, reply, force=None):
         r = FakeRcon()

@@ -92,7 +92,7 @@ def build(test, text, size="60x60"):
     d = tempfile.mkdtemp(prefix="fkfp-")
     test.addCleanup(shutil.rmtree, d, True)
     files = {"t.fk": text,
-             "nauvis.surface": f"surface nauvis\nmode play\nterrain none\n"
+             "nauvis.surface": f"surface nauvis\nterrain none\n"
                                f"place t = t plot 0,0 {size}\n",
              "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
                                  "place --keep pinned\nroute --only stale\nfloorplan\n"
