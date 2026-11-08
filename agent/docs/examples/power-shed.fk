@@ -1,10 +1,11 @@
-# power-shed.fk: a lab field that sheds its load when the accumulators run low (toolkit 2.1)
-#
-# Two power domains. `main` is the solar panels, the accumulators and everything the other domain
-# doesn't name. `labs` is the lab field alone, and its only power comes through one power switch
-# from main. A latch (the library's Hysteresis) watches the charge: below 20% the switch opens and
-# the labs stop, and it stays open until the charge is back above 80%. On the lab the switch
-# opened at 19.2% and closed at 79.6%, once each way.
+# power-shed.fk: a lab field that sheds its load when the accumulators run low. Plot 200x200
+# (any). Shows: two power domains (`power main: cover all`, `power labs: cover field`), the
+# library's Hysteresis latch, a PowerSwitch gated on it, `copper` lines joining domains.
+# Run:  fk check power-shed.fk    fk build --to report_checks    (then read out\cover_power.txt)
+# Expect: `check power-shed: 54 machines, 42 nets, 0 check lines`; `domain labs: cover power-labs
+# ... 4 poles`, `copper load: power-labs/p4 to sw/m0.right, 1 bridge pole added`; with the
+# template's roboport in main, `power-short ... want 220 kW ... 4 generators make 168 kW`. In
+# the lab the switch opened at 19.2% charge and closed at 79.6%, once each way.
 import LabColumn, Hysteresis from "cells.fk"
 
 power main: cover all                 # everything the labs domain doesn't name

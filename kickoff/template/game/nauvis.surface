@@ -3,7 +3,7 @@
 # The base is one plot, and the kit and the reactor are part of its design (world.fk, kit.fk,
 # plant.fk), so there is no claim to keep out of it: every tile inside the plot is yours.
 surface  nauvis
-mode     play                                   # fair play: you see where you look; alerts come to you
+# (3.1) `mode play` was here: a surface has properties now (free, force), and a base implies none
 terrain  map                                    # map.terrain.json: the bare ground, read at kickoff
 catalog  base
 design   nauvis.fk                              # the plot: your world

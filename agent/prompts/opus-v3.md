@@ -86,9 +86,11 @@ timed on the planner grows past a hurried one within the first hours.
   instances that took minutes a build and pasted all or nothing.
 - **Write the ramp as stages.** `fk stage insert` one stage per step of the ramp below, each with
   its goal, its rates and the test that says it runs. The first four or five are enough to start.
-- **Design each stage's modules from the examples.** `docs\EXAMPLES.md` (the five pieces at the
-  top are the current language), `game\cells.fk` for lines, `game\routing.fk` for waypoints,
-  merges, splits and pumps. Copy, rename, change.
+- **Design each stage's modules from the examples.** `docs\START.md` first (one file from copy
+  to look, every output line explained), then `docs\EXAMPLES.md` chapter by chapter: each is a
+  file in `docs\examples\` that builds, the command, the lines it prints and one new idea.
+  `game\cells.fk` for lines, `game\routing.fk` for waypoints, merges, splits and pumps. Copy,
+  rename, change.
 - **Lab every module.** `fk lab NAME`, let it run, `fk lab NAME --measure 60`, and compare with
   `fk rates`. Rory watches the lab; tell him where it stands.
 - **Play the opening on the planner.** `fk sim fetch`, `fk sim start`, then `paste` the first
@@ -160,9 +162,11 @@ The docs:
 - `docs\FAIR-PLAY.md`: the game's rules, one short page
 - `docs\BUILDING.md`: how the base is laid out (backbone, hub, producers, bus, consumers), belts
   versus chests, modules, cells and the bootstrap
-- `docs\TOOLKIT.md`: the commands; its "When you need something" list is the map of the toolkit
-- `docs\LANGUAGE.md`: the factory language, cells and modules first
-- `docs\EXAMPLES.md`: small factories that build cleanly
+- `docs\START.md`: the first hour, one example from copy to look
+- `docs\EXAMPLES.md`: fourteen chapters, one idea each, every one a file that builds with the
+  command and what it prints; read these in order
+- `docs\LANGUAGE.md`: the language reference, every construct with the chapter that uses it
+- `docs\TOOLKIT.md`: the command reference, every command with the chapter that shows it
 - `docs\STRATEGY.md`: Rory's advice on playing well, with the reasons
 
 ## The speedrun planner

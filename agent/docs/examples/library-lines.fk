@@ -1,8 +1,10 @@
-# library-lines.fk: two lines from the library's cells (toolkit 2.1)
-#
-# Copper ore and coal into a line of SmelterPairs, its plates into a line of AsmCell1s making
-# copper cable. Each Stack passes its parameters to every cell, so the iron cells of cells.fk make
-# copper here. Copy it into game\, where your own cells.fk is.
+# library-lines.fk: two lines from the library's cells. Plot 200x200 (any). Copper ore and coal
+# into a line of SmelterPairs, its plates into a line of AsmCell1s making copper cable. Shows: a
+# Stack passing its parameters to every cell (the iron cells of cells.fk make copper here), a
+# `kind` of a cell with its parameters set, two plate belts joining one feed.
+# Run:  fk check library-lines.fk    fk rates library-lines.fk
+# Expect: `check library-lines: 58 machines, 46 nets, 0 check lines`; the first four pairs at 98%
+# and the last at 89% (3 ore/s is a little short of ten furnaces); 360 cable/min.
 import SmelterPair, AsmCell1 from "cells.fk"
 
 kind CableCell = AsmCell1<recipe=copper-cable, ins=copper-plate, out=copper-cable>
