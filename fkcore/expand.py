@@ -37,6 +37,7 @@ import math
 import re
 from dataclasses import dataclass
 
+from . import arms as armsmod
 from . import avail as availmod
 from . import fkp as fkpmod
 from . import placer
@@ -506,6 +507,8 @@ def fragment_of(flat, path, cat):
         if kind == "SmelterArray":
             params["_per"] = _array_column(cat, m0)
         frag = fragment(kind, params, [b[1] for b in ins], [b[1] for b in outs])
+        if kind == "MinerRow" and _row_belt_leaves(flat, path, frag):
+            frag = _drills_only(frag)
         _row_modules(frag, flat, path, cat)
     binding = {}
     names_in = [r for r in frag.roles if frag.roles[r].side == "in"]
@@ -515,6 +518,54 @@ def fragment_of(flat, path, cat):
     for name, (net, _items) in zip(names_out, outs):
         binding[name] = net
     return frag, binding
+
+
+def _port_carriers(flat, path, ents):
+    """3.0, Literal ports: {carrier group net: the net its port is on}. A port's whole group of
+    touching pipes (or belts) carries the net that names the port, so the router keeps every
+    other net off it, as off any net's pipe."""
+    ports = getattr(flat, "_lit_ports", {}).get(path)
+    if not ports:
+        return {}
+    group = {e.key: e.attrs.get("net") for e in ents}
+    out = {}
+    for key, _side in ports.values():
+        nets = {n for hold in (getattr(flat, "_out_hold", {}), getattr(flat, "_in_hold", {}))
+                for (k, _i), ns in hold.items() if k == key for n in ns}
+        if len(nets) == 1 and group.get(key):
+            out[group[key]] = nets.pop()
+    return out
+
+
+def _row_belt_leaves(flat, path, frag):
+    """3.0 (drills in cells): True when a MinerRow's own out belt would run out of the frame its
+    module declares (``size WxH``): a drill in a cell, where the cell's through-belt is the
+    drills' belt. A row anywhere else keeps its belt."""
+    if "/" not in path:
+        return False
+    parent = flat.insts.get(path.rsplit("/", 1)[0])
+    hint = flat.insts[path].hints.get("at")
+    if parent is None or parent.size is None or hint is None:
+        return False
+    w, h = parent.size
+    for ax, ay, ad in frag.roles["out"].attach:
+        x, y, d = turn(float(ax), float(ay), ad, int(hint[2]) % 4, frag.size)
+        hd = int(d) // 4
+        tx = math.floor(x + hint[0]) + (0, 1, 0, -1)[hd]
+        ty = math.floor(y + hint[1]) + (-1, 0, 1, 0)[hd]
+        if not (0 <= tx < w and 0 <= ty < h):
+            return True
+    return False
+
+
+def _drills_only(frag):
+    """A MinerRow without its belt: its drills drive the out net by dropping on their drop tiles,
+    and the router lays the belt over them (``route.DropSink``)."""
+    ents = [e for e in frag.entities if e.role != "out"]
+    out = frag.roles["out"]
+    roles = dict(frag.roles, out=Role("out", "out", out.items, out.machines,
+                                       [(frag.size[0] / 2, frag.size[1] / 2, None)]))
+    return _finish(Fragment(frag.kind, dict(frag.params), ents, roles, frag.size))
 
 
 #: the module inventory of each machine kind, as the paste's ``items`` names it (2.0)
@@ -823,10 +874,13 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
             x0, y0, rot = hint
             params = {k: _param_text(v) for k, v in inst.params.items()}
             lay.insts[path] = fkpmod.Inst(path, "Literal", params, x0, y0, rot, sig)
+            carry = _port_carriers(flat, path, ents)
             for e in ents:
                 x, y, d = turn(float(e.x), float(e.y), e.dir, rot, size)
-                placed = fkpmod.Entity(e.key, e.name, _clean(x + x0), _clean(y + y0), d,
-                                       dict(e.attrs))
+                attrs = dict(armsmod.turned(e.attrs, rot))
+                if attrs.get("net") in carry:
+                    attrs["net"] = carry[attrs["net"]]
+                placed = fkpmod.Entity(e.key, e.name, _clean(x + x0), _clean(y + y0), d, attrs)
                 lay.add(placed)
                 xmax, ymax = _grow(cat, placed, xmax, ymax)
             continue
@@ -889,7 +943,7 @@ def _put(lay, path, inst, frag, binding, at, notes, cat=None):
     added = []
     for fe in frag.entities:
         x, y, d = turn(float(fe.x), float(fe.y), fe.dir, rot, frag.size)
-        attrs = dict(fe.attrs)
+        attrs = dict(armsmod.turned(fe.attrs, rot))
         if fe.role is not None:
             net = role_net(binding, fe.role)
             if net is None:

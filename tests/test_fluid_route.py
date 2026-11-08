@@ -48,6 +48,34 @@ class FluidRouteTest(unittest.TestCase):
         g0, g1 = r.layout.entities["~steam/g0"], r.layout.entities["~steam/g1"]
         self.assertEqual((g0.dir, g1.dir), (4, 12))      # open sides face away from each other
 
+    def test_a_fluid_net_that_failed_on_this_ground_is_not_searched_again(self):
+        # 3.0: as for belts; the fluid router searches its whole box, so the key is all of it
+        from unittest import mock
+        from fkcore import fluid_route
+        real, calls = fluid_route.route, []
+
+        def water_fails(flat, lay, cat, nets, *a, **k):
+            calls.append(list(nets))
+            added, how, failed = real(flat, lay, cat, nets, *a, **k)
+            if "water" in added:
+                del added["water"]
+                failed["water"] = "fake: no pipe route"
+            return added, how, failed
+        flat = elaborate_file(os.path.join(GAME, "steam.fk"), CAT)
+        lay, _notes = expand.expand_factory(flat, CAT)
+        with mock.patch.object(fluid_route, "route", water_fails):
+            r = route.route_layout(flat, lay, CAT)
+            self.assertEqual((sorted(r.memo), r.failed),
+                             (["water"], {"water": "fake: no pipe route"}))
+            # the first build's water saw no steam pipes; the next sees them standing
+            r = route.route_layout(flat, r.layout, CAT, memo=r.memo)
+            self.assertEqual(calls[-1], ["water"])
+            again = route.route_layout(flat, r.layout, CAT, memo=r.memo)
+            self.assertEqual(len(calls), 2)               # steam stands, water is remembered
+            self.assertIn("not searched again", again.failed["water"])
+            route.route_layout(flat, r.layout, CAT, memo=r.memo, again=["water"])
+            self.assertEqual(calls[-1], ["water"])
+
     def test_two_inputs_and_a_crossing(self):
         flat, r, rep = self.route("sulfur")
         self.assertEqual(sorted(r.routed), ["gas", "water"])

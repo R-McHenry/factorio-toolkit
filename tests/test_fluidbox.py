@@ -22,8 +22,10 @@ MEASURED = {
         [("input-output", (758.5, 451.5), (758.5, 450.5)),
          ("input-output", (758.5, 453.5), (758.5, 454.5))],
         [("output", (759.5, 452.5), (760.5, 452.5))]],
-    ("pump", 759, 476.5, 4): [[("output", (759.5, 476.5), (760.5, 476.5)),
-                               ("input", (758.5, 476.5), (757.5, 476.5))]],
+    # the game gives a pump one box with both connections; the catalog gives each end a box of
+    # its own (3.0: a Pump ends two nets, the input one and the output one), input first
+    ("pump", 759, 476.5, 4): [[("input", (758.5, 476.5), (757.5, 476.5))],
+                              [("output", (759.5, 476.5), (760.5, 476.5))]],
     ("offshore-pump", 774.5, 524.5, 12): [[("output", (774.5, 524.5), (775.5, 524.5))]],
     ("pumpjack", 766.5, 532.5, 8): [[("output", (765.5, 533.5), (765.5, 534.5))]],
 }

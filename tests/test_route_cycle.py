@@ -4,6 +4,9 @@ pmbay's green2|redc and cu5 each failed when the other went first. The failed ne
 the next pass, so the unit swung between the two orders for every pass it had (8 nets, 10 passes,
 the same two answers, twice per pmbay). The same order on the same ground lays the same routes:
 an order tried before goes on to the promoting pass.
+
+3.0: there are no passes over the unit any more. Each net is laid once (pass 1); the net that
+fails gets its group try, which never lays one order twice, then one promoting search.
 """
 import unittest
 from unittest import mock
@@ -13,7 +16,7 @@ from tests.test_route import BASE, build, CAT
 
 
 class CycleTest(unittest.TestCase):
-    def test_two_nets_that_block_each_other_take_two_passes(self):
+    def test_two_nets_that_block_each_other_never_repeat_an_order(self):
         flat, lay = build(BASE + "net plate: smelt -> pipes\n")
         real = route._route_one
         rival = {"ore_": "fuel", "fuel": "ore_"}
@@ -27,16 +30,21 @@ class CycleTest(unittest.TestCase):
         seen = []
 
         def progress(attempt, k, order, net, promo=False, which=None):
-            if k == 0 and which is None:
-                seen.append((attempt, promo, tuple(order)))
+            seen.append((which, k, tuple(order), net))
 
         with mock.patch.object(route, "_route_one", contended), \
                 mock.patch.object(route, "_progress", progress):
-            r = route.route_layout(flat, lay, CAT)
+            r = route.route_layout(flat, lay, CAT, group_budget=30)
         self.assertEqual(len(r.failed), 1, r.lines)
-        plain = [o for _a, promo, o in seen if not promo]
-        self.assertEqual(len(plain), len(set(plain)), seen)
-        self.assertEqual(len(plain), 2, seen)
+        # pass 1 lays each net once
+        first = [net for which, _k, _o, net in seen if which == "pass 1"]
+        self.assertEqual(len(first), len(set(first)), seen)
+        self.assertIn("ore_", first)
+        self.assertIn("fuel", first)
+        # the group try lays no order twice
+        tries = [o for which, k, o, _n in seen if which and which.startswith("the group of")
+                 and k == 0]
+        self.assertEqual(len(tries), len(set(tries)), seen)
 
 
 if __name__ == "__main__":

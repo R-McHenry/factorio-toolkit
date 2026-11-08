@@ -128,6 +128,18 @@ class WorthTest(unittest.TestCase):
         self.assertEqual(v["ice"], 1)                          # off-world, priced after home
         self.assertEqual(v["egg"], 0)                          # it breeds: nothing in, net
 
+    def test_power_keeps_a_breeding_loop_above_nothing(self):
+        # 3.0 (Rory, 11-02: "adding power consumption in as some cost"): with each craft's
+        # power, the egg that breeds costs its craft (2 s at 150 kW = 0.3 MJ, over 2 eggs net 1)
+        d = worth_data()
+        for r in d["recipes"].values():
+            r["energy"], r["jps"] = 1.0, 100e3
+        d["recipes"]["egg"]["energy"], d["recipes"]["egg"]["jps"] = 2.0, 150e3
+        v = techcost.Tree(d).values()
+        self.assertAlmostEqual(v["egg"], 0.3)
+        self.assertAlmostEqual(v["plate"], 1.1)                # 1 ore + 0.1 MJ
+        self.assertAlmostEqual(v["gear"], 2 * 1.1 + 0.1)
+
     def test_vertical_folds_research_into_material(self):
         tree = techcost.Tree(worth_data())
         base = explore.vertical({"plate": 10, "gear": 8}, tree, 2)

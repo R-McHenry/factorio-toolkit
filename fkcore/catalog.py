@@ -36,12 +36,16 @@ import os
 from collections import namedtuple
 
 from . import facts as _facts
+from . import learned as _learned
+from . import pack as _pack
 
 __all__ = ["Catalog", "DEFAULT_PATH", "FLUID_PATH", "FUEL_USE_W", "FUEL_VALUE_J", "MINING_TIME",
            "MINING_RADIUS", "STEAM_PER_S", "HEAT_W", "REACTOR_FUEL_S", "CIRCUIT_WIRE_REACH",
            "FluidBox", "PipeConn", "expected"]
 
-DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "catalog.json")
+#: The run's mod pack (env FK_PACK, :mod:`fkcore.pack`): its catalog is fkcore/data/packs/<pack>/,
+#: dumped from that game by tools/dump_catalog.lua + .py. Unset: the base game's measured fixture.
+DEFAULT_PATH = _pack.path("catalog.json")
 #: The fluid boxes beside the fixture (read from the game; see the file's ``source``).
 FLUID_PATH = os.path.join(os.path.dirname(DEFAULT_PATH), "fluidboxes.json")
 
@@ -105,15 +109,20 @@ class Catalog:
 
     # -- construction ---------------------------------------------------------------------
     @classmethod
-    def load(cls, path=DEFAULT_PATH) -> "Catalog":
-        """The fixture at ``path``, with the fluid boxes beside it (``fluidboxes.json``) if any."""
+    def load(cls, path=None) -> "Catalog":
+        """The fixture at ``path``, with the fluid boxes beside it (``fluidboxes.json``) if any.
+        3.0: the default path (the base game's, or the pack's) also takes the run's learned
+        overlay (``learned.json``, :mod:`fkcore.learned`): the machines its player read from the
+        game with ``fk catalog learn``."""
+        ov = _learned.load() if path is None else None
+        path = path or DEFAULT_PATH
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         fluid = os.path.join(os.path.dirname(os.path.abspath(path)), "fluidboxes.json")
         if os.path.exists(fluid):
             with open(fluid, encoding="utf-8") as fh:
                 data = dict(data, fluidboxes=json.load(fh))
-        return cls.from_dict(data)
+        return cls.from_dict(_learned.merge_catalog(data, ov))
 
     @classmethod
     def from_dict(cls, data: dict) -> "Catalog":
@@ -182,7 +191,8 @@ class Catalog:
         A crafting machine with a recipe the file measured takes that recipe's live boxes (one
         fluid on a side with several boxes holds them all: one box, every connection). A recipe
         it did not measure gets the same rule from the recipe itself (fluids in order, one per
-        box, an explicit ``fluidbox_index`` first). No recipe: every prototype box, except where
+        box, an explicit ``fluidbox_index`` first; fewer fluids than boxes, the first fluid takes
+        the extra boxes). No recipe: every prototype box, except where
         the boxes need a fluid recipe (assembling machines 2 and 3)."""
         row = (self._fluid.get("entities") or {}).get(name)
         if not row:
@@ -220,6 +230,18 @@ class Catalog:
             prod = prods.pop() if len(prods) == 1 else "input-output"
             out.append(FluidBox(i, fluid or protos[members[0][0]].get("filter"), prod,
                                 tuple(conns)))
+        if self.kind(name) == "pump":
+            # 3.0: a pump moves its fluid one way, so its box is two ends: the input it takes from
+            # and the output it pushes to, each a box of its own (a Pump ends two nets)
+            split = []
+            for b in out:
+                ways = [(f, tuple(c for c in b.conns if c.flow == f)) for f in ("input", "output")]
+                if all(cs for _f, cs in ways):
+                    for f, cs in ways:
+                        split.append(FluidBox(len(split) + 1, b.fluid, f, cs))
+                else:
+                    split.append(b._replace(box=len(split) + 1))
+            out = split
         return out
 
     def water_tiles(self, name, x, y, direction=None) -> set:
@@ -260,6 +282,16 @@ class Catalog:
             if len(fluids) == 1 and not fluids[0].get("fluidbox_index"):
                 out.append((fluids[0]["name"], [[b["index"], j + 1] for b in boxes
                                                  for j in range(len(b["connections"]))]))
+                continue
+            if len(fluids) < len(boxes) and not any(r.get("fluidbox_index") for r in fluids):
+                # 3.0 (measured: tools/laptop_server.py recipeboxes): fewer fluids than boxes,
+                # the first fluid takes the extra boxes, the others one each from the end (a
+                # cryogenic plant's or an Angel's plant's 3 boxes, 2 fluids: boxes 1-2 and 3, the
+                # only such shape in Space Age or Sea Block)
+                k = len(boxes) - len(fluids) + 1
+                for r, group in zip(fluids, [boxes[:k]] + [[b] for b in boxes[k:]]):
+                    out.append((r["name"], [[b["index"], j + 1] for b in group
+                                            for j in range(len(b["connections"]))]))
                 continue
             free = list(boxes)
             for r in fluids:
@@ -310,6 +342,19 @@ class Catalog:
     def size(self, name) -> tuple[int, int]:
         row = self.entity(name)
         return (row["tile_width"], row["tile_height"])
+
+    def drop_tile(self, name, x, y, direction=None):
+        """3.0: the tile an entity of ``name`` centred at (x, y) facing ``direction`` (0..15, a
+        cardinal) puts its output down on itself (``facts.drop_vector``: a drill, a recycler), or
+        None (it has none, or faces no cardinal)."""
+        v = _facts.drop_vector(name)
+        d = int(direction or 0) % 16
+        if v is None or d % 4:
+            return None
+        vx, vy = v
+        for _ in range(d // 4):
+            vx, vy = -vy, vx                                       # a quarter turn clockwise
+        return math.floor(float(x) + vx), math.floor(float(y) + vy)
 
     def tiles(self, name, x, y, direction=None) -> set[tuple[int, int]]:
         """Tiles occupied by an entity of `name` centred at (x, y).

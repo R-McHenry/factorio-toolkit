@@ -3,7 +3,7 @@ the routed rates and the too-thin lines that report_rates adds once a factory is
 import os
 import unittest
 
-from fkcore import connect, expand, fkp, lang, route, routed
+from fkcore import avail, connect, expand, fkp, lang, route, routed
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate, elaborate_file
 
@@ -27,6 +27,7 @@ net circuits: circ -> box
 class CircuitRowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        avail.install(None)     # nothing read (another test's snapshot would size the hands: route._TAPS)
         f = lang.parse(CIRCUITS, "t.fk")
         cls.flat = elaborate(f, dict(f.modules), CAT, "t")
         lay, _notes = expand.expand_factory(cls.flat, CAT)

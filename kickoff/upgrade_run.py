@@ -121,7 +121,9 @@ def _write_last(text):
 #: the template's second stop_on line (2.0.12): no paste with a net unrouted, or a maker whose
 #: product reaches no sink; and (2.1.3) none with a machine on a net it takes nothing from (the
 #: 10-29 run's pole maker, dropped from its route, starved for an hour)
-STOPS = ("no-route", "no-destination", "cannot-carry")
+#: 3.0 (Rory, 2026-11-01): no `no-route`: in a live game a net that doesn't route is pasted
+#: without its new belt and fixed after; a run's own `stop_on no-route` stays as it is
+STOPS = ("no-destination", "cannot-carry")
 #: what an older run's script may still say for a stop (2.0.52's rename): read either way, so an
 #: upgrade adds only the stops the run really lacks
 OLD_STOPS = {"unrouted": "no-route", "no_sink": "no-destination", "no sink": "no-destination",
@@ -141,9 +143,8 @@ def _stops(text):
     at = max([i for i, s in enumerate(steps) if s[:1] == ["stop_on"]] or [len(lines) - 1])
     if lines and not lines[at].endswith("\n"):
         lines[at] += "\n"
-    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need) + ' ':<26}# and no paste with a net unrouted, "
-                         "a maker whose product reaches no sink, or a machine on a net it takes "
-                         "nothing from\n")
+    lines.insert(at + 1, f"{'stop_on':<16}{' '.join(need) + ' ':<26}# and no paste with a maker whose "
+                         "product reaches no sink, or a machine on a net it takes nothing from\n")
     return "".join(lines)
 
 
@@ -233,8 +234,8 @@ def upgrade(run, sha, dry=False):
         stops = _stops(new_script or text)
         if stops:
             new_script = stops
-            changes.append(f"stop_on {' '.join(STOPS)}, the ones it lacked (no paste with a net "
-                           "unrouted)")
+            changes.append(f"stop_on {' '.join(STOPS)}, the ones it lacked (no paste with a maker "
+                           "whose product reaches no sink)")
         hand = _hand(new_script or text)
         if hand:
             new_script = hand
@@ -263,16 +264,23 @@ def upgrade(run, sha, dry=False):
     prelude = not os.path.exists(os.path.join(run, "game", "prelude.fk"))
     if prelude:
         plan.append("  game/prelude.fk: the template's prelude (the run has none)")
+    # 3.0: the routing pieces (Waypoint, Merge, Split), only where the run has none
+    routing = not os.path.exists(os.path.join(run, "game", "routing.fk"))
+    if routing:
+        plan.append("  game/routing.fk: the template's routing pieces (the run has none)")
     plan.append(f"  run.json: toolkit_sha {sha}, host_toolkit /home/computah/factorio/fk-v5-{sha}")
     if dry:
         return plan
     src = os.path.join(run, f".kit-{sha}")
     claude = cfg.get("player") == "claude"
+    pack = cfg.get("pack")
     _archive(sha, src, ("agent", "fkcore")
+             + ((f"kickoff/template-{pack}/docs",) if pack else ())
              + (tuple(f"kickoff/{name}" for name in LOOP) if claude else ())
              + (("kickoff/template/helpers",) if helpers else ())
              + (("kickoff/template/game/cells.fk",) if cells else ())
-             + (("kickoff/template/game/prelude.fk",) if prelude else ()))
+             + (("kickoff/template/game/prelude.fk",) if prelude else ())
+             + (("kickoff/template/game/routing.fk",) if routing else ()))
     keep = os.path.join(run, f".upgrade-{old}")
     os.makedirs(keep, exist_ok=True)
     for p in REPLACED:
@@ -289,6 +297,10 @@ def upgrade(run, sha, dry=False):
     shutil.copy(os.path.join(agent, "fk.py"), os.path.join(run, "bin", "fk.py"))
     shutil.copy(os.path.join(agent, "bin", "fk.cmd"), os.path.join(run, "bin", "fk.cmd"))
     shutil.copytree(os.path.join(agent, "docs"), os.path.join(run, "docs"))
+    pack_docs = os.path.join(src, "kickoff", f"template-{pack}", "docs") if pack else None
+    if pack_docs and os.path.isdir(pack_docs):
+        # 3.0: the pack's own guide (SEABLOCK.md) over the toolkit's docs, as new_run lays it
+        shutil.copytree(pack_docs, os.path.join(run, "docs"), dirs_exist_ok=True)
     workers = cfg.get("workers")
     if workers and workers.get("backend") == "claude":
         old_worker = os.path.join(run, ".claude", "agents", "worker.md")
@@ -306,6 +318,9 @@ def upgrade(run, sha, dry=False):
     if prelude:
         shutil.copy(os.path.join(src, "kickoff", "template", "game", "prelude.fk"),
                     os.path.join(run, "game", "prelude.fk"))
+    if routing:
+        shutil.copy(os.path.join(src, "kickoff", "template", "game", "routing.fk"),
+                    os.path.join(run, "game", "routing.fk"))
     shutil.copy(os.path.join(agent, "prompts", f"{cfg.get('prompt', 'core-v1')}.md"),
                 os.path.join(run, "AGENTS.md"))
     with open(os.path.join(run, "launch.json"), "w", encoding="utf-8", newline="\n") as fh:

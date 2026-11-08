@@ -13,6 +13,11 @@ kickoff-v1: a V1 player run, the laptop side (the V1 successor of v4-hand\kickof
                                        -Prompt says otherwise) with Claude worker subagents
                                        (agent\prompts\worker-v1.md); -WorkerModel sonnet (or a
                                        model id) for the workers, else the lead's model
+  kickoff-v1.cmd -Pack seablock -Instance sb
+                                       a Sea Block run on the Sea Block test server
+                                       (computah-ct:34198; factorio.service untouched): the
+                                       pack's kit and template overlay (kickoff-v1.sh --pack,
+                                       --instance; new_run.py --pack, --instance)
 
 Steps: stop earlier runs (as computah); deploy the toolkit at the commit (HEAD) to the host as
 its own dir fk-v5-<sha>, never over another; the host side, run from that dir:
@@ -26,7 +31,8 @@ param([string]$Prompt = "core-v1", [string]$Name = "", [switch]$NoReset, [switch
       [string]$Sha = "HEAD",
       [ValidateSet("deepseek", "claude")][string]$Player = "deepseek",
       [ValidateSet("none", "claude")][string]$Workers = "none", [string]$WorkerModel = "inherit",
-      [string]$Effort = "")
+      [string]$Effort = "", [string]$Pack = "",
+      [ValidateSet("live", "sb")][string]$Instance = "live")
 $ErrorActionPreference = "Stop"
 if ($Workers -ne "none") {
     if ($Player -ne "claude") { throw "-Workers claude needs -Player claude (workers are Claude Code subagents)" }
@@ -47,7 +53,9 @@ $name = if ($Name) { "$stamp-$Name" } else { "$stamp-$Prompt" }
 if ($name -match '\.') { throw "a run name has no dots ($name): the game would save it under another name" }
 $run = Join-Path $P "runs\$name"
 
-# one run at a time: an earlier session would share the world with this one
+# one run at a time: an earlier session would share the world with this one. A run on the Sea Block
+# test server (-Instance sb) shares no world with factorio.service's, so it leaves that run playing.
+if ($Instance -eq "live") {
 runas /savecred /user:computah "powershell -NoProfile -ExecutionPolicy Bypass -File $P\stop.ps1"
 Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "feed\.(py|js)" } |
     ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
@@ -56,6 +64,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "python.exe" -and $_.
     ForEach-Object { taskkill /F /PID $_.ProcessId 2>$null | Out-Null }
 Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "python.exe" -and $_.CommandLine -match "claude_loop\.py" } |
     ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
+}
 
 # the toolkit on the host, pinned for the run (cmd pipes the tar's bytes; PowerShell would not)
 $tk = "/home/computah/factorio/fk-v5-$sha"
@@ -64,7 +73,10 @@ if ($LASTEXITCODE -ne 0) { throw "toolkit deploy to $tk failed" }
 Write-Host "toolkit: $tk"
 
 if (-not $NoReset) {
-    ssh computah-ct "bash $tk/kickoff/kickoff-v1.sh $sha $name"
+    $hostArgs = ""
+    if ($Pack) { $hostArgs += " --pack $Pack" }
+    if ($Instance -ne "live") { $hostArgs += " --instance $Instance" }
+    ssh computah-ct "bash $tk/kickoff/kickoff-v1.sh $sha $name$hostArgs"
     if ($LASTEXITCODE -ne 0) { throw "kickoff-v1.sh failed (exit $LASTEXITCODE)" }
 }
 
@@ -73,6 +85,8 @@ if (-not $NoReset) {
 # the 0317 run's "cells were repeatedly traded against each other" and "finish the mall" in hand.
 # A fresh run starts from the brief and the docs. (--notes is still there for a deliberate carry.)
 $eff = if ($Effort) { @("--effort", $Effort) } else { @() }
+if ($Pack) { $eff += @("--pack", $Pack) }
+if ($Instance -ne "live") { $eff += @("--instance", $Instance) }
 python (Join-Path $here "new_run.py") $run --prompt $Prompt --sha $sha --player $Player `
     --workers $Workers --worker-model $WorkerModel @eff
 if ($LASTEXITCODE -ne 0) { throw "new_run.py failed" }

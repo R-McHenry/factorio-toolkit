@@ -39,7 +39,8 @@ A change to the game's rules goes in FAIR-PLAY.md and nowhere else.
   - each tool consumes the previous one's output;
   - power is its own step.
 - **Versioning:** releases are the only version numbers, and the major is the design generation.
-  1.x was V1, 2.0 is V2, buses are 2.1. A feature keeps a name until it ships. Each release gets a
+  1.x was V1, 2.0 is V2, buses are 2.1, and 3.0 is the build the player owns (step commands, the design
+  database, each net routed once). A feature keeps a name until it ships. Each release gets a
   `vX.Y` tag and a `docs/RELEASE-X.Y.md`.
 
 ## Runs and the game

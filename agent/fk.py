@@ -60,10 +60,15 @@ STAMP = os.path.join(GAME, "out", ".synced")
 #: commands that are pure: they run here, on the run's own toolkit
 LOCAL = {"rates", "plan", "check", "explain", "unfold", "dnp", "render", "layout", "split-to-chest",
          "merge", "insert", "chests-to-net", "net-to-chests"}
+#: 3.0: the design database's net files (game/out/design), read and written here, during a
+#: build too
+DESIGN = {"status", "hold", "unhold", "unroute", "seed"}
+#: 3.0: build steps as commands of their own, run alone on the laptop (``fk route NET``)
+STEP_CMDS = {"route", "place", "report"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capital",
         "read-terrain", "measure", "adopt", "sense", "research", "tech", "recipes", "lua", "fresh",
-        "avail", "decon", "request"}
+        "avail", "decon", "request", "walk", "map"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
 AREA_FIRST = ("fresh", "measure", "decon")
 #: files only the host writes: pulled, never pushed
@@ -296,12 +301,58 @@ def remote(cfg, args, footer=True, data=None):
         if footer:
             subprocess.run([sys.executable, "-m", "fkcore", "poll", "."], cwd=GAME, env=env)
         return code
-    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on "
+    # 3.0 (U6): unbuffered, so a lab or a foreground build says where it is as it goes
+    cmd = (f"cd {shlex.quote(cfg['host_game'])} && FK_LINK=on PYTHONUNBUFFERED=1 "
            f"PYTHONPATH={shlex.quote(cfg['host_toolkit'])} python3 -m fkcore "
            + " ".join(shlex.quote(a) for a in args))
     if footer:
         cmd += f"; s=$?; PYTHONPATH={shlex.quote(cfg['host_toolkit'])} FK_LINK=on python3 -m fkcore poll .; exit $s"
     return _ssh(cfg, cmd, data=data).returncode
+
+
+def _sim_mods(cfg, saves):
+    """3.0 (11-02): the planner plays with the live game's own mods. ``fk sim fetch`` copies the
+    host's mod list (``sim\\live-mods.json``, which ``fkcore.sim`` links by) and its
+    ``mod-settings.dat`` (``sim\\mod-settings.dat``), and any mod version the pack's mod folder
+    lacks into it (a fk-early-bots 0.2.1 sim against a 0.4.0 game ran its robots flat)."""
+    mods = posixpath.join(posixpath.dirname(saves), "mods")
+    got = _ssh(cfg, f"ls {shlex.quote(mods)}", capture=True)
+    if got.returncode != 0:
+        return [f"sim: no mod folder at {cfg['host']}:{mods}; the planner keeps the pack's mods"]
+    names = [n for n in got.stdout.decode().split() if n not in ("mod-list.json", "mod-settings.dat")]
+    root = os.path.join(RUN, "sim")
+    os.makedirs(root, exist_ok=True)
+    with open(os.path.join(root, "live-mods.json"), "w", encoding="utf-8") as fh:
+        json.dump({"from": f"{cfg['host']}:{mods}", "mods": names}, fh, indent=1)
+    out = [f"sim: {len(names)} mods as the live game has them"]
+    st = _ssh(cfg, f"cat {shlex.quote(mods + '/mod-settings.dat')}", capture=True)
+    if st.returncode == 0 and st.stdout:
+        with open(os.path.join(root, "mod-settings.dat"), "wb") as fh:
+            fh.write(st.stdout)
+        out.append("sim: the live game's mod settings")
+    local = os.environ.get("FK_SIM_MODS")
+    if not local:
+        try:
+            with open(os.path.join(RUN, ".toolkit", "fkcore", "data", "packs", cfg.get("pack") or "",
+                                   "pack.json"), encoding="utf-8") as fh:
+                local = json.load(fh).get("mods_dir")
+        except (OSError, ValueError):
+            local = None
+    if not local:
+        return out
+    have = set(os.listdir(local)) if os.path.isdir(local) else set()
+    for n in names:
+        if n in have:
+            continue
+        tar = _ssh(cfg, f"tar -cf - -C {shlex.quote(mods)} {shlex.quote(n)}", capture=True)
+        if tar.returncode != 0:
+            out.append(f"sim: could not copy {n} from {cfg['host']}")
+            continue
+        os.makedirs(local, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as tf:
+            tf.extractall(local, filter="data")
+        out.append(f"sim: {n} copied into {local}")
+    return out
 
 
 def footer(cfg):
@@ -319,7 +370,7 @@ def sim(cfg, rest):
     fkcore game command (stats, look, lua, research...) against the planner instead of the live
     game. Nothing here touches the live game but ``fetch --live``'s save."""
     if not rest or rest[0] in ("-h", "--help"):
-        print("fk sim fetch [--live NAME] | start [NAME] | stop | status | save NAME | load NAME | "
+        print("fk sim fetch [--live NAME] | start [NAME] | stop | status | kickoff [NAME] | save NAME | load NAME | "
               "saves | speed X | run N | until T | place FILE @X,Y | paste FILE @X,Y | remove "
               "X0,Y0,X1,Y1 | decon X0,Y0,X1,Y1 | play SCRIPT | game CMD ... | explore on|next|"
               "status|archive|best|off  (docs\\TOOLKIT.md, \"The speedrun planner\")")
@@ -340,10 +391,10 @@ def sim(cfg, rest):
             if r.returncode != 0:
                 return r.returncode
             time.sleep(5)
-            path = f"{HOST_SAVES}/{tag}.zip"
+            path = f"{cfg.get('host_saves') or HOST_SAVES}/{tag}.zip"
         else:
             path = cfg.get("host_start_save") or \
-                f"{HOST_SAVES}/v1-{os.path.basename(RUN)}-start.zip"
+                f"{cfg.get('host_saves') or HOST_SAVES}/v1-{os.path.basename(RUN)}-start.zip"
         got = _ssh(cfg, f"cat {shlex.quote(path)}", capture=True)
         if got.returncode != 0 or not got.stdout:
             print(f"fk sim fetch: no {path} on {cfg['host']}", file=sys.stderr)
@@ -353,6 +404,11 @@ def sim(cfg, rest):
         with open(os.path.join(dest, f"{name}.zip"), "wb") as fh:
             fh.write(got.stdout)
         print(f"sim: save state {name} from {cfg['host']}:{path} ({len(got.stdout) // 1024} kB)")
+        for line in _sim_mods(cfg, os.path.dirname(path)):
+            print(line)
+        if not live:
+            print("sim: if that start is the map from before the kickoff (fk sim start says tick "
+                  "~100, no robots): fk sim start, then fk sim kickoff")
         return 0
     if rest[0] == "game":
         env_json = subprocess.run([sys.executable, "-m", "fkcore", "sim", ".", "env"], cwd=GAME,
@@ -443,24 +499,58 @@ def build(cfg, args):
     j = _at(names, args[args.index("--to") + 1]) if "--to" in args else len(names) - 1
     # this build's own options (2.0.62): --with 'STEP OPTS' (repeatable) and --reroute NET[,NET]
     extra = ["--confirm"] if "--confirm" in args else []      # 2.0.63: take up DNP pieces
+    if "--yes" in args:            # 3.0: the OK to paste over the hand edits the diff listed
+        extra += ["--with", "diff --yes"]
     for k, a in enumerate(args[:-1]):
         if a in ("--with", "--reroute"):
             extra += [a, args[k + 1]]
     link_at = [k for k, n in enumerate(names) if n in LINK_STEPS]
     split = link_at[0] if link_at else len(names)
+    # 3.0: what comes after the last game step (a `later:` section's reports) runs here again,
+    # once the paste is done: heavy compute stays off the host the server shares
+    after = link_at[-1] + 1 if link_at else len(names)
     code = 0
     if i < split:
         _avail_first(cfg)
         code = local(cfg, ["build", script, "--from", _spec(names, i),
                            "--to", _spec(names, min(j, split - 1))] + extra)
-    if code == 0 and j >= split:
+    if code == 0 and j >= split and i < after:
         push(cfg)
         code = remote(cfg, ["build", script, "--from", _spec(names, max(i, split)),
-                            "--to", _spec(names, j)] + extra, footer=False)
+                            "--to", _spec(names, min(j, after - 1))] + extra, footer=False)
         pull(cfg)
     else:
         push(cfg)
+    if code == 0 and j >= after:
+        code = local(cfg, ["build", script, "--from", _spec(names, max(i, after)),
+                           "--to", _spec(names, j)] + extra)
     return code
+
+
+def background(argv):
+    """3.0 (PLAN-3.0 1b, Rory: "the default mode of the build going in the background"): ``fk
+    build`` starts the build on its own and returns at once; its lines go to game/out/build.log,
+    and ``fk status`` says where the route step is. ``fk build --wait`` runs it here."""
+    log = os.path.join(GAME, "out", "build.log")
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    flags = {}
+    if os.name == "nt":
+        # CREATE_NO_WINDOW, NEW_PROCESS_GROUP: a hidden console of its own, which its ssh and
+        # python children share (11-01: DETACHED_PROCESS gave each of them a console window)
+        flags["creationflags"] = 0x08000000 | 0x00000200
+    else:
+        flags["start_new_session"] = True
+    with open(log, "a", encoding="utf-8") as fh:          # a build still queued keeps its lines
+        fh.write(f"\n== fk build {' '.join(argv)} ({time.strftime('%H:%M:%S')})\n")
+        fh.flush()
+        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "build", "--wait"] + argv,
+                             stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             cwd=os.getcwd(), env=dict(os.environ, PYTHONUNBUFFERED="1",
+                                                       FK_BACKGROUND="1"), **flags)
+    print(f"fk build: started in the background (pid {p.pid}). Its lines go to "
+          f"{os.path.relpath(log, RUN)}; `fk status` shows the nets as the router lands them; "
+          "`fk build --wait` runs a build here instead.")
+    return 0
 
 
 def main(argv):
@@ -475,18 +565,26 @@ def main(argv):
         if "-h" in rest or "--help" in rest:
             # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
             # ran all 19 steps, the paste included)
-            print("fk build [--from STEP] [--to STEP] [--with 'STEP OPTS'] [--reroute NET[,NET]] "
-                  "[--confirm]: "
+            print("fk build [--wait] [--from STEP] [--to STEP] [--with 'STEP OPTS'] "
+                  "[--reroute NET[,NET]] [--confirm] [--yes]: "
+                  "runs in the background (its lines in game\\out\\build.log, fk status for "
+                  "progress) unless --wait; "
                   "--confirm takes up what stands built on DNP pieces; "
+                  "--yes pastes over the hand edits the last build listed and held; "
                   "the steps of game\\<surface>.build.fkb in order, design here and the game "
                   "steps on the host; STEP is a step's name, or NAME:K for its K-th time. --with "
                   "adds options to a step for this build only (--with 'cover robots --fresh'); "
                   "--reroute lays these nets (or every net inside an instance) again "
                   "(docs\\TOOLKIT.md, \"The build script\")")
             return 0
+        if "--wait" not in rest:
+            return background(rest)
+        rest = [a for a in rest if a != "--wait"]
         with _build_lock():
             code = build(cfg, rest)
-        footer(cfg)
+        print(f"fk build: done, exit {code}", flush=True)
+        if not os.environ.get("FK_BACKGROUND"):
+            footer(cfg)                # in the background its log would take the new alerts
         return code
     if cmd == "look":
         if "--design" in rest:
@@ -501,7 +599,9 @@ def main(argv):
     if cmd == "wait":
         if "-h" in rest or "--help" in rest:
             print("fk wait 90s | fk wait built [AREA] [--name ENTITY[,...]] [--max 5m] [--poll "
-                  "10s]: the one way to wait, from the run's fixed wait budget; it asks first "
+                  "10s] | fk wait build [--max 5m] (the background build's end) | fk wait 2m -- "
+                  "COMMAND (a command, stopped at the cap): "
+                  "the one way to wait, from the run's fixed wait budget; it asks first "
                   "(run it again, or add --sure). built: until the area has no ghosts left (or "
                   "the named entity's are gone), or the bound expires; 0 clear, 1 ghosts left, "
                   "2 a link error or no budget left (docs\\TOOLKIT.md, \"The loop\")")
@@ -528,6 +628,13 @@ def main(argv):
         return code
     if cmd == "sim":
         return sim(cfg, rest)
+    if cmd == "map" and (not rest or rest[0] in ("-h", "--help")):
+        print("fk map save NAME | saves | load NAME | restart | pause | resume: the live map. "
+              "load saves the map as it stands first (before-load-STAMP), then restarts the "
+              "server on NAME (start: the run's start); restart is load start, set up as the "
+              "kickoff set it up; pause stands the whole game still until resume "
+              "(docs\\TOOLKIT.md, \"Saving, loading and starting over\")")
+        return 0
     if cmd == "capture":
         # 2.0.62: a design's instance is read here; a lab slot or an area, in the game
         if rest and rest[0] == "design":
@@ -543,8 +650,52 @@ def main(argv):
         push(cfg)
         footer(cfg)
         return code
+    if cmd == "catalog":
+        # 3.0: the run's own catalog (game\learned.json): `learn` reads buildings from the game,
+        # on the host; `show` and `forget` are reads and edits of the file, here
+        if rest[:1] == ["learn"]:
+            push(cfg)
+            code = remote(cfg, ["catalog", "."] + rest)
+            pull(cfg)
+            return code
+        code = local(cfg, ["catalog", "."] + (rest or ["show"]))
+        push(cfg)
+        footer(cfg)
+        return code
+    if cmd in STEP_CMDS:
+        # 3.0: one step of the build script alone, here: `fk route coal,fe3p` lays those nets
+        # again and keeps every other route; nothing is pasted
+        step = {"report": "report_" + (rest[0] if rest else "checks")}.get(cmd, cmd)
+        args = rest[1:] if cmd == "report" else rest
+        with _build_lock():
+            code = local(cfg, ["step", _script(), step] + args)
+        push(cfg)
+        footer(cfg)
+        return code
+    if cmd == "compile":
+        # 3.0: a sealed module's insides routed alone and stored; the next build lays them
+        with _build_lock():
+            code = local(cfg, ["compile", _script()] + rest)
+        push(cfg)
+        footer(cfg)
+        return code
+    if cmd in DESIGN:
+        code = local(cfg, [cmd, "."] + rest)
+        log = os.path.join(GAME, "out", "build.log")
+        if cmd == "status" and os.path.exists(log):
+            with open(log, encoding="utf-8", errors="replace") as fh:
+                tail = [ln.rstrip() for ln in fh.readlines()[-4:] if ln.strip()]
+            print("build.log, last lines:\n" + "\n".join(f"  {ln}" for ln in tail))
+        footer(cfg)
+        return code
     if cmd == "lua":
         return lua(cfg, rest)
+    if cmd == "stats" and not rest:
+        # 3.0: plain `fk stats` is the one global feed (research, capital and reinvestment, made
+        # and used, power, machines): a sample if one is due, then the history report
+        remote(cfg, ["stats", ".", "--sample"], footer=False)
+        pull(cfg, stats=True)
+        rest = ["--history"]
     if cmd == "stats" and "--sample" in rest:
         # 2.1: the run's stats sample, on the host; no footer, so a sampler that runs on its own
         # never takes the player's new alerts or chat
@@ -677,8 +828,13 @@ def wait(cfg, rest, clock=time.time, sleep=time.sleep):
     sure = "--sure" in rest
     rest = [a for a in rest if a != "--sure"]
     plain = len(rest) == 1 and _seconds(rest[0]) is not None
-    if not plain and rest[:1] != ["built"]:
-        print("fk wait 90s, or fk wait built [AREA] [--max 5m] (fk wait --help)", file=sys.stderr)
+    # 3.0: the other waits a player reaches for, given a budgeted way: a command with a time cap
+    # (in place of `timeout 120 ...` or a long foreground run) and the background build's end
+    capped = len(rest) >= 3 and _seconds(rest[0]) is not None and rest[1] == "--"
+    building = rest[:1] == ["build"]
+    if not (plain or capped or building) and rest[:1] != ["built"]:
+        print("fk wait 90s, fk wait built [AREA] [--max 5m], fk wait build [--max 5m], or "
+              "fk wait 2m -- COMMAND (fk wait --help)", file=sys.stderr)
         return 2
     b = _budget(clock=clock)
     left = _left(b)
@@ -704,6 +860,28 @@ def wait(cfg, rest, clock=time.time, sleep=time.sleep):
         _save_budget(b)
         sleep(want)
         code = 0
+    elif capped:
+        want = min(_seconds(rest[0]), left)
+        b["running"] = {"since": t0, "for": want}
+        _save_budget(b)
+        try:
+            code = subprocess.run(rest[2:], timeout=want, stdin=subprocess.DEVNULL).returncode
+        except subprocess.TimeoutExpired:
+            print(f"fk wait: {rest[2]} still ran after {want:.0f} s; stopped")
+            code = 124
+        except OSError as exc:
+            print(f"fk wait: {rest[2]}: {exc}")
+            code = 127
+    elif building:
+        args = rest[1:]
+        want = left
+        if "--max" in args and args.index("--max") + 1 < len(args):
+            want = min(_seconds(args[args.index("--max") + 1]) or 300.0, left)
+        else:
+            want = min(300.0, left)
+        b["running"] = {"since": t0, "for": want}
+        _save_budget(b)
+        code = _wait_build(want, clock, sleep)
     else:
         args = _wait_args(rest)
         if "--max" in args:
@@ -724,6 +902,31 @@ def wait(cfg, rest, clock=time.time, sleep=time.sleep):
     _save_budget(b)
     print(f"fk wait: waited {took:.0f} s; {_left(b) / 60:.0f} min of wait budget left")
     return code
+
+
+def _wait_build(want, clock, sleep, log=None):
+    """``fk wait build``: until the newest build in game/out/build.log says ``fk build: done,
+    exit N`` (-> N), or ``want`` seconds pass (-> 1); 2 when no build was started."""
+    log = log or os.path.join(GAME, "out", "build.log")
+    end = clock() + want
+    while True:
+        try:
+            with open(log, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            print("fk wait build: no build.log: no build was started (fk build)")
+            return 2
+        last = text.rsplit("\n== fk build", 1)[-1]
+        m = re.search(r"fk build: done, exit (\d+)", last)
+        if m:
+            print("fk wait build: " + m.group(0))
+            return int(m.group(1))
+        if clock() >= end:
+            tail = [ln for ln in last.splitlines() if ln.strip()][-1:]
+            print(f"fk wait build: still running after {want:.0f} s"
+                  + (f"; last line: {tail[0]}" if tail else ""))
+            return 1
+        sleep(min(2.0, max(0.0, end - clock())))
 
 
 #: ``fk wait built`` takes the area where look does, after the word ``built``.

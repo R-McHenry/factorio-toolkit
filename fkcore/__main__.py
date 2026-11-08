@@ -87,7 +87,10 @@ use the game link, and only with FK_LINK=on)
     lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
                                           a factory (or a stage's) built on its own lab slot,
                                           powered and stocked; then what it really makes
-    sim GAME_DIR start [NAME] | stop | status | save NAME | load NAME | saves | speed X |
+    map GAME_DIR save NAME | saves | load NAME | restart | pause | resume
+                                          the live map: saved, loaded (the server restarted on
+                                          it), started over, paused (fkcore.mapctl; the host)
+    sim GAME_DIR start [NAME] | stop | status | kickoff [NAME] | save NAME | load NAME | saves | speed X |
          run N | until T | place FILE @X,Y | paste FILE @X,Y | remove AREA | decon AREA |
          play SCRIPT | env      the speedrun planner: the run's own map on this machine, paused
                                           between actions (fkcore.sim)
@@ -131,6 +134,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -183,6 +187,30 @@ def _game_link(what):
     if r is None:
         print(f"{what}: skipped, no game link ({why})")
     return r
+
+
+def _catalog(a):
+    """fk catalog learn|show|forget (3.0, fkcore.learn): the run's learned overlay."""
+    from . import learn, learned
+    path = learned.path() or os.path.join(os.path.abspath(a.game), learned.NAME)
+    if a.verb == "show":
+        print("\n".join(learn.show(a.names[0] if a.names else None, learned.path())))
+        return 0
+    if a.verb == "forget":
+        if len(a.names) != 1:
+            raise SystemExit("error: fk catalog forget NAME")
+        print("\n".join(learn.forget(a.names[0], path)))
+        return 0
+    if not (a.names or a.mod or a.all_mods):
+        raise SystemExit("error: fk catalog learn NAME... | --mod MOD | --all-mods")
+    how = "fk catalog learn " + (" ".join(a.names) or (f"--mod {a.mod}" if a.mod else "--all-mods"))
+
+    def body(r):
+        ov, lines = learn.learn(r, a.names, a.mod, a.all_mods, how=how)
+        if ov and not a.dry:
+            lines.append(f"wrote {learn.write(ov, path)}: every design step plans with it now")
+        return lines
+    return _world(a, None, "catalog learn", body)
 
 
 def _world(a, cat, what, body):
@@ -720,6 +748,10 @@ def _capture(a, cat):
             named = capture.names([row["name"] for row in rows], cat)
             if named:
                 data["names"] = named
+            edge = capture.ports([(row["name"], float(row["x"]), float(row["y"]),
+                                   row.get("direction")) for row in rows], cat)
+            if edge:
+                data["ports"] = edge
             capture.write(dest, data)
             names = {}
             for row in rows:
@@ -756,6 +788,9 @@ def _capture(a, cat):
             named = capture.names_of_bp(got["bp"], cat)
             if named:
                 data["names"] = named
+            edge = capture.ports_of_bp(got["bp"], cat)
+            if edge:
+                data["ports"] = edge
             capture.write(dest, data)
     except (capture.CaptureError, link.LinkError, surfacemod.SurfaceError, OSError) as exc:
         print(f"error: capture: {exc}", file=sys.stderr)
@@ -765,6 +800,10 @@ def _capture(a, cat):
     if named:
         print(f"  names: {capture.name_span(named)}: a net ends on one as X.asm1 when the Literal "
               "is X")
+    if edge:
+        print(f"  ports: {', '.join(sorted(edge, key=lambda p: (p[0], int(p[1:]))))}: the belts "
+              "and pipes that cross the frame's edge; a net ends on one as X.e1 (rename them in "
+              "the file)")
     print(f'  use it anywhere, a module included:  X = Literal<file="{rel}"> @(x, y)'
           f"   (or fk sim place game\\{rel.replace('/', chr(92))} @X,Y)")
     return 0
@@ -946,6 +985,19 @@ def _lab(a, cat):
     return 0
 
 
+def _map(a):
+    """fk map (3.0): the live map's saves, loads, start-over and pause (fkcore.mapctl), on the
+    game host."""
+    from . import link, mapctl
+    from . import pack as packmod
+    try:
+        print("\n".join(mapctl.run(a.game, a.verb, list(a.rest), pack=packmod.name() or None)))
+    except (mapctl.MapError, OSError, link.LinkError) as exc:
+        print(f"map: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _sim(a, cat):
     """fk sim (2.0.61): the speedrun planner (fkcore.sim), on this machine."""
     from . import link
@@ -964,6 +1016,8 @@ def _sim(a, cat):
             print(s.start(names[0] if names else "start", spectate=spectate))
         elif v == "stop":
             print(s.stop())
+        elif v == "kickoff":
+            print("\n".join(s.kickoff(rest[0] if rest else "start")))
         elif v == "status":
             st = s.state()
             print("sim: not running" if st is None else
@@ -1007,7 +1061,7 @@ def _sim(a, cat):
                 raise simmod.SimError("fk sim add-save FILE NAME")
             print(s.add_save(rest[0], rest[1]))
         else:
-            raise simmod.SimError(f"fk sim {v}: start, stop, status, save, load, saves, speed, "
+            raise simmod.SimError(f"fk sim {v}: start, stop, status, kickoff, save, load, saves, speed, "
                                   "run, until, place, paste, remove, decon, play, explore")
     except (simmod.SimError, OSError, link.LinkError, ValueError) as exc:
         print(f"sim: {exc}", file=sys.stderr)
@@ -1110,6 +1164,53 @@ def _explore(s, rest):
                           "[--prior K] | next | "
                           "status | off | archive [N] | "
                           "best [CELL] [--to plan.sim] | reset")
+
+
+def _walk(a, cat):
+    """fk walk (3.0, PLAN-3.0 3f): what a machine waits on, up and down its nets (fkcore.walk)."""
+    from . import walk
+    parts = a.what.split(",")
+    box = len(parts) == 4
+
+    frame = _area(a.frame) if a.frame else None
+
+    def body(dump):
+        w = walk.infer(dump, cat)
+        if frame:
+            return walk.summary(w)[:1] + walk.crossings(w, frame)
+        if box:
+            return walk.summary(w)
+        root = walk.find_root(w, a.what)
+        if root is None:
+            return walk.summary(w)[:1] + [f"walk: nothing to walk at {a.what}"]
+        return walk.summary(w)[:1] + walk.tree(w, root, a.up, a.down)
+
+    if a.frm:
+        with open(a.frm, encoding="utf-8") as fh:
+            print("\n".join(body(json.load(fh))))
+        return 0
+    if frame:
+        # what reaches over the edge from outside: an underground's far end, a long hand
+        m = 12
+        area = (frame[0] - m, frame[1] - m, frame[2] + m, frame[3] + m)
+    elif box:
+        area = _area(a.what)
+    else:
+        try:
+            x, y = (float(v) for v in parts)
+        except ValueError:
+            raise SystemExit("error: walk from the game takes X,Y or X0,Y0,X1,Y1 (a net or a key "
+                             "needs --from)")
+        r = a.radius
+        area = (math.floor(x) - r, math.floor(y) - r, math.floor(x) + r + 1, math.floor(y) + r + 1)
+
+    def run(r):
+        dump = walk.read(r, a.surface, area)
+        if a.save:
+            with open(a.save, "w", encoding="utf-8") as fh:
+                json.dump(dump, fh)
+        return body(dump)
+    return _world(a, cat, "walk", run)
 
 
 def _adopt(a, cat):
@@ -1245,6 +1346,59 @@ def _glue(argv):
     return out
 
 
+def _design(a):
+    """3.0 ``fk status|hold|unhold|unroute|seed``: the design database's net files
+    (``fkcore.design``), read even while a build runs; a hold written now is taken when the router
+    reaches that net."""
+    from . import design
+    out = os.path.join(a.game, "out")
+    factories = design.factories(out)
+    if not factories:
+        print(f"error: no net files under {os.path.join(out, 'design')}: no route step has run "
+              "since 3.0", file=sys.stderr)
+        return 2
+    if a.cmd == "status":
+        for f in factories:
+            if a.net is None or a.net in design.read_all(out, f):
+                print("\n".join(design.status_lines(out, f, a.net)))
+        return 0
+    where = [f for f in factories if a.net in design.read_all(out, f)]
+    if a.cmd == "seed" and a.pieces and not where and len(factories) == 1:
+        where = factories
+    if not where:
+        print(f"error: no net file for {a.net} (fk status {a.game} lists them)", file=sys.stderr)
+        return 2
+    if a.cmd == "seed":
+        ents = None
+        if a.pieces:
+            try:
+                lay = fkp.loads("fkp 1 factory x\n" + "\n".join(
+                    f"e ~seed/{k} {p}" for k, p in enumerate(a.pieces)) + "\n")
+            except ValueError as exc:
+                print(f"error: a piece is 'NAME X,Y DIR [ug=in|out]', as a net file writes "
+                      f"its carriers: {exc}", file=sys.stderr)
+                return 2
+            ents = [lay.entities[f"~seed/{k}"] for k in range(len(a.pieces))]
+        for f in where:
+            if design.seed(out, f, a.net, ents) is None:
+                print(f"error: {f} net {a.net} has no carriers to keep: give the pieces "
+                      "(fk seed NET 'splitter 11,30 S')", file=sys.stderr)
+                return 2
+            n = len(ents) if ents is not None else len(design.read_all(out, f)[a.net]["ents"])
+            print(f"{f} net {a.net}: seeded with {n} carriers; the next build lays the rest of "
+                  "it through them (fk route NET does it now)")
+        return 0
+    status, why = {"hold": ("held", ""), "unhold": ("routed", ""),
+                   "unroute": ("unrouted", design.UNROUTED_BY_YOU + " (fk unroute)")}[a.cmd]
+    for f in where:
+        design.set_status(out, f, a.net, status, why)
+        print(f"{f} net {a.net}: {status}" + {
+            "hold": "; its route stands as it is in every build until fk unhold",
+            "unhold": "; the next build judges its route as any other",
+            "unroute": "; the next build routes it again"}[a.cmd])
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m fkcore", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1301,6 +1455,34 @@ def main(argv=None):
                         "--with 'route --again NET'")
     b.add_argument("--confirm", action="store_true",
                    help="take up what stands built on DNP pieces (diff and apply --confirm)")
+    sp = sub.add_parser("step", help="3.0: one step of the build script alone, on what the steps "
+                                       "before it left (fk route NET, fk place)")
+    sp.add_argument("script")
+    sp.add_argument("step", help="a step of the script: route, place, report_checks, ...")
+    sp.add_argument("nets", nargs="?", default="",
+                    help="route only: NET[,NET] (or an instance, every net in it) to lay again")
+    sp.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'")
+    sp.add_argument("--try", dest="try_", nargs=2, metavar="X,Y",
+                    help="how a belt would go from tile A to tile B here; nothing laid")
+    cp = sub.add_parser("compile", help="3.0: a sealed module's insides routed alone and stored "
+                                         "(out/design/modules); the world lays them from there")
+    cp.add_argument("script")
+    cp.add_argument("module")
+    st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design)")
+    st.add_argument("game")
+    st.add_argument("net", nargs="?")
+    for name, what in (("hold", "keep a net's route as it stands, whatever the router would do"),
+                       ("unhold", "let the router judge a held net again"),
+                       ("unroute", "drop a net's route: the next build routes it again")):
+        p = sub.add_parser(name, help=f"3.0: {what}")
+        p.add_argument("game")
+        p.add_argument("net")
+    sd = sub.add_parser("seed", help="3.0: pin carriers of a net (a splitter, a belt) for the "
+                                     "router to lay the rest of it through")
+    sd.add_argument("game")
+    sd.add_argument("net")
+    sd.add_argument("pieces", nargs="*", metavar="'NAME X,Y DIR'",
+                    help="the carriers to pin (default: the net file's carriers as they stand)")
     lk = sub.add_parser("look")
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
@@ -1407,6 +1589,10 @@ def main(argv=None):
     sm.add_argument("game")
     sm.add_argument("verb")
     sm.add_argument("rest", nargs=argparse.REMAINDER)
+    mp = sub.add_parser("map")
+    mp.add_argument("game")
+    mp.add_argument("verb")
+    mp.add_argument("rest", nargs=argparse.REMAINDER)
     lb = sub.add_parser("lab")
     lb.add_argument("game")
     lb.add_argument("name", nargs="?")
@@ -1456,6 +1642,18 @@ def main(argv=None):
     rq.add_argument("--name", default="", metavar="ENTITY", help="the entity's prototype there")
     rq.add_argument("--inventory", default="", metavar="NAME",
                     help="a defines.inventory name (default: the one its kind takes ITEM in)")
+    wk = sub.add_parser("walk", description="the net walker, world mode (fkcore.walk, PLAN-3.0 3f)")
+    wk.add_argument("game")
+    wk.add_argument("what", help="X,Y (a machine or belt there), an entity key, a net (n7), "
+                    "or X0,Y0,X1,Y1 (every net in the area)")
+    wk.add_argument("--up", type=int, default=2)
+    wk.add_argument("--down", type=int, default=1)
+    wk.add_argument("--radius", type=int, default=32, help="tiles read around X,Y (default 32)")
+    wk.add_argument("--surface", default="nauvis")
+    wk.add_argument("--save", metavar="FILE", help="keep the read as JSON")
+    wk.add_argument("--from", dest="frm", metavar="FILE", help="walk a kept read, no game")
+    wk.add_argument("--frame", metavar="X0,Y0,X1,Y1", help="a module frame drawn on the base: "
+                    "where belts, undergrounds, hands and pipes cross it (the ports it needs)")
     cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
                         "anywhere (fkcore.capture)")
     cp.add_argument("game")
@@ -1497,6 +1695,16 @@ def main(argv=None):
     sg = sub.add_parser("stage", add_help=False)
     sg.add_argument("game")
     sg.add_argument("rest", nargs=argparse.REMAINDER)
+    cl = sub.add_parser("catalog", description="the run's own catalog overlay (fkcore.learn): "
+                        "learn reads buildings from the game into learned.json, show says what "
+                        "it holds (or what the catalog knows of NAME), forget takes one out")
+    cl.add_argument("game")
+    cl.add_argument("verb", choices=("learn", "show", "forget"))
+    cl.add_argument("names", nargs="*", metavar="NAME", help="buildings (entity or item names)")
+    cl.add_argument("--mod", help="learn: every building this mod adds")
+    cl.add_argument("--all-mods", action="store_true",
+                    help="learn: every building a mod adds (not base)")
+    cl.add_argument("--dry", action="store_true", help="learn: say what it read, write nothing")
     a = ap.parse_args(_glue(sys.argv[1:] if argv is None else list(argv)))
     if a.cmd == "stage":
         from . import stage
@@ -1511,6 +1719,8 @@ def main(argv=None):
         return _lua(a)
     if a.cmd == "read-terrain":
         return _read_terrain(a)
+    if a.cmd == "catalog":
+        return _catalog(a)
     cat = Catalog.load()
     if a.cmd == "migrate-surface":
         return _migrate_surface(a)
@@ -1520,10 +1730,14 @@ def main(argv=None):
         return _measure(a, cat)
     if a.cmd == "sim":
         return _sim(a, cat)
+    if a.cmd == "map":
+        return _map(a)
     if a.cmd == "lab":
         return _lab(a, cat)
     if a.cmd == "capture":
         return _capture(a, cat)
+    if a.cmd == "walk":
+        return _walk(a, cat)
     if a.cmd == "decon":
         return _decon(a, cat)
     if a.cmd == "request":
@@ -1546,6 +1760,34 @@ def main(argv=None):
                     have = {ln.cmd for ln in flow.parse(fh.read(), a.script)}
                 extra += [f"{s} --confirm" for s in ("diff", "apply") if s in have]
             code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra)
+        except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return code
+    if a.cmd in ("status", "hold", "unhold", "unroute", "seed"):
+        return _design(a)
+    if a.cmd == "compile":
+        # 3.0 (PLAN-3.0 §4): the script up to its route step, which routes and stores MODULE's
+        # insides alone (route --compile); nothing is pasted
+        try:
+            code, _ctx = flow.run(a.script, None, "route", cat,
+                                  extra=[f"route --compile {a.module}"])
+        except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return code
+    if a.cmd == "step":
+        # 3.0 (PLAN-3.0 §2, every step a command): the script's own line for that step, alone;
+        # the nets named are laid again, every other route kept from the net files
+        try:
+            extra = list(a.extra) + ([f"route --again {a.nets}"] if a.nets else [])
+            if a.nets and a.step != "route":
+                raise flow.FlowError("nets go with the route step only")
+            if a.try_:
+                if a.step != "route" or a.nets:
+                    raise flow.FlowError("--try goes alone: fk route --try X,Y X,Y")
+                extra.append(f"route --try {a.try_[0]}:{a.try_[1]}")
+            code, _ctx = flow.run(a.script, a.step, a.step, cat, extra=extra)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

@@ -1,7 +1,7 @@
 # Fair play
 
-The game's rules for this world, all in one place. The other docs are advice (`STRATEGY.md`) and
-how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
+The game's rules for this world, all in one place. The other docs are advice (`STRATEGY.md`,
+`BUILDING.md`) and how-to (`TOOLKIT.md`, `LANGUAGE.md`, `EXAMPLES.md`).
 
 ## Changing the world
 

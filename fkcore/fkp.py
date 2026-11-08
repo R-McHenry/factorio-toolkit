@@ -76,6 +76,12 @@ DIRS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
 _DIR = {d: i for i, d in enumerate(DIRS)}
 
 #: Entity types that move a net's items: each must carry exactly one net (CORE.md invariants).
+def machine_pump(cat, e):
+    """A pump an instance owns with no ``net=`` (3.0, ``Pump<fluid=...>``): an end of the two nets
+    it joins, as a machine is, not a carrier of one."""
+    return cat.kind(e.name) == "pump" and not e.net and not str(e.owner).startswith("~")
+
+
 CARRIER_TYPES = frozenset({"transport-belt", "underground-belt", "splitter", "inserter", "pipe",
                            "pipe-to-ground", "pump", "loader", "loader-1x1", "linked-belt"})
 #: the colours of a `w` wire: a circuit wire, or (2.1) a copper line between power domains (a
@@ -612,7 +618,7 @@ def invariants(lay: Layout, cat, nets=None) -> list:
                 problems.append(f"{key}: owner {owner} is not a net of this factory")
         elif owner not in owners and not any(owner.startswith(p + "/") for p in lay.insts):
             problems.append(f"{key}: owner {owner} is not an inst or cover line")
-        if cat.kind(e.name) in CARRIER_TYPES:
+        if cat.kind(e.name) in CARRIER_TYPES and not machine_pump(cat, e):
             net = e.net
             if not net or not net_names(net):
                 problems.append(f"{key}: a {e.name} carries no net")

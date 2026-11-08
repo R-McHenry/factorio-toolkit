@@ -184,7 +184,8 @@ class SurfaceNetworkTest(unittest.TestCase):
         with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(files["nauvis.surface"].replace("14,-14", "200,-14"))
         text, ctx = cover_txt()
-        self.assertIn("1 roboports, 1 storage chests beside them", text)
+        self.assertIn("1 roboports; 2/2 logistic chests", text)     # 3.0 (U5): no storage chest
+        self.assertNotIn("storage chests beside", text)
 
 
 if __name__ == "__main__":

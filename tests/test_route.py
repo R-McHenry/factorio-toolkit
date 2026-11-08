@@ -530,7 +530,8 @@ class RedgreenTest(unittest.TestCase):
     def setUpClass(cls):
         cls.flat = elaborate_file(REDGREEN, CAT)
         lay, cls.notes = expand.expand_factory(cls.flat, CAT)
-        cls.r = route.route_layout(cls.flat, lay, CAT)
+        # 3.0: redgreen is dense; its ins_ needs ~4-5 s of group work (its build script says so)
+        cls.r = route.route_layout(cls.flat, lay, CAT, group_budget=10)
         cls.rep = connect.connect(cls.r.layout, CAT, connect.endpoints(cls.flat))
 
     def test_every_net_routes_and_connects_without_leak(self):

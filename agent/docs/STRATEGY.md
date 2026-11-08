@@ -57,6 +57,9 @@ cost, but the base itself takes a sizeable share on top: machines, belts, robots
 the rocket's materials and the silo. So run mining and smelting well above what science alone
 implies, roughly one and a half to two times.
 
+`BUILDING.md` is the other half of this guide: how the base is laid out (the backbone, the hub,
+producers, the bus, consumers), modules all the way down, Stacks of cells, and the bootstrap.
+
 ## Bootstrap
 
 - **Guard the starter iron.** Spend the first plates on what makes more iron:
@@ -78,7 +81,11 @@ implies, roughly one and a half to two times.
 
 ## Research
 
-- **Idle labs mean progress has stopped.** Keep the queue long. Research what moves you forward
+- **Idle labs mean progress has stopped.** Keep the queue long: every time you touch research,
+  queue several techs ahead, and look at the queue before any long stretch of building. Three of
+  the long runs lost hours to an empty queue (the last one 8.5 game hours, overnight). The
+  research line at the end of every command says `QUEUE EMPTY after this` while the last tech
+  still runs. Research what moves you forward
   (automation, electric mining, logistics, fast inserter, automation-2, electric energy
   distribution, construction and logistic robotics) and skip what doesn't.
 - **When research stalls, check which pack the labs are waiting for** and scale that pack's makers.
@@ -120,6 +127,11 @@ implies, roughly one and a half to two times.
 
   Size the next step with `fk rates` / `fk plan` (or `n=auto`) against what the base makes now
   (`fk stats`) and holds (`fk stock`), build it, then double it when it runs.
+- **Don't build past the ramp.** The row the base is on says what to build next; a block sized for
+  a row further down waits until the base reaches the row before it. Designing ahead is good: draw
+  and lab the next two rows while the robots build this one, so each is ready when the base is.
+  Pasting ahead is what costs: a blue science block on a base that makes 150 plates a minute
+  starves, and its belts and inserters were taken from the step that would have grown the plates.
 - **Ask the order-of-magnitude question before every build.** At the stage the base is at, is this
   ten times too big, ten times too small, or about right? Spending hundreds of inserters and belts
   before you have constructed a single one is a sign you are off by an order of magnitude, and you
@@ -129,9 +141,13 @@ implies, roughly one and a half to two times.
   everything. Once the base is big enough that you're managing it, robots and every material get
   capped: you want as much as you need.
 - **Find the next ore patch before you need it.** Use radar, and a belt or a roboport chain (each
-  roboport within 50 tiles of the last) to reach new patches; put a storage chest near far builds.
+  roboport within 50 tiles of the last) to reach new patches.
 - **Keep the rest of the base growing alongside science.** A big science block with too little
   smelting and too few building materials stalls.
+- **Build the big smelting columns when blue starts**, not after the rocket parts. The last run
+  had nearly a rocket's worth of processing units, low density structures and rocket fuel, and
+  stopped at ~80 iron plates/min against ~420 the rocket needed: the columns planned at ~5.5M
+  ticks were never built. Plates are what the top tiers run short of.
 
 ## Robots
 
@@ -270,7 +286,8 @@ both.
 - **Keep something running.** Every round should place something that runs. Planning that leaves
   nothing going is lost time.
 - **Look around instead of pausing.** Check several parts of the factory: idle robots, stock
-  levels, starving machines. They suggest what to do next.
+  levels, starving machines. They suggest what to do next. For a starved line, `fk walk X,Y` on
+  one of its machines goes up the belts to where the flow stops.
 - **Some things that look wrong are fine:** an idle machine, a hot reactor with no fuel cell,
   ghosts waiting for a robot trip. Ghosts that wait on missing items or locked recipes are a
   blocked build.

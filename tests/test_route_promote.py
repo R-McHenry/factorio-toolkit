@@ -62,8 +62,8 @@ class PromoteTest(unittest.TestCase):
             self.assertIn(col[-1].key, seen, c)
 
     def test_the_promoting_pass_takes_the_last_pass_answers(self):
-        # 2.1.30: the promoting pass runs in the last pass's order on its ground: x's plain
-        # search is not run again, only the promoted one, and the routes are the same
+        # 2.1.30: the promoting search doesn't run a net's plain search again, only the promoted
+        # one (3.0: each net is searched once; with no group budget nothing else re-searches x)
         flat, lay = walled()
         orig, calls, depth = route._route_one, [], [0]
 
@@ -77,7 +77,7 @@ class PromoteTest(unittest.TestCase):
                 depth[0] -= 1
         route._route_one = counted
         try:
-            r = route.route_layout(flat, lay, CAT, bounds=(0, 0, 30, H))
+            r = route.route_layout(flat, lay, CAT, bounds=(0, 0, 30, H), group_budget=0)
         finally:
             route._route_one = orig
         self.assertEqual(calls, ["x"])

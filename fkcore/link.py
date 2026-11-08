@@ -44,17 +44,33 @@ import re
 import socket
 import struct
 
+from . import pack as _pack
+
 __all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_rip_load", "lua_stuck_hands", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
            "lua_seed", "lua_ghosts", "ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
            "open_from_env", "OUT_DIR", "WINDOWS"]
 
+def _game_link():
+    """``link.json`` in the game codebase (the working directory): where a run's server is when it
+    is not factorio.service, e.g. ``{"port": 27016, "pw_file": ..., "script_output": ...}`` for
+    the Sea Block test server (kickoff-v1.sh --instance sb writes it). The env vars win."""
+    try:
+        with open("link.json", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+_GAME = _game_link()
 HOST = os.environ.get("FK_RCON_HOST", "127.0.0.1")
-PORT = int(os.environ.get("FK_RCON_PORT", "27015"))
-PW_FILE = os.environ.get("FK_RCON_PW_FILE", "/home/computah/factorio/instance/rcon.pw")
+PORT = int(os.environ.get("FK_RCON_PORT") or _GAME.get("port") or 27015)
+PW_FILE = os.environ.get("FK_RCON_PW_FILE") or _GAME.get("pw_file") \
+    or "/home/computah/factorio/instance/rcon.pw"
 #: script-output of the server (write-data/script-output); snapshot files land in OUT_DIR/fk5/.
-OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT", "/home/computah/factorio/server/factorio/script-output")
+OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT") or _GAME.get("script_output") \
+    or "/home/computah/factorio/server/factorio/script-output"
 TIMEOUT = 5.0
 
 _FORBIDDEN = re.compile(r"\b(script\s*\.\s*on_\w+|commands\s*\.\s*add_command|remote\s*\.\s*add_interface"
@@ -873,7 +889,7 @@ _GHOSTS = r"""
 local s = game.get_surface(__SURFACE__)
 local F = __FORCE__
 local d = helpers.json_to_table(__DATA__)
-local missed, n = {}, 0
+local missed, n, laid = {}, 0, 0
 local function miss(k) missed[k] = (missed[k] or 0) + 1 end
 local function try(k, fn) if not pcall(fn) then miss(k) end end
 -- a blueprint field's runtime name where the two differ
@@ -886,6 +902,7 @@ local CB_OF = {
 }
 local FIELD = {input_priority = 'splitter_input_priority', output_priority = 'splitter_output_priority',
   filter = 'splitter_filter'}
+local VEC = {pickup_position = 1, drop_position = 1}
 local DONE = {entity_number = 1, name = 1, position = 1, direction = 1, tags = 1, recipe = 1, type = 1,
   quality = 1, control_behavior = 1, use_filters = 1, filters = 1, request_filters = 1, items = 1}
 local function slot(f, min, max)
@@ -926,11 +943,31 @@ local function requests(g, rf)
   end
   if rf.trash_not_requested then miss('request_filters.trash_not_requested') end
 end
+-- a pack with landfill: landfill under a ghost on water, as a paste lays it (an offshore pump: its
+-- own tile only; the side it pumps from stays water)
+local function landfill(g)
+  local at = {}
+  if g.ghost_type == 'offshore-pump' then
+    at[1] = {math.floor(g.position.x), math.floor(g.position.y)}
+  else
+    local b = g.bounding_box
+    for x = math.floor(b.left_top.x), math.ceil(b.right_bottom.x) - 1 do
+      for y = math.floor(b.left_top.y), math.ceil(b.right_bottom.y) - 1 do at[#at + 1] = {x, y} end
+    end
+  end
+  for _, p in pairs(at) do
+    local t = s.get_tile(p[1], p[2])
+    if t.valid and t.collides_with('water_tile') and not t.has_tile_ghost() then
+      if s.create_entity{name = 'tile-ghost', inner_name = d.l, position = p, force = F} then laid = laid + 1 end
+    end
+  end
+end
 for _, e in ipairs(d.e) do
   local g = s.create_entity{name = 'entity-ghost', inner_name = e.name, position = e.position,
     direction = e.direction, force = F, recipe = e.recipe, type = e.type, quality = e.quality}
   if g then
     n = n + 1
+    if d.l then try('landfill', function() landfill(g) end) end
     if e.tags then try('tags', function() g.tags = e.tags end) end
     if e.control_behavior then behaviour(g, e.control_behavior) end
     if e.use_filters ~= nil then try('use_filters', function() g.use_filters = e.use_filters end) end
@@ -940,7 +977,8 @@ for _, e in ipairs(d.e) do
     if e.request_filters then requests(g, e.request_filters) end
     if e.items then try('items', function() g.insert_plan = e.items end) end
     for k, v in pairs(e) do
-      if not DONE[k] then try(k, function() g[FIELD[k] or k] = v end) end
+      if VEC[k] then try(k, function() g[k] = {g.position.x + v[1], g.position.y + v[2]} end)
+      elseif not DONE[k] then try(k, function() g[FIELD[k] or k] = v end) end
     end
   else
     miss('ghost not placed: ' .. e.name)
@@ -964,7 +1002,7 @@ for _, w in ipairs(d.w) do
     miss('wires')
   end
 end
-rcon.print(helpers.table_to_json({n = n, missed = missed}))
+rcon.print(helpers.table_to_json({n = n, missed = missed, landfill = laid}))
 """
 
 
@@ -976,25 +1014,29 @@ def lua_ghosts(surface, force, entities, wires=()):
     go on the ghost, and a field the game won't take on a ghost is counted. ``wires``: [[end,
     connector, end, connector]], each end [name, x, y], found built (not ordered out) or as a
     ghost. Every one of these was checked on a laptop test server (2.0.77, 2026-10-22): a ghost
-    keeps them when robots (or a revive) build it. -> JSON {n: ghosts placed, missed: {field: n}}."""
-    data = json.dumps({"e": list(entities), "w": [list(w) for w in wires]},
-                      separators=(",", ":"))
+    keeps them when robots (or a revive) build it. A pack with landfill (``fkcore.pack``): a ghost
+    on water gets landfill tile ghosts under it, as a paste lays them (checked on the Sea Block test
+    server, 2026-11-01: robots lay the landfill, then build the ghost on it).
+    -> JSON {n: ghosts placed, missed: {field: n}, landfill: tile ghosts laid}."""
+    data = json.dumps({"e": list(entities), "w": [list(w) for w in wires],
+                       "l": _pack.landfill()}, separators=(",", ":"))
     return (_GHOSTS.replace("__SURFACE__", _q(surface)).replace("__FORCE__", _q(force))
             .replace("__DATA__", _q(data)))
 
 
 def ghosts(rcon, surface, force, entities, wires=(), chunk=None):
     """:func:`lua_ghosts` in RCON-sized calls: the entities in batches of about ``chunk``
-    characters, then the wires (both ends placed by then). -> {n, missed} summed."""
-    n, missed = 0, {}
+    characters, then the wires (both ends placed by then). -> {n, missed, landfill} summed."""
+    n, missed, laid = 0, {}, 0
     chunk = chunk or CHUNK
 
     def call(es, ws):
-        nonlocal n
+        nonlocal n, laid
         reply = rcon.lua(lua_ghosts(surface, force, es, ws)).strip()
         try:
             got = json.loads(reply)
             n += int(got.get("n") or 0)
+            laid += int(got.get("landfill") or 0)
             m = got.get("missed")           # Lua's empty table comes back as a JSON list
             for k, v in (m.items() if isinstance(m, dict) else ()):
                 missed[k] = missed.get(k, 0) + int(v)
@@ -1005,7 +1047,7 @@ def ghosts(rcon, surface, force, entities, wires=(), chunk=None):
         call(batch, [])
     for batch in _batches(wires, chunk):
         call([], batch)
-    return {"n": n, "missed": missed}
+    return {"n": n, "missed": missed, "landfill": laid}
 
 
 def _batches(items, chunk):

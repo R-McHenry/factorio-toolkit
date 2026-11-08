@@ -11,20 +11,41 @@ tools. The `.fkp` files beside them are the layouts the toolkit writes: read the
 fk rates main.fk                 the factory's numbers on paper: every machine's utilization, every
                                  net's supply and demand, what limits it (the binding chain)
 fk check main.fk                 the netlist checks (no-feed, no-taker, cannot-carry, ...)
-fk build                         the whole build script: lay out, route, power, check, paste
+fk build                         the whole build script: lay out, route, power, check, paste; in the
+                                 background (game\out\build.log), --wait to run it here
 fk build --to report_checks      design only: everything up to the checks, nothing pasted
 fk build --to diff               a dry run: the design against the world and what the build would
                                  take up; nothing written, nothing pasted
+fk status [NET]                  the nets as the router left them (or lands them now), the
+                                 unrouted ones with reasons; the build log's last lines
+fk hold NET / fk unroute NET     keep a net's route as it stands / route it again next build
+fk seed NET 'splitter X,Y S'     pin a piece of one net; the router lays the rest through it
+fk route NET[,NET]               lay those nets again now, every other route kept; nothing pasted
+fk route --try X,Y X,Y           how a belt would go from tile A to tile B now; nothing laid
+fk compile MODULE                route a sealed module's inside once and store it; every build
+                                 that places it lays the stored inside ("Compiled modules")
 fk look X0,Y0,X1,Y1              that area now, against the design
 fk look X0,Y0,X1,Y1 --design     the design alone, as it will be built
 fk look AREA --zoom 16 --layers all --image
                                  zoomed out, with every layer, as a PNG ("What `fk look` says")
+fk walk X,Y [--up 3] [--down 2]  what the machine there waits on, up and down its belts, and where
+                                 the flow stops ("What a line waits on: `fk walk`")
+fk walk X,Y --frame X0,Y0,X1,Y1  a module frame drawn on the base: every belt over its edge as a
+                                 ready `port` line, and whether it seals as drawn
 ```
 
-Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, and `fk wait built
-X0,Y0,X1,Y1` waits until the robots have built the area. It asks first: run it again, or add
-`--sure`. The run has 30 minutes of waiting in all; `wait-budget.json` in your folder says how
-much is spent.
+Only `fk wait` waits, from a fixed budget. `fk wait 90s` waits that long, `fk wait built
+X0,Y0,X1,Y1` waits until the robots have built the area, `fk wait build` until the background
+build is done (its exit code), and `fk wait 2m -- COMMAND` runs a command and stops it at the
+cap (in place of `timeout`). It asks first: run it again, or add `--sure`. The run has 30
+minutes of waiting in all; `wait-budget.json` in your folder says how much is spent. Anything
+long goes in the background while you keep working.
+
+A build never quietly undoes what was changed in the game. The diff step lists every hand edit
+the paste would replace, remove or set back (a pump you placed, an inserter upgraded by hand, a
+filter), and `stop_on by-hand` in the build script holds the paste there; the build log and
+`out\diff.txt` name each one. Put the ones to keep into the design (`fk adopt`, a Literal, a
+`set` line) and build again, or `fk build --yes` pastes over them for that one build.
 
 A buffer (LANGUAGE.md, "Buffers") gets a line per item at the end of `fk rates`: what comes in
 minus what goes out.
@@ -69,6 +90,13 @@ maker by one inserter straight from the requester. An inserter that loads a belt
 several items is filtered to its net's items (the route report's `unfiltered` line names one that
 can't be, a long-handed one where no fast inserter fits).
 
+With Bob's inserters (Sea Block; the pack's `SEABLOCK.md`), an inserter may pick up and drop off
+on any side, and reach further after research. The router turns corners and reaches 2 with a
+plain inserter once the force has `bob-long-inserters-1`, before it lays a long-handed one. It
+lays only what the force has researched, as the last stock read saw it (`out\avail.json`). The
+routed rates count a corner swing as about twice a straight one, and the .fkp keeps such a hand's
+own vectors (`pick=0,-1 drop=1,0`).
+
 A ribbon (a `net each`, a `bundle`, a `width 8` net; LANGUAGE.md, "Belts side by side") is routed
 as one. `out\route.txt` gives each of its nets a line, then one line for the ribbon (from
 `docs\examples\ribbon-bus.fk`, shortened):
@@ -87,6 +115,12 @@ longer than yellow's 5 tiles adds its length and tier, `(7 tiles red)`. `route -
 reach that far. A ribbon with no path fails every net of it, `FAILED    plates_3: ribbon plates
 (4 belts): ...` with the reason, and lays none of its belts.
 
+`route --pipe copper` lays fluid nets in copper pipes and copper pipes-to-ground. The word is a
+material (`iron`, `copper`, `stone`, `steel`, ...) or a pipe entity (`bob-copper-pipe`). The
+default is the pack's: copper in Sea Block, iron elsewhere. Pipes of any material join each other,
+and a pipe that stands stays as it is. A material the network hasn't researched falls back to
+iron, and `out\route.txt` says so (`pipe: ...`).
+
 `route --m2m` lays a net with several drivers and several consumers whose flow is above one
 lane as a network of runs, not one trunk. The hub comes first, without side-loads, each driver
 dropping on the left lane. Then runs are added, each split off a belt or from a driver with
@@ -101,8 +135,11 @@ MAXFLOW   plates: 22.4 of 22.4/s, the narrowest cut 3 lanes
 A net that falls short also gets a `maxflow` check, naming the carriers where it binds. Without
 `--m2m` nothing changes.
 
-`fk build` runs the steps of `game\nauvis.build.fkb` in order and prints one line per step (one
-build at a time in a run: a second `fk build` waits for the first). Each step writes its report
+`fk build` runs the steps of `game\nauvis.build.fkb` in order, in the background: it returns at
+once, and the build writes one line per step to `game\out\build.log` (its last line: `fk build:
+done, exit N`). Keep working meanwhile; `fk status` shows the nets as the router lands them and
+the log's last lines. `fk build --wait` runs it here instead. One build at a time in a run: a
+second `fk build` waits for the first. Each step writes its report
 to `game\out\<step>.txt`: read the one that matters
 (`out\report_checks.txt`, `out\route.txt`, `out\apply.txt`). A build changes only what changed
 in the source: unchanged rows and routes stay where they are, and a net is patched when a machine
@@ -185,6 +222,73 @@ underground ends. Each promotion takes 2 undergrounds from stock.
 Any step takes options for one build without editing the script: `fk build --with 'cover robots
 --fresh'`, `fk build --with 'route --effort high' --with 'tier --allow yellow,red'` (repeat
 `--with` as often as you like; the step's own options stay, the ones you add win).
+
+How route works through the nets is yours to set, on its line in the build script or with `--with`:
+- Each net is routed once, in order, and keeps what it laid. A net that fails is tried again
+  together with the nets laid near its ends (up to `--group-max 8`), in new orders, for up to
+  `--group-budget 3` seconds. If they don't all fit, the old routes stay and the net gets one
+  last search of its own. `--group-budget 0` routes every net once and alone.
+- `--first coal,fe3p,mall/*` routes those nets first, in that order (names or patterns).
+- `--skip st3o,oil/*` leaves those nets to you: route.txt says `manual`, and they never stop the
+  build. Lay them yourself (a Literal, `fk adopt`).
+- The route step writes one file per net as each one lands, under `out\design\<factory>\nets\`:
+  its status (routed, kept, patched, unrouted with the reason, held), then its carriers. The next
+  build starts from these files, even when the last one stopped before the paste or mid-route,
+  so it routes only what changed.
+- `fk status GAME` reads them, during a build too: counts per status, the unrouted nets with
+  their reasons and times, and the net the router is on now. `fk status GAME NET` shows one net.
+- `fk hold GAME NET` keeps a net's route as it stands in every build (until `fk unhold`), even
+  if you hold it while a build runs: the router takes it when it reaches it. You may also edit a
+  net file by hand (its carriers, or `# status: held`). `fk unroute GAME NET` drops a route, and
+  the next build routes the net again.
+- A net that failed is not searched again while its ends and the ground around it stand as they
+  did: its last reason stands, with "not searched again". Change something near it, or name it
+  with `--again NET`, to search it again. Your route line says this: `--retry-failed changed`.
+  Make it `always` to search failed nets every build, or `never` to leave them until you name
+  one (`fk route NET`).
+- `--failed keep` (on the route line): a net that fails keeps the route that stood before, where
+  its tiles are still free, so the paste goes on without taking up a belt that works. Fix the net
+  after. `--failed drop` loses that route instead.
+- To rework one area, pin everything else: `fk route --with "route --area X0,Y0,X1,Y1"`, or put
+  `--area` on the route line. Only nets with a belt or an end in that rectangle are routed again;
+  every other route stands exactly as it is, even one the router would have changed. Move
+  machines or ports inside the area, fix what blocked a net there, and build.
+- To help one net along without touching the design, pin a piece of it:
+  `fk seed GAME NET 'splitter 9,30.5 S'` (pieces are written as a net file writes its
+  carriers: name, x,y, direction, `ug=in|out` for an underground). Without pieces, the net
+  file's carriers as they stand are the seed, so you can cut a route down to the part you
+  like, or write a piece in. The next build (or `fk route NET` now) lays the rest of the net
+  through the seed: each driver into its nearest way in, each consumer from its nearest way
+  out, and every way out of a splitter gets a consumer when there are enough. The seed stays
+  in the net file (`# seed:`), so a later build that routes the net again keeps it.
+  `fk unroute NET` drops it. One belt only: not lane pairs, m2m nets or pipes. A seed may hold
+  the net's inserters too (`'inserter 12.5,8.5 S'`): one between a machine and a seed belt
+  stands as written, and the router lays no hand of its own there.
+- Seed little. A short run of plain belt where you want the line to pass helps; a seed of
+  splitters and undergrounds boxes the router in. On three real blueprints, seeding their
+  splitters and undergrounds gave fewer exact belts than plain routing and 2-3 nets with no
+  way through, where plain routing failed none. To keep a whole net as it is, `fk hold` it; to
+  keep a dense piece, make it a sealed module and `fk compile` it.
+- A net the router can't find a way for can be sent through a piece from `game\routing.fk`,
+  placed where you want it to pass. `import Waypoint, Merge, Split from "routing.fk"`, then
+  `wp = Waypoint<item=iron-gear-wheel> @(8, 28)` and `net gear: gears -> wp -> red, belts`. It
+  is still one net, gear, laid in stretches (`gear`, then `gear@wp`) that the route step and
+  `fk status` show together. `Split` divides a belt: `net copper: smelt -> sp -> cable, red`
+  puts cable on way a and red on way b, and a line under it like `sp.b -> wp2 -> red` takes way
+  b on by its own path. `Merge` joins two nets where you choose (`mg.a`, `mg.b`, `mg.o`). Each
+  is a small sealed module; open the file to see how, and copy one to make your own.
+- `fk route --try X,Y X,Y` asks the router how a belt would run from tile A to tile B on the
+  design as it stands (its routed nets included), every heading tried at both ends. It prints
+  the carriers, or why there is no way, and lays nothing: a quick check before you move a
+  block or pick a waypoint.
+- Fluid nets get one pass too. Another pass in a new order runs only if it fits in the group
+  budget.
+- `out\route.txt` has a `group` line for each net that got a group try, and whether it settled.
+
+Steps after a `later:` line in the build script run once the rest is done, the paste included.
+They are off the critical path: what they find is reported and never stops the build, and one
+that breaks says so in its report. Put slow reports there, like the routed `report_rates`. Steps
+that lay out, write or paste can't go there.
 
 Circuits come from the source (`LANGUAGE.md`, "Circuits"): the properties on objects (`set
 NAME.out -> CHEST: logistic=ITEM<N`), a crafter's `guard`, wires and conditions. The build lays them on the layout just
@@ -384,6 +488,41 @@ fk lab NAME --clear-ore          every ore tile of NAME's slot taken up
 - A good worker task: "Try stage 4's mall in the lab (`fk lab mall --from stages\4`), let it run
   two minutes, measure it, and report what each maker makes and what it waits for."
 
+### Compiled modules
+
+A sealed module's inside is routed once, then stored under `out\design\modules\MODULE\`, keyed
+by what is inside (its machines, inner nets and ports, the turn, the router version), not by
+where it stands. A build that places the module lays its stored inside and routes only the nets
+that cross frames, so a second copy, a move or a rebuild routes no inner net (the route step
+says `compiled  P: k inner nets from its stored inside`).
+
+- `fk compile MODULE` routes the inside now, alone, and stores it; the next world build lays
+  it. A build stores every sealed inside that routed whole, so you rarely need it.
+- A lab build of the module stores its inside too, and the world build reads the lab's store:
+  try a module in the lab, then place it. `--with "route --reuse-lab"` makes even a `fk route`
+  of named nets lay the stored insides.
+- Change anything inside and the key changes: the module routes again and stores the new
+  inside. `--with "route --compiled no"` routes every inside afresh.
+
+## Saving, loading and starting over: `fk map`
+
+The live map is yours to save, load, start over and pause:
+
+```
+fk map save NAME        the live map saved as NAME (the game goes on)
+fk map saves            the run's start, the map the server runs, and your saves
+fk map load NAME        your map saved first (before-load-STAMP), then the server restarted on
+                        NAME; start is the run's own start
+fk map restart          load start, set up the way the kickoff set it up (landfill, roboport,
+                        robots, kit chests, starter research); kept as save start-set-up too
+fk map pause | resume   the whole game stands still (machines, robots, research), or goes on
+```
+
+A load or restart restarts the server: it takes about half a minute, and anyone watching is
+dropped and joins again. Your designs in `game\` stay as they are, so after a restart the next
+`fk build` builds `world.fk` from the kit, as the robots get to it. Try a start-over in the
+planner first (`fk sim load start`); `fk map restart` is the live one.
+
 ## The speedrun planner: `fk sim`
 
 A second game of your own map, on this machine: same seed, same first tick, yours to try a plan in
@@ -393,12 +532,17 @@ gives the same game every time. It runs as fast as the machine allows: about 20 
 on this laptop.
 
 ```
-fk sim fetch                     your map as it stood right after the kickoff, as save state start
+fk sim fetch                     your map as it stood right after the kickoff, as save state start,
+                                 with the live game's own mods and mod settings
 fk sim fetch --live now          the live game as it stands now, as save state now
 fk sim start [NAME]              the planner from a save state (default start), paused
+fk sim kickoff                   the kickoff's setup on a bare start (landfill, roboport, robots,
+                                 kit chests, starter research), saved as start; the bare map is
+                                 kept as bare
 fk sim speed 100                 ticks run up to 100 times as fast (1 is real time)
 fk sim run 3600 | until T        move the game on 3600 ticks (a minute), or to tick T
-fk sim save NAME | load NAME     a save state of the game as it stands; back to one
+fk sim save NAME | load NAME     a save state of the game as it stands; back to one (at the
+                                 speed it ran at)
 fk sim saves | status | stop
 fk sim place FILE @X,Y           a design built at once and free: a laid-out .fkp (game\world.fkp,
                                  a factory's), a blueprint string (.txt) or {"bp": ...} (.json),
@@ -427,6 +571,15 @@ save after-smelt
 `fk sim play` prints each action with its tick. The game still refuses what it refuses in the
 run: a building on a cliff or an enemy base, or a drill off its ore. `place` says how many didn't
 stand and why. The planner's own files are in `sim\` of your run folder.
+
+Runs kicked off before toolkit 3.0 fetch a `start` from before the kickoff's setup: `fk sim start`
+says it stands at tick ~100, with no robots. `fk sim kickoff` sets it up as the live game was set
+up. A playback's paths are relative to the `.sim` file.
+
+- A `.fkp` is in its design's own tiles: `world.fkp` goes in at `@-1000,-1000` (the world plot's
+  corner on the map), a factory's at its plot's corner.
+- `place` and `paste` lay power wires only, not circuit wires: try a circuit design by building
+  it from its blueprint with `fk sim game lua`, or check it on the lab.
 
 A save state loads at the tick it was saved at, every time. A save written while the game was
 running (the fetched start, `fetch --live`) used to run on for tens to hundreds of ticks each time
@@ -476,6 +629,24 @@ collect without you tracking them.
   round starts in a part of the map picked at random, and its manifest is a step `--rise` up V
   in a direction picked the same way. `--pick track` leans the starts toward the best path.
 - **Starting over.** `fk sim explore reset`.
+
+## What a line waits on: `fk walk`
+
+`fk walk X,Y` reads the area around a machine (or belt) in the game and walks its belts: each
+net in and out, its items and how full each lane is, the machines that feed it and take from
+it and their state, then one level further, as deep as `--up` and `--down` say. It marks where
+the flow stops: a machine short of an input or with its output full or no power, a belt empty
+or backed up, a lane that never fills. The first starved machine upstream whose own inputs are
+fine is the place to look. It works on any base, hand-built ones included: the nets are found
+from the belts and inserters as they stand (made-up names, `n17`), not from your design.
+`fk walk X0,Y0,X1,Y1` lists every net in an area. A requester or provider chest ends the walk:
+that is the logistic network, and `fk stock` says what it holds.
+
+`fk walk X,Y --frame X0,Y0,X1,Y1` checks a module frame before you draw it: every belt that
+crosses the edge comes out as a ready `port` line (side, position, items), and every
+underground under the edge, inserter reaching over it, pipe through it or entity standing
+across it is listed. "sealable as drawn" means only belts cross: grow the frame until it says
+so, then the area can become a sealed module.
 
 ## What `fk look` says
 
@@ -685,6 +856,12 @@ answer is the next build. Nothing here is broken by itself.
 - `overlap`: two sealed modules' frames share tiles. Both modules' routes may use them, and each
   is in the way of the other's; a port that opens inside the other module's frame is named, since
   a net from outside both can't reach it. Only two entities on one tile stop the build
+- `pipe-too-long`: one pipe segment (pipes, pipes-to-ground and tanks joined; a pump or a machine
+  ends one) spreads past 320x320 tiles. The game moves no fluid through such a segment at all,
+  however short its load. The line says how many pumps at least: an `InlinePump` from
+  routing.fk in the net's chain (`net lub: oil -> pp -> engines`), or a `Pump<fluid=...>`
+  between two nets. Inside a segment, distance costs nothing; each machine's connection is
+  limited (about 4200/s in practice)
 - `too-thin`: a machine (or a chest with a rate, or the labs) runs short of a net's item as laid,
   and some of the net's belt lanes or inserters run full: the line says what is required there,
   what they carry, and who runs short. Lanes count one at a time (7.5/s yellow); on a belt two
@@ -710,11 +887,10 @@ answer is the next build. Nothing here is broken by itself.
   roboport at 8,8 serves chests 25 tiles each way and builds 55 tiles each way; `cover robots`
   gives a factory a roboport only for the chests no roboport of that network reaches yet (the
   kit's, and every one joined to it), which joins the network when it stands within 50 tiles of
-  another one on both axes. It puts a storage chest beside each roboport it places, so what the
-  robots take up there is stored there and not at spawn (`cover robots --storage none` leaves
-  the chest out). Grow outward: the next factory within reach of the last. It chains only from
-  roboports that stand, or that it lays in reach of them: a roboport no robot could reach
-  is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
+  another one on both axes. It places no storage chest (3.0): what robots take up goes to the
+  nearest storage chest you built, so put one in your hub. Grow outward: the next factory within
+  reach of the last. It chains only from roboports that stand, or that it lays in reach of them:
+  a roboport no robot could reach is not placed, and the factory's line says what stays uncovered. When a paste moves a roboport,
   the old one is ordered out (robots take it up and carry it to the new spot), and an old roboport
   is ordered out at once when the network holds none for the new ones; otherwise the old ones
   stand until the new ones do
@@ -815,9 +991,19 @@ fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  A game capture keeps world positions, so box="X0,Y0,X1,Y1" is in
                                  world tiles: several Literals cut from one capture line up.
                                  world --surface lab [--force player]: another surface's build
+fk catalog learn NAME... | --mod MOD | --all-mods
+                                 a building the catalog lacks (Space Age, a mod), read from the
+                                 game into game\learned.json: size, energy, fluid boxes, recipes,
+                                 built-in effects, drop tile. Every step plans with it after
+fk catalog show [NAME]           what learned.json holds, or what the toolkit knows of NAME
+fk catalog forget NAME           NAME out of learned.json
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
-fk stats [--items iron-plate,copper-plate] [--window 10min]
+fk stats                         the whole base in one report: research and its rate, capital and
+                                 the share that works (reinvested), made and used a minute,
+                                 power made and used (by domain), machines by state, the trend
+                                 (a sample first if one is due; the same as --history)
+fk stats --items iron-plate,copper-plate [--window 10min]
                                  production statistics (free to read), made and used per item;
                                  windows 5s, 1min, 10min, 1h, 10h, 50h, 250h and 1000h, as the
                                  production panel's. --fluids for fluids
@@ -1009,9 +1195,11 @@ design` draws the surface as designed rather than as built.
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading
 what the steps before it made. Keep it, or tweak it: leave `apply` out while you design. Its
-`stop_on no-route no-destination cannot-carry` holds a paste with a net unrouted, a maker whose
-product reaches no sink, or a machine on a net whose items it takes none of (an upgrade adds
-`cannot-carry` to an older script); `stop_on reach` holds one with ghosts no robot reaches,
+`stop_on no-destination cannot-carry` holds a paste with a maker whose product reaches no sink,
+or a machine on a net whose items it takes none of (an upgrade adds `cannot-carry` to an older
+script). A net that doesn't route doesn't hold the paste: it's pasted without its new belt (its
+old one stands, `--failed keep`) and you fix it after; add `stop_on no-route` to hold the paste
+until every net routes; `stop_on reach` holds one with ghosts no robot reaches,
 and `stop_on no-power` one whose poles reach no generation. Add `stop_on no-feed` before a big
 paste so that check stops it too (`stop_on short-stock`
 holds the paste until the network has what it lays: report_bom says when a paste would take up
@@ -1037,7 +1225,12 @@ the design's demand through every connector with no capacities (`routed.required
 depend on the hand laid: a stone furnace (0.33/s all in) keeps plain hands, a gear assembler (2
 plates/s in) gets fast ones. `hands maximize` takes the top rung everywhere; `hands minimize
 --downgrade` may also take a standing fast hand back to plain; a rung the network cannot build now
-is skipped and the line says so. A route that already
+is skipped and the line says so. Where even the best hand the network can build is too slow for a
+machine (a cable assembler's 2 cable/s against a plain inserter's 1.2/s), the router lays 2 or 3
+inserters between that machine and its belt, into it or out of it, where they fit; a belt from a
+1x1 chest wraps round it to take a loader on each side it passes. Two machines side by side on a
+net get the same: what flows between them over what one hand carries, so a crusher feeding the
+liquifier next to it gets 2 or 3 hands across the gap. A route that already
 stands keeps its carriers, so `--hand any` renames the standing hands robots cannot build to the one
 they can (`out\route.txt`: `rehanded 2 standing inserters robots cannot build, to inserter`), and
 leaves a hand that stands built alone. `cover power --pole

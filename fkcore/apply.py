@@ -121,6 +121,7 @@ class ApplyReport:
     misplaced: int = 0                 # ghosts that are not where the design says (play)
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     alone_missed: dict = field(default_factory=dict)  # settings those ghosts would not take
+    landfill: int = 0                  # landfill tile ghosts laid under them on water (a pack)
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
@@ -190,7 +191,9 @@ class ApplyReport:
                        "as designed")
         if self.placed_alone:
             out.append(f"  {self.placed_alone} the paste refused, placed one by one as ghosts "
-                       "with their settings and wires (uncharted ground refuses a paste)")
+                       "with their settings and wires (uncharted ground refuses a paste)"
+                       + (f"; {self.landfill} landfill under them on water" if self.landfill
+                          else ""))
         if self.alone_missed:
             out.append("  SETTINGS the single ghosts would not take (set them in the game, or "
                        "build again once a radar charts the ground): "
@@ -531,6 +534,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         try:
             got = link.ghosts(r, s.name, force, entities, wires)
             rep.placed_alone, rep.alone_missed = got["n"], got["missed"]
+            rep.landfill = got.get("landfill", 0)
         except link.LinkError as exc:
             rep.notes.append(str(exc))
         if rep.placed_alone:

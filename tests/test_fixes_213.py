@@ -242,7 +242,7 @@ class DryRunTest(unittest.TestCase):
         before = self.fkps()
         env = {k: v for k, v in os.environ.items() if k not in ("FK_RUN", "FK_LINK")}
         r = subprocess.run([sys.executable, os.path.join(self.run_dir, "bin", "fk.py"), "build",
-                            "--to", "report_bom"], cwd=self.run_dir, env=env,
+                            "--wait", "--to", "report_bom"], cwd=self.run_dir, env=env,
                            capture_output=True, text=True, timeout=300)
         self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-2000:])
         self.assertIn("report_bom", r.stdout)

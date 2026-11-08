@@ -4,6 +4,7 @@ import re
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from fkcore import compose, connect, fkp, flow, look, scene
 from fkcore.catalog import Catalog
@@ -181,16 +182,20 @@ class FlowTest(unittest.TestCase):
             fh.write(src)
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
-        self.assertIn("40 poles (37 kept where they stand, 0 bridging, 0 existing); 185/185",
+        # 3.0: the router lays each net once, so redgreen's layout is not the old 11th pass's
+        self.assertIn("40 poles (36 kept where they stand, 0 bridging, 0 existing); 185/185",
                       self.read("out/cover_power.txt"))
-        self.assertEqual(len(first & poles()), 37)
+        self.assertEqual(len(first & poles()), 36)
+        kept = poles()
         script = self.read("nauvis.build.fkb").replace("cover power", "cover power --fresh")
         with open(self.script, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(script)
         code, ctx = self.build()
         self.assertEqual(code, 0, ctx.log)
         self.assertNotIn("kept where they stand", self.read("out/cover_power.txt"))
-        self.assertLess(len(first & poles()), 37)
+        # 3.0: the fresh grid shares 36 poles with the first build's (also laid fresh), so
+        # compare it with the kept grid instead
+        self.assertNotEqual(poles(), kept)
 
     def test_from_and_to_use_the_checkpoints(self):
         self.build(to="tier")
@@ -198,7 +203,7 @@ class FlowTest(unittest.TestCase):
         code, ctx = self.build(frm="cover_power", to="report_checks")
         self.assertEqual(code, 0)
         self.assertEqual([l.split("]")[0] for l in ctx.log],
-                         ["[12/20", "[13/20", "[14/20", "[15/20"])
+                         ["[11/20", "[12/20", "[13/20", "[14/20"])
         self.assertIn("12 connected", self.read("out/report_checks.txt"))
 
     def test_a_step_run_twice_reports_its_checks_once(self):
@@ -214,8 +219,36 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(self.read("out/report_rates.txt").count("NOT met"), 2)
         code, ctx = self.build(frm="report_rates:2", to="report_rates:2")
         self.assertEqual(code, 0, ctx.log)
-        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[11/20"])     # the second one
+        self.assertEqual([l.split("]")[0] for l in ctx.log], ["[20/20"])     # the second one
         self.assertEqual(self.read("out/report_rates.txt").count("# report_rates"), 1)
+
+    def test_later_steps_never_stop_the_build(self):
+        # 3.0 (Rory, 2026-11-01): the routed rate report is off the critical path, after the paste
+        lines = flow.parse(self.read("nauvis.build.fkb"))
+        self.assertEqual([(ln.cmd, ln.later) for ln in lines[-2:]],
+                         [("stop_on", False), ("report_rates", True)])
+        with self.assertRaises(flow.FlowError) as caught:
+            flow.parse("elaborate\nlater:\nroute\n")
+        self.assertIn("goes before `later:`", str(caught.exception))
+        # what a later step finds that stop_on names is reported, and the build goes on; a later
+        # step that breaks says so in its report
+        text = re.sub(r"(?m)^report_checks .*\n", "", self.read("nauvis.build.fkb"))
+        with open(self.script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text.replace("stop_on         invariant", "stop_on         invariant bootstrap")
+                     + "report_checks\n")
+        original = flow.STEPS["report_rates"]
+
+        def broken(ctx, args):
+            if ctx.rates_runs:
+                raise RuntimeError("boom")
+            return original(ctx, args)
+        with mock.patch.dict(flow.STEPS, {"report_rates": broken}):
+            code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        self.assertIn("failed (a later step; the build goes on): RuntimeError: boom",
+                      self.read("out/report_rates.txt"))
+        self.assertIn("bootstrap", self.read("out/report_checks.txt"))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "main.fkp")))
 
     def test_a_bad_number_is_a_script_error(self):
         for line, why in (("tier minimize --red x", "--red needs a whole number"),
@@ -237,7 +270,8 @@ class FlowTest(unittest.TestCase):
         code, ctx = self.build(frm="diff")
         self.assertEqual(code, 0, ctx.log)
         self.assertIsNotNone(ctx.composed)
-        self.assertEqual(len(ctx.composed.entities), 1014)    # 974 + the 40 poles of cover power
+        # 1011 + the 40 poles of cover power (3.0: each net laid once; the old passes laid 974)
+        self.assertEqual(len(ctx.composed.entities), 1051)
         self.assertIn("skipped, no game link", self.read("out/diff.txt"))
         self.assertIn("skipped, no game link", self.read("out/apply.txt"))
 
@@ -440,8 +474,9 @@ class FlowTest(unittest.TestCase):
                      "coal  = Chest<requester, item=coal, rate=1/s> @(1054, 1016)\n"
                      "box   = Chest<provider, limit=4> @(1054, 1030)\n"
                      "net ore: ore -> smelt\nnet fuel: coal -> smelt\nnet plates: smelt -> box\n")
-        code, ctx = flow.run(os.path.join(game, "nauvis.build.fkb"), to="report_checks", cat=CAT,
-                             echo=lambda _line: None)
+        # 3.0: the routed rates are in its `later:` section, after the paste (no game link here)
+        code, ctx = flow.run(os.path.join(game, "nauvis.build.fkb"), to="report_rates:2",
+                             cat=CAT, echo=lambda _line: None)
         self.assertEqual(code, 0, ctx.log)
         with open(os.path.join(game, "out", "report_rates.txt"), encoding="utf-8") as fh:
             rates_txt = fh.read()
@@ -514,9 +549,11 @@ class FlowTest(unittest.TestCase):
 
         self.build()
         first = routes()
+        # 3.0: the row stands west of gears, where gear's belt starts; the router lays each net
+        # once now, and at (60, 34) ~cable walls the row off from gear's belt before its splits
         src = (self.read("main.fk")
                .replace("labs  = LabRow<n=10>", "gears2 = AsmRow<n=2, recipe=iron-gear-wheel> "
-                                                "@(60, 34)\nlabs  = LabRow<n=10>")
+                                                "@(2, 24)\nlabs  = LabRow<n=10>")
                .replace("iron_smelt -> gears, circ", "iron_smelt -> gears, gears2, circ")
                .replace("net gear:   gears -> red", "net gear:   gears, gears2 -> red"))
         with open(os.path.join(self.dir, "main.fk"), "w", encoding="utf-8", newline="\n") as fh:

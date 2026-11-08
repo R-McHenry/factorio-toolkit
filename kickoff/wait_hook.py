@@ -2,7 +2,8 @@
 wait commands are blocked; 2026-10-24: `fk wait` is the one wait, from a fixed budget).
 
 A Bash, PowerShell or Monitor command that sleeps (`sleep`, `Start-Sleep`, a loop of short sleeps)
-is denied, and the reason the player reads is "Use fk wait.". `fk wait` goes through: it waits
+or waits another way (`timeout N`, `Wait-Job`, `fk build --wait`; 3.0) is denied, and the reason
+the player reads names the `fk wait` form for it. `fk wait` goes through: it waits
 from the run's wait budget and asks first (agent/fk.py). claude_loop.py names this hook in every
 Claude run's --settings (2.0.11). Each block is one line in RUN\\.loop\\wait-hook.log.
 """
@@ -12,8 +13,12 @@ import re
 import sys
 from datetime import datetime
 
-WAIT = re.compile(r"\bsleep\s+\d|\bStart-Sleep\b", re.I)
-REASON = "Use fk wait."
+#: 3.0: the hidden waits too, each with its budgeted form: `timeout N CMD` (fk wait 2m -- CMD),
+#: PowerShell's Wait-Job / Wait-Process, and a foreground `fk build --wait` (fk wait build)
+WAIT = re.compile(r"\bsleep\s+\d|\bStart-Sleep\b|\btimeout\s+(/t\s+)?\d|\bWait-(Job|Process)\b"
+                  r"|\bfk\s+build\b[^\n|;&]*--wait\b", re.I)
+REASON = ("Use fk wait: fk wait 90s, fk wait build (the background build's end), "
+          "fk wait 2m -- COMMAND (a command with a cap).")
 
 
 def main():

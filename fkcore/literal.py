@@ -32,6 +32,13 @@ index of an entity in the file's list (from 0; a blueprint's entity order when t
 only ``bp``). ``automall.asm10`` is then a net end like any machine's (``names_of``, read by
 ``fkcore.elaborate``). ``fk capture`` writes a name for each machine it captures.
 
+3.0 (Literal ports, FRICTION-REVIEW-3.0 U4): a JSON file may name its ports, ``"ports":
+{"heavy": {"carrier": 12, "side": "e"}}``: a pipe or belt of the file (its index) and the frame
+edge it meets (n, e, s, w, in the file's own frame). ``plant.heavy`` is then a net end on that edge,
+as a module's port is: a net into it ends on the tile beside the carrier on that side, a net out
+of it starts there, and the carrier's whole group of touching pipes (or belts) carries the net
+(``ports_of``), so no other net's pipe may stand beside it.
+
 Keys are ``<inst>/<prototype><k>`` in file order. Carriers get a net by connectivity, since a file
 has no netlist: each group of touching pipes is ``<inst>/fluid<k>``, each group of touching belts
 ``<inst>/belt<k>``, each inserter ``<inst>/hand<k>`` (one inserter is a route). Rename them in source
@@ -50,13 +57,16 @@ from . import fkp as fkpmod
 from . import snapshot
 
 __all__ = ["LiteralError", "read_entities", "import_entities", "signature", "names_of",
-           "machine_names"]
+           "machine_names", "ports_of", "SIDES"]
+
+#: a port's side: the frame edge, as a heading (N E S W = 0..3)
+SIDES = {"n": 0, "e": 1, "s": 2, "w": 3}
 
 _DIRS = {0, 4, 8, 12}
 _PIPES = ("pipe", "pipe-to-ground", "pump")
 _BELTS = ("transport-belt", "underground-belt", "splitter", "loader", "loader-1x1")
 #: the attrs of a blueprint row that are the game's own settings (net and tags.fkp are not)
-_SETTINGS = ("recipe", "ug", "config")
+_SETTINGS = ("recipe", "ug", "config", "pick", "drop")   # 3.0: an inserter's own vectors
 
 
 class LiteralError(ValueError):
@@ -183,8 +193,13 @@ FACING = frozenset({"train-stop", "rail-signal", "rail-chain-signal", "straight-
                     "artillery-wagon", "mining-drill", "boiler", "generator", "storage-tank"})
 
 
-def import_entities(path, inst, cat, box=None):
-    """-> (entities in the Literal's own frame, frame size, frame origin in file coordinates)."""
+
+def import_entities(path, inst, cat, box=None, notes=None):
+    """-> (entities in the Literal's own frame, frame size, frame origin in file coordinates).
+
+    3.0 (the walker's blueprints): an entity whose centre doesn't fit its size (old blueprint
+    formats put some half a tile off) is snapped to the nearest centre that fits, and ``notes``
+    gets a line naming it, instead of the build stopping on a ValueError."""
     rows, wires = read_entities(path)
     kept = list(range(len(rows)))
     if box is not None:
@@ -199,7 +214,18 @@ def import_entities(path, inst, cat, box=None):
     unknown = sorted({r[0] for r in rows if not cat.has_entity(r[0])})
     if unknown:
         raise LiteralError(f"{path}: prototypes the catalog lacks: {', '.join(unknown)}")
-    tiles = [(r, cat.tiles(r[0], r[1], r[2], r[3] if r[3] is not None else 0)) for r in rows]
+    tiles = []
+    for r in rows:
+        try:
+            tiles.append((r, cat.tiles(r[0], r[1], r[2], r[3] if r[3] is not None else 0)))
+        except ValueError:
+            name, x, y, d, settings = r
+            sx, sy = _snap(cat, name, x, y, d)
+            if notes is not None:
+                notes.append(f"{path}: {name} at ({x}, {y}) doesn't fit its size; placed at "
+                             f"({sx}, {sy})")
+            r = (name, sx, sy, d, settings)
+            tiles.append((r, cat.tiles(name, sx, sy, d if d is not None else 0)))
     if box is None:
         x0 = min(t[0] for _r, ts in tiles for t in ts)
         y0 = min(t[1] for _r, ts in tiles for t in ts)
@@ -255,6 +281,18 @@ def box_cuts(path, box, cat):
             kept = x0 <= math.floor(x) < x1 and y0 <= math.floor(y) < y1
             out.append((name, _clean(x), _clean(y), kept))
     return out
+
+
+def _snap(cat, name, x, y, d):
+    """The centre nearest (x, y) that fits the entity's size: a whole number on an even side, a
+    half on an odd one."""
+    w, h = cat.size(name)
+    if d is not None and int(d) % 8 == 4:
+        w, h = h, w
+
+    def fit(v, n):
+        return round(v) if n % 2 == 0 else math.floor(v) + 0.5
+    return fit(x, w), fit(y, h)
 
 
 def _name_nets(ents, inst, cat):
@@ -357,6 +395,130 @@ def names_of(path, ents, box=None):
             continue        # 2.1.31: outside this Literal's box; one capture cuts into several
         out[str(name)] = ents[pos[idx]].key
     return out
+
+
+def _json(path):
+    if not path.lower().endswith(".json"):
+        return None
+    try:
+        data = json.loads(snapshot.read(path))
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def ports_of(path, ents, cat, box=None):
+    """``{name: (entity key, side)}`` from a JSON Literal file's ``"ports"`` (3.0): each a
+    ``{"carrier": index, "side": "n|e|s|w"}``, the carrier a pipe, pipe-to-ground or belt of the
+    file (its index from 0) and the side the frame edge it meets. {} when the file has none."""
+    data = _json(path)
+    if data is None or not data.get("ports"):
+        return {}
+    ports = data["ports"]
+    if not isinstance(ports, dict):
+        raise LiteralError(f'{path}: "ports" maps a name to {{"carrier": index, "side": "e"}}')
+    rows, _wires = read_entities(path)
+    kept = list(range(len(rows)))
+    if box is not None:
+        x0, y0, x1, y1 = _box(box)
+        kept = [k for k in kept if x0 <= math.floor(rows[k][1]) < x1
+                and y0 <= math.floor(rows[k][2]) < y1]
+    pos = {k: n for n, k in enumerate(kept)}
+    out = {}
+    for name, spec in ports.items():
+        if not _NAME.match(str(name)):
+            raise LiteralError(f"{path}: ports {name}: a name is a word without dashes (heavy), "
+                               "so a net can name it")
+        idx = spec.get("carrier") if isinstance(spec, dict) else None
+        side = str(spec.get("side", "")).lower() if isinstance(spec, dict) else ""
+        if isinstance(idx, bool) or not isinstance(idx, int) or not 0 <= idx < len(rows):
+            raise LiteralError(f"{path}: ports {name}: carrier {idx!r} is no entity's index (the "
+                               f"file has {len(rows)}, from 0)")
+        if side not in SIDES:
+            raise LiteralError(f"{path}: ports {name}: side {side!r} is not n, e, s or w")
+        if idx not in pos:
+            raise LiteralError(f"{path}: ports {name}: entity {idx} ({rows[idx][0]}) lies outside "
+                               f"box {box}")
+        kind = cat.kind(rows[idx][0]) if cat.has_entity(rows[idx][0]) else None
+        if rows[idx][0] not in _PIPES and kind not in _PIPES and kind not in _BELTS:
+            raise LiteralError(f"{path}: ports {name}: entity {idx} is a {rows[idx][0]}; a port's "
+                               "carrier is a pipe, a pipe-to-ground or a belt")
+        out[str(name)] = (ents[pos[idx]].key, side)
+    return out
+
+
+_RUNS = {"pipe", "pipe-to-ground", "storage-tank"}
+_BELT_RUNS = {"transport-belt", "underground-belt", "splitter"}
+
+
+def port_items(ents, key, cat):
+    """(gives, takes), each {item: {entity key}}: the items the carrier ``key`` of a Literal's
+    entities ``ents`` carries and the machines that put them on it or take them off, as their
+    recipes say (3.0). A pipe: the fluid of every machine box its pipes reach (an output box
+    gives, an input box takes). A belt: what inserters put on its belts from a machine's recipe
+    or a drill's ore (gives), and the solid ingredients of the machines inserters feed from
+    them (takes). Both empty when nothing in the file says."""
+    from . import connect
+    g = connect.graph(ents, cat)
+    gives, takes = {}, {}
+    if key not in g.nodes:
+        return gives, takes
+    if g.nodes[key].kind in _RUNS:
+        near = {}
+        for a, b, _via in g.joins:
+            near.setdefault(a, []).append(b)
+            near.setdefault(b, []).append(a)
+        todo = [nid for nid in g.boxes if nid[0] == key]
+        seen = set(todo)
+        while todo:
+            nid = todo.pop()
+            for m in near.get(nid, ()):
+                if m in seen:
+                    continue
+                seen.add(m)
+                if g.nodes[m[0]].kind in _RUNS:
+                    todo.append(m)
+                    continue
+                b = g.boxes[m]
+                if b.fluid is None:
+                    continue
+                if b.production in ("output", "input-output"):
+                    gives.setdefault(b.fluid, set()).add(m[0])
+                if b.production in ("input", "input-output"):
+                    takes.setdefault(b.fluid, set()).add(m[0])
+        return gives, takes
+    run, todo = {key}, [key]
+    while todo:
+        k = todo.pop()
+        for adj in (g.succ, g.pred):
+            for m, _via in adj.get(k, ()):
+                if m not in run and g.nodes[m].kind in _BELT_RUNS:
+                    run.add(m)
+                    todo.append(m)
+
+    def solids(into, key, side):
+        recipe = g.nodes[key].recipe
+        if not recipe or not cat.has_recipe(recipe):
+            return
+        for r in cat.recipe(recipe).get(side) or ():
+            if r.get("type") != "fluid":
+                into.setdefault(r["name"], set()).add(key)
+
+    for k in run:
+        for m, via in g.pred.get(k, ()):
+            n = g.nodes[m]
+            if via == "mine" and n.resource:
+                gives.setdefault(n.resource, set()).add(m)
+            elif via == "drop":
+                for src, v in g.pred.get(m, ()):
+                    if v == "pickup":
+                        solids(gives, src, "products")
+        for m, via in g.succ.get(k, ()):
+            if via == "pickup":
+                for dst, v in g.succ.get(m, ()):
+                    if v == "drop":
+                        solids(takes, dst, "ingredients")
+    return gives, takes
 
 
 def signature(ents, size):

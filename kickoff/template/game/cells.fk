@@ -209,10 +209,41 @@ module LabColumn<packs=automation-science-pack|logistic-science-pack> size 9x24 
 
 # -- mining ---------------------------------------------------------------------------------------
 
+# One electric drill on its ore, which it drops onto the belt that runs through the cell (no
+# inserter). Stacked east, the cells share one ore belt, the ore on its north lane; feed nothing,
+# take the ore off the last cell (`net ore: line.ore_out -> smelt`). 3x4: one drill wide.
+module DrillCell<resource=iron-ore> size 3x4 {
+  port ore_in  : in  $resource @w3
+  port ore_out : out $resource @e3
+  stack ore_in -> ore_out
+  d = MinerRow<n=1, resource=$resource> @(0, 0)
+  net o: ore_in, d -> ore_out
+}
+
+# Two drills facing each other across the ore belt: both lanes, 15 drills a side to a yellow belt
+# of iron ore. 3x7.
+module DrillPair<resource=iron-ore> size 3x7 {
+  port ore_in  : in  $resource @w3
+  port ore_out : out $resource @e3
+  stack ore_in -> ore_out
+  d = MinerRow<n=2, resource=$resource> @(0, 0)
+  net o: ore_in, d -> ore_out
+}
+
+# A DrillCell built from a wrapped machine: drill.json is one drill facing north, named d, and the
+# belt the router lays through the cell passes its drop tile. The same way, wrap any machine you
+# captured (its inserters too) and build cells of it. 3x4.
+module WrappedDrillCell<resource=iron-ore> size 3x4 {
+  port ore_in  : in  $resource @w0
+  port ore_out : out $resource @e0
+  stack ore_in -> ore_out
+  m = Literal<file="drill.json", resource=$resource> @(0, 1)
+  net o: ore_in, m.d -> ore_out
+}
+
 # One electric drill on uranium, its sulfuric acid through the cell on a pipe (a fluid port pair)
 # and its ore out along the foot. Stacked east, the cells share one pipe and one ore belt; feed
-# the acid at the head (`net acid: pump -> cells.acid_in`). 7x7: a narrower cell can't route the
-# drill's ore into the belt that runs through it.
+# the acid at the head (`net acid: pump -> cells.acid_in`). 7x7.
 module AcidDrillCell size 7x7 {
   port acid_in  : in  sulfuric-acid @w0
   port acid_out : out sulfuric-acid @e0

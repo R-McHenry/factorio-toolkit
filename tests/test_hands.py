@@ -162,6 +162,22 @@ class GearsTest(unittest.TestCase):
         self.assertEqual(hands_in(ctx.layouts["gear"]), {"fast-inserter"})
 
 
+class StarvedTest(unittest.TestCase):
+    # 3.0 (the live run, ~7820k): B5's cable hand was left plain because the model saw no plastic
+    # upstream and ran all of B5 at 0. A shortage upstream never shrinks a hand: the gears here get
+    # 0.2 plates/s in the model, and their output hands are still sized for what they make when the
+    # plates come (the hands off the requester carry what it is written to give, 0.2/s)
+    def setUp(self):
+        avail._snapshot, avail._notes = avail.Snapshot(), []
+        self.addCleanup(lambda: setattr(avail, "_snapshot", avail.Snapshot()))
+
+    def test_a_starved_row_is_sized_for_its_inputs_arriving(self):
+        code = Codebase(self, GEARS.format(extra="").replace("rate=4/s", "rate=0.2/s"), KIT)
+        _c, ctx = code.run()
+        self.assertIn("fast-inserter", hands_in(ctx.layouts["gear"]))
+        self.assertIn("raised for the flow: gears/o0", code.text("hands"))
+
+
 class SmeltTest(unittest.TestCase):
     def setUp(self):
         avail._snapshot, avail._notes = avail.Snapshot(), []

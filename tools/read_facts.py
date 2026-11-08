@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from fkcore import link  # noqa: E402
 from tools.laptop_server import LaptopServer  # noqa: E402
 
 DATA = os.path.join(ROOT, "fkcore", "data")
@@ -90,6 +91,7 @@ for name, p in pairs(prototypes.entity) do
     r.crafting_speed = m(p, 'get_crafting_speed')
     r.crafting_categories = g(p, 'crafting_categories') and keys(p.crafting_categories)
     r.mining_speed = g(p, 'mining_speed') r.mining_drill_radius = g(p, 'mining_drill_radius')
+    local dv = g(p, 'vector_to_place_result') if dv then r.drop_vector = {dv.x or dv[1], dv.y or dv[2]} end
     r.resource_categories = g(p, 'resource_categories') and keys(p.resource_categories)
     r.belt_speed = g(p, 'belt_speed') r.max_distance = g(p, 'max_underground_distance')
     if p.type == 'electric-pole' then r.supply_area_distance = m(p, 'get_supply_area_distance')
@@ -237,6 +239,34 @@ rcon.print(#seen)
 """
 
 
+class Attached:
+    """A server already running (``--attach``, a pack's game: the Sea Block test server on
+    computah-ct, run there), in place of a laptop server of the reader's own."""
+
+    def __init__(self, port, pw_file, write):
+        self.port, self.pw_file, self.write = port, pw_file, write
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def rcon(self):
+        return link.Rcon("127.0.0.1", self.port, self.pw_file, timeout=CALL_S)
+
+
+#: ``--attach``: the running server to read instead of starting one
+SERVER = None
+#: the longest one game call may take: a pack has many more signals (Sea Block: one combinator
+#: given ~5,000 of them takes over 5 s), and a pack's server is a test server of its own
+CALL_S = 5
+
+
+def _server(name):
+    return SERVER or LaptopServer(name, scenario="fk-play")
+
+
 def _read(srv, name):
     with open(os.path.join(srv.write, "script-output", OUT, name + ".json"), encoding="utf-8") as fh:
         return json.load(fh)
@@ -248,7 +278,7 @@ def _call(r, lua):
     took = time.time() - t0
     if out.startswith("Cannot execute command"):
         raise RuntimeError(out)
-    if took > 5:
+    if took > CALL_S:
         raise RuntimeError(f"a game call took {took:.1f} s")
     return out
 
@@ -290,7 +320,7 @@ def _list(v):
 
 def read_products(name="facts-products"):
     """-> {recipe: [product]} as the game gives them (one short call on a laptop server)."""
-    with LaptopServer(name, scenario="fk-play") as srv:
+    with _server(name) as srv:
         with srv.rcon() as r:
             _call(r, _PRODUCTS)
             return _read(srv, "products")
@@ -331,7 +361,7 @@ def apply_probabilities(cat, products):
 
 def read_game():
     """-> (entities, things, connectors, signals_set, signals_read) as the game wrote them."""
-    with LaptopServer("facts", scenario="fk-play") as srv:
+    with _server("facts") as srv:
         with srv.rcon() as r:
             n = _call(r, _ENTITIES)
             print(f"placeable entities: {n}")
@@ -400,6 +430,8 @@ def build_facts(ents, things, conns, sset, sread):
                     row[k] = clean(e[k])
         if e.get("fluid_usage_per_tick"):
             row["fluid_per_s"] = clean(e["fluid_usage_per_tick"] * 60)
+        if e.get("drop_vector"):
+            row["drop_vector"] = [clean(v) for v in e["drop_vector"]]
         entities[name] = row
     # steam: a boiler (or an exchanger) heats water to its target with its energy, at the steam's
     # heat capacity; an engine or a turbine takes its fluid usage
@@ -586,7 +618,19 @@ def main(argv=None):
     ap.add_argument("--raw", help="also save the game's raw answers to this JSON file")
     ap.add_argument("--products", action="store_true",
                     help="read only the recipes' products; write their probabilities")
+    ap.add_argument("--attach", metavar="PORT:PWFILE:WRITEDATA",
+                    help="read a server already running on this host (its RCON port, password "
+                         "file and write-data dir) and write the pack's facts.json (--pack)")
+    ap.add_argument("--pack", help="with --attach: write fkcore/data/packs/PACK/facts.json; "
+                                   "the pack's catalog comes from tools/dump_catalog.lua")
     a = ap.parse_args(argv)
+    if a.attach:
+        global SERVER, CALL_S
+        port, pw, write = a.attach.split(":", 2)
+        SERVER, CALL_S = Attached(int(port), pw, write), 60
+        if not a.pack:
+            ap.error("--attach needs --pack")
+        return main_pack(a.pack, a.dry)
     if a.products:
         return main_products(a.dry)
     ents, things, conns, sset, sread = read_game()
@@ -618,6 +662,23 @@ def main(argv=None):
     with open(CATALOG, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(wide, fh)
     print(f"wrote {FACTS} and {CATALOG}")
+    return 0
+
+
+def main_pack(pack, dry=False):
+    """``--attach``: a pack's facts.json from its running game (its catalog is the dump's)."""
+    ents, things, conns, sset, sread = read_game()
+    facts = build_facts(ents, things, conns, sset, sread)
+    facts["source"] = facts["source"].replace("on a laptop server", f"on the {pack} pack's game")
+    print(f"facts: {len(facts['entities'])} entities, {len(facts['resources'])} resources, "
+          f"{len(facts['fuels'])} fuels, {len(facts['modules'])} modules")
+    if dry:
+        return 0
+    out = os.path.join(DATA, "packs", pack, "facts.json")
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(facts, fh, indent=1, sort_keys=False)
+        fh.write("\n")
+    print(f"wrote {out}")
     return 0
 
 

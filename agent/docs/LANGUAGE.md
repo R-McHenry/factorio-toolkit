@@ -198,6 +198,9 @@ you use: `import SmelterPair, AsmCell from "cells.fk"`.
 | `CircuitCell` | green circuits: three cable assemblers to two circuit assemblers, handing straight across. Two cells: 480 circuits/min | `wi_*`, `wo_*`, `cu_*`, `eo_*`, `ei_*` |
 | `LabCell<packs>` | a lab, two packs on the two lanes of one belt (red and green unless you say) | `p_in`/`p_out` |
 | `LabColumn<packs>` | six LabCells and a header of one belt a pack; stacked east, a lab field | `r_*`, `g_*` |
+| `DrillCell<resource>` | an electric drill dropping its ore onto the belt through the cell: one lane, 15 drills to a yellow lane | `ore_in`/`ore_out` |
+| `DrillPair<resource>` | two drills facing each other across the ore belt: both lanes | `ore_in`/`ore_out` |
+| `WrappedDrillCell<resource>` | a DrillCell built from a wrapped machine (`drill.json`, one drill named `d`): the way to build cells of any machine you captured | `ore_in`/`ore_out` |
 | `AcidDrillCell` | an electric drill on uranium, its acid through the cell on a pipe | `acid_*`, `ore_*` |
 | `GateCell<item, items, amount=auto>`, `GateCellR` | a sushi loop's source: loads its item while the loop holds less than `amount` (`GateCellR` on the right lane) | `s_in`/`s_out` |
 | `MallCell<recipe, items>` | a maker on a sushi loop, and its provider chest | `s_in`/`s_out` |
@@ -208,6 +211,31 @@ On the lab each line made what the row it replaces makes, within 3% (the gear ce
 7%). They are yours: copy one, change its recipe, its ports' items or its machine, and rename it.
 `fk explain FILE INST` shows any instance as its exact entities, with its size and where its belts
 attach.
+
+### Your `game\routing.fk`
+
+Small pieces for steering the router: place one where a belt must go, and run the net through
+it. Each is a sealed module (ports and one net), so the router lays each stretch on its own.
+`import Waypoint, Merge, Split from "routing.fk"`.
+
+| piece | what | ports |
+|---|---|---|
+| `Waypoint<item>` | one belt, 1x3: the net passes here | `i`, `o` (inout) |
+| `Merge<a, b>` | two belts into one by a splitter; each item stays on the lane it came in on | `a`, `b` in, `o` out |
+| `Split<item>` | one belt into two, by a splitter | `i`, `a`, `b` (inout) |
+| `InlinePump<fluid>` | one pump in a pipe, 1x2: `net lub: oil -> pp -> engines` | `i`, `o` (inout) |
+
+They run north to south; `rot 1` turns one to run east to west, `rot 3` west to east.
+
+**Chained nets.** `net gear: gears -> wp -> red, belts` runs gear through the piece `wp`. A
+chain's middle stages are pieces, one instance each, whose modules have `inout` ports: the first
+one declared is the way in, the rest are ways out. The chain is one net laid in segments: `gear`
+(to the way in) and `gear@wp` (from the way out); a piece with several ways out gives
+`gear@sp.a`, `gear@sp.b`. The consumers after such a piece are shared, the first to its first
+way out, and so on. A line under the net, `sp.b -> wp2 -> red`, takes one way out on to its own
+pieces and consumers (a branch). The route step's `chain` line and `fk status` show the segments
+together. Writing the segments as plain nets on the ports (`net a: x -> wp.i`, `net b: wp.o ->
+y`) works too. Merge is not a chain piece: it joins two nets.
 
 ## Other kinds
 
@@ -224,6 +252,7 @@ attach.
 | `Pumpjack<n>` | crude oil. A machine that makes several fluids (`Refinery<recipe=advanced-oil-processing>`, the cracking plants) puts each on the net whose consumers take it: `net heavy: ref -> hcrack` carries only the heavy oil | pipes, one per fluid |
 | `Reactor<read=temperature, signal=S>`, `HeatExchanger`, `SteamTurbine` | nuclear power: a reactor heats the exchangers it touches (`net heat items heat: reactor -> hx`, no route), 10 MW each, 103 steam/s for 1.7 turbines | pipes, an inserter for the cells |
 | `InfinityPipe<fluid, rate=>` | a fluid from nowhere, for the lab only (its free materials) | pipes |
+| `Pump<fluid=lubricant>` | one pump, 1x2, ending two nets: `net a: x -> pm` takes in at its back, `net b: pm -> y` leaves at its front (rot 0 pushes north). A pipe segment past 320x320 tiles carries nothing (`pipe-too-long`); a pump starts a new one. In a chain, use routing.fk's `InlinePump` | pipes |
 | `Constant<signals="S=N, T=M">`, `Decider`, `Arithmetic` | combinators (Circuits, below) | wires |
 | `Literal<file="x.json">` | entities exactly as given. The file: a blueprint string (`.txt`), JSON `{"bp": "0e..."}`, or an entity list `[{"name": "roboport", "x": 2, "y": 2, "direction": 0}]`. A listed entity sets itself too: `"request": {"logistic-robot": 50}` (a requester's request), `"recipe"`, or `"config"` (the game's fields as JSON). Its frame is its entities' box, so a lone roboport needs a pole of its own beside it. `fk capture` writes such a file from anything built: a lab slot, an area of the game or the planner, or an instance of your design. So a build made in the lab or by hand goes anywhere, inside a module too | |
 | `Bus<belts=4, length, item, load=s11, tap=n26\|s33>` | Rory's bus: `belts` belts of one item, `length` tiles, running east at rot 0. Its loads and taps are ports (A bus, below) | one belt per port, beside the bus |
@@ -247,8 +276,12 @@ with `beacon=speed-module-3` for the modules in each (else the design's beacons'
 
 `AsmRow<n, recipe>`, `SmelterRow<n, recipe>`, `LabRow<n>`, `SmelterArray<n, recipe>` and
 `CircuitStack<n>` are rows the toolkit lays for you. They still build, exactly as before, and a
-design that has them keeps working; new lines are Stacks of cells. `fk check` names the library
-cell a new row could be (`row-cell`). A row is **counterflow**: every belt of a row attaches at
+design that has them keeps working; they are not for new designs. Each has a library cell that
+replaces it (`SmelterPair`, `FurnaceCell`/`FurnacePair`, `AsmCell`, `LabCell`/`LabColumn`,
+`CircuitCell`), and `fk check` names it (`row-cell`). `MinerRow` is not one of these: it is the
+drill line, and it is also what a drill cell holds (`DrillCell`, `DrillPair`): in a cell whose
+frame its own belt would leave, a MinerRow lays no belt, and its drills drop their ore onto the
+cell's through-belt. A row is **counterflow**: every belt of a row attaches at
 its head, the west end at rot 0, so leave a few free tiles there.
 
 `inserter=inserter` on a row puts plain inserters in place of the fast ones; `inserter=any` (or
@@ -379,6 +412,12 @@ share, below): the drivers put items on it, the consumers take them.
   can fill, typically a requester of several items feeding makers by belt. Every inserter that
   loads a belt from a chest of several items is filtered to its net's items anyway, so nothing the
   net doesn't carry gets on the belt.
+- `net NAME any: ...` (also after `items a, b`) is connected when each driver reaches some
+  consumer and each consumer is reached by some driver, instead of every driver reaching every
+  consumer. Use it for a belt that passes through a module (in at one port, out at another,
+  machines taking and adding on the way) and for an output that splits to two ends: there a
+  driver past the split reaches only its own tail, and the plain rule would call the net
+  `partly-connected`. It changes the check, not the route.
 - `X.*` means X's free endpoints, the ones no other net holds yet: `net out: mall.* -> chest`.
 - A machine is on at most one net per item and direction, with one exception: a single machine
   (`Assembler`, `Furnace`, a chest...) may take one item from several nets, each carrying only that
@@ -579,7 +618,8 @@ module GearRib size 16x10 {
 - `port NAME : in|out|inout ITEM [| ITEM2] [@side[pos][L|R]]`. A port is a **lane** of one belt
   end. `item | item2` is the two lanes of the pair; the same item twice is one item on both. A net
   may name a port only in the module that declares it: naming one from outside the module is an
-  error that says which `port` line to add.
+  error that says which `port` line to add. `inout` marks a pass-through port, for a piece a net
+  can run through (chained nets, under routing.fk above): it takes the way its outside net runs.
 - `size WxH` is the module's frame, and a port is a place on that frame's **edge**: it takes no
   tile. The belt crosses the edge there, from the tile just outside to the tile just inside (the
   other way for an `out` port): the module's own route reaches the tile inside, the parent's the
@@ -701,9 +741,14 @@ net out: line.g_out -> box
   straight belt tunnels under it. `docs\examples\blue6.fk` is such a cell.
 - A fluid port pair works the same way: `stack acid_in -> acid_out` runs one pipe through each
   cell, and each cell's pipe joins the next one's at their shared edge. Both ends carry the same
-  fluid. The library's `AcidDrillCell` is one, and `docs\examples\plastic-cell.fk` another. A
-  drill cell narrower than 7x7 can fail to route its ore (`UNREACHED`): the belt router merges a
-  port's belt and a drill's ore only with room for a splitter.
+  fluid. The library's `AcidDrillCell` is one, and `docs\examples\plastic-cell.fk` another.
+- A drill drops its ore on the tile in front of it, so a cell's through-belt that passes that tile
+  takes the ore with no inserter (`DrillCell`, 3x4). Two drills facing one belt tile fill both
+  lanes (`DrillPair`, 3x7). A belt across takes the ore on its near lane; one in line, heading
+  away from the drill or towards it, on its right lane (measured). A recycler drops its output the
+  same way, and one whose drop tile no belt can reach is emptied by an inserter. A drill (or a
+  recycler) whose drop tile is a chest or a machine of its net feeds it straight: the net lays
+  nothing.
 - Reports list a stack's cells as `line/0`, `line/1` ...: each cell is an instance of its own.
 - On a short line the cells nearest the feed run full and the last ones get what is left, as on
   the belt: `fk rates` says so cell by cell. Off a Stack's chain, a short net is shared evenly.
@@ -996,6 +1041,12 @@ that a hand-written blueprint can get wrong (measured 2026-10-30):
   {"circuit_mode_of_operation": 1}`; `"set_requests": true` is ignored;
 - a decider outputs `each` only when one of its conditions reads `each`.
 
+**Wrapped machines.** A Literal of one machine, with its own inserters, and a name for it is a
+wrapped machine: a cell places it and names it in its nets (`net i: in_in -> w.a, in_out`), and
+the router lays the cell's belts past its inserters' hands, or past a drill's drop tile. A
+blueprint holds no ore, so a Literal's drills mine what `resource=` says
+(`Literal<file="drill.json", resource=$resource>`). The library's `WrappedDrillCell` is one.
+
 **Names inside a Literal.** A JSON Literal file may name its machines: `"names": {"asm10": 37}`, a
 name (no dashes) to the index of an entity in the file (from 0; the blueprint's entity order when
 the file holds only `"bp"`). `automall.asm10` is then a net end like any machine's: `net out:
@@ -1004,10 +1055,43 @@ names. `fk capture` writes them (`asm1`, `furnace1`, `drill1`, ... in file order
 **belt** is a belt end: a net into it (`net r: rr -> labs.r_in`) is routed into the belt from
 behind, so name the first belt of the Literal's own line; a net out of it starts in front of it
 (name the last), and carries what the net declares (`net out items iron-plate: blk.last -> box`).
+A named splitter or underground is a belt end too: an underground's entry takes a net in and its
+exit gives one out (named the other way round, the net is not laid and shows unconnected).
 The Literal's inserters pick from its own belts as built. A name of any other entity that is no
-machine is refused when a net uses it. A blueprint Literal keeps its circuit
-settings (`if=`, `read=`, ...) and its wires; a wire longer than the game's 9 tiles is dropped by
-the game.
+machine is refused when a net uses it. An entity whose centre doesn't fit its size (old
+blueprints put some half a tile off) is moved to the nearest centre that does, with a
+`literal-snap` line naming it.
+
+**An inserter's own pickup and drop (Bob's inserters, Sea Block).** Where every inserter takes
+custom vectors, a Literal's inserter keeps the ones it was built with. A blueprint string carries
+them as `pickup_position` / `drop_position`. A listed entity writes them as tiles from its own
+tile (x east, y south): `{"name": "inserter", "x": 4.5, "y": 5.5, "direction": 0, "pick": "0,-1",
+"drop": "1,0"}` picks from the north and drops east. Write them as the force may set them (range
+1, or 2 after `bob-long-inserters-1`); one it can't is a `needs-research` line. The router lays
+its own hands this way where it helps, so a design needs no vectors written.
+
+**Ports of a Literal.** A JSON Literal file may also name its ports, the way a module declares
+them: `"ports": {"heavy": {"carrier": 12, "side": "e"}}`, a pipe, pipe-to-ground or belt of the
+file (its index, from 0) and the edge of the frame it meets (`n`, `e`, `s`, `w`, in the file's own
+frame; a turned Literal turns them). `plant.heavy` is then a net end on that edge: `net heavy
+items heavy-oil: plant.heavy -> crack` starts on the tile beside the carrier across the edge, and a
+net into a port ends there, flowing in. The carrier's whole group of touching pipes (or belts)
+carries the net, so the router lays no other net beside it: a refinery's three outputs, each a
+port, never short. With ports a Literal is a sealed piece, and a module around it (a wrapper, a
+buffer) routes like any other. `fk capture` writes a port for each belt and pipe that crosses the
+edge of what it captures, named by where it is: `n1` the westmost on the north edge, `e1` the
+northmost on the east. The names describe the piece, not a recipe, so they hold when the recipe
+inside changes; keep them.
+
+A port carries what the Literal's own machines put on it or take off it, as their recipes say:
+a pipe the fluid of the machine box it reaches (advanced oil's `n1` heavy oil; basic oil's `n1`
+nothing), a belt what inserters put on it or take from it. So a net needs no `items`
+(`net q: g.e1 -> out` carries the gears), a net of another item there is `cannot-carry`, and the
+port drives at the rate of the machines behind it. A port nothing inside explains carries what
+its net says.
+
+A blueprint Literal keeps its circuit settings (`if=`, `read=`, ...) and its wires; a wire longer
+than the game's 9 tiles is dropped by the game.
 
 ## Checks on paper
 

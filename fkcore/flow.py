@@ -57,9 +57,12 @@ import shlex
 import time
 from dataclasses import dataclass, field
 
+from . import arms as armsmod
 from . import avail as availmod
-from . import compose, connect, expand, fkp, placer, rates, route, snapshot
+from . import compiled as compiledmod
+from . import compose, connect, design, expand, fkp, placer, rates, route, snapshot
 from . import own as ownmod
+from . import pack as packmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
 from .catalog import Catalog
@@ -79,6 +82,7 @@ class Line:
     cmd: str                 # the step name: "route", "cover_power", ...
     args: list
     text: str
+    later: bool = False      # 3.0: after `later:`, off the critical path (never stops a paste)
 
 
 @dataclass
@@ -124,10 +128,18 @@ class Ctx:
 
 
 def parse(text, path="<fkb>") -> list:
-    out = []
+    """The script's lines. 3.0 (Rory, 2026-11-01: "a section for non critical path stuff that
+    wont block a paste, like the more expensive rate report"): the steps after a `later:` line run
+    once the rest has run, the paste too; what they find is reported and never stops the build,
+    and one that fails says so in its report. They only read the layout, so a layout step there
+    is a script error."""
+    out, later = [], False
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
+            continue
+        if line == "later:":
+            later = True
             continue
         t = shlex.split(line)
         cmd, args = t[0], t[1:]
@@ -139,7 +151,10 @@ def parse(text, path="<fkb>") -> list:
             raise FlowError(f"{path}:{n}: unknown step {t[0]!r} (steps: "
                             + ", ".join(sorted(s.replace('_power', ' power')
                                                .replace('_robots', ' robots') for s in STEPS)) + ")")
-        out.append(Line(n, cmd, args, line))
+        if later and cmd in _NOT_LATER:
+            raise FlowError(f"{path}:{n}: {t[0]} changes the layout or the game; it goes before "
+                            "`later:`, whose steps only report")
+        out.append(Line(n, cmd, args, line, later))
     return out
 
 
@@ -776,6 +791,102 @@ def _pinned_routes(flat, new, prev, cat):
     return pinned, again
 
 
+def _with_last_routes(ctx, factory, flat, lay, pinned, again):
+    """3.0 (the 20261030-2352 run, 11-01: eight hours of builds that stopped before the paste, each
+    laying every new net again): the routes the last route step laid (its net files,
+    ``fkcore.design``, written as each net landed, so a build that stopped mid-route counts too),
+    when it ran after the committed ``.fkp`` was written, are kept in place of the committed ones: that step
+    laid on what stood of them, so its routes are the newer design (the 11-01 bench: c4_suo's
+    committed route was broken, its last route stood, and it was laid again in every build). A
+    committed route of a net the last step has none for keeps its carriers on tiles no last route
+    holds. -> (pinned, again), in net order."""
+    last = os.path.join(design.folder(ctx.out, factory), "base.fkp")
+    committed = os.path.join(ctx.root, f"{factory}.fkp")
+    if not os.path.exists(last) or (os.path.exists(committed)
+                                    and os.path.getmtime(last) <= os.path.getmtime(committed)):
+        return pinned, again
+    prev = design.layout(ctx.out, factory)
+    if prev is None:
+        return pinned, again
+    more, why = _pinned_routes(flat, lay, prev, ctx.cat)
+    if not more:
+        return pinned, again
+    taken = set()
+    for ents in more.values():
+        for e in ents:
+            taken |= fkp.tiles_of(ctx.cat, e)
+    out = dict(more)
+    for net, ents in pinned.items():
+        if net in out:
+            continue
+        ents = [e for e in ents if not fkp.tiles_of(ctx.cat, e) & taken]
+        if ents:
+            out[net] = ents
+    again = {n: w for n, w in {**again, **why}.items() if n not in out}
+    return dict(sorted(out.items())), again
+
+
+def _held_nets(ctx, flat, lay, recs):
+    """3.0: the nets the player holds (``fk hold NET``, or ``status: held`` in a net file) stand as
+    they are: their carriers go on the layout before the router, which keeps them. A carrier on a
+    tile something else now holds is left out, and said. -> (layout, {net: carriers}, lines)."""
+    held = {n: r["ents"] for n, r in recs.items() if r["status"] == "held"
+            and all(m in flat.nets for m in fkp.net_names(n) or [n])}
+    if not held:
+        return lay, {}, []
+    lay = lay.copy()
+    taken = {t for e in lay.entities.values() for t in fkp.tiles_of(ctx.cat, e)}
+    out, lines = {}, []
+    for net, ents in sorted(held.items()):
+        mine = [e for e in ents if e.key not in lay.entities
+                and not fkp.tiles_of(ctx.cat, e) & taken]
+        for e in mine:
+            lay.entities[e.key] = e
+            taken |= fkp.tiles_of(ctx.cat, e)
+        out[net] = mine
+        lines.append(f"held {net}: {len(mine)} carriers stand as you hold them"
+                     + (f" ({len(ents) - len(mine)} left out: their tiles are taken now)"
+                        if len(mine) < len(ents) else ""))
+    return lay, out, lines
+
+
+def _write_nets(ctx, factory, r, held, seeds=None, stood=()):
+    """Every net's file (``fkcore.design``) as the route step left it; a net held while it ran
+    stays held, a seed stays (``fk seed``), and the file of a net the design no longer has goes."""
+    seeds = seeds or {}
+    by_owner = {}
+    for e in r.layout.entities.values():
+        if e.owner.startswith("~"):
+            by_owner.setdefault(e.owner[1:], []).append(e)
+    kept, routed = set(r.kept) | set(stood), set(r.routed)
+    now = design.read_all(ctx.out, factory)
+    held = set(held) | {n for n, rec in now.items() if rec["status"] == "held"}
+    nets = set(by_owner) | set(r.failed) | held
+    for net in set(now) - nets:
+        try:
+            os.remove(design.net_path(ctx.out, factory, net))
+        except OSError:
+            pass
+    for net in sorted(nets):
+        ents = by_owner.get(net, [])
+        if net in held:
+            status, why = "held", ""
+        elif net in r.failed:
+            status, why = "unrouted", r.failed[net]
+        elif net in r.patched:
+            status, why = "patched", r.patched[net]
+        elif net in kept:
+            status, why = "kept", ""
+        else:
+            status, why = ("routed" if ents or net in routed else "skipped"), ""
+        sd = seeds.get(net) or ()
+        if sd and status == "unrouted":
+            ents = sd
+        design.write_net(ctx.out, factory, net, status, ents, why,
+                         key=(r.memo.get(net) or {}).get("key") if status == "unrouted" else None,
+                         seed=[e.key for e in sd])
+
+
 def _module_pinned(flat, prev, cat, path):
     """A sealed module's patch scope (``route --module X``, PLAN-MODULES phase 4): X's own nets and
     the parent nets ending at X's ports are routed again; every other committed route is kept as it
@@ -860,9 +971,41 @@ def _ribbon_ug(word):
     return "yellow", None
 
 
+def _pipe(ctx, word, lines):
+    """(pipe, pipe-to-ground) for ``route --pipe`` (a material or a pipe entity; empty: the
+    pack's default, else iron); an unresearched one falls back to iron, with a line."""
+    from . import fluid_route as fluidmod
+    try:
+        pipe = fluidmod.material(word, ctx.cat)
+    except ValueError as exc:
+        raise FlowError(str(exc)) from None
+    if pipe[0] != fluidmod.PIPE and (availmod.locked(pipe[0]) or availmod.locked(pipe[1])):
+        lines.append(f"pipe: {pipe[0]} is not researched here: iron pipes instead")
+        return fluidmod.PIPE, fluidmod.PTG
+    if pipe[0] != fluidmod.PIPE:
+        lines.append(f"pipe: {pipe[0]} and {pipe[1]}")
+    return pipe
+
+
 def s_route(ctx, args):
+    # 3.0: the routing policy is the build script's: --group-budget S (a failed net's group try,
+    # 0 = every net once and alone), --group-max N, --first NET,... (patterns too: mall/*), and
+    # --skip NET,... (left to the player, reported manual); --retry-failed changed|always|never (a
+    # net that failed last build), --failed keep|drop (a net that fails now keeps the route that
+    # stands, or loses it), --area X0,Y0,X1,Y1 (only the nets there are routed; the rest stand)
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
-              m2m=False, store="")
+              m2m=False, group_budget=route.GROUP_BUDGET, group_max=route.GROUP_MAX, first="",
+              skip="", retry_failed="changed", failed="keep", area="", compiled="yes",
+              reuse_lab=False, compile="", pipe="", store="", **{"try": ""})
+    if o["try"]:
+        return _route_try(ctx, str(o["try"]))
+    if o["compile"]:
+        return _route_compile(ctx, str(o["compile"]), str(o["hand"]))
+    if o["retry_failed"] not in ("changed", "always", "never"):
+        raise FlowError(f"route --retry-failed changed|always|never, got {o['retry_failed']!r}")
+    if o["failed"] not in ("keep", "drop"):
+        raise FlowError(f"route --failed keep|drop, got {o['failed']!r}")
+    area = _area(o["area"]) if o["area"] else None
     # PLAN-3.0 §4: sealed modules compile once, into the game folder's out/compiled (fk lab shares
     # its game's); --store DIR elsewhere, --store none to lay every module afresh
     store = str(o["store"]) or ctx.compiled or os.path.join(ctx.out, "compiled")
@@ -875,9 +1018,10 @@ def s_route(ctx, args):
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
     lines, checks = [], []
     ug, ug_note = _ribbon_ug(str(o["ug"]))
+    pipe = _pipe(ctx, o["pipe"], lines)
     for factory, lay in list(ctx.layouts.items()):
         flat = ctx.flats[factory]
-        pinned, again = {}, {}
+        pinned, again, comp = {}, {}, {}
         if o["module"]:
             if o["module"] not in flat.insts or o["module"] not in flat.sealed:
                 lines.append(f"{factory}: --module {o['module']} is not a sealed instance here")
@@ -886,6 +1030,45 @@ def s_route(ctx, args):
                                                o["module"])
         elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
+            pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
+        # 3.0, the design database: the net files the last route step left (fkcore.design)
+        recs = design.read_all(ctx.out, factory)
+        for net, rec in sorted(recs.items()):
+            if rec["status"] == "unrouted" and rec["why"].startswith(design.UNROUTED_BY_YOU):
+                pinned.pop(net, None)
+                again[net] = "unrouted by you (fk unroute)"
+        lay, held, held_lines = _held_nets(ctx, flat, lay, recs)
+        for net in held:
+            pinned.pop(net, None)
+            again.pop(net, None)
+        lines += [f"{factory}: {line}" for line in held_lines]
+        old = _old_routes(ctx, factory, recs)
+        stood, inside = {}, set()
+        if area is not None:
+            # route --area: every net with a carrier or an end there is routed again, and every
+            # other route stands exactly as it is (held for this build), whatever the router thinks
+            inside = _nets_in_area(ctx, flat, lay, old, area)
+            out_ = {n: {"status": "held", "ents": ents} for n, ents in old.items()
+                    if n not in inside and n not in held and n in flat.nets}
+            lay, stood, stood_lines = _held_nets(ctx, flat, lay, out_)
+            lines += [f"{factory}: {ln.replace('held ', 'stands ', 1)}" for ln in stood_lines
+                      if "left out" in ln]
+            for net in stood:
+                pinned.pop(net, None)
+                again.pop(net, None)
+            for net in sorted(inside):
+                if net in flat.nets and net not in held:
+                    pinned.pop(net, None)
+                    again[net] = "in the area (route --area)"
+            lines.append(f"{factory}: route --area {o['area']}: {len(inside)} nets there routed "
+                         f"again, {len(stood)} outside stand as they are")
+        # fk seed: carriers the player pinned; the router lays the rest of the net through them
+        seeds = {n: design.seed_of(r) for n, r in recs.items()
+                 if r["seed"] and n in flat.nets and n not in held}
+        for net, rec in sorted(recs.items()):
+            if net in seeds and rec["status"] == "seeded":
+                pinned.pop(net, None)
+                again[net] = "seeded by you (fk seed)"
         if o["again"]:
             asked, unknown = _asked(flat, str(o["again"]))
             for net in sorted(asked):
@@ -893,6 +1076,25 @@ def s_route(ctx, args):
                     again[net] = "asked (--again / fk build --reroute)"
             if unknown:
                 lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
+        # 3.0, sealed modules compile once (fkcore.compiled): a sealed instance whose inside the
+        # store holds lays its inner nets from it, translated to where it stands now
+        reuse = o["only"] == "stale" and not o["module"] and str(o["compiled"]) != "no"
+        if reuse or o["reuse_lab"]:
+            asked = _asked(flat, str(o["again"]))[0] if o["again"] else set()
+            # the stored inside wins over a committed route (the same inside, and it moves with the
+            # module); what the player pinned, held, seeded or asked for again stays theirs
+            keep_out = set(held) | set(seeds) | set(inside) | set(stood) | asked
+            keep_out |= {n for n, why in again.items() if "by you" in why}
+            comp, used, refused = compiledmod.reuse(_compiled_dirs(ctx, o["reuse_lab"]), flat,
+                                                    lay, ctx.cat, skip=keep_out,
+                                                    locked=availmod.locked)
+            for net, ents in comp.items():
+                pinned[net] = ents
+                again.pop(net, None)
+            lines += [f"{factory}: compiled  {p}: {k} inner nets from its stored inside ({m} {key})"
+                      for p, (m, key, k) in sorted(used.items()) if k]
+            lines += [f"{factory}: compiled  {p}: its stored inside ({m}) holds {', '.join(bad)}, "
+                      f"not researched here: routed again" for p, (m, bad) in sorted(refused.items())]
         blocked = _frame_blocked(ctx, factory, lay.size)
         # 2.1.19: a long route says how far it is, every route.PROGRESS_EVERY seconds
         saved = route.PROGRESS
@@ -901,20 +1103,66 @@ def s_route(ctx, args):
             route._progress_at[:] = [time.monotonic()] * 2
             route._progress_net[:] = [None, 0.0]
             route.PROGRESS = lambda msg, f=factory: ctx.echo(f"      {f}: {msg}")
+        memo = {n: {"key": r["key"], "why": r["why"]} for n, r in recs.items()
+                if r["status"] == "unrouted" and r["key"]}
+        design.write_base(ctx.out, factory, lay)
+        began = time.time()
+
+        def on_net(net, status, ents, why, took, f=factory, seeds=seeds):
+            sd = seeds.get(net) or ()
+            if sd and status == "unrouted":
+                ents = sd                          # a seed stays, routed or not
+            design.write_net(ctx.out, f, net, status, ents, why, took, seed=[e.key for e in sd])
+
+        def on_reach(net, which, k, n, f=factory):
+            design.write_now(ctx.out, f, f"route, {which}: {k + 1} of {n}, {net}")
+            path = design.net_path(ctx.out, f, net)
+            try:
+                if os.path.getmtime(path) < began:
+                    return None
+            except OSError:
+                return None
+            rec = design.read_net(path)        # the player held it while this build runs
+            return rec["ents"] if rec and rec["status"] == "held" else None
         try:
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
-                                   blocked=blocked, hand=hand, patch=pinned, ug=ug,
+                                   blocked=blocked, hand=hand, patch=pinned, ug=ug, pipe=pipe,
                                    m2m="left" if o["m2m"] == "left"
-                                   else o["m2m"] not in (False, "no"), store=store)
+                                   else o["m2m"] not in (False, "no"),
+                                   group_budget=float(o["group_budget"]),
+                                   group_max=int(o["group_max"]),
+                                   first=[p for p in str(o["first"]).split(",") if p],
+                                   skip=[p for p in str(o["skip"]).split(",") if p],
+                                   memo=memo,
+                                   again=sorted((_asked(flat, str(o["again"]))[0]
+                                                 if o["again"] else set()) | inside),
+                                   on_net=on_net, on_reach=on_reach,
+                                   seeds={n: s for n, s in seeds.items() if n not in pinned},
+                                   retry=str(o["retry_failed"]), store=store)
         finally:
             route.PROGRESS = saved
+            design.clear_now(ctx.out, factory)
+        # every net as this step left it, the nets that failed with the ground they failed on: the
+        # next build does not search them again while it stands (route --again NET does)
+        if o["failed"] == "keep":
+            r.layout, standing = _keep_failed(ctx, r, old)
+            lines += [f"  standing  {n}: unrouted; its last route ({k} carriers) stands until it "
+                      f"routes (route --failed keep)" for n, k in sorted(standing.items())]
+        _write_nets(ctx, factory, r, held, seeds, stood)
+        if str(o["compiled"]) != "no":
+            stored = _store_compiled(ctx, flat, lay, r)
+            if stored:
+                lines.append(f"{factory}: compiled  stored the inside of {', '.join(stored)} "
+                             "(out/design/modules): laid from there wherever it stands next")
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
         lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept"
                      + (f", {len(r.patched)} patched" if r.patched else "")
-                     + f" ({len(pinned)} pinned from the committed .fkp), {len(r.failed)} failed, "
+                     + f" ({len(pinned) - len(comp)} pinned from the committed .fkp"
+                     + (f", {len(comp)} from compiled modules" if comp else "")
+                     + f"), {len(r.failed)} failed, "
                      f"{r.passes} pass{'es' if r.passes != 1 else ''}"
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
                         else ""))
@@ -927,6 +1175,7 @@ def s_route(ctx, args):
             lines.append(f"  rehanded  {rehanded} standing inserter"
                          f"{'s' if rehanded != 1 else ''} robots cannot build, to {hand}")
         lines += [f"  {l}" for l in r.lines]
+        lines += _chain_lines(flat, r)
         lines += _one_inserter(ctx, factory, flat, r.layout)
         checks += [Check("no-route", f"{factory} net {n}", why) for n, why in r.failed.items()]
         checks += [Check("maxflow", f"{factory} net {n}", why) for n, why in r.maxflow.items()]
@@ -936,6 +1185,183 @@ def s_route(ctx, args):
     if ug_note and any(ln.lstrip().startswith("ribbon ") for ln in lines):
         lines.append(f"  {ug_note}")
     return lines, checks
+
+
+def _route_compile(ctx, module, hand_word):
+    """``route --compile MODULE`` (``fk compile MODULE``): every placed sealed instance of MODULE
+    routed alone, its inner nets only, and stored (fkcore.compiled); one per inside, so two
+    instances that are the same inside route once. Nothing else is laid, written or pasted."""
+    hand, _note = availmod.choose("hand", hand_word, need=_need(ctx, "inserter"))
+    lines = []
+    for factory, lay in ctx.layouts.items():
+        flat = ctx.flats[factory]
+        mine = [p for p in compiledmod.sealed_roots(flat, lay)
+                if (flat.insts[p].module or flat.insts[p].kind) == module]
+        done = {}
+        for path in mine:
+            key = compiledmod.inside_key(flat, lay, ctx.cat, path)
+            if key in done:
+                lines.append(f"{factory}: compile {path}: the same inside as {done[key]}")
+                continue
+            done[key] = path
+            if compiledmod.load([ctx.out], compiledmod._module(flat, path), key):
+                lines.append(f"{factory}: compile {path}: already compiled ({module} {key})")
+                continue
+            nets = set(compiledmod.inner_nets(flat, path))
+            began = time.time()
+            r = route.route_layout(flat, lay, ctx.cat, hand=hand, pipe=_pipe(ctx, "", []),
+                                   blocked=_frame_blocked(ctx, factory, lay.size),
+                                   skip=[n for n in flat.nets if n not in nets])
+            took = time.time() - began
+            failed = sorted(n for n in r.failed if n in nets)
+            if failed:
+                lines.append(f"{factory}: compile {path}: {len(failed)} of {len(nets)} inner nets "
+                             f"did not route ({', '.join(failed)}), not stored ({took:.1f} s)")
+                continue
+            compiledmod.save(ctx.out, flat, lay, ctx.cat, path, r.layout, key)
+            lines.append(f"{factory}: compile {path}: {len(nets)} inner nets routed and stored "
+                         f"({module} {key}, {took:.1f} s); the world lays them from there")
+        if not mine:
+            lines.append(f"{factory}: compile: no sealed instance of {module} is placed here")
+    return lines, []
+
+
+def _compiled_dirs(ctx, lab):
+    """The module stores the route step reads: this build's own ``out``, and with ``route
+    --reuse-lab`` every lab build's (``<run>/lab/<name>/out``, fkcore.lab)."""
+    dirs = [ctx.out]
+    if lab:
+        labs = os.path.join(os.path.dirname(os.path.abspath(ctx.root)), "lab")
+        if os.path.isdir(labs):
+            dirs += [os.path.join(labs, d, "out") for d in sorted(os.listdir(labs))
+                     if os.path.isdir(os.path.join(labs, d, "out"))]
+    return dirs
+
+
+def _store_compiled(ctx, flat, lay, r):
+    """Store the inside of every sealed instance whose inner nets all routed (fkcore.compiled),
+    unless the store has it already. -> the instances stored."""
+    out = []
+    for path in compiledmod.sealed_roots(flat, lay):
+        nets = compiledmod.inner_nets(flat, path)
+        if not nets or any(n in r.failed for n in nets):
+            continue
+        key = compiledmod.inside_key(flat, lay, ctx.cat, path)
+        if key is None or compiledmod.load([ctx.out], compiledmod._module(flat, path), key):
+            continue
+        if compiledmod.save(ctx.out, flat, lay, ctx.cat, path, r.layout, key):
+            out.append(path)
+    return out
+
+
+def _area(spec):
+    """``route --area X0,Y0,X1,Y1`` -> (x0, y0, x1, y1), the tiles x0 <= x < x1, y0 <= y < y1."""
+    try:
+        a = tuple(int(v) for v in str(spec).split(","))
+        if len(a) != 4 or a[0] >= a[2] or a[1] >= a[3]:
+            raise ValueError
+    except ValueError:
+        raise FlowError(f"route --area X0,Y0,X1,Y1 (x0 < x1, y0 < y1), got {spec!r}") from None
+    return a
+
+
+def _old_routes(ctx, factory, recs):
+    """{net: carriers} of the routes that stand before this route step: the committed .fkp's,
+    and over them the net files' (routed, kept, patched, held: newer when the last build stopped
+    before its paste)."""
+    out = {}
+    prev = ctx.previous.get(factory)
+    if prev is not None:
+        for e in prev.entities.values():
+            if e.owner.startswith("~"):
+                out.setdefault(e.owner[1:], []).append(e)
+    for net, rec in recs.items():
+        if rec["status"] in ("routed", "kept", "patched", "held") and rec["ents"]:
+            out[net] = list(rec["ents"])
+    return {n: [fkp.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)) for e in ents]
+            for n, ents in out.items()}
+
+
+def _nets_in_area(ctx, flat, lay, old, area):
+    """The nets with a carrier of their standing route, or a machine at one of their ends, on a
+    tile of ``area``."""
+    x0, y0, x1, y1 = area
+
+    def hit(e):
+        return any(x0 <= x < x1 and y0 <= y < y1 for x, y in fkp.tiles_of(ctx.cat, e))
+    out = {n for n, ents in old.items() if any(hit(e) for e in ents)}
+    for name, net in flat.nets.items():
+        for key, _item in list(net.drivers) + list(net.consumers):
+            e = lay.entities.get(key)
+            if e is not None and hit(e):
+                out.add(name)
+                break
+    return out
+
+
+def _chain_lines(flat, r):
+    """3.0 chained nets: one line per chain, its segments and how they stand, so the chain reads
+    as the one net it is written as."""
+    chains = {}
+    for name, net in flat.nets.items():
+        if net.chain:
+            chains.setdefault(net.chain, []).append(name)
+    out = []
+    for chain, segs in sorted(chains.items()):
+        failed = [s for s in segs if s in r.failed]
+        out.append(f"  chain     {chain}: {len(segs)} segments ({', '.join(segs)}), "
+                   + (f"{len(failed)} unrouted: {', '.join(failed)}" if failed else "all laid"))
+    return out
+
+
+def _keep_failed(ctx, r, old):
+    """``route --failed keep`` (the default; Rory, 2026-11-01: "in a live game its better to
+    paste and fix after"): a net that fails keeps the route that stood before, where every tile of
+    it is still free, so the paste doesn't take up a belt that works. -> (layout, {net: carriers
+    put back})."""
+    lay = r.layout
+    have = {e.owner[1:] for e in lay.entities.values() if e.owner.startswith("~")}
+    back = {}
+    for net in sorted(r.failed):
+        ents = old.get(net)
+        if not ents or net in have:
+            continue
+        taken = {t for e in lay.entities.values() for t in fkp.tiles_of(ctx.cat, e)}
+        if any(fkp.tiles_of(ctx.cat, e) & taken or e.key in lay.entities for e in ents):
+            continue
+        if not back:
+            lay = lay.copy()
+        for e in ents:
+            lay.entities[e.key] = e
+        back[net] = len(ents)
+    return lay, back
+
+
+def _route_try(ctx, spec):
+    """``route --try X,Y:X,Y`` (3.0, the question mode): how a belt would go from A to B on the
+    design as it stands (the net files on its base); nothing is laid or written."""
+    try:
+        a, b = (tuple(int(v) for v in end.split(",")) for end in spec.split(":"))
+        if len(a) != 2 or len(b) != 2:
+            raise ValueError
+    except ValueError:
+        raise FlowError(f"route --try X,Y:X,Y (a belt from tile A to tile B), got {spec!r}")
+    import time
+    lines = []
+    for factory, lay in list(ctx.layouts.items()):
+        now = design.layout(ctx.out, factory) or lay
+        ctx.layouts[factory] = now
+        t0 = time.monotonic()
+        got, how = route.try_route(ctx.flats[factory], now, ctx.cat, a, b,
+                                   blocked=_frame_blocked(ctx, factory, now.size))
+        took = f"{time.monotonic() - t0:.1f} s"
+        where = f"{a[0]},{a[1]} -> {b[0]},{b[1]}"
+        if got is None:
+            lines.append(f"{factory}: try {where}: no belt: {how} ({took})")
+            continue
+        lines.append(f"{factory}: try {where}: {len(got)} carriers, {how} ({took}); nothing laid")
+        lines += [f"  {e.name} {e.x:g},{e.y:g} {fkp.DIRS[e.dir]}" for e in got]
+    return lines, []
 
 
 def _asked(flat, spec):
@@ -1139,30 +1565,28 @@ def _infra(ctx):
 def s_cover_robots(ctx, args):
     """Roboports so every logistic chest of a factory is in a logistic area (``fkcore.robots``);
     before ``cover power`` in the script, so the poles power them. A chest the surface's network
-    already reaches (the kit's roboport and every roboport joined to it) needs none (1.2), and
-    each roboport placed gets a storage chest beside it (``--storage none``: no chest). 1.7 (pin
-    and patch): the committed roboports and their chests stay where they still fit and reach a
-    chest; ``--fresh`` places them all anew, as before."""
+    already reaches (the kit's roboport and every roboport joined to it) needs none (1.2). 1.7 (pin
+    and patch): the committed roboports stay where they still fit and reach a chest; ``--fresh``
+    places them all anew, as before. 3.0 (U5, Rory): no storage chest beside a roboport any more;
+    ``--storage`` is ignored with one line."""
     from . import robots
-    o = _opts(args, roboport="roboport", storage="storage-chest")
+    o = _opts(args, roboport="roboport", storage=None)
     if ctx.surface is not None and ctx.surface.mode == "lab":
         return ["cover robots: lab mode revives the ghosts, no robots build here; nothing placed"], []
-    storage = None if o["storage"] in ("none", "off") else \
-        ("storage-chest" if o["storage"] is True else o["storage"])
-    if storage and not ctx.cat.has_entity(storage):
-        return [f"cover robots: no {storage} in the catalog; nothing placed"], [
-            Check("no-robots", "cover robots", f"--storage {storage}: not an entity")]
+    storage = None
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
     # 2.1.3: new roboports only where one that stands builds them (the last diff's read)
     standing = _standing_roboports(ctx)
     lines, checks = [], []
+    if o["storage"] not in (None, "none", "off"):
+        lines.append("cover robots: --storage is gone in 3.0 (no chest beside a roboport); ignored")
     for factory, lay in list(ctx.layouts.items()):
         near = robots.served(places, infra, ctx.layouts, factory, ctx.cat)
         keep_out = _frame_blocked(ctx, factory, lay.size)        # no roboport or chest on water
         prev = ctx.previous.get(factory)
         pinned = [] if o.get("fresh") is True else \
-            _own(prev, "robots", "r") + _own(prev, "robots", "s")
+            _own(prev, "robots", "r")
         reach = robots.in_frame(places, ctx.layouts, factory, standing)
         new, rep = robots.apply_robots(lay, ctx.cat, keep_out=keep_out, roboport=o["roboport"],
                                        served=near, storage=storage, pinned=pinned, reach=reach)
@@ -1335,10 +1759,12 @@ def _on_terrain(t, s, cat):
     stood where world 3 had a lake: no water, no power, and every look said ok). -> (report
     lines, checks); checks, never gates."""
     lines, checks, hits = [], [], 0
+    # a pack with landfill (Sea Block): water is ground that costs landfill, so it is no check
+    wet = frozenset() if packmod.landfill() else t.water
     for key in sorted(s.entities, key=fkp.natural_key):
         e = s.entities[key]
         tiles = set(e.tiles)
-        parts = [(len(tiles & t.water), "water"), (len(tiles & t.cliff_tiles), "cliff"),
+        parts = [(len(tiles & wet), "water"), (len(tiles & t.cliff_tiles), "cliff"),
                  (len(tiles & t.other), "other blocked")]
         if not any(n for n, _k in parts):
             continue
@@ -1349,6 +1775,11 @@ def _on_terrain(t, s, cat):
                             f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)} stands on {what} "
                             f"tile{'s' if sum(n for n, _k in parts) != 1 else ''} (first "
                             f"{first[0]},{first[1]})"))
+    if packmod.landfill():
+        n = len(landfill_tiles(s.entities.values(), t, cat))
+        if n:
+            lines.append(f"  landfill: {n} entity tiles stand on water; the paste lays "
+                         f"{packmod.landfill()} under them")
     x0, y0, x1, y1 = t.area
     unknown = {tuple(c) for c in t.ungenerated}
     # 2.1.19 (the live run, ~4245k): the terrain stopped at x480 and cu2p was routed on to x498,
@@ -1388,7 +1819,11 @@ def _on_terrain(t, s, cat):
         full += len(body) == len(e.tiles)
         under += len(body)
         amount += sum(body)
-        if not any(q in ore for q in placer.mining_area(e.name, float(e.x), float(e.y))):
+        # 3.0 (U11): a pumpjack stands on its well, so its own tiles are where the crude is (its
+        # mining area is not; every pumpjack on a field read no-ore)
+        area = e.tiles if e.name == "pumpjack" else \
+            placer.mining_area(e.name, float(e.x), float(e.y))
+        if not any(q in ore for q in area):
             checks.append(Check("no-ore", e.key,
                                 f"{e.name} at {fkp.fmt(e.x)},{fkp.fmt(e.y)}: no "
                                 f"{e.attrs['resource']} in its mining area"))
@@ -1451,6 +1886,8 @@ def _bootstrap_checks(ctx, factory, flat, lay):
                                in zip(rows, clauses))
             msg = (f"its route needs {needs}: {detail}: stock what the route needs first, or "
                    "build those makers first")
+        if getattr(net, "chain", None):
+            msg += f" ({net.name} is a stretch of chain {net.chain})"
         out.append(Check("bootstrap", f"net {factory}/{net.name}", msg))
     return out
 
@@ -1464,6 +1901,8 @@ def s_report_checks(ctx, args):
         rep = connect.connect(lay, ctx.cat, connect.endpoints(flat), ports)
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
+        checks += [Check(c.code, f"{factory} {c.where}", c.msg)
+                   for c in connect.long_pipes(rep.graph)]          # 3.0
         sink_lines, sink_checks = _sinks(ctx, factory, flat, rep)
         lines += sink_lines
         checks += sink_checks
@@ -1529,6 +1968,29 @@ def _to_build(ctx):
     return need, "the whole design (no diff before this step)"
 
 
+def _to_build_entities(ctx):
+    """The composed entities :func:`_to_build` counts: after a diff those it found missing,
+    ghosted or wrong (by name and position), else every one the design builds."""
+    es = [e for e in ctx.composed.entities.values() if not e.attrs.get("dnp")]
+    if ctx.last_diff is None:
+        return es
+    todo = {(v.name, float(v.x), float(v.y)) for v in ctx.last_diff.verdicts
+            if v.verdict.split()[0] in ("not-placed", "ghost", "other-entity")}
+    return [e for e in es if (e.name, float(e.x), float(e.y)) in todo]
+
+
+def landfill_tiles(entities, t, cat):
+    """The water tiles under ``entities`` that take landfill: each entity's own tiles, except an
+    offshore pump's water side (the tiles it pumps from stay water)."""
+    out = set()
+    for e in entities:
+        tiles = set(e.tiles) & t.water
+        if tiles and cat.has_entity(e.name):
+            tiles -= cat.water_tiles(e.name, e.x, e.y, e.dir)
+        out |= tiles
+    return out
+
+
 def _bom_live(ctx):
     """report_bom --stock live: what still has to be built against the network's stock, and every
     item and machine recipe against what is researched (short-stock, needs-research). The first V1 run
@@ -1538,15 +2000,34 @@ def _bom_live(ctx):
     if r is None:
         return [f"report_bom --stock live: skipped, no game link ({ctx.link_error})"], []
     need, what = _to_build(ctx)
+    # a pack with landfill: one landfill under each entity tile on water (the paste lays it)
+    if packmod.landfill() and ctx.ground is not None and ctx.composed is not None:
+        todo = _to_build_entities(ctx)
+        n = len(landfill_tiles(todo, ctx.ground, ctx.cat))
+        if n:
+            need[packmod.landfill_item()] = need.get(packmod.landfill_item(), 0) + n
     used = sorted({e.attrs["recipe"] for e in (ctx.composed.entities.values() if ctx.composed
                                                 else ()) if e.attrs.get("recipe")
                    and ctx.cat.kind(e.name) == "assembling-machine"})
     # the availability families too: this is the read the next (linkless) build's inserter=any,
     # --hand any and --pole any choose from (out/avail.json, beside out/force.json)
-    sup = supply.read(r, _force(ctx), ctx.surface.name, list(need) + list(availmod.CANDIDATES),
+    # 3.0: and every entity laid, and every one read before (it stays read): a compiled inside is
+    # only reused when none of its entities needs research (compiled.reuse, avail.locked)
+    laid = sorted({e.name for e in ctx.composed.entities.values()}) if ctx.composed else []
+    before = list(availmod.snapshot().sup.entities) if availmod.snapshot().sup else []
+    sup = supply.read(r, _force(ctx), ctx.surface.name,
+                      list(dict.fromkeys(list(need) + list(availmod.CANDIDATES) + laid + before)),
                       used)
     availmod.save(ctx.root, sup, "report_bom --stock live")
     lines, checks = supply.bom(need, sup, used)
+    # 3.0 (fair play): an inserter set to vectors the force has not researched (Bob's adjustable
+    # inserters: the GUI's own limits) waits on that research like an unresearched entity
+    for tech, keys in sorted(armsmod.locked(ctx.composed.entities.values() if ctx.composed
+                                            else (), armsmod.of(sup)).items()):
+        checks.append(Check("needs-research", f"inserter vectors ({tech})",
+                            f"{len(keys)} inserter{'s' if len(keys) != 1 else ''} "
+                            f"({', '.join(keys[:4])}{' ...' if len(keys) > 4 else ''}) reach "
+                            f"further or wider than the force may set: research {tech}"))
     lines = ([lines[0], f"  to build: {what}; {sum(need.values())} entities",
               f"  {supply.research_line(sup.research)}"] + lines[1:])
     # the first lead run (2026-10-21): a paste took up the burner row before the 137 belts its
@@ -1786,7 +2267,7 @@ def _net_items(ctx):
 
 
 def s_diff(ctx, args):
-    o = _opts(args, scope="all", confirm=False)
+    o = _opts(args, scope="all", confirm=False, yes=False)
     if ctx.composed is None:
         return ["diff: no composed surface yet (floorplan first)"], []
     r = _link(ctx)
@@ -1826,7 +2307,14 @@ def s_diff(ctx, args):
         lines.append(f"hand: {len(hand)} hand edits that the apply would replace, remove or set "
                      "back:")
         lines += [f"  {line}" for line in hand]
-        checks += [Check("by-hand", ctx.surface.name, line) for line in hand]
+        # 3.0 (the retro: builds undid pumps, hand upgrades and filters set in the game): with
+        # `stop_on by-hand` the paste waits; `fk build --yes` (diff --yes) is the player's OK for
+        # this one build, and adopting the change into the design keeps it
+        code = "by-hand-ok" if o["yes"] is True else "by-hand"
+        if code == "by-hand":
+            lines.append("  keep one: put it in the design (fk adopt, a Literal, a set line); "
+                         "paste over them: fk build --yes")
+        checks += [Check(code, ctx.surface.name, line) for line in hand]
     turned = _turned(ctx, rep)
     if turned:
         lines.append(f"  {turned.msg}")
@@ -2017,6 +2505,9 @@ STEPS = {
 }
 _SOURCE = ("read_surface", "read_terrain", "run_models", "elaborate", "size", "stop_on")
 _LAYOUT = ("place", "route", "hands", "tier", "cover_power", "cover_robots")
+#: the steps a `later:` section may not hold: they lay out, write or paste
+_NOT_LATER = tuple(s for s in _SOURCE if s != "stop_on") + _LAYOUT + (
+    "floorplan", "write_layout", "diff", "apply")
 
 
 def _write_checkpoint(ctx, step, upto):
@@ -2084,8 +2575,8 @@ def with_options(lines, extra):
     missing = sorted(set(add) - {ln.cmd for ln in lines})
     if missing:
         raise FlowError(f"--with: the script has no {', '.join(missing)} step")
-    return [Line(ln.n, ln.cmd, ln.args + add[ln.cmd], ln.text + "  " + " ".join(add[ln.cmd]))
-            if ln.cmd in add else ln for ln in lines]
+    return [Line(ln.n, ln.cmd, ln.args + add[ln.cmd], ln.text + "  " + " ".join(add[ln.cmd]),
+                 ln.later) if ln.cmd in add else ln for ln in lines]
 
 
 def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None,
@@ -2184,7 +2675,16 @@ def _steps(ctx, script, lines, first, last, width, written, notes, timings):
     for i in range(first, last + 1):
         ln = lines[i]
         t0 = time.monotonic()
-        report, checks = STEPS[ln.cmd](ctx, ln.args)
+        if ln.later:
+            try:
+                report, checks = STEPS[ln.cmd](ctx, ln.args)
+            except FlowError:
+                raise                         # a malformed line is still the script's error
+            except Exception as exc:      # noqa: BLE001 - off the critical path: it reports
+                report, checks = [f"failed (a later step; the build goes on): "
+                                  f"{type(exc).__name__}: {exc}"], []
+        else:
+            report, checks = STEPS[ln.cmd](ctx, ln.args)
         took = time.monotonic() - t0
         timings.write(f"{ln.cmd:<14} line {ln.n:>3}  {took:8.1f} s  (at {t0 - began:7.1f} s)\n")
         timings.flush()
@@ -2202,7 +2702,7 @@ def _steps(ctx, script, lines, first, last, width, written, notes, timings):
         written.add(ln.cmd)
         if ln.cmd in _LAYOUT or ln.cmd == "floorplan":
             _write_checkpoint(ctx, ln.cmd, lines[:i + 1])
-        stops = _stopping(ctx, checks)
+        stops = [] if ln.later else _stopping(ctx, checks)
         head = report[0] if report else ""
         summary = (f"[{i + 1:>2}/{width}] {ln.text:<44} {head[:70]}"
                    + (f"  ({len(checks)} check lines)" if checks else "")
@@ -2213,6 +2713,13 @@ def _steps(ctx, script, lines, first, last, width, written, notes, timings):
             why = (f"stopped at line {ln.n} ({ln.cmd}): {len(stops)} {stops[0].code} "
                    f"line(s), first: {stops[0]}")
             echo(why)
+            # 3.0: a held paste over hand edits names every one (the player says yes to a list)
+            hand = [c for c in stops if c.code == "by-hand"]
+            for c in hand[:30]:
+                echo(f"  by-hand: {c.msg}")
+            if hand:
+                echo(("  ... and more in out/diff.txt; " if len(hand) > 30 else "  ")
+                     + "keep one: put it in the design; paste over them: fk build --yes")
             # the steps this run would have reached say so, instead of keeping an earlier run's
             # report (the first lead run's mall2 designer read stale report_checks and route
             # lines after a build stopped at elaborate, 2026-10-21)
