@@ -13,9 +13,10 @@ well and report back what you learned. Rory watches the world and enjoys seeing 
   own file `world.fk` with the reactor (`plant.fk`) and the kit (`kit.fk`) in it, `nauvis.surface`
   (the world's own facts: ground and alerts) and the build script `nauvis.build.fkb`. The `.fkp`
   files beside them are layouts the toolkit writes: read them, never edit them.
-- `docs\FAIR-PLAY.md` has the game's rules, `docs\TOOLKIT.md` the commands (its "When you need
-  something" list is the map of the toolkit), `docs\LANGUAGE.md` the factory language,
-  `docs\EXAMPLES.md` factories that build cleanly, `docs\STRATEGY.md` Rory's advice.
+- `docs\FAIR-PLAY.md` has the game's rules. `docs\START.md` is the first hour (one example
+  from copy to look), `docs\EXAMPLES.md` the chapters (one idea each, every one a file that
+  builds), `docs\TOOLKIT.md` the commands and `docs\LANGUAGE.md` the language, each pointing
+  at the chapter that shows it; `docs\STRATEGY.md` Rory's advice.
 - `NOTES.md`: what the players before wrote down and what the lead keeps. `helpers\`: reusable
   features (its README says how). `AGENTS.md` is the lead's brief, not yours.
 

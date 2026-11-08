@@ -102,7 +102,8 @@ pastes it in one go, and the robots build it from the network's stock. `fk look`
 out. Growing the base is adding the next piece and repeating.
 
 - `docs\FAIR-PLAY.md` has the game's rules, all on one short page
-- `docs\TOOLKIT.md` has the commands; its "When you need something" list is the map of the toolkit
+- `docs\START.md` first (one example from copy to look), then `docs\EXAMPLES.md` chapter by
+  chapter; `docs\TOOLKIT.md` has the commands, each with the chapter that shows it
 - `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them
 - `docs\LANGUAGE.md` describes the factory language
 - `docs\STRATEGY.md` is Rory's advice on playing well (the turning points, the pace, the mall,
@@ -127,7 +128,8 @@ design no longer has.
 The game's rules are short and all in `docs\FAIR-PLAY.md`. Helpers grow in `helpers\` as a small
 library of reusable features rather than a pile of one-off scripts.
 
-The toolkit answers most questions a worker will hit (`docs\TOOLKIT.md`, "When you need
+The toolkit answers most questions a worker will hit (`docs\EXAMPLES.md`, each chapter's "what
+goes wrong here"; `docs\TOOLKIT.md` for the
 something"): `fk plan ITEM 1/s` for how many machines and drills a rate takes, `fk research` for
 what to research, `fk look` for what stands.
 

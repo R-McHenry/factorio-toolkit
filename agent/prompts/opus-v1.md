@@ -69,9 +69,11 @@ adds the poles, pastes it in one go, and the robots build it from the network's 
 The docs:
 
 - `docs\FAIR-PLAY.md` has the game's rules, all on one short page
-- `docs\TOOLKIT.md` has the commands; its "When you need something" list is the map of the toolkit
-- `docs\LANGUAGE.md` describes the factory language, cells first
-- `docs\EXAMPLES.md` has small factories that build cleanly
+- `docs\START.md` first: one example from copy to look, every output line explained
+- `docs\EXAMPLES.md`: fourteen chapters, one idea each, every one a file that builds, the
+  command, the lines it prints, and what goes wrong at that stage
+- `docs\TOOLKIT.md`: the commands, each with the chapter that shows it
+- `docs\LANGUAGE.md`: the language reference, every construct with the chapter that uses it
 - `docs\STRATEGY.md` is Rory's advice on playing well: reasons, not rules, so use what fits
 - `game\nauvis.fk` is the world design: one plot, your base (`world`, `game\world.fk`), 2000x2000
   tiles covering map -1000,-1000 to 999,999. A map tile x,y is the file's x+1000, y+1000

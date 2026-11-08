@@ -192,9 +192,11 @@ The docs:
 - `docs\SEABLOCK.md`: this world, its opening and its numbers
 - `docs\FAIR-PLAY.md`: the game's rules, one short page
 - `docs\BUILDING.md`: how a base is laid out, modules, cells, adding a machine, the bootstrap
-- `docs\TOOLKIT.md`: the commands; its "When you need something" list is the map of the toolkit
-- `docs\LANGUAGE.md`: the factory language, cells and modules first
-- `docs\EXAMPLES.md`: small factories that build cleanly
+- `docs\START.md` first: one example from copy to look, every output line explained
+- `docs\EXAMPLES.md`: fourteen chapters, one idea each, every one a file that builds, the
+  command, the lines it prints, and what goes wrong at that stage
+- `docs\TOOLKIT.md`: the commands, each with the chapter that shows it
+- `docs\LANGUAGE.md`: the language reference, every construct with the chapter that uses it
 - `docs\STRATEGY.md`: Rory's advice on playing well, with the reasons (written for vanilla; the
   shape holds)
 

@@ -33,7 +33,9 @@ adds the poles, pastes it in one go, and the robots build it from the network's 
 repeating.
 
 - `docs\FAIR-PLAY.md` has the game's rules, all on one short page
-- `docs\TOOLKIT.md` has the commands — read the "When you need something" list once, it is the map of
+- `docs\START.md` first: one example from copy to look, every output line explained; then
+  `docs\EXAMPLES.md` chapter by chapter, one idea each, every one a file that builds.
+- `docs\TOOLKIT.md` has the commands, each with the chapter that shows it; it is the map of
   the whole toolkit
 - `docs\EXAMPLES.md` has small factories that build cleanly, a steam power plant among them: a
   good place to start
