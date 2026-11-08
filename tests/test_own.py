@@ -253,25 +253,34 @@ class ApplyTest(unittest.TestCase):
                                              ("small-electric-pole", 16.5, 4.5)])
         self.assertEqual(rep.held, 0)
 
-    def test_a_hand_edit_the_build_replaces_is_reported(self):
+    def test_a_hand_edit_on_a_design_tile_is_a_mismatch_the_build_refuses(self):
         # 2.0 (Rory, 2026-10-21): the first lead run's build pasted a splitter over his
-        # self-feeding long-handed inserter on coal/~cfuel/s0's tile and said nothing. The game
-        # named no one: on that map no entity carried a last_user, his editor edit among them
+        # self-feeding long-handed inserter on coal/~cfuel/s0's tile and said nothing. 3.1 (Rory
+        # 11-08): a conflicting design is a MISMATCH, never a build over: the tile is refused, the
+        # rest is pasted, and the owner is named (the game named no one on that map)
         live = copy.deepcopy(live_as_designed(self.s))
         live["things"].remove(find(live, "transport-belt", 10.5, 0.5))
         live["things"].append(scene.thing(name="long-handed-inserter", type="inserter",
                                           x=10.5, y=0.5))
         r, rep = self.run_apply(live, record_of(self.s))
-        self.assertEqual(rep.hand, [
-            "Someone placed (the game names no one: the map editor, or a script) "
-            "long-handed-inserter at 10.5,0.5 on mini/~iron/b0's tile; this build replaces it"])
-        self.assertIn("by-hand: 1 placed by hand, replaced or removed by this build",
-                      "\n".join(rep.lines()))
+        self.assertEqual(rep.hand, [])
+        (c,) = rep.refused
+        self.assertEqual((c.key, c.stands, c.owner),
+                         ("nauvis:mini/~iron/b0", "long-handed-inserter", "unknown"))
+        self.assertNotIn("nauvis:mini/~iron/b0", [row["src"] for row in rep.rows])
+        self.assertEqual(len(rep.rows), 19)                    # the other 19 of 20 went
+        self.assertNotIn(("long-handed-inserter", 10.5, 0.5), r.ordered)   # not taken up either
+        text = "\n".join(rep.lines())
+        self.assertIn("mismatch: 1 design tiles have something standing on them", text)
+        self.assertIn("MISMATCH mini/~iron/b0 (transport-belt at 10.5,0.5): long-handed-inserter "
+                      "stands there, unknown; refused, not pasted. fk register 10,0,11,1 MODULE",
+                      text)
         named = copy.deepcopy(live)
         find(named, "long-handed-inserter", 10.5, 0.5)["last_user"] = "Rory_618"
         r, rep = self.run_apply(named, record_of(self.s))
-        self.assertEqual(rep.hand, ["Rory_618 placed long-handed-inserter at 10.5,0.5 on "
-                                    "mini/~iron/b0's tile; this build replaces it"])
+        (c,) = rep.refused
+        self.assertEqual(c.owner, "hand edit by Rory_618")
+        self.assertIn("fk adopt 10.5,0.5 --into FACTORY/NET", c.resolve)
 
     def test_the_toolkits_own_under_a_design_tile_is_no_hand_edit(self):
         live = copy.deepcopy(live_as_designed(self.s))

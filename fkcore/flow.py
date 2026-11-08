@@ -62,6 +62,7 @@ from . import avail as availmod
 from . import compiled as compiledmod
 from . import compose, connect, design, expand, fkp, placer, rates, route, snapshot
 from . import own as ownmod
+from . import placements as placementsmod
 from . import pack as packmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
@@ -2268,7 +2269,8 @@ def s_diff(ctx, args):
     if area is None:
         return ["diff: nothing is designed on this surface"], []
     rep = applymod.diff(r, ctx.composed, ctx.cat, area, ctx.surface, _net_items(ctx), own=own,
-                        force=_force(ctx), confirm=bool(o["confirm"]))
+                        force=_force(ctx), confirm=bool(o["confirm"]),
+                        placements=_placements(ctx))
     try:
         _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
@@ -2283,8 +2285,15 @@ def s_diff(ctx, args):
     checks = [Check("diff", ctx.surface.name, f"{k} {n}") for k, n in sorted(rep.counts().items())
               if k != "ok"]
     lines = rep.lines()
-    # 2.0 (Rory, 2026-10-21): a hand change the build would replace is said before the paste
     from . import sense
+    # 3.1 (Rory 11-08): a design tile something else stands on is a MISMATCH the apply refuses
+    bad = sense.conflicts(rep)
+    if bad:
+        lines.append(f"mismatch: {len(bad)} design tiles have something standing on them the "
+                     "toolkit did not paste; the apply refuses them and pastes the rest:")
+        lines += [f"  {c.line()}" for c in bad]
+        checks += [Check("mismatch", ctx.surface.name, c.line()) for c in bad]
+    # 2.0 (Rory, 2026-10-21): a hand change the build would replace is said before the paste
     hand = sense.hand_edits(rep)
     if hand:
         lines.append(f"hand: {len(hand)} hand edits that the apply would replace, remove or set "
@@ -2401,6 +2410,11 @@ def _force(ctx):
     return ctx.surface.force_name
 
 
+def _placements(ctx):
+    """3.1: the registry's records that explain what stands and is not this design's own."""
+    return placementsmod.explaining(placementsmod.load(ctx.root, ctx.surface.name), ctx.composed)
+
+
 def s_apply(ctx, args):
     o = _opts(args, scope="all", confirm=False)
     if ctx.composed is None:
@@ -2418,10 +2432,16 @@ def s_apply(ctx, args):
                          keys=keys, net_items=_net_items(ctx),
                          label=f"fk build {os.path.basename(ctx.script)}",
                          seed=ctx.ground is None, own=ownmod.load(ctx.root, ctx.surface.name),
-                         confirm=bool(o["confirm"]))
+                         confirm=bool(o["confirm"]), placements=_placements(ctx))
     if rep.own is not None:
         ownmod.save(ctx.root, ctx.surface.name, rep.own)
-    checks = []
+    if rep.rows:
+        # 3.1: one placement per factory in the paste (fkcore.placements), replaced on a rebuild
+        modules = {p.factory: p.module for p in ctx.surface.places.values()}
+        placementsmod.put_all(ctx.root, ctx.surface.name, placementsmod.from_apply(
+            ctx.composed, rep.rows, ctx.cat, modules, ctx.out, rep.tick,
+            f"fk build {os.path.basename(ctx.script)}"))
+    checks = [Check("mismatch", ctx.surface.name, c.line()) for c in rep.refused]
     if rep.hand:
         # 2.0: what this build replaced or removed that was placed by hand, for the player (the
         # Claude loop hands out/hand.txt's new lines to the lead the way it hands it chat)
