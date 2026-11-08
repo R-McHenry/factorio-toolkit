@@ -7,6 +7,11 @@ installed, or `FK_NATIVE=0` is set, every kernel runs its Python original.
   A port of the Python search, step for step, with Python's tie-break (heap order
   `(f, -g, state)`), so it returns the same path. Tap sinks call back into Python for their goal
   test (it needs the tree); everything else runs native.
+- `walk`: `fkcore.route._walk`, belt distances over a bounded grid (the same dict, in the same
+  order), used by the hub, join and ribbon searches.
+- `hubs`: `fkcore.route._hubs` after its seeds: every walk and the candidate ranking in one call.
+
+`FK_NATIVE=check` runs every kernel both ways and raises on any difference.
 
 Build and install into the current Python (from this folder):
 

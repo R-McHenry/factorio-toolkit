@@ -96,11 +96,13 @@ from __future__ import annotations
 
 import heapq
 import math
+import os
 import re
 from dataclasses import dataclass, field
 
 from . import connect as connectmod
 from . import fkp as fkpmod
+from . import steiner as steinermod
 from .expand import attach_points, frame_of, port_edges, record_misfit
 from .steiner import COSTS, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
@@ -468,14 +470,34 @@ def _ug_spans(cat, ents):
     return spans
 
 
+def _ent_ground(cat, e):
+    """(tiles, front tiles, hand tiles, hand owner is the net) of one entity: what it stands on,
+    what its belt points into (``_belt_fronts``), what its hand picks from or drops onto
+    (``_hand_tiles``; a drill's drop has no net). Remembered on the catalog per entity value."""
+    memo = cat.__dict__.setdefault("_route_ground_memo", {})
+    key = (e.name, e.x, e.y, e.dir, e.attrs.get("ug"))
+    got = memo.get(key)
+    if got is None:
+        got = memo[key] = (tuple(fkpmod.tiles_of(cat, e)), tuple(_belt_fronts(cat, [e])),
+                           tuple(_hand_tiles(cat, [e])), cat.has_entity(e.name)
+                           and cat.kind(e.name) == "inserter")
+    return got
+
+
 def _ground(cat, ents, frames, js, net, terrain=()):
     blocked = set(frames) | set(terrain)
-    for e in ents:
-        blocked |= fkpmod.tiles_of(cat, e)
-    for tile, owner in _belt_fronts(cat, ents).items():
+    fronts, hands = {}, {}
+    for e in ents:         # as _belt_fronts and _hand_tiles: the first entity on a tile owns it
+        ts, fs, hs, ins = _ent_ground(cat, e)
+        blocked.update(ts)
+        for t in fs:
+            fronts.setdefault(t, e.net)
+        for t in hs:
+            hands.setdefault(t, e.net if ins else None)
+    for tile, owner in fronts.items():
         if owner != net:
             blocked.add(tile)
-    for tile, owner in _hand_tiles(cat, ents).items():
+    for tile, owner in hands.items():
         if owner != net:
             blocked.add(tile)
     for other, job in js.items():
@@ -691,9 +713,45 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
 
 
 # -- the hub --------------------------------------------------------------------------------------
+def _native_box_grid(grid):
+    """The grid's fkroute.NativeGrid when the native kernel may walk it (a _Bounded), else None."""
+    if not steinermod.native_on():
+        return None
+    try:
+        ng = steinermod._native_grid(grid)
+    except (TypeError, OverflowError):
+        return None
+    return ng if ng is not None and getattr(grid, "box", None) is not None and \
+        type(grid).blocked is _Bounded.blocked else None
+
+
+def _int_tiles(ts):
+    out = []
+    for t in ts:
+        if type(t[0]) is not int or type(t[1]) is not int:
+            return None
+        out.append((t[0], t[1]))
+    return out
+
+
 def _walk(grid, seeds, reach=5):
     """Belt distance over free ground from ``seeds``: a step to a free tile, or a tunnel under
-    whatever blocks it to the first free tile within ``reach`` (as the search may jump)."""
+    whatever blocks it to the first free tile within ``reach`` (as the search may jump).
+    Runs in fkroute when it can (the same dict, in the same order)."""
+    seeds = list(seeds)
+    ng = _native_box_grid(grid)
+    ints = _int_tiles(seeds) if ng is not None else None
+    if ints is not None:
+        got = dict(steinermod._native.walk(ng, ints, reach))
+        if os.environ.get("FK_NATIVE") == "check":
+            py = _walk_py(grid, seeds, reach)
+            if list(py.items()) != list(got.items()):
+                raise AssertionError("fkroute.walk differs from _walk_py")
+        return got
+    return _walk_py(grid, seeds, reach)
+
+
+def _walk_py(grid, seeds, reach=5):
     dist = {s: 0 for s in seeds}
     todo = [(0, s) for s in sorted(dist)]
     while todo:
@@ -728,8 +786,24 @@ def _hubs(grid, job, most=_HUBS):
     ends = set(job.ends())
     near_d = [[t] for t, _h in job.starts] + [_beside(grid, r) for _k, r in job.sources]
     near_c = [[t] for t, _h in job.goals] + [_beside(grid, r) for _k, r in job.taps]
-    dd = [_walk(grid, s) for s in near_d]
-    dc = [_walk(grid, s) for s in near_c]
+    ng = _native_box_grid(grid)
+    if ng is not None:
+        nd = [_int_tiles(s) for s in near_d]
+        nc = [_int_tiles(s) for s in near_c]
+        ne = _int_tiles(ends)
+        if ne is not None and all(s is not None for s in nd + nc):
+            got = [(tuple(t), f) for t, f in steinermod._native.hubs(ng, nd, nc, ne, most)]
+            if os.environ.get("FK_NATIVE") == "check":
+                py = _hubs_py(grid, ends, near_d, near_c, most)
+                if py != got:
+                    raise AssertionError(f"fkroute.hubs differs from _hubs_py: {got} != {py}")
+            return got
+    return _hubs_py(grid, ends, near_d, near_c, most)
+
+
+def _hubs_py(grid, ends, near_d, near_c, most):
+    dd = [_walk_py(grid, s) for s in near_d]
+    dc = [_walk_py(grid, s) for s in near_c]
     if not dd or not dc:
         return []
     common = set.intersection(*(set(d) for d in dd + dc)) - ends

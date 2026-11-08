@@ -58,6 +58,28 @@ class NativeParity(unittest.TestCase):
             with self.subTest(seed=seed):
                 self.assertEqual(_run("1", grid, root, sinks), _run("0", grid, root, sinks))
 
+    def test_walk_and_hubs(self):
+        """route._walk and route._hubs: the same dict (in the same order) and the same hubs."""
+        from fkcore import route
+        for seed in range(150):
+            grid, _root, _sinks = _case(seed)
+            rnd = random.Random(seed + 1000)
+            box = (-1, -2, 23, 17)
+            bg = route._Bounded(grid.occ, box, grid.spans)
+            free = [(x, y) for x in range(box[0], box[2]) for y in range(box[1], box[3])
+                    if (x, y) not in grid.occ]
+            near_d = [rnd.sample(free, rnd.randrange(1, 3)) for _ in range(rnd.randrange(1, 4))]
+            near_c = [rnd.sample(free, rnd.randrange(1, 3)) for _ in range(rnd.randrange(1, 4))]
+            ends = set(rnd.sample(free, 3))
+            with self.subTest(seed=seed):
+                ng = route._native_box_grid(bg)
+                self.assertIsNotNone(ng)
+                for s in near_d + near_c + [[(-5, 3)]]:          # one seed outside the box
+                    py = route._walk_py(bg, s)
+                    self.assertEqual(list(steiner._native.walk(ng, s, 5)), list(py.items()))
+                got = [(tuple(t), f) for t, f in steiner._native.hubs(ng, near_d, near_c, list(ends), 6)]
+                self.assertEqual(got, route._hubs_py(bg, ends, near_d, near_c, 6))
+
     def test_check_mode_raises_on_a_difference(self):
         grid, root, sinks = _case(3)
         real = steiner._astar_native
