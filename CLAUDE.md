@@ -34,6 +34,15 @@ A change to the game's rules goes in FAIR-PLAY.md and nowhere else.
   branch, why it waits and who merges it. Release numbers are assigned on main at merge time, and
   whoever merges updates `..\STATE.md` in the same commit. Nothing (lab, run, host) deploys from a
   dirty tree: install from a commit and record its sha.
+- **Start of a session:** `python tools/branches.py` prints main's version, every branch with
+  commits not on main, dirty worktrees, and whether STATE.md is older than the last tag.
+- **The merge set** runs in the background before every merge to main (about 2 minutes):
+  test_route, test_route_cycle, test_route_policy, test_route_taps, test_route_promote,
+  test_route_ground, test_route_units, test_steiner_split_tap, test_native, test_compile_once,
+  test_compiled, test_design, test_flow, test_lab, test_lab_megabase, test_walk, test_golden,
+  test_literal_ports, test_friction_30, test_circuits, test_cover, test_rail_signals,
+  test_terrain, test_robots, test_robots_reach, test_terrain_flow, test_apply, test_sense,
+  test_own, test_surface, test_placements, plus the branch's own new tests.
 - **Core ideas:**
   - a net is a declared object (name, items, drivers -> consumers), and machines join nets;
   - one source owns every tile;
