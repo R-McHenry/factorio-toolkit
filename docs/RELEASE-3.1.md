@@ -110,6 +110,31 @@ objects into new source so a new blueprint mates with and overlaps them.
   the Lua paths of `fk paste`, `capture --from` and `register` are not yet checked against a
   laptop server.
 
+### 3.1.1: checked on the lab server (2026-11-08, evening)
+
+The 3.1 commands were run against the live lab server (Factorio 2.1.24 in WSL, the megahub
+save) from the lab run `lab-session\fk-run`:
+
+- `read-terrain --entities` over the 11-05 gears block: 33 standing entities, 49 blocked tiles,
+  recorded in the terrain file with the tick.
+- `fk capture --from=AREA --into FILE --names` wrote an anchored Literal (33 entities, names
+  asm1/asm2, one port) and printed the two `.fk` lines; `fk paste FILE --at 2500,-300 --surface
+  lab` pasted and revived it and recorded placement `gears-std`; a second paste at the same
+  origin replaced the record.
+- `fk build --to diff` on the run's own nauvis design against the lab server's nauvis: the diff
+  reported two conflicts (a crash-site spaceship and a recycler on design tiles, owner unknown)
+  with the resolving commands, and `mismatch: 3 design tiles` refused.
+- Found and fixed: `fk look ID` and `fk diff ID` resolved a placement on the lab surface but read
+  the game's own surface. 3.1.1: a placement id brings its surface (`_scope`, `look.run(surface,
+  force)`), and `robots`, `register`, `diff` and `look --source world` take `--surface S` for an
+  area on another surface. Against another surface the design is empty, so what stands is judged
+  by the placements alone (`placed 33` for the paste).
+- Known: on the lab, designs live in the build-alone workspaces, so `fk robots --surface lab`
+  sees the megahub's 208 roboports but no design chests ("every roboport is redundant for
+  them"); `fk diff ID` of a build-alone placement judges against an empty design. A value that
+  starts with a minus sign goes with `=` (`--from=-300,-300,-100,-100`); argparse reads it as a
+  flag otherwise.
+
 ## Wave 3
 
 ### Documentation (31-docs)

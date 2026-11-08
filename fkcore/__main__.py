@@ -147,6 +147,7 @@ use the game link, and only with FK_LINK=on)
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -254,17 +255,33 @@ def _view(a):
 
 
 def _area_or_placement(game, text, surface=None):
-    """3.1: ``X0,Y0,X1,Y1`` -> (area, None); a placement id -> (its area, its head line)."""
+    """3.1: ``X0,Y0,X1,Y1`` -> (area, None, None); a placement id -> (its area, its head line,
+    its record). The record says which surface it stands on (3.1.1: a placement on another
+    surface than the game's own, the lab's say, is read there)."""
     from . import placements
     if not text:
-        return None, None
+        return None, None, None
     if placements.is_area(text):
-        return _area(text), None
+        return _area(text), None, None
     try:
         rec, area = placements.resolve(game, text, surface)
     except (KeyError, ValueError) as exc:
         raise SystemExit(f"error: {str(exc).strip(chr(34)).strip(chr(39))}") from None
-    return area, placements.head(rec)
+    return area, placements.head(rec), rec
+
+
+def _scope(game, cat, surface=None, rec=None):
+    """(surface file, composed design) a world command judges against (3.1.1). The game's own
+    surface and design, unless ``rec`` (a placement) or ``surface`` names another surface: then
+    the surface file is the game's with that name and force, and the design is empty (nothing
+    of the game codebase is designed there; what stands is judged by the placements alone)."""
+    sf, _surface_lay, _lay_path, s = _composed(game, cat)
+    want = rec.surface if rec is not None else surface
+    if want and want != sf.name:
+        force, _name = _surface_force(game, want)
+        sf = dataclasses.replace(sf, name=want, force=force)
+        s = compose.Surface(name=want)
+    return sf, s
 
 
 def _surface_force(game, surface=None, force=None):
@@ -292,10 +309,13 @@ def _is_free(game, surface):
 
 def _look_world(a, cat):
     from . import look
-    area, head = _area_or_placement(a.game, a.area)
+    area, head, rec = _area_or_placement(a.game, a.area)
     view = _view(a)
+    surface = rec.surface if rec is not None else getattr(a, "surface", None)
+    force = _surface_force(a.game, surface)[0] if surface else None
     return _world(a, cat, "look --source world", lambda r: ([head] if head else []) + look.run(
-        r, a.game, cat, area, a.notify, a.watch, a.write_marks, view=view).lines())
+        r, a.game, cat, area, a.notify, a.watch, a.write_marks, view=view, surface=surface,
+        force=force).lines())
 
 
 def _paste(a, cat):
@@ -365,7 +385,7 @@ def _register(a, cat):
     if not a.what and not a.as_name:
         print("error: register AREA MODULE[/INSTANCE], or register AREA --as NAME", file=sys.stderr)
         return 2
-    sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
+    sf, s = _scope(a.game, cat, getattr(a, "surface", None))
     module, _, inst = (a.what or "").partition("/")
     place = None
     if a.as_name:
@@ -424,8 +444,9 @@ def _register(a, cat):
                 f"{module}" + (" (a factory of this surface)" if place is not None else
                                " (no factory of this surface places it: a placement only)"),
                 f"  {placements.head(rec)}"]
+        # a --as placement explains its own entities (placed), a factory's are judged against it
         rep = sense.sense(s, live, cat, list(area), sf, own=ownmod.load(a.game, sf.name),
-                          placements=others)
+                          placements=others if place is not None else others + [rec])
         lines = head + lines + ["differences against the design (as fk diff says them):"] \
             + [f"  {ln}" for ln in rep.lines()]
         bad = sense.conflicts(rep)
@@ -441,11 +462,11 @@ def _diff_cmd(a, cat):
     """fk diff PLACEMENT_ID|AREA (3.1): the diff of the game codebase's design over that area,
     headed by the placement (its module and origin). Cheap: the area is already there."""
     from . import apply as applymod, look, own as ownmod, placements, sense
-    sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
-    area, head = _area_or_placement(a.game, a.what)
+    area, head, rec = _area_or_placement(a.game, a.what)
     if area is None:
         print("error: diff PLACEMENT_ID | X0,Y0,X1,Y1", file=sys.stderr)
         return 2
+    sf, s = _scope(a.game, cat, getattr(a, "surface", None), rec)
 
     def body(r):
         items, notes = look.net_items(a.game, sf, cat)
@@ -578,7 +599,7 @@ def _look(a, cat):
     except surfacemod.SurfaceError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    box, head = _area_or_placement(a.game, a.area, sf.name)
+    box, head, _rec = _area_or_placement(a.game, a.area, sf.name)
     if head:
         print(head)
     view = _view(a)
@@ -1648,7 +1669,9 @@ def _adopt_edits(a, cat):
     sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
     text = a.what
     if placements.is_area(text) or not re.fullmatch(r"[-\d.,; ]+", text):
-        area, head = _area_or_placement(a.game, text, sf.name)
+        area, head, rec = _area_or_placement(a.game, text)     # any surface's placement
+        if rec is not None and rec.surface != sf.name:
+            sf, s = _scope(a.game, cat, None, rec)
     else:
         tiles = [tuple(math.floor(float(v)) for v in t.split(","))
                  for t in text.replace(";", " ").split()]
@@ -1827,7 +1850,7 @@ def _robots(a, cat):
     read once, against the design's logistic chests. A read and a report; it changes nothing."""
     from . import link, robots
     area = _area(a.area)
-    sf, _lay, _path, s = _composed(a.game, cat)
+    sf, s = _scope(a.game, cat, getattr(a, "surface", None))
     force = a.force or sf.force_name
     chests = [(k, e.name, float(e.x), float(e.y)) for k, e in s.entities.items()
               if e.name in robots.LOGISTIC_CHESTS and not e.attrs.get("dnp")]
@@ -2042,6 +2065,8 @@ def main(argv=None):
     lk.add_argument("game")
     lk.add_argument("--source", default="design", choices=("design", "world"))
     lk.add_argument("--area")
+    lk.add_argument("--surface", help="--source world: another surface than the game's own (a "
+                    "placement id brings its own)")
     lk.add_argument("--notify", choices=("nearby", "all", "off"))
     lk.add_argument("--watch", help="strict | keep | revert | mark DUR, or plots=A,sanctioned=B")
     lk.add_argument("--write-marks", action="store_true")
@@ -2221,10 +2246,13 @@ def main(argv=None):
     rg.add_argument("area", help="X0,Y0,X1,Y1")
     rg.add_argument("what", nargs="?", help="MODULE[/INSTANCE]: a factory of the surface, or a module")
     rg.add_argument("--as", dest="as_name", help="NAME for something no module stands for")
+    rg.add_argument("--surface", help="another surface than the game's own (the lab)")
     df = sub.add_parser("diff", description="3.1: the diff over a placement's area (or an area), "
                         "headed by the placement")
     df.add_argument("game")
     df.add_argument("what", help="PLACEMENT_ID or X0,Y0,X1,Y1")
+    df.add_argument("--surface", help="for an area: another surface than the game's own (a "
+                    "placement id brings its own)")
     pls = sub.add_parser("placements", description="3.1: the registry of what was pasted")
     pls.add_argument("game")
     ch = sub.add_parser("chat")
@@ -2318,6 +2346,7 @@ def main(argv=None):
     rb.add_argument("game")
     rb.add_argument("--area")
     rb.add_argument("--force")
+    rb.add_argument("--surface", help="another surface than the game's own (the lab)")
     sg = sub.add_parser("stage", add_help=False)
     sg.add_argument("game")
     sg.add_argument("rest", nargs=argparse.REMAINDER)

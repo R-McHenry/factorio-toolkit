@@ -528,6 +528,12 @@ fk look ID          fk diff ID|AREA              the look and the diff over a pl
 fk adopt ID|AREA [--write]                       propose `set` lines for settings changed in the world; --write appends them
 ```
 
+A placement id brings its own surface: `fk look ID`, `fk diff ID`, `fk adopt ID` and `fk capture
+--from ID` read the surface the placement stands on (the lab's, say), even when the game's design
+is on another. For an area on another surface give `--surface S` (`robots`, `register`, `diff`,
+`look --source world`). A value that starts with a minus sign goes with `=`:
+`--from=-300,-300,-100,-100`, `--at=-300,-300`, `--area=-300,-300,-100,-100`.
+
 **The mismatch rule.** A build pastes only onto tiles it can explain. A world entity standing
 (or pending as a ghost) on a design entity's tiles that the toolkit did not paste there is a
 MISMATCH: the diff names it and its owner (`placement <id>`, `hand edit by <player>`, or

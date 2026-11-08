@@ -320,11 +320,16 @@ def side_by_side(design, live, area, max_width=MAX_WIDTH):
 
 
 def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag="look",
-        view=None):
+        view=None, surface=None, force=None):
     """Look at ``area`` of the game codebase ``game`` in the game: snapshot, sense, render; write
     the marks (``write_marks``) and push (notify all). ``view`` (``vision.View``): zoom, layers,
-    image; a map look returns a :class:`MapLook`."""
+    image; a map look returns a :class:`MapLook`. ``surface`` (3.1.1): another surface than the
+    game's own (a placement's, the lab's): read there, against an empty design, with ``force``."""
     sf, surface_lay, lay_path, s = composed(game, cat)
+    if surface and surface != sf.name:
+        import dataclasses
+        sf = dataclasses.replace(sf, name=surface, force=force or sf.force)
+        s = compose.Surface(name=surface)
     if area is None:
         if not sf.free:
             raise LookError("fair play: a look needs --area X0,Y0,X1,Y1 on a surface that is not "
