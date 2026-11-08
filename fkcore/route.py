@@ -2794,7 +2794,8 @@ def _filter_loads(flat, lay, cat):
 
 #: PLAN-3.0 §4: the router's version a compiled module was laid by; a compiled module of another
 #: version is laid again. Bump it when a change to the router would lay a module otherwise.
-COMPILE_VERSION = "route-3.0.2"
+# 3.0.2 + lab: the compile key leaves out rails other modules own (bumped from route-3.0.2)
+COMPILE_VERSION = "route-3.0.2-lab"
 
 
 def _unit(net, sealed):
@@ -2901,10 +2902,14 @@ def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
             kids.append((p[len(u) + 1:], r.kind, sorted(r.params.items()), r.x - x0, r.y - y0,
                          r.rot))
     parts.append(sorted(kids))
+    # 2.1.35: a rail or signal another module owns (a shared lane's ramp, the planned signals)
+    # is left out of the key: it differs from twin to twin at the frame's edge, and ``_fits``
+    # still rejects a moved route that would stand on it
     parts.append(sorted((e.name,) + tf.point(e.x, e.y) + (tf.d16(e.dir) if e.dir is not None
                                                           else -1,)
                         for e in _near(ground, x0, y0, x1, y1)
-                        if x0 <= e.x < x1 and y0 <= e.y < y1))
+                        if x0 <= e.x < x1 and y0 <= e.y < y1
+                        and not ("rail" in e.name and not e.key.startswith(u + "/"))))
     if terrain:
         parts.append(sorted(tile((x, y)) for x in range(x0, x1) for y in range(y0, y1)
                             if (x, y) in terrain))

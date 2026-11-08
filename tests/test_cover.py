@@ -246,6 +246,31 @@ class CoverTest(unittest.TestCase):
         self.assertEqual(audit(lay, poles), ([], 1))
 
 
+class UnitsTest(unittest.TestCase):
+    """2.1.35: poles laid per sealed unit, alike units alike, one last pass joining them."""
+
+    def test_alike_units_take_the_first_ones_poles_and_the_grid_is_one(self):
+        from fkcore.cover import cover_power_units
+        text = ""
+        for k, dx in enumerate((0, 20, 40)):
+            for line in ROW.strip().splitlines():
+                _e, key, name, pos, *rest = line.split()
+                x, y = pos.split(",")
+                text += f"e u{k}/{key} {name} {float(x) + dx},{y} {' '.join(rest)}\n"
+        lay = L(text, "52x7")
+        units = [(f"u{k}", (dx, 0, dx + 12, 7), ("Row", 0)) for k, dx in enumerate((0, 20, 40))]
+        poles, rep = cover_power_units(lay, CAT, units)
+        self.assertEqual(rep.units, (1, 2))
+        self.assertEqual(audit(lay, poles), ([], 1))
+        self.assertEqual((rep.covered, rep.total, rep.components), (36, 36, 1))
+        inside = [sorted((p.x - dx, p.y) for p in poles if dx <= p.x < dx + 12)
+                  for dx in (0, 20, 40)]
+        self.assertEqual(inside[0], inside[1])
+        self.assertEqual(inside[1], inside[2])
+        self.assertEqual(len({p.key for p in poles}), len(poles))
+        self.assertTrue(all(p.key.startswith("power/p") for p in poles))
+
+
 class ExistingPolesTest(unittest.TestCase):
     def test_existing_poles_power_and_anchor_the_grid(self):
         lay = L("""

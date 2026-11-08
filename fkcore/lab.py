@@ -539,9 +539,13 @@ def clear(r, game, name):
     return [f"lab {name}: slot {x},{y} emptied ({got} entities) and freed"]
 
 
-def build(r, game, name, src=None, size=None, cat=None, extra=None):
+def build(r, game, name, src=None, size=None, cat=None, extra=None, keep=False):
     """NAME on its lab slot: workspace, the slot emptied, the lab flow, then power, the
-    requesters' items and burners' first coal. -> the report lines."""
+    requesters' items and burners' first coal. ``keep`` (3.0.2-lab, Rory 11-08: a base in the lab
+    is changed a region at a time): the slot is not emptied, so what stands (trains, a hub's
+    stock, the things placed by hand) stays; the paste lays the design over it (``apply --area``
+    for one region), and nothing is stocked, powered or fuelled: it stands already, and stock put
+    in by the build would be a dump. -> the report lines."""
     before = slots(game).get(name)
     ws, (x, y, w, h) = prepare(game, name, src, size)
     sx, sy, sw, sh = slots(game)[name]
@@ -550,13 +554,21 @@ def build(r, game, name, src=None, size=None, cat=None, extra=None):
     edge = r.lua(lua_unbounded()).strip()
     if edge.startswith("was"):
         lines.append(f"  the lab has no edge now (it {edge})")
+    if keep and before is None:
+        raise LabError(f"{name}: --keep keeps a slot that stands; it has none yet (fk lab {name})")
+    if keep and list(before) != [sx, sy, sw, sh]:
+        raise LabError(f"{name}: --keep: it outgrew its slot at {before[0]},{before[1]}; a build "
+                       "without --keep moves it")
     if before is not None and list(before) != [sx, sy, sw, sh]:
         moved = r.lua(lua_clear(_box(*before))).strip()
         lines.append(f"  it outgrew its slot at {before[0]},{before[1]}: that one emptied "
                      f"({moved} entities)")
     chunks = r.lua(link.lua_generate_area(SURFACE, FORCE, _box(sx, sy, sw, sh))).strip()
-    gone = r.lua(lua_clear(_box(sx, sy, sw, sh))).strip()
-    lines.append(f"  emptied first: {gone} entities; {chunks} chunks generated under the slot")
+    if keep:
+        lines.append(f"  kept: the slot stands as it is; {chunks} chunks generated under it")
+    else:
+        gone = r.lua(lua_clear(_box(sx, sy, sw, sh))).strip()
+        lines.append(f"  emptied first: {gone} entities; {chunks} chunks generated under the slot")
     steps = []
     # PLAN-3.0 §4: a sealed module the lab routed is compiled into the game folder's store, so
     # the world build (and the next lab build) lays it from there
@@ -568,6 +580,9 @@ def build(r, game, name, src=None, size=None, cat=None, extra=None):
             lines.append("  " + " ".join(hit.split("]", 1)[1].split()))
     if code != 0:
         lines.append(f"  stopped: {steps[-1] if steps else 'the flow'} (out\\*.txt in the workspace)")
+        return lines
+    if keep:
+        lines.append("  kept: no power, stock or fuel added (what stands has them)")
         return lines
     fed = _feed(r, ctx, name, x, y)
     got = json.loads(r.lua(lua_supply(_box(sx, sy, sw, sh))).strip() or "{}")

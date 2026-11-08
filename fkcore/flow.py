@@ -931,6 +931,50 @@ def _one_inserter(ctx, factory, flat, lay):
             "only what the sink accepts: no CLOG" for n in sorted(clear)]
 
 
+def _power_units(ctx, factory, lay):
+    """2.1.35: the sealed modules of ``factory`` as cover units, innermost first:
+    [(path, frame, (kind, rot))]; [] for a layout without them."""
+    flat = ctx.flats.get(factory)
+    if flat is None or not getattr(flat, "sealed", None):
+        return []
+    from .expand import frame_of
+    out = []
+    for path in flat.sealed:
+        rec = lay.insts.get(path)
+        if rec is None or path not in flat.insts:
+            continue
+        try:
+            box = tuple(int(v) for v in frame_of(flat, lay, path, ctx.cat))
+        except Exception:            # a frame the fragment can't size: the last pass covers it
+            continue
+        out.append((path, box, (rec.kind, int(rec.rot or 0) % 4)))
+    out.sort(key=lambda u: (-u[0].count("/"), u[0]))
+    return out
+
+
+def _empty_slots(ctx, factory, lay):
+    """2.1.34: the tiles of every sealed module that holds nothing (a slot a paste will fill, as
+    the megabase grid's bay slots are): cover power keeps its poles out of them, so the paste
+    finds its frame empty. -> frozenset of tiles."""
+    flat = ctx.flats.get(factory)
+    if flat is None or not getattr(flat, "sealed", None):
+        return frozenset()
+    from .expand import frame_of
+    full = {e.key.split("/")[:-1] and "/".join(e.key.split("/")[:-1]) for e in lay.entities.values()}
+    tiles = set()
+    for path in flat.sealed:
+        if path not in lay.insts or path not in flat.insts:
+            continue
+        if any(o == path or o.startswith(path + "/") for o in full if o):
+            continue
+        try:
+            x0, y0, x1, y1 = frame_of(flat, lay, path, ctx.cat)
+        except Exception:            # a frame the fragment can't size: leave it to the poles
+            continue
+        tiles |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+    return frozenset(tiles)
+
+
 def _frame_blocked(ctx, factory, size):
     """The terrain's blocked tiles in ``factory``'s frame (empty on a paper surface)."""
     if ctx.ground is None or ctx.surface is None or factory not in ctx.surface.places:
@@ -1523,7 +1567,7 @@ def s_cover_power(ctx, args):
     from . import domains
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
-        keep_out = _frame_blocked(ctx, factory, lay.size)
+        keep_out = _frame_blocked(ctx, factory, lay.size) | _empty_slots(ctx, factory, lay)
         standing = _standing(ctx, factory)
         doms = domains.active(ctx.flats.get(factory))
         if doms is not None:
@@ -1539,12 +1583,24 @@ def s_cover_power(ctx, args):
             checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
             continue
         pinned = [] if o.get("fresh") is True else _own(ctx.previous.get(factory), "power", "p")
-        poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
-                                       pinned=pinned, standing=standing)
+        units = [] if o.get("flat") is True else _power_units(ctx, factory, lay)
+        if units:
+            # 2.1.35 (Rory 11-07): poles in the hierarchy, as the routes are: each sealed module
+            # its own, alike modules alike, then one pass joins them. Laid fresh each build (a
+            # unit's poles depend only on what stands in it); ``--flat`` for the one-pass cover
+            pinned = []
+            poles, rep = cover.cover_power_units(lay, ctx.cat, units, pole=pole,
+                                                 keep_out=keep_out)
+        else:
+            poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
+                                           pinned=pinned, standing=standing)
         # 2.1.26: the poles just laid, not a second cover_power (the live world's took ~30 s each)
         new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
                                 standing=standing, poles=poles)
         ctx.layouts[factory] = new
+        if units:
+            lines.append(f"{factory}: by unit: {rep.units[0]} sealed modules laid, "
+                         f"{rep.units[1]} took a twin's poles")
         lines.append(f"{factory}: {rep.summary()}"
                      + (f"; {len(keep_out)} terrain tiles kept out" if ctx.ground is not None
                         else ""))

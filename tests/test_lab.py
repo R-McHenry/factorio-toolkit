@@ -147,6 +147,36 @@ class LabTest(unittest.TestCase):
         self.assertIn("force_generate_chunk_requests", said[1])
         self.assertIn("chunks generated under the slot", lines[2])
 
+    def test_a_kept_build_empties_nothing_and_stocks_nothing(self):
+        # 3.0.2-lab (Rory 11-08): a base in the lab changes a region at a time, its trains, stock
+        # and hand-placed things standing; stock put in by the build would be a dump
+        said = []
+
+        def lua(text):
+            said.append(text)
+            return "was 2048x2048" if "map_gen_settings" in text else "0"
+        r = mock.Mock()
+        r.lua.side_effect = lua
+        with mock.patch.object(lab.flow, "run", return_value=(1, None)):
+            lab.build(r, self.game, "iron")
+        box = lab._box(*lab.slots(self.game)["iron"])
+        self.assertIn(lab.lua_clear(box), said)
+        said.clear()
+        ctx = mock.Mock()
+        with mock.patch.object(lab.flow, "run", return_value=(0, ctx)), \
+                mock.patch.object(lab, "_feed") as feed:
+            lines = lab.build(r, self.game, "iron", keep=True)
+        self.assertNotIn(lab.lua_clear(box), said)
+        self.assertNotIn(lab.lua_supply(box), said)
+        feed.assert_not_called()
+        self.assertTrue(any("kept: the slot stands" in ln for ln in lines))
+
+    def test_keep_needs_a_slot_that_stands(self):
+        r = mock.Mock()
+        r.lua.return_value = "0"
+        with self.assertRaises(lab.LabError):
+            lab.build(r, self.game, "iron", keep=True)
+
     def test_the_lua_is_safe(self):
         for text in (lab.lua_clear((0, 0, 10, 10)), lab.lua_supply((0, 0, 10, 10)),
                      lab.lua_unbounded()):

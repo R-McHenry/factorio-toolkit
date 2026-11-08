@@ -71,7 +71,9 @@ PW_FILE = os.environ.get("FK_RCON_PW_FILE") or _GAME.get("pw_file") \
 #: script-output of the server (write-data/script-output); snapshot files land in OUT_DIR/fk5/.
 OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT") or _GAME.get("script_output") \
     or "/home/computah/factorio/server/factorio/script-output"
-TIMEOUT = 5.0
+#: seconds a reply may take; FK_RCON_TIMEOUT raises it for a big lab build (11-07: megahub's
+#: 45k-entity snapshot took longer than 5 s)
+TIMEOUT = float(os.environ.get("FK_RCON_TIMEOUT", "5.0"))
 
 _FORBIDDEN = re.compile(r"\b(script\s*\.\s*on_\w+|commands\s*\.\s*add_command|remote\s*\.\s*add_interface"
                         r"|script\s*\.\s*register_\w+)")

@@ -935,8 +935,14 @@ class _Layer:
                                if e.attrs.get("net") == net and self.kind(k) in _GATED),
                               key=fkpmod.natural_key)
             if not carriers:
+                # 3.0.2-lab (Rory 11-08: "connect a wire right to a belt and enable or disable
+                # flow"): a belt-only route is switched at one belt, the first every driver's
+                # items pass through
+                belt = self.trunk_belt(net)
+                carriers = [belt] if belt else []
+            if not carriers:
                 self.check("gate-open", f"net {net}", f"gated ({cd.text}), but its route has no "
-                           "inserter or pump to gate: it runs ungated")
+                           "inserter, pump or belt to gate: it runs ungated")
                 continue
             attr, value = cd.attr()
             for k in carriers:
@@ -945,6 +951,31 @@ class _Layer:
             self.lines.append(f"gated net {net}: {len(carriers)} carrier"
                               f"{'s' if len(carriers) != 1 else ''} {attr}={value}"
                               + (f" on {cd.wire}" if cd.wire else ""))
+
+    def trunk_belt(self, net):
+        """The first transport belt of net ``net``'s route that every head of the route reaches
+        (past the joins of all its drivers), or None."""
+        mine = {k for k, e in self.lay.entities.items() if e.attrs.get("net") == net}
+        if not mine:
+            return None
+        heads = [k for k in mine if not any(p in mine for p, _v in self.g.pred.get(k, ()))]
+        reach = None
+        order = {}
+        for h in sorted(heads, key=fkpmod.natural_key):
+            seen, todo = {h: 0}, [h]
+            while todo:
+                nxt = []
+                for k in todo:
+                    for b, _v in self.g.succ.get(k, ()):
+                        if b in mine and b not in seen:
+                            seen[b] = seen[k] + 1
+                            nxt.append(b)
+                todo = nxt
+            reach = set(seen) if reach is None else reach & set(seen)
+            if not order:
+                order = seen
+        belts = [k for k in (reach or ()) if self.kind(k) == "transport-belt"]
+        return min(belts, key=lambda k: (order.get(k, 1 << 30), fkpmod.natural_key(k))) if belts else None
 
     def enables(self):
         for path, cd in sorted(self.c.enables.items()):

@@ -1006,7 +1006,7 @@ def _lab(a, cat):
             elif a.measure is not None:
                 lines = lab.measure_lab(r, a.game, a.name, a.measure, cat)
             else:
-                lines = lab.build(r, a.game, a.name, a.src, size, cat, extra=a.extra)
+                lines = lab.build(r, a.game, a.name, a.src, size, cat, extra=a.extra, keep=a.keep)
     except lab.LabError as exc:
         print(f"lab: {exc}", file=sys.stderr)
         return 2
@@ -1636,6 +1636,8 @@ def main(argv=None):
     lb.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'",
                     help="a step's options for this build only, as fk build --with")
     lb.add_argument("--clear", action="store_true")
+    lb.add_argument("--keep", action="store_true",
+                    help="3.0.2-lab: build over what stands (the slot not emptied, nothing stocked)")
     lb.add_argument("--list", action="store_true")
     lb.add_argument("--ore")                      # 2.0.56: RESOURCE over --area
     lb.add_argument("--area")

@@ -362,6 +362,29 @@ wire ctl red: k -> feed
         self.assertIn(("gate-open", "net feed"), checks(flat, "gate-open"))   # no behave cycle
         self.assertEqual(cks, [])
 
+    def test_a_belt_only_route_is_switched_at_one_belt(self):
+        # 3.0.2-lab (Rory 11-08: "connect a wire right to a belt and enable or disable flow"):
+        # a gated net with no hand or pump on its route gates its first belt past the joins
+        src = """
+signal low = signal-L
+module Pass size 12x4 {
+  port a : in iron-plate  @w1
+  port b : in iron-plate  @w2
+  port o : out iron-plate @e1
+  k = Constant<signals="low=1"> @(5, 3)
+  net t: a, b -> o  when ctl.low > 0
+  wire ctl red: k -> t
+}
+p = Pass @(0, 0)
+"""
+        flat, lay, lines, cks = laid(src)
+        gated = with_attr(lay, "if")
+        self.assertEqual(list(gated.values()), ["signal-L>0"], gated)
+        (belt,) = gated
+        self.assertEqual(lay.entities[belt].name, "transport-belt")
+        self.assertIn(belt, {e for w in lay.wires for e in (w.a, w.b)})
+        self.assertNotIn(("gate-open", "net p/t"), [c for c in checks(flat) if "ungated" in str(c)])
+
     def test_a_behave_cycle_on_its_wire_answers_gated(self):
         flat = flat_of(self.SRC + "behave b on ctl {\n  cycle open: 1 s on, 1 s off\n}\n")
         self.assertEqual(checks(flat, "gate-open"), [])

@@ -65,20 +65,22 @@ class PlanTest(unittest.TestCase):
         _sigs, notes = rs.plan(self.pieces + [("straight-rail", 501, 501, 0)], self.stops)
         self.assertIn("1 of", notes[0])
 
-    def test_a_segment_two_trains_fit_gets_a_chain_signal_half_way(self):
-        # 11-07 (Rory: "a chain signal in the middle of a segment so that two trains can occupy
-        # it"): a fork at x 50, 120 tiles of lane, a feed merging in at x 170
+    def test_a_long_segment_is_cut_into_blocks_by_rail_signals(self):
+        # 11-07 (Rory: "any straight segment ultimately should be broken up into chunks with
+        # rail signals that let more trains occupy the rail"): a fork at x 50, 120 tiles of
+        # lane, a feed merging in at x 170
         feed = [("straight-rail", 160 - 2 * k, 6 + 2 * k, 2) for k in range(8)] +             [("curved-rail-b", 163, 3, 12), ("curved-rail-a", 168, 1, 12)]
         pieces = line(1, 50) + [("curved-rail-a", 52, 1, 4)] + line(51, 300) + feed
-        sigs, notes = rs.plan(pieces, self.stops, long=42)
+        sigs, notes = rs.plan(pieces, self.stops, long=42, pitch=25)
         lane = sorted((s["x"], s["name"]) for s in sigs if s["y"] == 2.5)
         exit_x = next(x for x, n in lane if n == "rail-signal")
         entrance = max(x for x, n in lane if x < 170)
-        mids = [x for x, n in lane if exit_x < x < entrance]
-        self.assertEqual(len(mids), 1, lane)
-        self.assertGreaterEqual(mids[0] - exit_x, 42)          # a train's room on each side
-        self.assertGreaterEqual(entrance - mids[0], 42)
-        self.assertIn("half way", notes[-1])
+        mids = [(x, n) for x, n in lane if exit_x < x < entrance]
+        self.assertEqual(len(mids), 3, lane)
+        self.assertTrue(all(n == "rail-signal" for _x, n in mids), lane)
+        cuts = [exit_x] + [x for x, _n in mids] + [entrance]
+        self.assertTrue(all(b - a >= 25 for a, b in zip(cuts, cuts[1:])), cuts)  # a train each
+        self.assertIn("25-tile blocks", notes[-1])
         # a lane that runs out at a dead end gets none
         sigs, notes = rs.plan(line(1, 50) + [("curved-rail-a", 52, 1, 4)] + line(51, 300),
                               self.stops, long=42)

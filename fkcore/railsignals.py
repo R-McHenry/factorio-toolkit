@@ -221,7 +221,7 @@ class Network:
         return []
 
 
-def plan(pieces, stops=(), long=42.0, taken=None, gap=8.0):
+def plan(pieces, stops=(), long=42.0, taken=None, gap=8.0, pitch=25.0):
     """-> (signals [{name, x, y, d}], notes). Every segment between two junctions gets two
     signals, outside both intersections: an exit signal just past the last piece of the
     intersection it leaves (a rail signal when a train fits between it and the next, else a chain
@@ -231,7 +231,9 @@ def plan(pieces, stops=(), long=42.0, taken=None, gap=8.0):
     ``taken``: tiles signals may not stand on besides the rails' (the other entities'); no signal
     stands on a rail's tiles (fkcore/railtiles.py: fk gives each tile one owner, and a measured
     spot beside a diagonal is on its own piece's tiles). A blocked signal moves along its
-    segment, away from the junction."""
+    segment, away from the junction. Past its exit signal a segment is cut into blocks of at
+    least ``pitch`` tiles by rail signals (a 1-2 train and a little), so as many trains as fit
+    can stand on it."""
     net = Network(pieces, stops)
     notes = []
     taken = set(taken or ())
@@ -308,23 +310,26 @@ def plan(pieces, stops=(), long=42.0, taken=None, gap=8.0):
         else:
             left += 1
         # 2.1.32 (Rory, 11-07: "a chain signal in the middle of a segment so that two trains can
-        # occupy it"): a segment with room for two trains gets a chain signal half way along
-        if xt is not None and ein is not None \
-                and sum(net.length(p) for p in run[xt:stop]) >= 2 * long:
+        # occupy it"), then (11-07: "any straight segment ultimately should be broken up into
+        # chunks with rail signals that let more trains occupy the rail"; his lab test: two rail
+        # signals 26 tiles apart): rail signals every ``pitch`` tiles or more past the exit, the
+        # last block before the entrance a ``pitch`` too. Rail, not chain: a straight one-way
+        # run can't lock, and a chain signal reads on to the next one
+        if xt is not None and ein is not None:
             along = [0.0]
             for p in run[xt:stop]:
                 along.append(along[-1] + net.length(p))
-            near = sorted(range(1, len(along) - 1), key=lambda i: abs(along[i] - along[-1] / 2))
-            for i in near:
-                if min(along[i], along[-1] - along[i]) < long:
-                    break                      # no spot leaves a train's room on both sides
-                if put(joints[xt + i], "rail-chain-signal"):
+            last = 0.0
+            for i in range(1, len(along) - 1):
+                if along[i] - last < pitch or along[-1] - along[i] < pitch:
+                    continue
+                if put(joints[xt + i], "rail-signal"):
                     middles += 1
-                    break
+                    last = along[i]
     chains = sum(1 for s in signals if s["name"] == "rail-chain-signal")
     notes.append(f"{len(segs)} segments, {sum(1 for s in segs if s[3] >= long)} of them "
                  f"{long:g}+ tiles; {chains} chain signals, {len(signals) - chains} rail signals"
-                 + (f"; {middles} chain signals half way along a segment two trains fit"
+                 + (f"; {middles} rail signals cutting segments into {pitch:g}-tile blocks"
                     if middles else "")
                  + (f"; {merged} segments inside an intersection" if merged else "")
                  + (f"; {short} too short for an exit signal" if short else "")
