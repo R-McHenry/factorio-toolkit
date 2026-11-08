@@ -7,7 +7,7 @@ import random
 import unittest
 from unittest import mock
 
-from fkcore import steiner
+from fkcore import lanephys, steiner
 from fkcore.steiner import FixedSink, Grid, TapSink
 
 
@@ -119,26 +119,77 @@ class NativeParity(unittest.TestCase):
         self.assertGreater(crossed, 10)             # belts did step on soft tiles
         self.assertEqual(Grid(set()).soft, {})      # outside soft_ground: none
 
-    def test_no_bend(self):
-        """2.1.31's lane-pair join: on a no_bend tile the belt runs straight on, no turn and no
-        tunnel; the same trees both ways, and no tree turns on one."""
-        held = 0
+    def test_fed_tiles(self):
+        """PLAN-LANES phase 2: tiles other belts feed (a pair's join from both sides, or one
+        side-load) take only the carriers lanephys allows (``Grid.lane_ok``); the same trees both
+        ways, and every carrier a tree puts on a fed tile holds what the tile needs, by
+        lanephys.fed itself. The masks count the outside feeds only: right where the tree starts
+        (half the seeds feed the root, as a pair's join), a parity exercise mid-path (the tree's
+        own belt into the tile is phase 3's)."""
+        A, B, E = {"a"}, {"b"}, set()
+        checked = roots = 0
         for seed in range(150):
             grid, root, sinks = (_reversed_case if seed % 2 else _case)(seed)
             if not sinks:
                 continue
             rnd = random.Random(seed + 55)
-            grid.no_bend = {(rnd.randrange(24), rnd.randrange(18)) for _ in range(40)}
+            spec = {}
+            for _ in range(40):
+                t, h = (rnd.randrange(24), rnd.randrange(18)), rnd.randrange(4)
+                if rnd.random() < 0.6:          # a pair's join: A from the left, B from the right
+                    spec[t] = ({"L": A, "R": B},
+                               [((h + 1) % 4 * 4, {"L": A, "R": A}),
+                                ((h + 3) % 4 * 4, {"L": B, "R": B})])
+                else:                           # A on one lane, side-loaded from the left
+                    spec[t] = ({"L": A, "R": E}, [((h + 1) % 4 * 4, {"L": E, "R": A})])
+            if seed % 4 < 2:                    # the root is a join, heading its own way
+                h = root[2]
+                spec[root[:2]] = ({"L": A, "R": B}, [((h + 1) % 4 * 4, {"L": A, "R": A}),
+                                                    ((h + 3) % 4 * 4, {"L": B, "R": B})])
+            grid.lane_ok = {t: lanephys.tile_mask(need, feeds) for t, (need, feeds) in spec.items()}
             with self.subTest(seed=seed):
                 a = _run("1", grid, root, sinks)
                 self.assertEqual(a, _run("0", grid, root, sinks))
+                succ = dict(a[0])
                 for s, mv in a[0]:
-                    # 2.1.31 rules A*'s belts: a splitter may still stand on the tile, and a
-                    # step grow lays itself (a dropped split's) may turn there, both ways alike
-                    if (s[0], s[1]) in grid.no_bend and s[3] == 0 and mv[0] != "split":
-                        self.assertEqual(mv[0], "step")          # no tunnel
-                        held += mv[1][2] == s[2]                 # straight on
-        self.assertGreater(held, 10)                # trees did cross no_bend tiles
+                    if mv[0] == "split":
+                        for t in steiner.Tree.split_tiles(s, mv[1]):
+                            if t in spec:
+                                need, feeds = spec[t]
+                                out, lost = lanephys.fed("splitter", s[2] * 4, feeds)
+                                self.assertFalse(lost)
+                for s in set(succ) | {c for mv in succ.values() for c in mv[1:]
+                                      if isinstance(c, tuple)}:
+                    t = (s[0], s[1])
+                    if t not in spec:
+                        continue
+                    mv = succ.get(s)
+                    carrier, d = ("ug_out", s[2]) if s[3] else \
+                        ("ug_in", s[2]) if mv and mv[0] == "jump" else \
+                        ("belt", mv[1][2]) if mv and mv[0] == "step" else ("belt", s[2])
+                    need, feeds = spec[t]
+                    out, lost = lanephys.fed(carrier, d * 4, feeds)
+                    if s == tuple(root) and len(feeds) == 2:
+                        self.assertEqual((carrier, d), ("belt", root[2]))   # straight on
+                        roots += 1
+                    self.assertFalse(lost, (seed, s, carrier, d))
+                    self.assertEqual({k: set(v) for k, v in out.items() if v},
+                                     {k: v for k, v in need.items() if v}, (seed, s, carrier, d))
+                    checked += 1
+        self.assertGreater(checked, 10)             # trees did cross fed tiles
+        self.assertGreater(roots, 20)               # and left joins straight on
+
+    def test_join_runs_straight_on(self):
+        """The pair's join by the rules alone: only a belt running straight on holds A|B; an
+        entrance holds it too when A rides one lane and the other side is an empty stub."""
+        A, B, E = {"a"}, {"b"}, set()
+        for h in range(4):
+            feeds = [((h + 1) % 4 * 4, {"L": A, "R": A}), ((h + 3) % 4 * 4, {"L": B, "R": B})]
+            m = lanephys.tile_mask({"L": A, "R": B}, feeds)
+            self.assertEqual(m, 1 << lanephys.mask_bit("belt", h))
+        feeds = [(4, {"L": E, "R": A}), (12, {"L": E, "R": E})]
+        m = lanephys.tile_mask({"L": A, "R": E}, feeds)
+        self.assertEqual(m, 1 << lanephys.mask_bit("belt", 0) | 1 << lanephys.mask_bit("ug_in", 0))
 
     def test_walk_and_hubs(self):
         """route._walk and route._hubs: the same dict (in the same order) and the same hubs."""

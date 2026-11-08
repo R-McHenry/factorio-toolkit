@@ -18,12 +18,21 @@ rank), ...)``, and the source lane it blocks (or None):
 
 Inserters and drills fill one lane: ``drop_lane`` (across a belt the far lane, in line the right
 lane), ``turn_drop_lane`` (onto a turning belt) and ``mine_lane`` (a drill's near lane).
-``carry`` folds what each lane holds through a move: the search's step. Pure, stdlib only.
+``carry`` folds what each lane holds through a move: the search's step.
+
+A tile that other carriers feed (a pair's join: two belts side-loading it) holds what the game
+makes of its feeds, by the carrier the router puts there (``fed``): a belt fed from one side with
+nothing behind turns, from two sides or with something behind each side-loads; an underground end
+side-loaded passes only the open-side lane; a splitter takes nothing from its sides; nothing goes
+in head-on. ``tile_mask`` turns that into the router's verdict per carrier and heading (PLAN-LANES
+phase 2): the carriers that hold exactly the lanes the tile needs and lose nothing. The search,
+Python and native alike, reads only the verdicts, so the rules stay here. Pure, stdlib only.
 """
 from __future__ import annotations
 
 __all__ = ["LANES", "RULES", "left", "right", "near", "moves", "carry", "drop_lane",
-           "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK"]
+           "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK", "CARRIERS", "fed",
+           "tile_mask", "mask_bit"]
 
 LANES = ("L", "R")
 KEEP = ("straight", "turn", "tunnel", "splitter")
@@ -115,6 +124,60 @@ def turn_drop_lane(come, go, side):
     if side in ((come + 8) % 16, go):
         return _other(inside)
     return inside
+
+
+#: The carriers a router may put on a tile, in ``tile_mask``'s bit order.
+CARRIERS = ("belt", "ug_in", "ug_out", "splitter")
+_EMPTY = frozenset()
+
+
+def fed(carrier, d, feeds):
+    """({lane: nets}, lost nets) of a ``carrier`` heading ``d`` on a tile fed by ``feeds``
+    [(the feeder's heading, {lane: nets})]: what each of its lanes holds, and the nets a feed
+    loses (a blocked lane, a head-on belt, a splitter's side)."""
+    behind = any(src == d for src, _h in feeds)
+    sides = sum(near(src, d) is not None for src, _h in feeds)
+    out, lost = {}, _EMPTY
+    for src, held in feeds:
+        if src == d:
+            via = None if carrier == "ug_out" else "straight"     # an exit's back is the tunnel
+        elif near(src, d) is None:
+            via = None                                             # head-on
+        elif carrier == "belt":
+            via = "turn" if sides == 1 and not behind else "side"
+        elif carrier in ("ug_in", "ug_out"):
+            via = "ug_side"
+        else:
+            via = None                                             # a splitter's side
+        if via is None:
+            for nets in held.values():
+                lost |= frozenset(nets)
+            continue
+        edges, blocked = moves(via, src, d, "in" if carrier == "ug_in" else "out")
+        for a, b, _r in edges:
+            out[b] = out.get(b, _EMPTY) | frozenset(held.get(a, ()))
+        if blocked is not None:
+            lost |= frozenset(held.get(blocked, ()))
+    return out, lost
+
+
+def mask_bit(carrier, d4):
+    """The bit of ``tile_mask`` for a carrier heading ``d4`` (the router's 0 N, 1 E, 2 S, 3 W)."""
+    return CARRIERS.index(carrier) * 4 + d4
+
+
+def tile_mask(need, feeds):
+    """The router's verdict on a fed tile: bit ``mask_bit(carrier, d4)`` set when that carrier
+    heading that way holds exactly ``need`` ({lane: nets}) and loses nothing. ``feeds`` as
+    ``fed``'s, headings 0 N, 4 E, 8 S, 12 W."""
+    want = {lane: frozenset(need.get(lane, ())) for lane in LANES}
+    mask = 0
+    for carrier in CARRIERS:
+        for d4 in range(4):
+            out, lost = fed(carrier, d4 * 4, feeds)
+            if not lost and all(out.get(lane, _EMPTY) == want[lane] for lane in LANES):
+                mask |= 1 << mask_bit(carrier, d4)
+    return mask
 
 
 def mine_lane(drill_dir, belt_dir):

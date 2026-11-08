@@ -199,9 +199,12 @@ class NetJob:
     pin: str | None = None                         # 2.0.54: the lane it ends on (L or R)
     drv: list = field(default_factory=list)        # [(start or source, instance path)]
     m2m: dict | None = None                        # 2.1 route --m2m: fkcore.m2m.spec_of
-    no_bend: list = field(default_factory=list)    # 2.1.31: tiles whose belt runs straight on
     drops: dict = field(default_factory=dict)      # 3.0: {source key: tile} a drill drops onto
     direct: list = field(default_factory=list)     # 3.0: [(driver, consumer)] dropped straight in
+    # PLAN-LANES phase 2: {tile: (need, feeds)}, a tile other carriers feed (a pair's join):
+    # need {lane: labels} what its carrier must hold, feeds [(heading 0-3, {lane: labels})] what
+    # comes in; lanephys says which carriers the search may put there (was 2.1.31's no_bend)
+    lanes: dict = field(default_factory=dict)
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved) \
@@ -996,7 +999,10 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
     """forward or reverse: one tree. -> (plan entities, report text) or (None, reason)."""
     reverse = job.mode == "reverse"
     grid = _Bounded(blocked, box, spans, clear if reverse else None)
-    grid.no_bend = set(job.no_bend)
+    if job.lanes and not reverse:
+        from . import lanephys
+        grid.lane_ok = {t: lanephys.tile_mask(need, [(h * 4, held) for h, held in feeds])
+                        for t, (need, feeds) in job.lanes.items()}
     if reverse:
         (gtile, gh), = job.goals
         root = (gtile[0], gtile[1], (gh + 2) % 4, 0)
@@ -2910,7 +2916,11 @@ def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
                       sorted((tile(t), tf.h4(h)) for t, h in j.goals),
                       sorted((key_of(k), rect(r)) for k, r in j.taps),
                       sorted((key_of(k), rect(r)) for k, r in j.sources),
-                      sorted(tile(t) for t in j.reserved), sorted(tile(t) for t in j.no_bend),
+                      sorted(tile(t) for t in j.reserved),
+                      sorted((tile(t), sorted((ln, sorted(v)) for ln, v in need.items()),
+                              sorted((tf.h4(h), sorted((ln, sorted(v)) for ln, v in held.items()))
+                                     for h, held in feeds))
+                             for t, (need, feeds) in j.lanes.items()),
                       j.skip, j.fluid, j.straight, j.wide, j.pin, j.m2m is not None,
                       len(j.parts)))
     return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:20]

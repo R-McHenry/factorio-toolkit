@@ -201,9 +201,16 @@ def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
                         drops=dict(right.drops),
                         goals=list(right.goals) + [(rt, (h + 3) % 4)], taps=list(right.taps),
                         owners=list(right.owners))
+    # the join by the belt model (PLAN-LANES phase 2): A's last belt feeds it from its left side,
+    # B's from its right, each with its net on both lanes (a stub: nothing); its carrier must hold
+    # A on the left lane and B on the right, losing nothing. lanephys then allows only a belt
+    # running straight on (2.1.31's no_bend, from the rules)
+    a_on = {"l"} if left.drivers() else set()
+    b_on = {"r"} if right.drivers() else set()
+    feeds = [((h + 1) % 4, {"L": a_on, "R": a_on}), ((h + 3) % 4, {"L": b_on, "R": b_on})]
     both = routemod.NetJob(job.net, starts=[(hub, h)], goals=list(pair.goals),
                            taps=list(pair.taps), owners=list(pair.owners), reserved=[back, ahead],
-                           no_bend=[hub])
+                           lanes={hub: ({"L": a_on, "R": b_on}, feeds)})
     sub = {k: v for k, v in js.items() if k != job.net}
     sub.update({a.net: a, b.net: b, both.net: both})
     laid, how, now = [], {}, list(ents)

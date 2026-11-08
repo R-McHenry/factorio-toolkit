@@ -298,7 +298,7 @@ struct Search<'a> {
     sinks: &'a [Sink],
     targets: &'a [usize],
     tapped: &'a FxHashSet<T>,
-    nobend: &'a FxHashSet<T>, // 2.1.31: tiles whose belt runs straight on (no turn, no tunnel)
+    lane_ok: &'a FxHashMap<T, u16>, // PLAN-LANES: a fed tile's allowed carriers (lanephys.tile_mask)
     belt: f64,
     turn: f64,
     ug: f64,
@@ -363,6 +363,9 @@ where
                     }
                 }
             };
+            // the path's end: a belt or an exit its fed tile does not allow
+            let hit = hit
+                && s.lane_ok.get(&(st.0, st.1)).map_or(true, |m| m >> ((if st.3 != 0 { 8 } else { 0 }) + st.2) & 1 != 0);
             if hit {
                 let p = path.get_or_insert_with(|| trace(&parent, st));
                 let tiles: FxHashSet<T> = p.iter().map(|s| (s.0, s.1)).collect();
@@ -382,6 +385,7 @@ where
         }
         let du = d as usize;
         let ax = (d % 2) as usize;
+        let lok: Option<u16> = if s.lane_ok.is_empty() { None } else { s.lane_ok.get(&(x, y)).copied() };
         for nd in 0..4i64 {
             if ex != 0 && nd != d {
                 continue;
@@ -389,13 +393,11 @@ where
             if nd == (d + 2) % 4 {
                 continue;
             }
-            if nd != d && s.nobend.contains(&(x, y)) {
-                continue;
-            }
             let ndu = nd as usize;
             let (nx, ny) = (x + DX[ndu], y + DY[ndu]);
             let step = s.belt + if nd != d { s.turn } else { 0.0 };
-            if !blocked((nx, ny)) {
+            let bit = if ex != 0 { 8 + d } else { nd };
+            if !blocked((nx, ny)) && lok.map_or(true, |m| m >> bit & 1 != 0) {
                 let ns = (nx, ny, nd, 0);
                 let mut cost = gs + step;
                 if !grid.soft.is_empty() {
@@ -407,7 +409,7 @@ where
                     heap.push(Entry { f: cost + hh(nx, ny), ng: -cost, st: ns });
                 }
             }
-            if ex != 0 || nd != d || s.tapped.contains(&(x, y)) || s.nobend.contains(&(x, y)) {
+            if ex != 0 || nd != d || s.tapped.contains(&(x, y)) || lok.map_or(false, |m| m >> (4 + d) & 1 == 0) {
                 continue;
             }
             let mut seen_block = false;
@@ -466,7 +468,7 @@ fn to_sinks(sinks: Vec<(u8, i64, i64, i64, i64)>) -> Vec<Sink> {
 /// fixed or (1, x0, y0, x1, y1) tap. `tap_goal(i, path)`: the Python goal test of tap sink i.
 #[pyfunction]
 #[pyo3(signature = (grid, extra, tspan0, tspan1, starts, start_spare, sinks, targets, tapped,
-                    belt, turn, ug, max_ug, limit, tap_goal, nobend=None))]
+                    belt, turn, ug, max_ug, limit, tap_goal, lane_ok=None))]
 #[allow(clippy::too_many_arguments)]
 fn astar<'py>(
     grid: &Bound<'py, NativeGrid>,
@@ -484,7 +486,7 @@ fn astar<'py>(
     max_ug: i64,
     limit: usize,
     tap_goal: &Bound<'py, PyAny>,
-    nobend: Option<Vec<T>>,
+    lane_ok: Option<Vec<(T, u16)>>,
 ) -> PyResult<Option<(Vec<St>, usize, f64)>> {
     let sinks = to_sinks(sinks);
     if targets.is_empty() || targets.iter().any(|&i| i >= sinks.len()) {
@@ -493,10 +495,10 @@ fn astar<'py>(
     let extra: FxHashSet<T> = extra.into_iter().collect();
     let tspans: [FxHashSet<T>; 2] = [tspan0.into_iter().collect(), tspan1.into_iter().collect()];
     let tapped: FxHashSet<T> = tapped.into_iter().collect();
-    let nobend: FxHashSet<T> = nobend.unwrap_or_default().into_iter().collect();
+    let lane_ok: FxHashMap<T, u16> = lane_ok.unwrap_or_default().into_iter().collect();
     let s = Search {
         grid: grid.get(), extra: &extra, tspans: &tspans, sinks: &sinks, targets: &targets,
-        tapped: &tapped, nobend: &nobend, belt, turn, ug, max_ug, limit,
+        tapped: &tapped, lane_ok: &lane_ok, belt, turn, ug, max_ug, limit,
     };
     let got = search(&s, &starts, &start_spare, |i, p, _from| tap_goal.call1((i, p.to_vec()))?.is_truthy())?;
     Ok(got.map(|(p, i, gs, _from)| (p, i, gs)))
@@ -598,7 +600,7 @@ struct Ctx<'a> {
     long_tap: f64,
     max_ug: i64,
     limit: usize,
-    nobend: FxHashSet<T>,
+    lane_ok: FxHashMap<T, u16>,
     names: Vec<String>,  // inserter names
     long: Option<usize>, // "long-handed-inserter" in names
     sinks: Vec<Sink>,
@@ -612,6 +614,34 @@ fn split_tiles(s: St, side: i64) -> (T, T) {
     let n = (s.0 + DX[d], s.1 + DY[d]);
     let sh = ((s.2 + side) % 4) as usize;
     (n, (n.0 + DX[sh], n.1 + DY[sh]))
+}
+
+/// _lanes_allow: may tile ``t`` hold the carrier of ``bit``? Always, unless something feeds it.
+#[inline]
+fn lanes_allow(cx: &Ctx, t: T, bit: i64) -> bool {
+    cx.lane_ok.get(&t).map_or(true, |m| m >> bit & 1 != 0)
+}
+
+/// _lanes_hold: every one of ``states`` on a fed tile holds a carrier its lanes allow.
+fn lanes_hold(cx: &Ctx, t: &Tree, states: &[St]) -> bool {
+    if cx.lane_ok.is_empty() {
+        return true;
+    }
+    states.iter().all(|s| {
+        if !cx.lane_ok.contains_key(&(s.0, s.1)) {
+            return true;
+        }
+        let bit = if s.3 != 0 {
+            8 + s.2
+        } else {
+            match t.succ.get(s) {
+                Some(Mv::Jump(_)) => 4 + s.2,
+                Some(Mv::Step(c)) => c.2,
+                _ => s.2,
+            }
+        };
+        lanes_allow(cx, (s.0, s.1), bit)
+    })
 }
 
 #[inline]
@@ -857,7 +887,9 @@ fn starts_of(cx: &Ctx, tree: &Tree, tl: &Tiles) -> Vec<(St, f64, How, Vec<T>)> {
             if cx.drop_taps && tl.own.contains_key(&sp) {
                 continue;
             }
-            if tree.free(cx, tl, m) && tree.free(cx, tl, (o2.0, o2.1)) {
+            if tree.free(cx, tl, m) && tree.free(cx, tl, (o2.0, o2.1)) && lanes_allow(cx, n, 12 + d)
+                && lanes_allow(cx, m, 12 + d)
+            {
                 out.push((o2, cx.split - cx.belt, How::Split(s, side, c), vec![n, m]));
             }
         }
@@ -876,7 +908,7 @@ fn step(cx: &Ctx, tree: &Tree, targets: &[usize]) -> PyResult<Option<(Vec<St>, H
     let tapped = tree.tapped(cx);
     let s = Search {
         grid: cx.grid, extra: &extra, tspans: &tspans, sinks: &cx.sinks, targets,
-        tapped: &tapped, nobend: &cx.nobend, belt: cx.belt, turn: cx.turn, ug: cx.ug,
+        tapped: &tapped, lane_ok: &cx.lane_ok, belt: cx.belt, turn: cx.turn, ug: cx.ug,
         max_ug: cx.max_ug, limit: cx.limit,
     };
     let starts: Vec<(St, f64)> = st.iter().map(|(s, g0, _, _)| (*s, *g0)).collect();
@@ -967,20 +999,28 @@ fn detach(cx: &Ctx, tree: &Tree, i: usize) -> Option<Tree> {
                 let keep = if s == c1 { c2 } else { c1 };
                 let (n, m) = split_tiles(p, side);
                 let d = p.2;
-                if keep == c1 {
+                let laid: Vec<St> = if keep == c1 {
                     let mid = (n.0, n.1, d, 0);
                     t.succ.insert(p, Mv::Step(mid));
                     t.succ.insert(mid, Mv::Step(c1));
+                    vec![p, mid]
                 } else {
                     let sh = (d + side) % 4;
                     let (a, b) = ((n.0, n.1, d, 0), (m.0, m.1, sh, 0));
                     t.succ.insert(p, Mv::Step(a));
                     t.succ.insert(a, Mv::Step(b));
                     t.succ.insert(b, Mv::Step(c2));
+                    vec![p, a, b]
+                };
+                if !lanes_hold(cx, &t, &laid) {
+                    return None; // the belts in the splitter's place break a fed tile
                 }
             }
             _ => {
                 t.succ.remove(&p);
+                if !lanes_hold(cx, &t, &[p]) {
+                    return None; // ... or a belt left heading its own way as a leaf
+                }
             }
         }
     }
@@ -1000,7 +1040,7 @@ type LogOut = (u8, Vec<usize>, usize, u8, f64, f64);
 /// 0 leaf | 1 split, cost a, cost b).
 #[pyfunction]
 #[pyo3(signature = (grid, keep_clear, drop_taps, root, sinks, snames, ks, inserters, costs,
-                    improve, order, limit, nobend=None))]
+                    improve, order, limit, lane_ok=None))]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn grow(
     grid: &Bound<'_, NativeGrid>,
@@ -1015,7 +1055,7 @@ fn grow(
     improve: usize,
     order: Option<Vec<usize>>,
     limit: usize,
-    nobend: Option<Vec<T>>,
+    lane_ok: Option<Vec<(T, u16)>>,
 ) -> PyResult<(Vec<(St, MvOut)>, Vec<(St, usize)>, Vec<TapOut>, Vec<T>, Option<(St, bool)>, Vec<LogOut>)> {
     let n = sinks.len();
     if snames.len() != n || ks.len() != n || inserters.len() != n {
@@ -1048,7 +1088,7 @@ fn grow(
     let cx = Ctx {
         grid: grid.get(), keep_clear: keep_clear.into_iter().collect(), drop_taps,
         belt, turn, ug, split, tap, long_tap, max_ug, limit,
-        nobend: nobend.unwrap_or_default().into_iter().collect(), names, long, sinks, taps, sname,
+        lane_ok: lane_ok.unwrap_or_default().into_iter().collect(), names, long, sinks, taps, sname,
     };
 
     let mut tree = Tree::new(root);

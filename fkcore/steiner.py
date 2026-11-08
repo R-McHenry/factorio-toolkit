@@ -123,7 +123,11 @@ class Grid:
         self.drop_taps = False       # laid reversed: taps drop onto their belt
         if _SOFT:
             self.soft = _SOFT
-        self.no_bend = set()         # 2.1.31: tiles whose belt runs straight on (a pair's join)
+        # PLAN-LANES phase 2: tile -> lanephys.tile_mask, the carriers a fed tile (a pair's join)
+        # may hold; the search puts nothing else there. The mask counts the outside feeds only:
+        # exact where a tree starts (nothing of its own behind), as at a join; the tree's own
+        # belt into a fed tile mid-path is phase 3's (its lanes in the search state)
+        self.lane_ok = {}
 
     def blocked(self, t):
         return t in self.occ or t in self.fronts
@@ -599,9 +603,44 @@ def _starts(tree):
                 continue     # laid reversed, this merge's spare output would feed what is there
             if tree.grid.drop_taps and Tree.spare_tile(s, side) in tree.tiles():
                 continue     # ... the tree's own belt there, too
-            if tree.free(m) and tree.free((o2[0], o2[1])):
+            if tree.free(m) and tree.free((o2[0], o2[1])) and _lanes_allow(tree.grid, n, 12 + d) \
+                    and _lanes_allow(tree.grid, m, 12 + d):
                 out.append((o2, k["split"] - k["belt"], ("split", s, side, c), (n, m)))
     return out
+
+
+def _lanes_allow(grid, t, bit):
+    """PLAN-LANES phase 2: may tile ``t`` hold the carrier of ``bit`` (``lanephys.mask_bit``)?
+    Always, unless something feeds it (``Grid.lane_ok``)."""
+    lane_ok = getattr(grid, "lane_ok", None)
+    m = lane_ok.get(t) if lane_ok else None
+    return m is None or bool(m >> bit & 1)
+
+
+def _lanes_hold(tree, states):
+    """Every one of ``states`` (on fed tiles) holds a carrier its lanes allow: a landing an
+    underground exit, else a jump's start an entrance, else a belt heading on to its next state
+    (a leaf or a split's feed: its own heading)."""
+    for s in states:
+        if not getattr(tree.grid, "lane_ok", None) or (s[0], s[1]) not in tree.grid.lane_ok:
+            continue
+        mv = tree.succ.get(s)
+        if s[3]:
+            bit = 8 + s[2]
+        elif mv is not None and mv[0] == "jump":
+            bit = 4 + s[2]
+        elif mv is not None and mv[0] == "step":
+            bit = mv[1][2]
+        else:
+            bit = s[2]
+        if not _lanes_allow(tree.grid, (s[0], s[1]), bit):
+            return False
+    return True
+
+
+def _lane_list(grid):
+    """``Grid.lane_ok`` for the kernel: [(tile, mask)]."""
+    return [(tuple(t), int(m)) for t, m in (getattr(grid, "lane_ok", None) or {}).items()]
 
 
 # -- the native kernel (optional) ---------------------------------------------------------------
@@ -690,8 +729,7 @@ def _astar_native(tree, starts, sinks, targets, limit):
     extra = set(tiles) | set(res) | set(spare)
     got = _native.astar(ng, list(extra), list(spans[0]), list(spans[1]), st_list, st_spare, spec,
                         list(targets), tapped, float(k["belt"]), float(k["turn"]), float(k["ug"]),
-                        int(k["max_ug"]), int(limit), tap_goal,
-                        list(getattr(grid, "no_bend", ()) or ()))
+                        int(k["max_ug"]), int(limit), tap_goal, _lane_list(grid))
     if got is None:
         return None
     path, i, gs = got
@@ -726,9 +764,9 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
     sink_tiles = {s.tile for i, s in enumerate(sinks) if isinstance(s, FixedSink)}
     spans = tree.spans()
     soft = getattr(grid, "soft", None)    # negotiated: a step onto a tile another net holds pays
-    # 2.1.31: tiles whose belt must run straight on, neither turning nor starting a tunnel (a lane
-    # pair's join: an underground there is side-loaded from both sides, and drops a lane)
-    nobend = getattr(grid, "no_bend", ()) or ()
+    # PLAN-LANES phase 2: on a fed tile only the carriers its lanes allow (lanephys.tile_mask):
+    # bit d a belt heading d, 4 + d an underground entrance, 8 + d an exit
+    lane_ok = getattr(grid, "lane_ok", None) or {}
 
     def blocked(t):
         return grid.blocked(t) or t in tiles or t in res or t in spare
@@ -793,6 +831,9 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
                 keys = keys or _trace(parent, st)
                 path = path or [p[:4] for p in keys]
                 hit = sinks[i].goal(here, tree, path, taken_of[keys[0]])
+            if hit and lane_ok and (here[0], here[1]) in lane_ok and \
+                    not lane_ok[(here[0], here[1])] >> ((8 if here[3] else 0) + here[2]) & 1:
+                hit = False      # the path's end: a belt or an exit its fed tile does not allow
             if hit:
                 keys = keys or _trace(parent, st)
                 path = path or [p[:4] for p in keys]
@@ -803,21 +844,20 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
 
         if (x, y) in sink_tiles and parent[st] is not None:
             continue   # nothing continues through a port's link tile
+        lok = lane_ok.get((x, y)) if lane_ok else None
         for nd in range(4):
             if ex and nd != d:
                 continue
             if nd == (d + 2) % 4:
                 continue
-            if nd != d and (x, y) in nobend:
-                continue
             nx, ny = x + DX[nd], y + DY[nd]
             step = k["belt"] + (k["turn"] if nd != d else 0.0)
-            if not blocked((nx, ny)):
+            if not blocked((nx, ny)) and (lok is None or lok >> ((8 + d) if ex else nd) & 1):
                 cost = gs + step
                 if soft:
                     cost += soft.get((nx, ny), 0.0)
                 _push(heap, g, parent, key(nx, ny, nd, 0, st), st, cost, hh)
-            if ex or nd != d or (x, y) in tapped or (x, y) in nobend:
+            if ex or nd != d or (x, y) in tapped or (lok is not None and not lok >> (4 + d) & 1):
                 continue
             seen_block = False
             for j in jumps:
@@ -907,14 +947,20 @@ def _detach(tree, sink_i, sinks):
             mid = (n[0], n[1], d, 0)
             tree.succ[p] = ("step", mid)
             tree.succ[mid] = ("step", c1)
+            laid = (p, mid)
         else:
             sh = (d + side) % 4
             a, b = (n[0], n[1], d, 0), (m[0], m[1], sh, 0)
             tree.succ[p] = ("step", a)
             tree.succ[a] = ("step", b)
             tree.succ[b] = ("step", c2)
+            laid = (p, a, b)
+        if not _lanes_hold(tree, laid):
+            return None   # PLAN-LANES phase 2: the belts in the splitter's place break a fed tile
     elif p is not None:
         tree.succ.pop(p, None)
+        if not _lanes_hold(tree, (p,)):
+            return None   # ... or a belt left heading its own way as a leaf
     tree.taps = [t for t in tree.taps if t[3] != sinks[sink_i].name]
     tree.reserved = {t[0] for t in tree.taps}
     tree.touch()
@@ -988,7 +1034,7 @@ def _grow_native(grid, root, sinks, costs, improve, order, limit):
     succ, sink_at, taps, reserved, last, log = _native.grow(
         ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names, ks, ins, kk,
         int(improve), None if order is None else [int(i) for i in order], int(limit),
-        list(getattr(grid, "no_bend", ()) or ()))
+        _lane_list(grid))
     for s, (kind, side, c1, c2) in succ:
         tree.succ[tuple(s)] = ("split", side, tuple(c1), tuple(c2)) if kind == 2 else \
             (_MOVES[kind], tuple(c1))
