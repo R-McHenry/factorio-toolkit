@@ -2794,7 +2794,7 @@ def _filter_loads(flat, lay, cat):
 
 #: PLAN-3.0 §4: the router's version a compiled module was laid by; a compiled module of another
 #: version is laid again. Bump it when a change to the router would lay a module otherwise.
-COMPILE_VERSION = "route-3.0.1"
+COMPILE_VERSION = "route-3.0.2"
 
 
 def _unit(net, sealed):

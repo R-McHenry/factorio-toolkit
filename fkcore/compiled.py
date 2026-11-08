@@ -36,7 +36,7 @@ __all__ = ["ROUTER", "inside_key", "store_path", "save", "load", "reuse", "seale
 
 #: the router generation a stored inside was laid by: a change to what the router lays for the
 #: same inside raises it, and every stored inside is laid again once
-ROUTER = "3.0.1"
+ROUTER = "3.0.2"
 _HERE = "@"
 
 
