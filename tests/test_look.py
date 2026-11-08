@@ -205,7 +205,7 @@ class LookTest(unittest.TestCase):
     def test_fair_play_a_play_look_needs_an_area(self):
         path = os.path.join(self.dir, "lab.surface")
         with open(path, encoding="utf-8") as fh:
-            text = fh.read().replace("mode     lab", "mode     play")
+            text = fh.read().replace("\nfree\n", "\n")       # 3.1: not free, so fair play applies
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         with mock.patch.object(link, "snapshot", lambda *a, **k: self.fail("no snapshot")):
