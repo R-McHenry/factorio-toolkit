@@ -119,6 +119,27 @@ class NativeParity(unittest.TestCase):
         self.assertGreater(crossed, 10)             # belts did step on soft tiles
         self.assertEqual(Grid(set()).soft, {})      # outside soft_ground: none
 
+    def test_no_bend(self):
+        """2.1.31's lane-pair join: on a no_bend tile the belt runs straight on, no turn and no
+        tunnel; the same trees both ways, and no tree turns on one."""
+        held = 0
+        for seed in range(150):
+            grid, root, sinks = (_reversed_case if seed % 2 else _case)(seed)
+            if not sinks:
+                continue
+            rnd = random.Random(seed + 55)
+            grid.no_bend = {(rnd.randrange(24), rnd.randrange(18)) for _ in range(40)}
+            with self.subTest(seed=seed):
+                a = _run("1", grid, root, sinks)
+                self.assertEqual(a, _run("0", grid, root, sinks))
+                for s, mv in a[0]:
+                    # 2.1.31 rules A*'s belts: a splitter may still stand on the tile, and a
+                    # step grow lays itself (a dropped split's) may turn there, both ways alike
+                    if (s[0], s[1]) in grid.no_bend and s[3] == 0 and mv[0] != "split":
+                        self.assertEqual(mv[0], "step")          # no tunnel
+                        held += mv[1][2] == s[2]                 # straight on
+        self.assertGreater(held, 10)                # trees did cross no_bend tiles
+
     def test_walk_and_hubs(self):
         """route._walk and route._hubs: the same dict (in the same order) and the same hubs."""
         from fkcore import route

@@ -298,6 +298,7 @@ struct Search<'a> {
     sinks: &'a [Sink],
     targets: &'a [usize],
     tapped: &'a FxHashSet<T>,
+    nobend: &'a FxHashSet<T>, // 2.1.31: tiles whose belt runs straight on (no turn, no tunnel)
     belt: f64,
     turn: f64,
     ug: f64,
@@ -388,6 +389,9 @@ where
             if nd == (d + 2) % 4 {
                 continue;
             }
+            if nd != d && s.nobend.contains(&(x, y)) {
+                continue;
+            }
             let ndu = nd as usize;
             let (nx, ny) = (x + DX[ndu], y + DY[ndu]);
             let step = s.belt + if nd != d { s.turn } else { 0.0 };
@@ -403,7 +407,7 @@ where
                     heap.push(Entry { f: cost + hh(nx, ny), ng: -cost, st: ns });
                 }
             }
-            if ex != 0 || nd != d || s.tapped.contains(&(x, y)) {
+            if ex != 0 || nd != d || s.tapped.contains(&(x, y)) || s.nobend.contains(&(x, y)) {
                 continue;
             }
             let mut seen_block = false;
@@ -462,7 +466,7 @@ fn to_sinks(sinks: Vec<(u8, i64, i64, i64, i64)>) -> Vec<Sink> {
 /// fixed or (1, x0, y0, x1, y1) tap. `tap_goal(i, path)`: the Python goal test of tap sink i.
 #[pyfunction]
 #[pyo3(signature = (grid, extra, tspan0, tspan1, starts, start_spare, sinks, targets, tapped,
-                    belt, turn, ug, max_ug, limit, tap_goal))]
+                    belt, turn, ug, max_ug, limit, tap_goal, nobend=None))]
 #[allow(clippy::too_many_arguments)]
 fn astar<'py>(
     grid: &Bound<'py, NativeGrid>,
@@ -480,6 +484,7 @@ fn astar<'py>(
     max_ug: i64,
     limit: usize,
     tap_goal: &Bound<'py, PyAny>,
+    nobend: Option<Vec<T>>,
 ) -> PyResult<Option<(Vec<St>, usize, f64)>> {
     let sinks = to_sinks(sinks);
     if targets.is_empty() || targets.iter().any(|&i| i >= sinks.len()) {
@@ -488,9 +493,10 @@ fn astar<'py>(
     let extra: FxHashSet<T> = extra.into_iter().collect();
     let tspans: [FxHashSet<T>; 2] = [tspan0.into_iter().collect(), tspan1.into_iter().collect()];
     let tapped: FxHashSet<T> = tapped.into_iter().collect();
+    let nobend: FxHashSet<T> = nobend.unwrap_or_default().into_iter().collect();
     let s = Search {
         grid: grid.get(), extra: &extra, tspans: &tspans, sinks: &sinks, targets: &targets,
-        tapped: &tapped, belt, turn, ug, max_ug, limit,
+        tapped: &tapped, nobend: &nobend, belt, turn, ug, max_ug, limit,
     };
     let got = search(&s, &starts, &start_spare, |i, p, _from| tap_goal.call1((i, p.to_vec()))?.is_truthy())?;
     Ok(got.map(|(p, i, gs, _from)| (p, i, gs)))
@@ -592,6 +598,7 @@ struct Ctx<'a> {
     long_tap: f64,
     max_ug: i64,
     limit: usize,
+    nobend: FxHashSet<T>,
     names: Vec<String>,  // inserter names
     long: Option<usize>, // "long-handed-inserter" in names
     sinks: Vec<Sink>,
@@ -869,7 +876,8 @@ fn step(cx: &Ctx, tree: &Tree, targets: &[usize]) -> PyResult<Option<(Vec<St>, H
     let tapped = tree.tapped(cx);
     let s = Search {
         grid: cx.grid, extra: &extra, tspans: &tspans, sinks: &cx.sinks, targets,
-        tapped: &tapped, belt: cx.belt, turn: cx.turn, ug: cx.ug, max_ug: cx.max_ug, limit: cx.limit,
+        tapped: &tapped, nobend: &cx.nobend, belt: cx.belt, turn: cx.turn, ug: cx.ug,
+        max_ug: cx.max_ug, limit: cx.limit,
     };
     let starts: Vec<(St, f64)> = st.iter().map(|(s, g0, _, _)| (*s, *g0)).collect();
     let spare: Vec<Option<T>> = st
@@ -992,7 +1000,7 @@ type LogOut = (u8, Vec<usize>, usize, u8, f64, f64);
 /// 0 leaf | 1 split, cost a, cost b).
 #[pyfunction]
 #[pyo3(signature = (grid, keep_clear, drop_taps, root, sinks, snames, ks, inserters, costs,
-                    improve, order, limit))]
+                    improve, order, limit, nobend=None))]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn grow(
     grid: &Bound<'_, NativeGrid>,
@@ -1007,6 +1015,7 @@ fn grow(
     improve: usize,
     order: Option<Vec<usize>>,
     limit: usize,
+    nobend: Option<Vec<T>>,
 ) -> PyResult<(Vec<(St, MvOut)>, Vec<(St, usize)>, Vec<TapOut>, Vec<T>, Option<(St, bool)>, Vec<LogOut>)> {
     let n = sinks.len();
     if snames.len() != n || ks.len() != n || inserters.len() != n {
@@ -1038,7 +1047,8 @@ fn grow(
     let (belt, turn, ug, split, tap, long_tap, max_ug) = costs;
     let cx = Ctx {
         grid: grid.get(), keep_clear: keep_clear.into_iter().collect(), drop_taps,
-        belt, turn, ug, split, tap, long_tap, max_ug, limit, names, long, sinks, taps, sname,
+        belt, turn, ug, split, tap, long_tap, max_ug, limit,
+        nobend: nobend.unwrap_or_default().into_iter().collect(), names, long, sinks, taps, sname,
     };
 
     let mut tree = Tree::new(root);

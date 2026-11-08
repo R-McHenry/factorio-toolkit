@@ -634,7 +634,8 @@ def _astar_native(tree, starts, sinks, targets, limit):
     extra = set(tiles) | set(res) | set(spare)
     got = _native.astar(ng, list(extra), list(spans[0]), list(spans[1]), st_list, st_spare, spec,
                         list(targets), tapped, float(k["belt"]), float(k["turn"]), float(k["ug"]),
-                        int(k["max_ug"]), int(limit), tap_goal)
+                        int(k["max_ug"]), int(limit), tap_goal,
+                        list(getattr(grid, "no_bend", ()) or ()))
     if got is None:
         return None
     path, i, gs = got
@@ -669,6 +670,9 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
     sink_tiles = {s.tile for i, s in enumerate(sinks) if isinstance(s, FixedSink)}
     spans = tree.spans()
     soft = getattr(grid, "soft", None)    # negotiated: a step onto a tile another net holds pays
+    # 2.1.31: tiles whose belt must run straight on, neither turning nor starting a tunnel (a lane
+    # pair's join: an underground there is side-loaded from both sides, and drops a lane)
+    nobend = getattr(grid, "no_bend", ()) or ()
 
     def blocked(t):
         return grid.blocked(t) or t in tiles or t in res or t in spare
@@ -728,6 +732,8 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
                 continue
             if nd == (d + 2) % 4:
                 continue
+            if nd != d and (x, y) in nobend:
+                continue
             nx, ny = x + DX[nd], y + DY[nd]
             step = k["belt"] + (k["turn"] if nd != d else 0.0)
             if not blocked((nx, ny)):
@@ -735,7 +741,7 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
                 if soft:
                     cost += soft.get((nx, ny), 0.0)
                 _push(heap, g, parent, (nx, ny, nd, 0), st, cost, hh)
-            if ex or nd != d or (x, y) in tapped:
+            if ex or nd != d or (x, y) in tapped or (x, y) in nobend:
                 continue
             seen_block = False
             for j in jumps:
@@ -899,7 +905,8 @@ def _grow_native(grid, root, sinks, costs, improve, order, limit):
           float(k["long_tap"]), int(k["max_ug"]))
     succ, sink_at, taps, reserved, last, log = _native.grow(
         ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names, ks, ins, kk,
-        int(improve), None if order is None else [int(i) for i in order], int(limit))
+        int(improve), None if order is None else [int(i) for i in order], int(limit),
+        list(getattr(grid, "no_bend", ()) or ()))
     for s, (kind, side, c1, c2) in succ:
         tree.succ[tuple(s)] = ("split", side, tuple(c1), tuple(c2)) if kind == 2 else \
             (_MOVES[kind], tuple(c1))
