@@ -163,6 +163,14 @@ about 100 turns and built first at turn 115). PLAN-DOCS.md in assessment-2026110
   (core-v1, lead-v1, opus-v1, seablock-v1) still name a TOOLKIT.md section that is gone;
   game-side lines could be quoted exactly from a laptop server later.
 
+### 3.1.3: every brief points at START.md (2026-11-08, night)
+
+The older briefs (core-v1, lead-v1, opus-v1, seablock-v1, worker-v1) named TOOLKIT.md's "When you
+need something" list, which 3.1.2 removed; they now send a player to START.md first, then the
+chapters, with TOOLKIT.md and LANGUAGE.md as references. The runner (`R-McHenry/factorio-runner`,
+branch `claude/toolkit-3.1.2`, not merged: computah owns that repo) vendors 3.1.2 and the same
+docs beside its `sa-early` pack, and its brief `l0-lab-fk.md` reads the same way.
+
 ## Wave 3
 
 ### Documentation (31-docs)
