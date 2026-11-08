@@ -88,7 +88,7 @@ class SenseTest(unittest.TestCase):
             ("not-placed", "nauvis:mini/~iron/b0"), ("ghost", "nauvis:mini/~iron/b1"),
             ("settings-changed", "nauvis:mini/gears/i0"), ("settings-changed", "nauvis:mini/gears/m1"),
             ("settings-changed", "nauvis:mini/~iron/u1"), ("other-entity", "nauvis:mini/~iron/b3"),
-            ("marked", "nauvis:mark/unknown@4200000")})
+            ("conflict", "nauvis:mini/~iron/b3")})
         wrong = next(v for v in rep.verdicts if v.wrong_items)
         self.assertEqual((wrong.key, wrong.wrong_items), ("nauvis:mini/~iron/b2", ["copper-plate"]))
         drift = {v.key: v.detail for v in rep.verdicts if v.verdict == "settings-changed"}
@@ -96,8 +96,16 @@ class SenseTest(unittest.TestCase):
         self.assertEqual(drift["nauvis:mini/gears/m1"],
                          "recipe pipe, designed iron-gear-wheel")
         self.assertEqual(drift["nauvis:mini/~iron/u1"], "underground input, designed output")
-        # the chest standing where a belt belongs is a foreign change in the plot: kept, marked
-        self.assertIn("iron-chest at 15.5,0.5: no last_user (plots, keep)", rep.changes)
+        # 3.1: the chest standing where a belt belongs is a MISMATCH the toolkit did not paste
+        # (no mark, not pasted over); its owner is unknown (no last_user, no placement)
+        self.assertEqual(rep.marks, [])
+        wrong = next(v for v in rep.verdicts if v.verdict == "other-entity")
+        self.assertEqual(wrong.owner, "unknown")
+        self.assertTrue(any(c.startswith("iron-chest at 15.5,0.5: on mini/~iron/b3's tile, unknown "
+                                         "(plots): MISMATCH") for c in rep.changes), rep.changes)
+        (c,) = sense.conflicts(rep)
+        self.assertEqual((c.key, c.stands, c.owner), ("nauvis:mini/~iron/b3", "iron-chest", "unknown"))
+        self.assertIn("fk register 15,0,16,1 MODULE", c.resolve)
 
     def test_a_belt_rory_places_in_sanctioned_space_is_marked_temp(self):
         live = copy.deepcopy(self.live)

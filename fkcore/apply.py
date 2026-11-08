@@ -69,6 +69,16 @@ The report names each change and why (``changes``). Then the wire pass (``fkcore
 design's missing wires and cuts the ones between design entities that the design doesn't have:
 one count line. It runs after every paste (and ``fk wait built`` runs it once robots are done).
 
+MISMATCH (3.1, placements; Rory 11-08: "a conflicting design must produce a MISMATCH, never a
+silently adjusted plan or a build over or around"): a design tile that something stands on which
+the toolkit did not paste there (not in ``own``: another placement's, a hand edit, or unknown) is
+refused. Its row is left out of the paste, one line names what stands there, whose it is and the
+command that would resolve it (``fk register``, ``fk capture --from``, ``fk adopt``, or taking it
+out), and the rest of the paste goes (``refused``, ``sense.conflicts``). Mating is no mismatch: an
+entity standing as the design has it is ``ok``. ``placements`` are the registry's records that
+are not this design's own (``placements.explaining``); the pasted rows (``rows``) and the paste's
+tick are on the report, for the caller to record the placements (``placements.from_apply``).
+
 ``diff(r, s, cat, area, policy)`` is a snapshot of the area judged by ``sense``: after robots finish
 (or a lab revive) it is all ``ok``, which is 1:1. Nothing here registers anything; every game
 call is one RCON command with the link's 5 s timeout.
@@ -137,6 +147,9 @@ class ApplyReport:
     fresh: list = field(default_factory=list)      # (key, why): laid fresh, and why (2.1)
     wires: object = None               # the wire pass (``fkcore.wires.Pass``)
     own: dict | None = None            # the record of what the applies pasted, after this one
+    refused: list = field(default_factory=list)   # 3.1: MISMATCH tiles left out (sense.Conflict)
+    rows: list = field(default_factory=list)      # 3.1: the codec rows pasted (for placements)
+    tick: int | None = None                       # the game tick after the paste
     dnp_kept: int = 0                  # built on DNP entities, kept standing (2.0.63)
     dnp_taken: int = 0                 # on DNP entities, ordered out: ghosts, and --confirm
     chunks: int = 0
@@ -185,6 +198,10 @@ class ApplyReport:
             out.append(f"  {len(self.resettled)} with new settings a paste can't write (a ghost, "
                        "a drill, an offshore pump): ordered out, and the paste lays them fresh "
                        "with the new ones")
+        if self.refused:
+            out.append(f"  mismatch: {len(self.refused)} design tiles have something standing on "
+                       "them the toolkit did not paste; refused (not pasted), the rest went:")
+            out += [f"    {c.line()}" for c in self.refused]
         out += self.change_lines()
         if self.turned:
             shown = ", ".join(k.split(":", 1)[-1] for k in self.turned[:6])
@@ -375,14 +392,15 @@ def single_ghosts(rows, s, cat, refused, poles=None):
 
 
 def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=None,
-         confirm=False):
+         confirm=False, placements=None):
     """Snapshot ``area`` and judge it against the design: a ``sense.SenseReport``. With
     ``force`` (2.0.12), the standing entities' settings too (``fkcore.settings``): those that
     differ from the design's are in the report's ``settings``, and so in its hand edits.
-    ``confirm`` (2.0.63): what stands on a DNP entity is taken up (``sense``)."""
+    ``confirm`` (2.0.63): what stands on a DNP entity is taken up (``sense``). ``placements``
+    (3.1): the registry's records that explain what stands (``placements.explaining``)."""
     live = scene.from_capture(link.snapshot(r, s.name, area, tag))
     rep = sense.sense(s, live, cat, list(area), policy, net_items=net_items, own=own,
-                      confirm=confirm)
+                      confirm=confirm, placements=placements)
     if force is not None:
         try:
             have = settingsmod.read(r, s.name, force, area, f"{tag}-settings")
@@ -396,10 +414,13 @@ def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=No
 
 
 def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None, keys=None,
-          net_items=None, tag="apply", seed=True, own=None, confirm=False) -> ApplyReport:
+          net_items=None, tag="apply", seed=True, own=None, confirm=False,
+          placements=None) -> ApplyReport:
     """Paste the design inside ``area`` (default: all of ``s``, and the toolkit's own entities it
     dropped) as one named blueprint. ``free``: the surface's property (ghosts revived by Lua,
-    nothing built by robots). ``own``: the record of what the applies pasted."""
+    nothing built by robots). ``own``: the record of what the applies pasted. ``placements``
+    (3.1): the registry's records that are not this design's (``placements.explaining``); a
+    design tile something else stands on is a MISMATCH, refused (``refused``)."""
     t0 = time.time()
     given = area
     rows = scope_rows(s, area, keys)
@@ -415,7 +436,14 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
     upped = {}
     if not free and policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own,
-                      force=force, confirm=confirm)
+                      force=force, confirm=confirm, placements=placements)
+        # 3.1: a design tile something stands on that the toolkit did not paste is refused: its
+        # row leaves the paste, and one line says what stands there and whose it is
+        rep.refused = sense.conflicts(before)
+        bad = {c.key for c in rep.refused}
+        if bad:
+            rows = [row for row in rows if row["src"] not in bad]
+            rep.design = len(rows)
         rep.dnp_kept = sum(1 for v in before.verdicts if v.verdict == "dnp-standing")
         rep.dnp_taken = sum(1 for v in before.verdicts if v.verdict == "unowned"
                             and v.key and v.detail.startswith(("DNP", "a ghost of a DNP")))
@@ -436,7 +464,8 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
         asked = {c["key"] for c in cands}
         rep.fresh += [(v.key, f"{v.detail.replace(' stands there', '')} stood on its tiles")
                       for v in before.verdicts if v.verdict == "other-entity"
-                      and v.key not in asked and any(not u[4] for u in v.under)]
+                      and v.key not in asked and v.key not in bad
+                      and any(not u[4] for u in v.under)]
         gone = [v for v in before.verdicts if v.verdict == "unowned"
                 and (v.name, v.x, v.y) not in held and (v.name, v.x, v.y) not in upped]
         # the toolkit's own that still stand stay in the record: ordered out, held up or upgrading
@@ -476,7 +505,8 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
                 rep.written.append((d.key, "set back from a hand edit"))
         rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
     if not rows:
-        rep.notes.append("nothing designed in this scope")
+        rep.notes.append("nothing designed in this scope" if not rep.refused else
+                         "nothing pasted: every designed tile in this scope is a mismatch")
         rep.seconds = time.time() - t0
         return rep
     if free:
@@ -495,7 +525,9 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
     at = _anchor(rows, cat)
     rep.pasted = _int(link.paste(r, s.name, force, bp, at))
     want = {(row["name"], float(row["x"]), float(row["y"])) for row in rows}
+    rep.rows = rows
     cap = link.snapshot(r, s.name, area, f"{tag}-ghosts")
+    rep.tick = cap.get("tick") if isinstance(cap, dict) else None
     # an entity ordered up stands for its design entity until robots swap it
     up_now = {(c["new"], float(c["x"]), float(c["y"])) for (o, x, y), c in upped.items()
               if any(t["n"] == o and float(t["x"]) == float(x) and float(t["y"]) == float(y)
@@ -568,15 +600,17 @@ def _skips(name):
 
 def upgrade_candidates(before, s):
     """What could go up to its design entity (2.1): a built entity of another name standing on a
-    design entity's position (``other-entity`` in the diff ``before``), not ordered out. ->
-    [{old, x, y, new, key, dir, ug}]."""
+    design entity's position (``other-entity`` in the diff ``before``), not ordered out. 3.1: the
+    toolkit's own only (the ``own`` record has it); anything else there is a MISMATCH, refused.
+    -> [{old, x, y, new, key, dir, ug}]."""
     out = []
     for v in before.verdicts:
-        if v.verdict != "other-entity":
+        if v.verdict != "other-entity" or v.owner:
             continue
         e = s.entities.get(v.key)
-        for name, x, y, _user, ghost, _mine in v.under:
-            if ghost or name == v.name or (float(x), float(y)) != (float(v.x), float(v.y)):
+        for name, x, y, _user, ghost, mine in v.under:
+            if ghost or not mine or name == v.name \
+                    or (float(x), float(y)) != (float(v.x), float(v.y)):
                 continue
             out.append({"old": name, "x": float(x), "y": float(y), "new": v.name, "key": v.key,
                         "dir": e.dir if e is not None else None,

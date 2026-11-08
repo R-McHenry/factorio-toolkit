@@ -231,13 +231,15 @@ def unpaired(live):
 
 
 def report(s, live, cat, area, pol, net_items=None, own=None, view=None, facts=None,
-           tags=None) -> Look:
+           tags=None, placements=None) -> Look:
     """The look at ``area`` of the composed ``s`` against the ``live`` scene. Pure. ``own``: the
     toolkit's own entities (``fkcore.own``): those the design dropped read unowned. ``view``
     (``vision.View``): zoom, layers and image; ``facts``: the game's vision read
-    (``vision.facts_from_read``); ``tags``: ``vision.design_tags``."""
+    (``vision.facts_from_read``); ``tags``: ``vision.design_tags``; ``placements`` (3.1): the
+    registry's records that are not this design's (``placements.explaining``)."""
     area = tuple(int(v) for v in area)
-    rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items, own=own)
+    rep = sense.sense(s, live, cat, list(area), pol, net_items=net_items, own=own,
+                      placements=placements)
     dsc = scene.design_scene(s, cat, list(area))
     design = compose.render_scene(dsc, cat, area)
     lk = Look(s.name, area, dict(pol), rep, design, compose.render_scene(live, cat, area),
@@ -355,7 +357,10 @@ def run(r, game, cat, area=None, notify=None, watch=None, write_marks=False, tag
         facts = vision.facts_from_read(raw, live, tags[0]) if raw is not None else None
         if facts is None and view.layers:
             facts = vision.facts_from_read({}, live, tags[0])
-    lk = report(s, live, cat, area, pol, items, ownmod.load(game, sf.name), view, facts, tags)
+    from . import placements as placementsmod
+    recs = placementsmod.explaining(placementsmod.load(game, sf.name), s)
+    lk = report(s, live, cat, area, pol, items, ownmod.load(game, sf.name), view, facts, tags,
+                placements=recs)
     ghosts = sorted({v.name for v in lk.rep.verdicts if v.verdict == "ghost"})
     if ghosts:
         # a ghost that stays is a blocked build: say why (SHORT: the network holds none of the

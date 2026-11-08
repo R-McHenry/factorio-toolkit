@@ -253,12 +253,233 @@ def _view(a):
     return vision.View(a.zoom, layers, a.image)
 
 
+def _area_or_placement(game, text, surface=None):
+    """3.1: ``X0,Y0,X1,Y1`` -> (area, None); a placement id -> (its area, its head line)."""
+    from . import placements
+    if not text:
+        return None, None
+    if placements.is_area(text):
+        return _area(text), None
+    try:
+        rec, area = placements.resolve(game, text, surface)
+    except (KeyError, ValueError) as exc:
+        raise SystemExit(f"error: {str(exc).strip(chr(34)).strip(chr(39))}") from None
+    return area, placements.head(rec)
+
+
+def _surface_force(game, surface=None, force=None):
+    """(force, surface) of a command: the run's own, or ``surface`` (its game/<surface>.surface
+    names the force; the lab's is ``lab``), ``force`` given wins."""
+    from . import alone
+    got_force, got_surface = _force_surface(game)
+    if surface and surface != got_surface:
+        got_surface = surface
+        path = os.path.join(game, f"{surface}.surface")
+        if os.path.exists(path):
+            got_force = surfacemod.load(path, derive=False).force_name
+        elif surface == alone.LAB:
+            got_force = "lab"
+    return force or got_force, got_surface
+
+
+def _is_free(game, surface):
+    from . import alone
+    path = os.path.join(game, f"{surface}.surface")
+    if os.path.exists(path):
+        return surfacemod.load(path, derive=False).free
+    return surface == alone.LAB
+
+
 def _look_world(a, cat):
     from . import look
-    area = _area(a.area)
+    area, head = _area_or_placement(a.game, a.area)
     view = _view(a)
-    return _world(a, cat, "look --source world", lambda r: look.run(
+    return _world(a, cat, "look --source world", lambda r: ([head] if head else []) + look.run(
         r, a.game, cat, area, a.notify, a.watch, a.write_marks, view=view).lines())
+
+
+def _paste(a, cat):
+    """fk paste FILE --at X,Y [--rot R] [--as NAME] (3.1, fkcore.placements): a captured Literal
+    file or a blueprint string pasted as ghosts with its origin (the file's 0,0) at X,Y, turned R
+    quarter turns about it, and recorded as a placement."""
+    from . import apply as applymod, codec, link, literal, placements
+    file = a.file if os.path.isabs(a.file) else os.path.join(a.game, a.file)
+    if not os.path.exists(file):
+        print(f"error: paste: no file {a.file}", file=sys.stderr)
+        return 2
+    try:
+        x, y = (int(v) for v in a.at.split(","))
+    except ValueError:
+        print("error: paste: --at X,Y (whole tiles)", file=sys.stderr)
+        return 2
+    rot = int(a.rot or 0) % 4
+    force, surface = _surface_force(a.game, a.surface, a.force_name)
+    stem = a.as_name or re.sub(r"\.(json|bp|txt)$", "", os.path.basename(a.file), flags=re.I)
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip("-") or "paste"
+    try:
+        rows = placements.paste_rows(file, stem, cat, (x, y), rot)
+    except literal.LiteralError as exc:
+        print(f"error: paste: {exc}", file=sys.stderr)
+        return 2
+    rel = os.path.relpath(file, a.game).replace(os.sep, "/") if not os.path.isabs(a.file) else a.file
+    free = _is_free(a.game, surface)
+
+    def body(r):
+        bp = codec.blueprint(rows, description=f"fk paste {rel} at {x},{y} rot {rot}",
+                             label=f"fk paste {stem}", wires=codec.pole_wires(rows, cat))
+        n = applymod._int(link.paste(r, surface, force, bp, applymod._anchor(rows, cat)))
+        box = applymod.scope_area(rows, cat, margin=0)
+        # the record's area spans the origin too: a paste at the same origin is the rebuild
+        area = (min(x, box[0]), min(y, box[1]), max(x + 1, box[2]), max(y + 1, box[3]))
+        revived = None
+        if free:
+            got = r.lua(link.lua_revive(surface, area)).split()
+            revived = int(got[0]) if got and got[0].isdigit() else 0
+        tick = r.lua("rcon.print(game.tick)").strip()
+        tick = int(tick) if tick.isdigit() else None
+        recs = placements.load(a.game, surface)
+        pid = a.as_name or placements.unique_id(recs, stem, stem, (x, y))
+        rec = placements.Record(pid, surface, stem, None, placements.rows_key(rows, (x, y)),
+                                [x, y], rot, list(area), tick, f"fk paste {rel}", "paste", rel,
+                                len(rows))
+        placements.put_all(a.game, surface, [rec])
+        out = [f"paste {rel}: {len(rows)} entities as ghosts on {surface} (force {force}), origin "
+               f"{x},{y}" + (f" rot {rot}" if rot else "") + f", {n} placed by the game"
+               + (f", {revived} revived (free surface)" if revived is not None else
+                  "; robots build them"),
+               f"  {placements.head(rec)}",
+               f"  fk look {pid} / fk diff {pid} judge its area; fk capture --from {pid} --into "
+               f"FILE writes it as source again, anchored where it stands"]
+        return out
+    return _world(a, cat, "paste", body)
+
+
+def _register(a, cat):
+    """fk register AREA MODULE[/INSTANCE] | AREA --as NAME (3.1): what stands in AREA is that
+    artifact (built by hand, Lua or an older toolkit): a placement is recorded, and the
+    differences against the design are reported (the diff's report). For a factory placed on
+    the surface the standing entities become the toolkit's own (``fkcore.own``), so the next
+    build converges them."""
+    from . import link, own as ownmod, placements, scene, sense
+    area = _area(a.area)
+    if not a.what and not a.as_name:
+        print("error: register AREA MODULE[/INSTANCE], or register AREA --as NAME", file=sys.stderr)
+        return 2
+    sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
+    module, _, inst = (a.what or "").partition("/")
+    place = None
+    if a.as_name:
+        pid, module = a.as_name, a.as_name
+    else:
+        place = sf.places.get(inst or module) \
+            or next((p for p in sf.places.values() if p.module == module), None)
+        pid = inst or (place.factory if place is not None else module)
+        if place is not None:
+            module = place.module
+
+    def inside(t):
+        return any(area[0] <= tx < area[2] and area[1] <= ty < area[3] for tx, ty in t["tiles"])
+
+    def body(r):
+        live = scene.from_capture(link.snapshot(r, sf.name, area, "register"))
+        things = [t for t in live["things"] if t["force"] not in ("enemy", "neutral")
+                  and inside(t) and not t["ghost"]]
+        own = ownmod.load(a.game, sf.name) or {}
+        others = [rec for rec in placements.explaining(placements.load(a.game, sf.name), s)
+                  if rec.id != pid]
+        lines = []
+        if place is not None:
+            # the standing entities are the factory's: the design's where they match it, the
+            # rest under <factory>/registered; the next build lays the differences fresh
+            rep = sense.sense(s, live, cat, list(area), sf, own=own, placements=others)
+            design = ownmod.rows_of(s)
+            matched = {ownmod.at(v.name, v.x, v.y) for v in rep.verdicts
+                       if v.verdict in ("ok", "settings-changed")}
+            n, k = 0, 0
+            for t in things:
+                key = ownmod.at(t["name"], t["x"], t["y"])
+                if key in own:
+                    continue
+                if key in matched and key in design:
+                    own[key] = design[key]
+                else:
+                    own[key] = ownmod.Row(f"{sf.name}:{pid}/registered/{t['name']}{k}", t["name"],
+                                          t["x"], t["y"], t["direction"], None, None)
+                    k += 1
+                n += 1
+            ownmod.save(a.game, sf.name, own)
+            lines.append(f"  own: {n} standing entities are the toolkit's own under {pid} now "
+                         f"({k} of them not where the design has them: the next build of {pid} "
+                         "takes them up or swaps them, as any difference)")
+        rows = [{"name": t["name"], "x": t["x"], "y": t["y"], "direction": t["direction"]}
+                for t in things]
+        origin = [place.x, place.y] if place is not None else [area[0], area[1]]
+        rec = placements.Record(pid, sf.name, module, (inst or place.factory) if place is not None
+                                else None, placements.rows_key(rows, origin), origin,
+                                int(place.rot) if place is not None else 0, list(area),
+                                live.get("tick"), f"fk register {a.area} {a.what or a.as_name}",
+                                "register", None, len(things))
+        placements.put_all(a.game, sf.name, [rec])
+        head = [f"register {a.area} as {pid}: {len(things)} entities stand there, recorded as "
+                f"{module}" + (" (a factory of this surface)" if place is not None else
+                               " (no factory of this surface places it: a placement only)"),
+                f"  {placements.head(rec)}"]
+        rep = sense.sense(s, live, cat, list(area), sf, own=ownmod.load(a.game, sf.name),
+                          placements=others)
+        lines = head + lines + ["differences against the design (as fk diff says them):"] \
+            + [f"  {ln}" for ln in rep.lines()]
+        bad = sense.conflicts(rep)
+        if bad:
+            lines.append(f"  mismatch: {len(bad)} design tiles something else stands on; the apply "
+                         "refuses them:")
+            lines += [f"    {c.line()}" for c in bad]
+        return lines
+    return _world(a, cat, "register", body)
+
+
+def _diff_cmd(a, cat):
+    """fk diff PLACEMENT_ID|AREA (3.1): the diff of the game codebase's design over that area,
+    headed by the placement (its module and origin). Cheap: the area is already there."""
+    from . import apply as applymod, look, own as ownmod, placements, sense
+    sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
+    area, head = _area_or_placement(a.game, a.what)
+    if area is None:
+        print("error: diff PLACEMENT_ID | X0,Y0,X1,Y1", file=sys.stderr)
+        return 2
+
+    def body(r):
+        items, notes = look.net_items(a.game, sf, cat)
+        recs = placements.explaining(placements.load(a.game, sf.name), s)
+        rep = applymod.diff(r, s, cat, area, sf, items, own=ownmod.load(a.game, sf.name),
+                            force=sf.force_name, placements=recs)
+        lines = ([head] if head else []) + rep.lines()
+        bad = sense.conflicts(rep)
+        if bad:
+            lines.append(f"mismatch: {len(bad)} design tiles have something standing on them the "
+                         "toolkit did not paste; the apply refuses them and pastes the rest:")
+            lines += [f"  {c.line()}" for c in bad]
+        hand = sense.hand_edits(rep)
+        if hand:
+            lines.append(f"hand: {len(hand)} hand edits the apply would replace, remove or set back:")
+            lines += [f"  {ln}" for ln in hand]
+        lines += [f"note: {n}" for n in notes]
+        return lines
+    return _world(a, cat, "diff", body)
+
+
+def _placements_cmd(a):
+    """fk placements (3.1): the registry, every surface of the game."""
+    from . import placements
+    folder = os.path.join(a.game, "out", "placements")
+    names = sorted(f[:-5] for f in os.listdir(folder) if f.endswith(".json")) \
+        if os.path.isdir(folder) else []
+    if not names:
+        print("\n".join(placements.lines({})))
+        return 0
+    for name in names:
+        print("\n".join(placements.lines(placements.load(a.game, name))).replace(
+            "placements:", f"placements on {name}:", 1))
+    return 0
 
 
 def _alerts(a, cat):
@@ -357,7 +578,9 @@ def _look(a, cat):
     except surfacemod.SurfaceError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    box = _area(a.area)
+    box, head = _area_or_placement(a.game, a.area, sf.name)
+    if head:
+        print(head)
     view = _view(a)
     if not view.plain:
         from . import scene, vision
@@ -787,10 +1010,69 @@ def _decon(a, cat):
     return _world(a, cat, "decon", body)
 
 
+def _capture_from(a, cat):
+    """fk capture --from PLACEMENT_ID|AREA --into FILE [--names] (3.1, Rory 11-08: "pull a
+    selection of world objects from the registry right into new source"): the selection as a
+    Literal file anchored where it stands (its entities relative to the anchor, the placement's
+    origin or the area's corner), and the two .fk lines that put it back exactly there, so a
+    module written against it mates with the standing objects."""
+    from . import capture, link, placements
+    try:
+        rec, area = placements.resolve(a.game, a.frm)
+    except (KeyError, ValueError) as exc:
+        print(f"error: capture: {str(exc).strip(chr(34)).strip(chr(39))}", file=sys.stderr)
+        return 2
+    surface = rec.surface if rec is not None else (a.surface or _force_surface(a.game)[1])
+    force, surface = _surface_force(a.game, surface, getattr(a, "force_name", None))
+    anchor = (int(rec.origin[0]), int(rec.origin[1])) if rec is not None else (area[0], area[1])
+    to = a.into or os.path.join("captured", f"{rec.id if rec is not None else 'area'}.json")
+    dest = to if os.path.isabs(to) else os.path.join(a.game, to)
+    rel = os.path.relpath(dest, a.game).replace(os.sep, "/")
+    stem = re.sub(r"[^A-Za-z0-9_]+", "_", os.path.splitext(os.path.basename(dest))[0]).lower()
+    try:
+        r = _game_link("capture")
+        if r is None:
+            return 2
+        with r:
+            got = capture.from_game(r, surface, force, area)
+        data = capture.anchored(got, anchor, cat)
+    except (capture.CaptureError, link.LinkError, OSError) as exc:
+        print(f"error: capture: {exc}", file=sys.stderr)
+        return 2
+    data["from"] = (f"placement {rec.id} on {surface}" if rec is not None
+                    else f"area {','.join(str(v) for v in area)} on {surface}")
+    data["surface"] = surface
+    capture.write(dest, data)
+    names = got.get("names") or {}
+    named = data.get("names") or {}
+    print(f"capture: {got['n']} entities into {rel}, anchored at {anchor[0]},{anchor[1]} on "
+          f"{surface}: {capture.summary(names)}")
+    print("  in a module whose frame is the world's (the world design, or a plot at 0,0):")
+    print(f'    {stem} = Literal<file="{rel}"> @({anchor[0]}, {anchor[1]})')
+    end = f"{stem}.{sorted(named, key=lambda n: (re.sub(chr(92) + 'd', '', n), int(re.sub(chr(92) + 'D', '', n) or 0)))[0]}" \
+        if named else f"{stem}.<port>"
+    print(f"    net out: {end} -> <your new instance>")
+    print("  on a plot at X,Y: @(%d - X, %d - Y). Placed there, its entities land on the standing "
+          "ones (ok, mated) and your new ones are ghosts" % anchor)
+    if named and (a.names or len(named) <= 12):
+        print(f"  names: {', '.join(sorted(named, key=lambda n: (re.sub(chr(92) + 'd', '', n), int(re.sub(chr(92) + 'D', '', n) or 0))))}")
+    elif named:
+        print(f"  names: {capture.name_span(named)} (--names lists them)")
+    if data.get("ports"):
+        print(f"  ports: {', '.join(sorted(data['ports'], key=lambda p: (p[0], int(p[1:]))))}")
+    return 0
+
+
 def _capture(a, cat):
     """fk capture (2.0.62): something built, as a Literal file that can go anywhere
     (fkcore.capture)."""
     from . import alone, capture, link
+    if a.frm:
+        return _capture_from(a, cat)
+    if not a.source or not a.what:
+        print("error: capture slot NAME | world X0,Y0,X1,Y1 | design INST, or --from "
+              "PLACEMENT_ID|AREA --into FILE", file=sys.stderr)
+        return 2
     to = a.to or os.path.join("captured", f"{re.sub(r'[^A-Za-z0-9_-]+', '-', a.what)}.json")
     dest = to if os.path.isabs(to) else os.path.join(a.game, to)
     try:
@@ -1356,16 +1638,98 @@ def _walk(a, cat):
     return _world(a, cat, "walk", run)
 
 
+def _adopt_edits(a, cat):
+    """fk adopt PLACEMENT_ID|AREA|X,Y[;X,Y] [--write] (3.1): the world edits inside, each turned
+    into source as far as a small step goes (fkcore.adopt.propose): a changed setting is a
+    proposed set line (a diff of the module source; --write appends it), a carrier next to a net
+    is V1's carrier adoption (--into), the rest needs a Literal patch."""
+    import math
+    from . import adopt, apply as applymod, look, own as ownmod, placements
+    sf, _surface_lay, _lay_path, s = _composed(a.game, cat)
+    text = a.what
+    if placements.is_area(text) or not re.fullmatch(r"[-\d.,; ]+", text):
+        area, head = _area_or_placement(a.game, text, sf.name)
+    else:
+        tiles = [tuple(math.floor(float(v)) for v in t.split(","))
+                 for t in text.replace(";", " ").split()]
+        xs, ys = [t[0] for t in tiles], [t[1] for t in tiles]
+        area, head = (min(xs) - 1, min(ys) - 1, max(xs) + 2, max(ys) + 2), None
+    carriers = fkp.CARRIER_TYPES
+
+    def nets_near(t):
+        near = set()
+        for x, y in t["tiles"]:
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                key = s.tiles.get((nx, ny))
+                if key is not None:
+                    e = s.entities[key]
+                    if e.attrs.get("net") and cat.kind(e.name) in carriers:
+                        near.add(f"{e.plot}/{e.attrs['net']}" if e.plot else e.attrs["net"])
+        return sorted(near)
+
+    def body(r):
+        items, _notes = look.net_items(a.game, sf, cat)
+        recs = placements.explaining(placements.load(a.game, sf.name), s)
+        rep = applymod.diff(r, s, cat, area, sf, items, own=ownmod.load(a.game, sf.name),
+                            force=sf.force_name, placements=recs, tag="adopt")
+        modules = {p.factory: p.module for p in sf.places.values()}
+        props = adopt.propose(rep.settings or [], cat, modules)
+        lines = ([head] if head else []) + [
+            f"adopt {text}: {len(props)} setting changes on standing design entities"]
+        texts = {}
+        for p in props:
+            if p.module and p.module not in texts:
+                path = os.path.join(a.game, f"{p.module}.fk")
+                texts[p.module] = None
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8") as fh:
+                        texts[p.module] = fh.read()
+            lines += [f"  {ln}" for ln in p.diff_lines(texts.get(p.module))]
+        if rep.settings_error:
+            lines.append(f"  settings not read ({rep.settings_error})")
+        foreign = [v for v in rep.verdicts if v.verdict in ("conflict", "marked", "placed")
+                   or (v.verdict == "unowned" and v.action != "own")]
+        if foreign:
+            lines.append(f"  {len(foreign)} things stand here that the design does not have:")
+        for v in foreign:
+            t = {"tiles": cat.tiles(v.name, float(v.x), float(v.y), 0) if cat.has_entity(v.name)
+                 else [(math.floor(v.x), math.floor(v.y))]}
+            who = v.owner or (f"hand edit by {v.actor}" if v.actor and v.actor != "unknown"
+                              else "unknown")
+            near = nets_near(t) if cat.has_entity(v.name) and cat.kind(v.name) in carriers else []
+            where = f"{fkp.fmt(v.x)},{fkp.fmt(v.y)}"
+            if near:
+                lines.append(f"    {v.name} at {where} ({who}): a carrier next to net "
+                             f"{', '.join(near)}: fk adopt {where} --into {near[0]} takes it into "
+                             "the net")
+            else:
+                lines.append(f"    {v.name} at {where} ({who}): needs a Literal patch: fk capture "
+                             f"--from {','.join(str(int(c)) for c in area)} --into captured/patch.json, "
+                             "then Literal<file=\"captured/patch.json\"> @(x, y) in the module")
+        if a.write:
+            done = adopt.write_proposals(a.game, props)
+            lines += [f"wrote {m}.fk: {ln}" for m, ln in done]
+            if not done:
+                lines.append("  nothing written: no set line to write")
+        elif any(p.line for p in props):
+            lines.append("  --write appends these set lines to the module files (after the "
+                         "instance's line)")
+        return lines
+    return _world(a, cat, "adopt", body)
+
+
 def _adopt(a, cat):
     import math
     from . import adopt, link, scene
+    if not a.into:
+        return _adopt_edits(a, cat)
     factory, _, net = a.into.partition("/")
     if not net:
         print("error: --into FACTORY/NET", file=sys.stderr)
         return 2
     # 2.2 (FRICTION ~4480k): a tile is the floor of a position, so -128.5 is tile -129 (int()
     # truncated it to -128, the tile beside it)
-    tiles = [tuple(math.floor(float(v)) for v in t.split(",")) for t in a.tiles.replace(";", " ").split()]
+    tiles = [tuple(math.floor(float(v)) for v in t.split(",")) for t in a.what.replace(";", " ").split()]
     sf, surface_lay, lay_path, s = _composed(a.game, cat)
     place = next((p for p in sf.places.values() if p.factory == factory), None)
     if place is None or factory not in surface_lay.plots:
@@ -1832,10 +2196,37 @@ def main(argv=None):
     lb.add_argument("--copy-ore", dest="copy_ore")    # X0,Y0,X1,Y1 of the world
     lb.add_argument("--to", default="0,0")
     lb.add_argument("--clear-ore", dest="clear_ore", action="store_true")
-    ad = sub.add_parser("adopt")
+    ad = sub.add_parser("adopt", description="a world edit taken into the source: carriers at X,Y"
+                        " into a net (--into FACTORY/NET, V1); 3.1: fk adopt PLACEMENT_ID|AREA "
+                        "proposes set lines for changed settings (--write appends them)")
     ad.add_argument("game")
-    ad.add_argument("tiles")
-    ad.add_argument("--into", required=True)
+    ad.add_argument("what", help="X,Y[;X,Y] tiles (with --into), or a placement id or area")
+    ad.add_argument("--into", help="FACTORY/NET: adopt the carriers on the tiles into it")
+    ad.add_argument("--write", action="store_true", help="append the proposed set lines")
+    pa = sub.add_parser("paste", description="3.1: a captured Literal file or blueprint string "
+                        "pasted as ghosts with its origin at X,Y, recorded as a placement "
+                        "(fkcore.placements)")
+    pa.add_argument("game")
+    pa.add_argument("file", help="a Literal file (.json with bp or entities) or a blueprint string "
+                   "file (.bp, .txt), relative to GAME_DIR")
+    pa.add_argument("--at", required=True, help="X,Y: where the file's origin (0,0) goes")
+    pa.add_argument("--rot", type=int, default=0, help="quarter turns clockwise about the origin")
+    pa.add_argument("--as", dest="as_name", help="the placement's id (default the file's stem)")
+    pa.add_argument("--surface", help="the surface (default the run's own)")
+    pa.add_argument("--force", dest="force_name", help="the force (default the surface file's)")
+    rg = sub.add_parser("register", description="3.1: what stands in AREA is that artifact (built "
+                        "by hand, Lua or an older toolkit): recorded as a placement, differences "
+                        "reported")
+    rg.add_argument("game")
+    rg.add_argument("area", help="X0,Y0,X1,Y1")
+    rg.add_argument("what", nargs="?", help="MODULE[/INSTANCE]: a factory of the surface, or a module")
+    rg.add_argument("--as", dest="as_name", help="NAME for something no module stands for")
+    df = sub.add_parser("diff", description="3.1: the diff over a placement's area (or an area), "
+                        "headed by the placement")
+    df.add_argument("game")
+    df.add_argument("what", help="PLACEMENT_ID or X0,Y0,X1,Y1")
+    pls = sub.add_parser("placements", description="3.1: the registry of what was pasted")
+    pls.add_argument("game")
     ch = sub.add_parser("chat")
     ch.add_argument("game")
     ch.add_argument("--all", action="store_true")
@@ -1880,10 +2271,14 @@ def main(argv=None):
     cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
                         "anywhere (fkcore.capture)")
     cp.add_argument("game")
-    cp.add_argument("source", choices=("lab", "slot", "world", "design"))
-    cp.add_argument("what", help="slot: the NAME of a module built alone (--surface; `lab` is "
-                    "slot --surface lab); world: X0,Y0,X1,Y1; design: [FACTORY/]INST")
+    cp.add_argument("source", nargs="?", choices=("lab", "slot", "world", "design"))
+    cp.add_argument("what", nargs="?", help="slot: the NAME of a module built alone (--surface; "
+                    "`lab` is slot --surface lab); world: X0,Y0,X1,Y1; design: [FACTORY/]INST")
     cp.add_argument("--to", help="the file (default captured/<what>.json, in GAME_DIR)")
+    cp.add_argument("--from", dest="frm", help="3.1: a placement id or X0,Y0,X1,Y1: the selection "
+                    "as source, anchored where it stands (fkcore.placements)")
+    cp.add_argument("--into", help="--from: the file (default captured/<id>.json)")
+    cp.add_argument("--names", action="store_true", help="--from: list every machine name")
     cp.add_argument("--fkp", help="design: the layout to read (default the committed one)")
     cp.add_argument("--surface", help="world, slot: the surface to read (default the run's own); "
                     "its GAME/<surface>.surface names the force")
@@ -1985,6 +2380,14 @@ def main(argv=None):
         return _dnp(a, cat)
     if a.cmd == "adopt":
         return _adopt(a, cat)
+    if a.cmd == "paste":
+        return _paste(a, cat)
+    if a.cmd == "register":
+        return _register(a, cat)
+    if a.cmd == "diff":
+        return _diff_cmd(a, cat)
+    if a.cmd == "placements":
+        return _placements_cmd(a)
 
     if a.cmd == "plan":
         return _plan(a, cat)

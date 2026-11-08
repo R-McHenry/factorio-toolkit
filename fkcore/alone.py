@@ -390,6 +390,10 @@ def build(r, game, name, src=None, size=None, cat=None, extra=None, keep=False,
     code, ctx = flow.run(os.path.join(ws, f"{surface}.build.fkb"), cat=cat, echo=steps.append,
                          link=r, extra=extra, compiled=compiled_store(game))
     got.code, got.ctx = code, ctx
+    if any(re.search(r"\]\s+apply\b", s) for s in steps):
+        # 3.1: the slot is a placement of the game's (fkcore.placements): fk look NAME, fk diff
+        # NAME, fk capture --from NAME read it there
+        lines.append("  " + record_placement(game, name, surface, sf, (x, y, w, h), (sx, sy, sw, sh)))
     for want in ("elaborate", "route", "report_checks", "apply", "diff"):
         hit = next((s for s in steps if re.search(rf"\]\s+{want}\b", s)), None)
         if hit:
@@ -397,6 +401,23 @@ def build(r, game, name, src=None, size=None, cat=None, extra=None, keep=False,
     if code != 0:
         lines.append(f"  stopped: {steps[-1] if steps else 'the flow'} (out\\*.txt in the workspace)")
     return got
+
+
+def record_placement(game, name, surface, sf, plot, slot, tick=None):
+    """Record NAME's build alone as a placement in the game's registry for ``surface``: id NAME,
+    its module, origin the plot's corner, area the slot's box, the compile store's current key
+    when the module has one. -> one report line."""
+    from . import compiled, placements
+    module = sf.places[name].module if name in sf.places else name
+    if module == WRAP:
+        module = next((p.module for p in sf.places.values()), name)
+    key = compiled.current(os.path.join(os.path.abspath(game), "out"), module)
+    x, y, w, h = plot
+    rec = placements.Record(name, surface, module, name, f"store:{key}" if key else None,
+                           [x, y], 0, list(box(*slot)), tick, f"fk alone {name} --surface {surface}",
+                           "alone", None, 0)
+    placements.put_all(game, surface, [rec])
+    return f"placement {name}: recorded in out/placements/{surface}.json (fk look {name}, fk diff {name})"
 
 
 def layout(game, name, surface=LAB, cat=None):
