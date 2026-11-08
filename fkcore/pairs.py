@@ -199,7 +199,8 @@ def _laid(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, spans,
                         goals=list(right.goals) + [(rt, (h + 3) % 4)], taps=list(right.taps),
                         owners=list(right.owners))
     both = routemod.NetJob(job.net, starts=[(hub, h)], goals=list(pair.goals),
-                           taps=list(pair.taps), owners=list(pair.owners), reserved=[back, ahead])
+                           taps=list(pair.taps), owners=list(pair.owners), reserved=[back, ahead],
+                           no_bend=[hub])
     sub = {k: v for k, v in js.items() if k != job.net}
     sub.update({a.net: a, b.net: b, both.net: both})
     laid, how, now = [], {}, list(ents)

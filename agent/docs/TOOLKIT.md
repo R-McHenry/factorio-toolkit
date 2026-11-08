@@ -145,6 +145,16 @@ When a route you have stops pleasing you (spaghetti from patches, a branch you'd
 (`out\route.txt`: `routed again: asked`). A route that doesn't reach a machine of its net is laid
 again by itself; `report_checks` says `partly-connected` if one ever still doesn't.
 
+Sealed modules compile once. Each sealed module (one with ports or a `size`) is routed alone in
+its frame, the innermost first, then the nets outside them: a net that fails in one module is
+tried again with that module's nets only, never with the whole design's. A module whose twin
+(the same module, the same things standing in its frame) was laid earlier in the build takes the
+twin's routes, moved to its frame, so ten copies of a cell or two of a chain cost one route. Every
+module routed whole is kept in `game\out\compiled\` (your `fk lab` builds write there too), so
+the next build lays it from there wherever it stands now, the first world build after a lab build
+included. `out\route.txt` says it on its `compile` line, and on each net `laid as ... (compiled
+once)`. `route --store none` lays every module afresh; `route --store DIR` keeps them elsewhere.
+
 Room for routes. Most routes that failed in the 10-30 run had no room, not a router fault:
 - A belt fed into a machine by an inserter takes 2 tiles beside it: one for the inserter, one
   for the belt. Two machines that share a belt between them need 3 tiles apart. A 1-tile gap
@@ -801,7 +811,10 @@ fk capture world X0,Y0,X1,Y1     of the game (fk sim game capture world ...: of 
 fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  X = Literal<file="captured/NAME.json"> @(x, y) puts it anywhere,
                                  inside a module too, and fk sim place takes the same file. The
-                                 file names its machines (asm1, furnace1, ...): X.asm1 is a net end
+                                 file names its machines (asm1, furnace1, ...): X.asm1 is a net end.
+                                 A game capture keeps world positions, so box="X0,Y0,X1,Y1" is in
+                                 world tiles: several Literals cut from one capture line up.
+                                 world --surface lab [--force player]: another surface's build
 fk measure X0,Y0,X1,Y1 [--seconds 30]
                                  what the machines in an area really make, against the model
 fk stats [--items iron-plate,copper-plate] [--window 10min]

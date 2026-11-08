@@ -111,6 +111,7 @@ class Ctx:
     source: dict = field(default_factory=dict)       # {source file: sha1} as the run began
     echo: object = None                              # the run's echo, for a long step's progress
     models: dict = field(default_factory=dict)       # factory -> (flat, its rates.solve), reused
+    compiled: str | None = None                      # the compiled-module store (PLAN-3.0 §4)
 
     def model(self, factory):
         """The nominal rate model of ``flats[factory]``, solved once per flat (2.1.27: hands, tier
@@ -861,7 +862,14 @@ def _ribbon_ug(word):
 
 def s_route(ctx, args):
     o = _opts(args, only="all", effort="normal", hand="any", module="", again="", ug="any",
-              m2m=False)
+              m2m=False, store="")
+    # PLAN-3.0 §4: sealed modules compile once, into the game folder's out/compiled (fk lab shares
+    # its game's); --store DIR elsewhere, --store none to lay every module afresh
+    store = str(o["store"]) or ctx.compiled or os.path.join(ctx.out, "compiled")
+    if store.lower() in ("none", "no", "off"):
+        store = None
+    elif not os.path.isabs(store):
+        store = os.path.join(ctx.root, store)
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -897,7 +905,7 @@ def s_route(ctx, args):
             r = route.route_layout(flat, lay, ctx.cat, limit=limit, retries=retries,
                                    blocked=blocked, hand=hand, patch=pinned, ug=ug,
                                    m2m="left" if o["m2m"] == "left"
-                                   else o["m2m"] not in (False, "no"))
+                                   else o["m2m"] not in (False, "no"), store=store)
         finally:
             route.PROGRESS = saved
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
@@ -1039,7 +1047,7 @@ def s_tier(ctx, args):
     ``--downgrade`` (minimize and maximize may go below the tier a belt has; without it they
     never do), ``--hand N`` / ``--bulk-hand N`` (the inserter hand sizes, as for report_rates)."""
     from . import tiers
-    o = _opts(args, allow="yellow", hand="auto", bulk_hand="auto")
+    o = _opts(args, allow="yellow", hand="auto", bulk_hand="auto", all=False)
     mode = (o.get("_") or ["minimize"])[0]
     allow = [t.strip() for t in str(o["allow"]).split(",") if t.strip()] \
         if o["allow"] is not True else []
@@ -1055,7 +1063,8 @@ def s_tier(ctx, args):
         new, tlines, _changed = tiers.assign(ctx.flats[factory], lay, ctx.cat, mode, allow,
                                              budgets, hand=hand, bulk_hand=bulk,
                                              downgrade=o.get("downgrade") is True,
-                                             model=ctx.model(factory))
+                                             model=ctx.model(factory),
+                                             every=o.get("all") is True)
         ctx.layouts[factory] = new
         lines += [f"{factory}: {tlines[0]}"] + tlines[1:]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
@@ -2079,17 +2088,19 @@ def with_options(lines, extra):
             if ln.cmd in add else ln for ln in lines]
 
 
-def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) -> tuple:
+def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None,
+        compiled=None) -> tuple:
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
     stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
     steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes.
-    ``extra``: options for this build only (``with_options``).
+    ``extra``: options for this build only (``with_options``). ``compiled``: the compiled-module
+    store the route step uses when its line names none (``fkcore.lab``: the game folder's).
 
     2.1.19: the whole build reads the source as it began (``fkcore.snapshot``). A file edited
     while it runs is left for the next build, and the build says which ones were."""
     with snapshot.held() as snap:
         try:
-            return _run(script, frm, to, cat, echo, link, extra)
+            return _run(script, frm, to, cat, echo, link, extra, compiled)
         finally:
             moved = snapshot.changed(snap)
             if moved:
@@ -2099,11 +2110,12 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None) 
                      "build began; build again to lay the new source")
 
 
-def _run(script, frm, to, cat, echo, link, extra):
+def _run(script, frm, to, cat, echo, link, extra, compiled=None):
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
         lines = with_options(parse(fh.read(), script), extra)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
+    ctx.compiled = compiled
     ctx.echo = echo
     availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:

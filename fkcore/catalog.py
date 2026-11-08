@@ -330,6 +330,11 @@ class Catalog:
         return set(got)
 
     def _tiles(self, name, x, y, direction):
+        # 2.1.32: a rail piece takes the tiles measured for its direction, not its bounding box
+        from . import railtiles
+        got = railtiles.tiles(name, x, y, direction)
+        if got is not None:
+            return got
         w, h = self.size(name)
         if direction is not None and int(direction) % 8 == 4:
             w, h = h, w

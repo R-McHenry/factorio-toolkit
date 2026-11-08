@@ -39,11 +39,22 @@ class LabTest(unittest.TestCase):
         with open(os.path.join(*parts), encoding="utf-8") as fh:
             return fh.read()
 
+    def test_a_lab_build_script_of_the_sources_own(self):
+        # 2.1.31: the default flow has no tier or hands step; a lab.build.fkb beside the source
+        # replaces it, so a design can have express belts and bulk inserters on the lab
+        ws, _ = lab.prepare(self.game, "iron")
+        self.assertEqual(self.read(ws, "lab.build.fkb"), lab.SCRIPT)
+        self.write("game/lab.build.fkb", "read_surface lab\ntier maximize --allow blue\n")
+        ws, _ = lab.prepare(self.game, "iron")
+        self.assertEqual(self.read(ws, "lab.build.fkb"),
+                         "read_surface lab\ntier maximize --allow blue\n")
+
     def test_a_workspace_of_its_own_on_a_slot_of_its_own(self):
         ws, (x, y, w, h) = lab.prepare(self.game, "iron")
         self.assertEqual(ws, os.path.join(self.run, "lab", "iron"))
         self.assertEqual((w, h), (26, 26))                       # the plot nauvis gives it
         self.assertEqual(sorted(os.listdir(ws)), ["lab.build.fkb", "lab.surface", "smelting.fk"])
+        # (the first build: nothing to keep)
         surf = surfacemod.load(os.path.join(ws, "lab.surface"))
         self.assertEqual((surf.name, surf.mode), ("lab", "lab"))
         p = surf.places["iron"]
@@ -59,6 +70,23 @@ class LabTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.game)), ["map.terrain.json", "nauvis.build.fkb",
                                                          "nauvis.fkp", "nauvis.surface",
                                                          "smelting.fk"])
+
+    def test_a_rebuild_keeps_the_last_layout_to_pin(self):
+        # 2.1.31: emptying the workspace lost write_layout's MODULE.fkp, so `route --only stale`
+        # pinned nothing and every lab rebuild of a 1300-net loop routed it all again
+        ws, _ = lab.prepare(self.game, "iron")
+        self.write("lab/iron/smelting.fkp", "fkp 1 module smelting\n")
+        self.write("lab/iron/stale.txt", "x")
+        self.write("lab/iron/lab.fkp", "fkp 1 surface lab\n")
+        ws, _ = lab.prepare(self.game, "iron")
+        self.assertEqual(self.read(ws, "smelting.fkp"), "fkp 1 module smelting\n")
+        self.assertNotIn("stale.txt", os.listdir(ws))
+        # 2.1.32: not the lab surface's own, which holds the old slot
+        self.assertNotIn("lab.fkp", os.listdir(ws))
+        # a layout the source has of its own wins
+        self.write("game/smelting.fkp", "fkp 1 module smelting # game\n")
+        ws, _ = lab.prepare(self.game, "iron")
+        self.assertIn("# game", self.read(ws, "smelting.fkp"))
 
     def test_from_a_stage_folder_and_the_refusals(self):
         os.makedirs(os.path.join(self.run, "stages", "3"))
@@ -124,6 +152,20 @@ class LabTest(unittest.TestCase):
                      lab.lua_unbounded()):
             link.assert_safe("/sc " + text)
             self.assertIn("'lab'", text)                         # the lab surface, never nauvis
+
+    def test_the_lab_power_carries_a_beaconed_bay(self):
+        # 2.1.31: 2 MJ a tick (120 MW) left a PU chain's assemblers on low power
+        self.assertIn("ei.power_production = 100000000", lab.lua_supply((0, 0, 10, 10)))
+
+    def test_the_feed_takes_the_fastest_loader_and_belt(self):
+        # 2.1.31: a yellow loader fed a lab port 15/s and starved a blue-belt line of ore
+        text = lab.lua_feed([dict(k="loader", at=[0.5, 1], port="m/a", dir="north",
+                                  type="output"),
+                             dict(k="belt", at=[0.5, 0.5], port="m/a", dir="north")])
+        link.assert_safe("/sc " + text)
+        self.assertIn("'turbo-loader', 'express-loader'", text)
+        self.assertIn("'turbo-transport-belt', 'express-transport-belt'", text)
+        self.assertNotIn("loader = 'loader'", text)
 
     def test_a_lab_surface_in_game_takes_nothing_over(self):
         # 2.0.3: the first .surface / .build.fkb alphabetically was the codebase's

@@ -122,6 +122,7 @@ class Grid:
         self.drop_taps = False       # laid reversed: taps drop onto their belt
         if _SOFT:
             self.soft = _SOFT
+        self.no_bend = set()         # 2.1.31: tiles whose belt runs straight on (a pair's join)
 
     def blocked(self, t):
         return t in self.occ or t in self.fronts
@@ -687,6 +688,9 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
         return min(sinks[i].h(x, y) for i in targets)
 
     tapped = set()           # laid reversed, a tapped belt takes a drop: it starts no tunnel
+    # 2.1.31: tiles whose belt must run straight on, neither turning nor starting a tunnel (a lane
+    # pair's join: an underground there is side-loaded from both sides, and drops a lane)
+    nobend = getattr(grid, "no_bend", ()) or ()
     if grid.drop_taps:
         for q, name, direction, _s in tree.taps:
             r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4

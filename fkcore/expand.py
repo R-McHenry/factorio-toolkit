@@ -80,8 +80,17 @@ def belts(flat, key, side):
     lane_of = getattr(flat, "lane_of", {}) if side == "in" else {}
     # 2.0.58: one item may come from several nets (a circuit assembler handed cable by two cable
     # assemblers, each its own net): a role per net, not only the first
-    pairs = [(item, lane_of.get(net, net)) for (k, item), nets in hold.items()
-             if k == key and item not in CONTACT for net in nets]
+    # 2.1.32: the hold indexed by machine once (a scan of it all for every machine was most of a
+    # megabase grid's route setup); rebuilt if the hold has changed size since
+    memo = flat.__dict__.setdefault("_hold_by_key", {})
+    got = memo.get(side)
+    if got is None or got[0] is not hold or got[1] != len(hold):
+        idx = {}
+        for (k, item), nets in hold.items():
+            idx.setdefault(k, []).append((item, nets))
+        got = memo[side] = (hold, len(hold), idx)
+    pairs = [(item, lane_of.get(net, net)) for item, nets in got[2].get(key, ())
+             if item not in CONTACT for net in nets]
     pairs.sort(key=lambda p: order.index(p[0]) if p[0] in order else len(order))
     out = []
     for item, net in pairs:
@@ -166,8 +175,17 @@ def _port_out(port, belt):
 
 def ports_of(flat, path):
     """The port keys an instance ``path`` has, sorted (its own ports, not a child's)."""
-    return sorted(k for k in flat.ports
-                  if k.startswith(path + "/") and "/" not in k[len(path) + 1:])
+    # 2.1.32: the keys indexed by their instance once (a scan of every port for every module was
+    # most of a megabase grid's fragments); rebuilt when the ports change
+    memo = flat.__dict__.get("_ports_by_inst")
+    if memo is None or memo[0] != len(flat.ports) or memo[1] is not flat.ports:
+        idx = {}
+        for k in flat.ports:
+            if "/" in k:
+                idx.setdefault(k.rsplit("/", 1)[0], []).append(k)
+        memo = flat.__dict__["_ports_by_inst"] = (len(flat.ports), flat.ports,
+                                                   {p: sorted(ks) for p, ks in idx.items()})
+    return list(memo[2].get(path, ()))
 
 
 def _port_choice(flat, key):
@@ -422,11 +440,20 @@ def _module_fragment(flat, path, cat):
         belt = _port_belt(port, out)          # the way the items cross the edge
         ox, oy = x + _STEP[out][0], y + _STEP[out][1]
         inside_role, outside_role = port.name, port.name + "!"
+        # 2.1.31: a paired port's nets are looked up by each of its items, so a net on its right
+        # lane alone binds it too (a line's far end whose left lane runs out there: the PU bay's
+        # red | processing-unit belt, whose units leave and whose red circuits end)
+        def held(hold):
+            for it in list(port.items or [None]) + list(port.right or []):
+                got = hold.get((key, it), [])
+                if got:
+                    return got
+            return []
         if port.dir == "in":
-            inner, outer = flat._out_hold.get((key, item), []), flat._in_hold.get((key, item), [])
+            inner, outer = held(flat._out_hold), held(flat._in_hold)
             inside_side, outside_side = "out", "in"
         else:
-            inner, outer = flat._in_hold.get((key, item), []), flat._out_hold.get((key, item), [])
+            inner, outer = held(flat._in_hold), held(flat._out_hold)
             inside_side, outside_side = "in", "out"
         roles[inside_role] = Role(inside_role, inside_side, [item] if item else [], [key],
                                   [(ox + 0.5, oy + 0.5, belt)])

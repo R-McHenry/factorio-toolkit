@@ -108,8 +108,10 @@ net done: red -> out
         self.assertNotIn("cannot-carry", codes(flat))
         self.assertEqual(flat.nets["ec2"].drivers, [("gbuf/c0", "electronic-circuit")])
         flat2 = flat_of(src.replace("gbuf = Buffer", "gbuf = Chest<plain>"))
-        self.assertIn("driver gbuf makes no item", [c.msg for c in flat2.checks
-                                                    if c.code == "cannot-carry"])
+        msgs = [c.msg for c in flat2.checks if c.code == "cannot-carry"]
+        # 2.1.33 (lab FRICTION 3): the line says a relay chest is a Buffer
+        self.assertIn("driver gbuf makes no item: it is a chest that only takes; a chest one net "
+                      "fills and another drains is a Buffer (Chest<plain, hold>)", msgs)
 
     def test_buffers_chain_and_item_is_explicit(self):
         flat = flat_of("""
@@ -412,6 +414,34 @@ net out: lit.asm2 -> gb
         self.assertIn("names a small-electric-pole of Literal lit, which is no machine",
                       str(cm.exception))
 
+    def test_a_wire_ends_at_a_literals_combinator(self):
+        # 2.1.31 (the PU bay): the hub sorter's combinator sat in one Literal and the chest it
+        # reads became a Buffer beside it; the wire between them had no way to be written
+        ents = self.ENTS + [{"name": "arithmetic-combinator", "x": 11.5, "y": 1.0,
+                             "direction": 0}]
+        self.write({"entities": ents, "names": {"comb": 4, "asm2": 2}})
+        src = (self.SRC + "box = Buffer<item=iron-plate> @(16, 4)\n"
+               "wire stock green: box -> lit.comb.in\n")
+        flat = self.flat(src)
+        w = flat.circuit.wires["stock"]
+        self.assertEqual(w.consumers, [("machine", "lit/arithmetic-combinator0")])
+        self.assertNotIn("no-wire", [c.code for c in flat.checks])
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT)
+        out, _lines, _cks = circuits.lay(flat, r.layout, CAT)
+        ends = {e for wd in out.wires if wd.net == "stock" for e in (wd.a, wd.b)}
+        self.assertIn("lit/arithmetic-combinator0.in", ends)
+        # a captured selector drives a wire from its output side, to a captured inserter
+        ents.append({"name": "selector-combinator", "x": 12.5, "y": 1.0, "direction": 0})
+        self.write({"entities": ents, "names": {"comb": 4, "sel": 5, "asm2": 2, "pole": 3}})
+        flat = self.flat(src + "wire pick green: lit.sel.out -> lit.pole\n")
+        self.assertEqual(flat.circuit.wires["pick"].drivers,
+                         [("machine", "lit/selector-combinator0")])
+        # a pole is still no net end
+        with self.assertRaises(ElabError):
+            self.write({"entities": self.ENTS, "names": {"pole": 3}})
+            self.flat(self.SRC.replace("lit.asm2 -> gb", "lit.pole -> gb"))
+
     def test_a_named_belt_is_fed_from_behind(self):
         # 2.1.19 (Rory's 42-lab block, ~4115k): a net may end INTO a Literal's own belt
         self.write({"entities": self.ENTS, "names": {"belt": 0, "asm2": 2}})
@@ -460,9 +490,10 @@ net out: lit.asm2 -> gb
         ents, _size, _corner = literal.import_entities(path, "lit", CAT, "1,0,9,5")
         self.assertEqual(literal.names_of(path, ents, "1,0,9,5"),
                          {"asm2": "lit/assembling-machine-11"})
-        self.write({"entities": self.ENTS, "names": {"belt": 0}})
-        with self.assertRaises(literal.LiteralError):
-            literal.names_of(path, ents, "1,0,9,5")
+        # 2.1.31: a name outside the box is left out, so one capture cuts into several Literals
+        self.write({"entities": self.ENTS, "names": {"belt": 0, "asm2": 2}})
+        self.assertEqual(literal.names_of(path, ents, "1,0,9,5"),
+                         {"asm2": "lit/assembling-machine-11"})
 
     def test_capture_names_the_machines(self):
         names = ["transport-belt", "assembling-machine-2", "stone-furnace", "inserter",

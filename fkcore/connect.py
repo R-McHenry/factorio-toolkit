@@ -78,12 +78,13 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import deque
 from dataclasses import dataclass, field
 
 from .catalog import FluidBox
 from .elaborate import Check
-from .fkp import CARRIER_TYPES, map_nets, net_names
+from .fkp import CARRIER_TYPES, map_nets, net_names, rails_share
 # 2.1.30: every use here is a sort key: the remembered tuple, not a fresh list per call (route's
 # standing nets sorted ~1.7M keys building graphs on the 20261030-2352 world)
 from .fkp import _natural_key as natural_key
@@ -413,6 +414,9 @@ def _add_node(g, e, cat):
                           e.attrs.get("recipe"), _priority(e) if kind == "splitter" else None,
                           e.attrs.get("resource") if kind == "mining-drill" else None)
     for t in tiles:
+        if t in g.at and g.at[t] in g.nodes and \
+                rails_share(e.name, g.nodes[g.at[t]].name):
+            continue
         if t in g.at:
             g.problems.append(f"{e.key}: tile {t[0]},{t[1]} is already {g.at[t]}")
         else:
@@ -787,10 +791,29 @@ def _joint(a, b, na, nb, table):
                for y in nb.nets if y in table for k in (a, b))
 
 
+_LIT_NET = re.compile(r"^(.+)/(hand|belt|fluid)\d+$")
+
+
+def _one_literal(na, nb):
+    """2.1.31: both carriers are one Literal's own (``fkcore.literal`` nets a captured build by
+    connectivity: ``<inst>/hand<k>``, ``<inst>/belt<k>``, ``<inst>/fluid<k>``), so the edge is the
+    build working as it was built, not a spill: a captured hub's 600 inserters all read SPILL."""
+    insts = set()
+    for n in (na, nb):
+        for x in n.nets or [None]:
+            m = _LIT_NET.match(x or "")
+            if m is None:
+                return False
+            insts.add(m.group(1))
+    return len(insts) == 1
+
+
 def _leak(g, a, b, via, table, cat=None):
     """The Leak an edge makes, or None. Between two carriers, the items of a net the second one
     does not carry escape (``ore|fuel`` into a belt of ``ore``: the fuel)."""
     na, nb = g.nodes[a], g.nodes[b]
+    if na.carrier and nb.carrier and _one_literal(na, nb):
+        return None
     if na.carrier and nb.carrier:
         if na.nets:
             out = [x for x in na.nets if x not in nb.nets]

@@ -140,6 +140,8 @@
    "energy_w": 480000,
    "drain_w": 480000,
    "priority": "secondary-input",
+   "distribution_effectivity": 1.5,
+   "supply_area_distance": 3,
    "module_slots": 2,
    "allowed_effects": [
     "consumption",

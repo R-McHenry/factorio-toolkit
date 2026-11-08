@@ -51,6 +51,9 @@ ORIGIN = -900                      # a cell's corner is ORIGIN + SLOT * i (2.0.3
 SPARE = 10                         # tiles a slot keeps free beyond its factory
 DEFAULT_SIZE = (100, 100)          # a factory no surface file places
 PAD = 4                            # tiles round a sealed module built alone: its ports' feeds
+#: J a tick from the lab's energy interface: 6 GW (2.1.31; 120 MW left a beaconed PU chain on
+#: low power, every assembler at a fraction of its speed)
+LAB_POWER = 100_000_000
 #: what the workspace copies from the source: the modules, their layouts, Literals' files, models
 _COPY = (".fk", ".fkp", ".json", ".py")
 _SKIP = ("map.terrain.json",)
@@ -81,6 +84,11 @@ class LabError(ValueError):
 
 def _run_dir(game):
     return os.path.dirname(os.path.abspath(game))
+
+
+def compiled_store(game):
+    """The game folder's compiled sealed modules (PLAN-3.0 §4), which its lab builds share."""
+    return os.path.join(os.path.abspath(game), "out", "compiled")
 
 
 def workspace(game, name):
@@ -182,9 +190,21 @@ def prepare(game, name, src=None, size=None):
         w, h = alone[1][0] + 2 * PAD, alone[1][1] + 2 * PAD
     (x, y, _sw, _sh), _old = slot_of(game, name, (w, h))
     ws = workspace(game, name)
+    # 2.1.31: the last build's layouts (write_layout's MODULE.fkp) are what `route --only stale`
+    # pins; emptying the workspace threw them away, so every lab rebuild routed every net again
+    kept = {}
     if os.path.isdir(ws):
+        for f in os.listdir(ws):
+            # the modules' layouts, not the lab surface's own (lab.fkp: it holds the old slot, and
+            # a slot moved took the old slot's area into the next apply and diff)
+            if f.endswith(".fkp") and f != "lab.fkp" and not os.path.exists(os.path.join(source, f)):
+                with open(os.path.join(ws, f), encoding="utf-8") as fh:
+                    kept[f] = fh.read()
         shutil.rmtree(ws)
     os.makedirs(ws)
+    for f, text in kept.items():
+        with open(os.path.join(ws, f), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
     skip = set(_SKIP) | ({f"{sf.name}.fkp"} if sf is not None else set())
     for f in sorted(os.listdir(source)):
         full = os.path.join(source, f)
@@ -202,8 +222,15 @@ def prepare(game, name, src=None, size=None):
         fh.write(f"# lab.surface (fkcore.lab): {name} from {os.path.relpath(source, _run_dir(game))}"
                  f" on its lab slot\nsurface  lab\nmode     lab\nterrain  none\ncatalog  base\n\n"
                  f"place {name} = {module} plot {x},{y} {w}x{h}\n")
+    # 2.1.31: a lab.build.fkb of the source's own (game\\ or --from) replaces the default flow,
+    # so a design can be built with its tier and hands steps (express belts, bulk inserters)
+    own = os.path.join(source, "lab.build.fkb")
+    script = SCRIPT
+    if os.path.isfile(own):
+        with open(own, encoding="utf-8") as fh:
+            script = fh.read()
     with open(os.path.join(ws, "lab.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(SCRIPT)
+        fh.write(script)
     return ws, (x, y, w, h)
 
 
@@ -284,8 +311,8 @@ if s.count_entities_filtered{{area = area, name = 'electric-energy-interface'}} 
         local pos = {{p.position.x + dx, p.position.y + dy}}
         if s.can_place_entity{{name = 'electric-energy-interface', position = pos, force = f}} then
           local ei = s.create_entity{{name = 'electric-energy-interface', position = pos, force = f}}
-          ei.power_production = 2000000
-          ei.electric_buffer_size = 2000000
+          ei.power_production = {LAB_POWER}
+          ei.electric_buffer_size = {LAB_POWER}
           out.power = ei.position.x .. ',' .. ei.position.y
         end
       end
@@ -449,8 +476,11 @@ def lua_feed(ents):
         rows.append("{" + ", ".join(parts) + "}")
     return f"""
 local s, f = game.get_surface('{SURFACE}'), '{FORCE}'
-local NAME = {{chest = 'infinity-chest', loader = 'loader', belt = 'transport-belt',
-              pipe = 'infinity-pipe'}}
+local function top(names) for _, n in ipairs(names) do if prototypes.entity[n] then return n end end end
+local NAME = {{chest = 'infinity-chest', pipe = 'infinity-pipe',
+              loader = top{{'turbo-loader', 'express-loader', 'fast-loader', 'loader'}},
+              belt = top{{'turbo-transport-belt', 'express-transport-belt', 'fast-transport-belt',
+                          'transport-belt'}}}}
 local out = {{placed = 0, blocked = {{}}}}
 for _, x in pairs({{{', '.join(rows)}}}) do
   local spec = {{name = NAME[x.k], position = {{x.x, x.y}}, force = f, direction = x.dir}}
@@ -509,7 +539,7 @@ def clear(r, game, name):
     return [f"lab {name}: slot {x},{y} emptied ({got} entities) and freed"]
 
 
-def build(r, game, name, src=None, size=None, cat=None):
+def build(r, game, name, src=None, size=None, cat=None, extra=None):
     """NAME on its lab slot: workspace, the slot emptied, the lab flow, then power, the
     requesters' items and burners' first coal. -> the report lines."""
     before = slots(game).get(name)
@@ -528,7 +558,10 @@ def build(r, game, name, src=None, size=None, cat=None):
     gone = r.lua(lua_clear(_box(sx, sy, sw, sh))).strip()
     lines.append(f"  emptied first: {gone} entities; {chunks} chunks generated under the slot")
     steps = []
-    code, ctx = flow.run(os.path.join(ws, "lab.build.fkb"), cat=cat, echo=steps.append, link=r)
+    # PLAN-3.0 §4: a sealed module the lab routed is compiled into the game folder's store, so
+    # the world build (and the next lab build) lays it from there
+    code, ctx = flow.run(os.path.join(ws, "lab.build.fkb"), cat=cat, echo=steps.append, link=r,
+                         extra=extra, compiled=compiled_store(game))
     for want in ("elaborate", "route", "report_checks", "apply", "diff"):
         hit = next((s for s in steps if re.search(rf"\]\s+{want}\b", s)), None)
         if hit:
@@ -681,7 +714,7 @@ def measure_lab(r, game, name, seconds, cat=None):
     if name not in slots(game) or not os.path.exists(os.path.join(ws, "lab.build.fkb")):
         raise LabError(f"{name}: not built in the lab yet (fk lab {name})")
     code, ctx = flow.run(os.path.join(ws, "lab.build.fkb"), to="report_checks", cat=cat,
-                         echo=lambda _l: None)
+                         echo=lambda _l: None, compiled=compiled_store(game))
     if code != 0 or ctx.composed is None:
         raise LabError(f"{name}: its lab design didn't lay out again (out\\*.txt in {ws})")
     x, y, w, h = slots(game)[name]

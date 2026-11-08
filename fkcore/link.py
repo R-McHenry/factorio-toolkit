@@ -235,9 +235,15 @@ for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, type = {_SKIP}
   end
   if not g and (t == 'pipe' or t == 'pipe-to-ground' or t == 'pump') then
     local it = {{}}
-    for i = 1, #e.fluidbox do
-      local f = e.fluidbox[i]
-      if f then it[f.name] = (it[f.name] or 0) + f.amount end
+    local okb, fbx = pcall(function() return e.fluidbox end)
+    if okb and fbx then
+      for i = 1, #fbx do
+        local f = fbx[i]
+        if f then it[f.name] = (it[f.name] or 0) + f.amount end
+      end
+    else
+      local okc, fc = pcall(function() return e.get_fluid_contents() end)
+      if okc and fc then for n, a in pairs(fc) do it[n] = (it[n] or 0) + a end end
     end
     if next(it) then row.it = it end
   end
@@ -279,8 +285,8 @@ local function cls_of(t, n, d)
   return c or '?'
 end
 local function fluidrow(e)
-  local fb = e.fluidbox
-  if not fb or #fb < 1 then return nil end
+  local okb, fb = pcall(function() return e.fluidbox end)
+  if not okb or not fb or #fb < 1 then return nil end
   local fl = fb[1]
   local okc, cap = pcall(fb.get_capacity, 1)
   local oks, seg = pcall(fb.get_fluid_segment_id, 1)
@@ -288,8 +294,8 @@ local function fluidrow(e)
     fl and fl.name or '', fl and fl.amount or 0, okc and cap or 0}}
 end
 local function opens(e)
-  local fb = e.fluidbox
-  if not fb or #fb < 1 then return 0 end
+  local okb, fb = pcall(function() return e.fluidbox end)
+  if not okb or not fb or #fb < 1 then return 0 end
   local n = 0
   for i = 1, #fb do
     local okf, filt = pcall(fb.get_filter, i)
@@ -521,8 +527,10 @@ def lua_revive(surface, area):
 local s = game.get_surface({_q(surface)})
 local n, failed = 0, 0
 for _, g in pairs(s.find_entities_filtered{{area = {_area(area)}, type = 'entity-ghost'}}) do
-  local _, e = g.revive()
-  if e then n = n + 1 else failed = failed + 1 end
+  if g.valid then
+    local _, e = g.revive()
+    if e then n = n + 1 else failed = failed + 1 end
+  end
 end
 rcon.print(n .. ' ' .. failed)
 """

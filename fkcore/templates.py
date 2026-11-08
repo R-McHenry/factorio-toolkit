@@ -30,7 +30,7 @@ INF = float("inf")
 #: straight holds at most N; ``guard``: its input inserters carry only what its recipe takes.
 CIRCUIT_PARAMS = ("keep", "fill", "guard")
 #: Parameters every instance may carry; the elaborator reads them, the templates ignore them.
-COMMON_PARAMS = ("duty", "dnp", "inserter", "modules") + CIRCUIT_PARAMS
+COMMON_PARAMS = ("duty", "dnp", "inserter", "modules", "beacons", "beacon") + CIRCUIT_PARAMS
 #: 2.0.53, ``modules=``: the module slots of the machines that take them, and each module's
 #: effect on speed and productivity (normal quality; efficiency changes no rate). 2.1.1: read
 #: from facts.json (``fkcore.facts``): every entity with module slots, every module.

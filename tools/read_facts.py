@@ -97,6 +97,8 @@ for name, p in pairs(prototypes.entity) do
     if p.type == 'inserter' then r.rotation_speed = m(p, 'get_inserter_rotation_speed')
       r.extension_speed = m(p, 'get_inserter_extension_speed') r.bulk = g(p, 'bulk')
       r.stack_size_bonus = g(p, 'inserter_stack_size_bonus') r.filter_count = g(p, 'filter_count') end
+    if p.type == 'beacon' then r.distribution_effectivity = g(p, 'distribution_effectivity')
+      r.supply_area_distance = m(p, 'get_supply_area_distance') end
     if p.type == 'roboport' then r.logistic_radius = g(p, 'logistic_radius')
       r.construction_radius = g(p, 'construction_radius') end
     r.module_slots = g(p, 'module_inventory_size')
@@ -391,6 +393,11 @@ def build_facts(ents, things, conns, sset, sread):
         if e.get("module_slots"):
             row["module_slots"] = e["module_slots"]
             row["allowed_effects"] = _list(e.get("allowed_effects"))
+        if e.get("type") == "beacon":
+            # 2.1.33: the beacon's reach and strength; its profile is 1/sqrt(n) (fkcore.elaborate)
+            for k in ("distribution_effectivity", "supply_area_distance"):
+                if e.get(k) is not None:
+                    row[k] = clean(e[k])
         if e.get("fluid_usage_per_tick"):
             row["fluid_per_s"] = clean(e["fluid_usage_per_tick"] * 60)
         entities[name] = row

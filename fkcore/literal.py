@@ -63,7 +63,24 @@ class LiteralError(ValueError):
     pass
 
 
+#: 2.1.32: {(path, text digest): (rows, wires)}: a capture's 6000-entity blueprint was decoded again
+#: for every Literal cut from it (a 9-bay loop: 36 s of elaborate, mostly this)
+_PARSED = {}
+
+
 def read_entities(path):
+    """:func:`_read_entities`, parsed once per file text (callers get their own lists)."""
+    text = snapshot.read(path)
+    key = (os.path.abspath(path), hashlib.sha1(text.encode("utf-8")).hexdigest())
+    if key not in _PARSED:
+        if len(_PARSED) > 256:
+            _PARSED.clear()
+        _PARSED[key] = _read_entities(path)
+    rows, wires = _PARSED[key]
+    return [(n, x, y, d, dict(st)) for n, x, y, d, st in rows], list(wires)
+
+
+def _read_entities(path):
     """-> (rows, wires) from an entity-list JSON or a blueprint string file. rows: [(name, x, y,
     dir, settings)] in file order, ``settings`` the entity's game settings (``recipe``, ``ug``,
     ``config``); wires: the circuit wires [(i, ci, j, cj)] between rows, as row indices.
@@ -108,6 +125,8 @@ def read_entities(path):
             x, y = e["position"]["x"], e["position"]["y"]
         d = e.get("d", e.get("direction"))
         k = at.get((e["name"], float(e.get("bx", x)), float(e.get("by", y))))
+        if d is None and k is not None:
+            d = got[k]["direction"]          # 2.1.31: a capture's list leaves it to the blueprint
         if k is not None:
             row_of[k] = len(rows)
         own = _own_settings(e)
@@ -152,6 +171,18 @@ def _box(text):
     return x0, y0, x1, y1
 
 
+#: 2.1.32: the kinds whose facing matters: a turned Literal turns them (a blueprint leaves a north
+#: one's direction out, and a None one stayed north, so a turned bay's train stops faced its rails'
+#: wrong side and no train could reach them)
+FACING = frozenset({"train-stop", "rail-signal", "rail-chain-signal", "straight-rail",
+                    "half-diagonal-rail", "curved-rail-a", "curved-rail-b", "legacy-straight-rail",
+                    "legacy-curved-rail", "inserter", "transport-belt", "underground-belt",
+                    "splitter", "loader", "loader-1x1", "pipe-to-ground", "pump", "offshore-pump",
+                    "constant-combinator", "arithmetic-combinator", "decider-combinator",
+                    "selector-combinator", "locomotive", "cargo-wagon", "fluid-wagon",
+                    "artillery-wagon", "mining-drill", "boiler", "generator", "storage-tank"})
+
+
 def import_entities(path, inst, cat, box=None):
     """-> (entities in the Literal's own frame, frame size, frame origin in file coordinates)."""
     rows, wires = read_entities(path)
@@ -178,12 +209,52 @@ def import_entities(path, inst, cat, box=None):
     for (name, x, y, d, settings), _ts in tiles:
         k = count.get(name, 0)
         count[name] = k + 1
+        if d is None and cat.kind(name) in FACING:
+            d = 0            # 2.1.32: north, which a blueprint leaves out, so a turn turns it too
         out.append(fkpmod.Entity(f"{inst}/{name}{k}", name, _clean(x - x0), _clean(y - y0),
                                  d if d in _DIRS or d is None else d, dict(settings)))
     for n, text in codec.wire_attrs([e.key for e in out], wires).items():
         out[n].attrs["wire"] = text
     _name_nets(out, inst, cat)
     return out, (x1 - x0, y1 - y0), (x0, y0)
+
+
+def row_keys(path, inst, box=None):
+    """2.1.33: {file row index: entity key} of the entities ``import_entities`` keeps, keyed as it
+    keys them (``inst/<name><k>``), so a capture wire's ends can be found in the Literals cut
+    from it."""
+    rows, _wires = read_entities(path)
+    kept = list(range(len(rows)))
+    if box is not None:
+        x0, y0, x1, y1 = _box(box)
+        kept = [k for k in kept if x0 <= math.floor(rows[k][1]) < x1
+                and y0 <= math.floor(rows[k][2]) < y1]
+    count, out = {}, {}
+    for k in kept:
+        name = rows[k][0]
+        n = count.get(name, 0)
+        count[name] = n + 1
+        out[k] = f"{inst}/{name}{n}"
+    return out
+
+
+def box_cuts(path, box, cat):
+    """2.1.33 (lab FRICTION 30): [(name, x, y, kept)] of every entity of ``path`` whose tiles lie
+    both inside and outside ``box``. A Literal keeps an entity by its position, so a cut one is
+    either left out (a hole: the station unit lost the last curve of each turn, and no train
+    found a path) or kept sticking out over its neighbour."""
+    rows, _wires = read_entities(path)
+    x0, y0, x1, y1 = _box(box)
+    out = []
+    for name, x, y, d, _settings in rows:
+        if not (x0 - 8 <= x < x1 + 8 and y0 - 8 <= y < y1 + 8) or not cat.has_entity(name):
+            continue
+        ts = cat.tiles(name, x, y, d if d is not None else 0)
+        inside = sum(1 for tx, ty in ts if x0 <= tx < x1 and y0 <= ty < y1)
+        if 0 < inside < len(ts):
+            kept = x0 <= math.floor(x) < x1 and y0 <= math.floor(y) < y1
+            out.append((name, _clean(x), _clean(y), kept))
+    return out
 
 
 def _name_nets(ents, inst, cat):
@@ -283,8 +354,7 @@ def names_of(path, ents, box=None):
             raise LiteralError(f"{path}: names {name}: {idx!r} is no entity's index (the file has "
                                f"{len(rows)}, from 0)")
         if idx not in pos:
-            raise LiteralError(f"{path}: names {name}: entity {idx} ({rows[idx][0]}) lies outside "
-                               f"box {box}")
+            continue        # 2.1.31: outside this Literal's box; one capture cuts into several
         out[str(name)] = ents[pos[idx]].key
     return out
 

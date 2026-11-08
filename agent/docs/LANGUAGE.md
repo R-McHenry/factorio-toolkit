@@ -236,6 +236,13 @@ electric-furnace 2, chemical-plant 3, oil-refinery 3, electric-mining-drill 3, p
 beacon 2; an assembling-machine-1 or a burner has none. Productivity modules go only into the
 recipes the game allows them in (intermediates, science packs, uranium fuel cells).
 
+Beacons count too (2.1.33). A placed beacon (`Entity<name=beacon, modules=speed-module-2>`) reaches
+every machine whose box comes within 3 tiles of its own, so at most 2 free tiles between them. Each
+machine's speed gains 1.5 x its beacons' module speed x 1/sqrt(beacons), on top of its own modules.
+That needs both placed with `@(x, y)` in the same module tree. Where the layout can't say (a row, or
+beacons that stand in a neighbour placed elsewhere), set the count on the instance: `beacons=8`,
+with `beacon=speed-module-3` for the modules in each (else the design's beacons' modules).
+
 ### Rows, the older way
 
 `AsmRow<n, recipe>`, `SmelterRow<n, recipe>`, `LabRow<n>`, `SmelterArray<n, recipe>` and

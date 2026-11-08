@@ -138,7 +138,18 @@ def maker(path, cat, name=None, layout=None):
     """A factory's elaboration at given counts, its file read once: ``make(sizes) -> Flat``."""
     f, modules = load(path)
     name = name or os.path.splitext(os.path.basename(path))[0]
-    return lambda sizes: elaborate(f, modules, cat, name, layout, sizes)
+    # 2.1.32: the base (no sizes) once: size, _size_counts and _size_rows each asked for it, three
+    # elaborations of a megabase grid with nothing to size (its base is shared read-only already,
+    # _Run.flat)
+    base = []
+
+    def make(sizes):
+        if sizes:
+            return elaborate(f, modules, cat, name, layout, sizes)
+        if not base:
+            base.append(elaborate(f, modules, cat, name, layout, sizes))
+        return base[0]
+    return make
 
 
 # -- the model at given counts --------------------------------------------------------------------

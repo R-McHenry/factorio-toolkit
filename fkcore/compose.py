@@ -110,6 +110,9 @@ def compose(surface: fkpmod.Layout, factories: dict, cat) -> Surface:
             s.problems.append(f"{key}: {exc}")
             return
         for t in tiles:
+            if t in s.tiles and s.tiles[t] in s.entities and \
+                    fkpmod.rails_share(e.name, s.entities[s.tiles[t]].name):
+                continue
             if t in s.tiles:
                 s.problems.append(f"{key}: tile {t[0]},{t[1]} is already {s.tiles[t]}")
             else:
