@@ -135,6 +135,34 @@ save) from the lab run `lab-session\fk-run`:
   starts with a minus sign goes with `=` (`--from=-300,-300,-100,-100`); argparse reads it as a
   flag otherwise.
 
+### 3.1.2: the docs structured around examples (2026-11-08, night)
+
+Rory, 11-08: the docs should be structured around examples; the reference-first shape was a big
+problem for the DeepSeek players (the runner's win arm read docs and probed the cell library for
+about 100 turns and built first at turn 115). PLAN-DOCS.md in assessment-20261108, shipped on
+`claude/32-docs`:
+
+- `agent/docs/START.md` (new, 240 lines): the first hour with gears.fk from copy to look, every
+  output line explained, then the path through the chapters.
+- `agent/docs/EXAMPLES.md` (619 to 1,235 lines) is the spine: 14 chapters, one idea each, every
+  chapter a complete file, the command, the exact output of a paper build, the new idea, and
+  "what goes wrong here" with the check lines quoted as the toolkit prints them. Game-side lines
+  come from the code's format strings and are marked "in the game".
+- `LANGUAGE.md` (1,165 to 424) and `TOOLKIT.md` (887 to 411) are reference appendices: every row
+  a snippet and the chapter that uses it; one paragraph on packs (`FK_PACK` or the `pack` file;
+  the base game with Space Age, and Sea Block). Rory, 11-08: the pack stays a run-level setting.
+- Four new examples from the megahub lab: `beacon-cells.fk` (beaconed lines, prod2 and speed2),
+  `red-chain.fk` (a sealed ore-to-product chain with a fluid port, chapter 11's main example, the
+  lab's 6.9 red circuits/s quoted as measured), `belt-switch.fk` (a production switch on a belt,
+  3.0.3's gated net), `mate.fk` with `captured/mate-block.json` (the mating workflow as files).
+  Every example file opens with a header: what it shows, the command, what to expect.
+- `tests/test_examples_docs.py`: all 26 examples build on paper; the summary lines EXAMPLES.md
+  and START.md quote must match the build; the chapter-7 library table equals the cell library;
+  every `fk X` in the three docs is a real command.
+- Open: the runner's own brief (another repo) does not point at START.md; the older briefs
+  (core-v1, lead-v1, opus-v1, seablock-v1) still name a TOOLKIT.md section that is gone;
+  game-side lines could be quoted exactly from a laptop server later.
+
 ## Wave 3
 
 ### Documentation (31-docs)
