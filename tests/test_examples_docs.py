@@ -170,7 +170,7 @@ class CommandsTest(unittest.TestCase):
 
     def test_every_fk_word_is_a_command(self):
         import io
-        from contextlib import redirect_stderr
+        from contextlib import redirect_stderr, redirect_stdout
         from fkcore import __main__ as cli
         import argparse
         names = set()
@@ -187,7 +187,7 @@ class CommandsTest(unittest.TestCase):
             return sub
         argparse.ArgumentParser.add_subparsers = grab
         try:
-            with redirect_stderr(io.StringIO()):
+            with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
                 try:
                     cli.main(["--help"])
                 except SystemExit:
@@ -198,7 +198,7 @@ class CommandsTest(unittest.TestCase):
         real = names | WRAPPER
         bad = set()
         for doc in ("START.md", "EXAMPLES.md", "TOOLKIT.md"):
-            for word in re.findall(r"\bfk ([A-Za-z][A-Za-z0-9_-]*:?)", read(DOCS, doc)):
+            for word in re.findall(r"(?<![.\w])fk ([A-Za-z][A-Za-z0-9_-]*:?)", read(DOCS, doc)):
                 if word in NOT_COMMANDS or word.rstrip(":") in real:
                     continue
                 bad.add((doc, word))

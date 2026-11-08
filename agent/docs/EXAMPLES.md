@@ -129,7 +129,8 @@ net load: botin -> port
 
 `fk check robot-feed.fk`: `check robot-feed: 2 machines, 1 nets, 0 check lines`. The route is
 `routed    load: 1 -> 1, 1 inserter (direct insertion)`: a roboport takes robots from an
-inserter. A second chest with `item="construction-robot"` does the same for those.
+inserter; `robot-feed: 1 nets: 1 connected, 0 open, 0 unrouted; 0 SPILL; 4 entities, 2 edges, 0
+underground pairs`. A second chest with `item="construction-robot"` does the same for those.
 
 ## 3. smelting.fk: a row, and the cell that replaces it
 
@@ -195,8 +196,9 @@ would take 150.0/min, so they run at about 80% for it`: four drills for eight fu
 **Aside: smelter-array.fk.** `SmelterArray<n=24, recipe=iron-plate>` is the older stack row,
 furnaces on both sides of each plate belt; the library's `SmelterPair` replaces it. On paper
 (`fk rates smelter-array.fk`) 24 furnaces make `iron-plate 450.00` a minute at full speed into
-three chests, since one chest's inserter takes 2.5/s. At plot 33x50 the power cover has no spot
-for five of the sixteen drills: `NO_POWER smelter-array ore/m10: all 81 spots a
+three chests, since one chest's inserter takes 2.5/s (`smelter-array: 3 nets: 3 connected, 0
+open, 0 unrouted; 0 SPILL; 345 entities, 351 edges, 2 underground pairs`). At plot 33x50 the
+power cover has no spot for five of the sixteen drills: `NO_POWER smelter-array ore/m10: all 81 spots a
 medium-electric-pole could power it from are taken: 54 on entities (ore); 27 outside the 33x50
 frame`. A wider plot, or fewer drills in the row, is the answer.
 
@@ -229,7 +231,7 @@ shared-belt: 2 routed, 0 kept (0 pinned from the committed .fkp), 0 failed, 1 pa
 ```
 
 ```
-shared-belt: 3 nets: 3 connected, 0 open, 0 unrouted; 0 SPILL; 110 entities, 110 edges, 0 underground pairs
+shared-belt: 3 nets: 3 connected, 0 open, 0 unrouted; 0 SPILL; 110 entities, 110 edges, 1 underground pairs
 ```
 
 After the build, `fk rates shared-belt.fk` adds the routed section, the belts and inserters as
@@ -427,7 +429,7 @@ fk lab plastic-cell
 ```
 
 In the game the lines have this shape: `alone plastic-cell on lab (free): slot X,Y (WxH tiles
-for 20x27), workspace lab\plastic-cell (from game)`, then `emptied first: N entities; C chunks
+for 19x27), workspace lab\plastic-cell (from game)`, then `emptied first: N entities; C chunks
 generated under the slot`, the route and report_checks lines of the build, `placement
 plastic-cell: recorded in out/placements/lab.json (fk look plastic-cell, fk diff plastic-cell)`,
 `stand-in supply: power ...; requesters stocked: 1 coal; burners given a first load: 0`,
@@ -444,8 +446,9 @@ lubricant).
 furnaces: a 7x3 `FurnaceCell` with `modules=productivity-module`, `Stack<cell=FurnaceCell, n=8>`,
 six drills. `fk rates furnace-column.fk`: the first five furnaces full (`iron-plate 36.45`), the
 sixth at a third, the last two `iron-ore short on col/0/o`: 3 ore/s is ore for 5.3 furnaces, and
-the belt serves them in order. `no-limit furnace-column box: no limit=: what reaches it goes into
-the logistic network without end`: the provider has no `limit=`.
+the belt serves them in order; `furnace-column: 32 nets: 32 connected, 0 open, 0 unrouted; 0
+SPILL; 189 entities, 178 edges, 0 underground pairs`. `no-limit furnace-column box: no limit=:
+what reaches it goes into the logistic network without end`: the provider has no `limit=`.
 
 **Aside: beacon-cells.fk.** `docs\examples\beacon-cells.fk` (plot 44x40) is the lab's beaconed
 line, from the processing-unit bay: `kind Beacon = Entity<name=beacon, modules=speed-module-2>`,
@@ -527,7 +530,7 @@ The cells of `game\cells.fk` (this table is checked against the file by a test):
 | `SmelterPair<plate, ore, fuel=coal>` | two stone furnaces back to back on one ore and fuel belt, plates out both sides: 24 furnaces to a yellow lane of ore | `f_*`, `pw_*`, `pe_*` |
 | `SmeltColumn<plate, ore>` | three FurnaceCells in a column, the ore along its foot; stacked east, a bus of plate belts (chapter 8) | `ore_in`/`ore_out`, `pl` |
 | `AsmCell<recipe, ins, out>` | an assembler, two ingredients on the two lanes of one belt (`ins=A\|B`), its product down the other | `in_*`, `out_*` |
-| `AsmCell1<recipe, ins, out>` | the same with one ingredient; `GearCell` is a kind of it | `in_*`, `out_*` |
+| `AsmCell1<recipe, ins, out>`, `GearCell` | the same with one ingredient; `GearCell` is a kind of it with gears set | `in_*`, `out_*` |
 | `CircuitCell` | green circuits: three cable assemblers to two circuit assemblers, handing straight across. Two cells: 480 circuits/min | `wi_*`, `wo_*`, `cu_*`, `eo_*`, `ei_*` |
 | `LabCell<packs>` | a lab, two packs on the two lanes of one belt (red and green unless you say) | `p_in`/`p_out` |
 | `LabColumn<packs>` | six LabCells and a header of one belt a pack; stacked east, a lab field | `r_*`, `g_*` |
@@ -1087,11 +1090,11 @@ surface file that places it on a slot of its own, runs the build script there, a
 pastes it and revives it. In the game the lines have this shape:
 
 ```
-alone plastic-cell on lab (free): slot X,Y (WxH tiles for 20x27), workspace lab\plastic-cell (from game)
+alone plastic-cell on lab (free): slot X,Y (WxH tiles for 19x27), workspace lab\plastic-cell (from game)
   emptied first: N entities; C chunks generated under the slot
   route ... 24 routed, 0 kept ...
   report_checks ... 24 nets: 24 connected, 0 open, 0 unrouted ...
-  apply lab area X0,Y0,X1,Y1 (free, force lab): 164 entities designed, N ghosts placed, 0 where designed
+  apply lab area X0,Y0,X1,Y1 (free, force lab): N entities designed, N ghosts placed, 0 where designed
   placement plastic-cell: recorded in out/placements/lab.json (fk look plastic-cell, fk diff plastic-cell)
   stand-in supply: power ...; requesters stocked: 1 coal; burners given a first load: 0
   stand-in feed: N open ports (...):
