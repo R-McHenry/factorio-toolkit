@@ -2795,7 +2795,7 @@ def _filter_loads(flat, lay, cat):
 #: PLAN-3.0 §4: the router's version a compiled module was laid by; a compiled module of another
 #: version is laid again. Bump it when a change to the router would lay a module otherwise.
 # 3.0.2 + lab: the compile key leaves out rails other modules own (bumped from route-3.0.2)
-COMPILE_VERSION = "route-3.0.2-lab"
+COMPILE_VERSION = "route-3.0.3"
 
 
 def _unit(net, sealed):

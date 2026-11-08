@@ -26,11 +26,14 @@ A change to the game's rules goes in FAIR-PLAY.md and nowhere else.
 
 ## Building it
 
-- **Tests:** stdlib only, run from this folder.
-  - While working, run the modules that cover the change (`python -m unittest tests.test_x`).
-  - The full suite (`python -m unittest discover -s tests -t .`) has about 1,650 tests and takes
-    about 6 minutes. Run it once before a merge to main, in the background, and keep working; never
-    wait on it. Small fixes can share one release.
+- **Tests:** stdlib only, run from this folder. Run the modules that cover the change
+  (`python -m unittest tests.test_x`), in the background when they take more than a few seconds.
+  Never run the whole suite. Small fixes can share one release.
+- **Main is the only integration point.** This folder stays checked out on `main`. A branch is
+  merged within a day or two of its last commit, or `..\STATE.md` gets a dated line saying which
+  branch, why it waits and who merges it. Release numbers are assigned on main at merge time, and
+  whoever merges updates `..\STATE.md` in the same commit. Nothing (lab, run, host) deploys from a
+  dirty tree: install from a commit and record its sha.
 - **Core ideas:**
   - a net is a declared object (name, items, drivers -> consumers), and machines join nets;
   - one source owns every tile;
