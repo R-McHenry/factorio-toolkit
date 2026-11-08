@@ -432,26 +432,6 @@ class FlowTest(unittest.TestCase):
         self.assertIn("1 of them are power-bridge poles", c.msg)
         self.assertIsNone(flow._unreached(ctx, Link([]), Rep))
 
-    def test_the_diff_records_the_built_poles_for_the_cover_step(self):
-        # 2.0.1: the cover step runs where there is no game link; the diff says which poles stand
-        from fkcore.sense import Verdict
-        ctx = flow.Ctx(self.dir, self.script, CAT, os.path.join(self.dir, "out"))
-        ctx.surface = type("S", (), {"name": "nauvis"})()
-        self.assertIsNone(flow._standing(ctx, "main"))           # no diff yet: as before
-
-        class Rep:
-            verdicts = [Verdict("ok", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0"),
-                        Verdict("ghost", "medium-electric-pole", 9.5, 0.5, "nauvis:main/power/p1"),
-                        Verdict("ok", "small-electric-pole", 1.5, 0.5, "nauvis:coal/power/p0"),
-                        Verdict("ok", "assembling-machine-1", 1.5, 1.5, "nauvis:main/a/m0")]
-        flow._save_standing(ctx, Rep)
-        self.assertEqual(flow._standing(ctx, "main"), {"power/p0"})
-        self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})
-        Rep.verdicts = [Verdict("not-placed", "medium-electric-pole", 3.5, 0.5, "nauvis:main/power/p0")]
-        flow._save_standing(ctx, Rep)                            # gone since: no longer standing
-        self.assertEqual(flow._standing(ctx, "main"), set())
-        self.assertEqual(flow._standing(ctx, "coal"), {"power/p0"})   # outside the scope: kept
-
     def test_the_kickoff_template_runs_through_the_routed_rates(self):
         # every new run's script (tier, then report_rates again) on the template as it ships: one
         # plot with the reactor, its pole line and the kit inside it, and a first factory of drills

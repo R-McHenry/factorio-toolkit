@@ -442,7 +442,7 @@ def _check_args(lay, cat, pole, owner):
 
 
 def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=(),
-                standing=None, only=None, deny=(), attrs=None, frame=None):
+                only=None, deny=(), attrs=None, frame=None):
     """``(poles, report)``: the poles to add to ``lay`` and a :class:`CoverReport`.
 
     ``frame`` (2.1.35): the box (x0, y0, x1, y1) new poles stand in, in place of the layout's
@@ -450,11 +450,10 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
 
     ``keep_out`` is an iterable of ``(x, y)`` tiles no pole may use (a route's tiles, a reserved
     lane). ``pinned``: the committed poles to keep where they still fit (they come back among
-    ``poles``, under their own keys). ``standing``: the keys of the pinned poles the last diff
-    found built; a pinned pole of another kind than ``pole`` (and its size) stays only when it
-    stands, so switching ``pole`` keeps the built grid and lays the new kind where the old one
-    never stood (2.0.1, the first lead run: medium poles were SHORT before steel, and switching to
-    small dropped every medium pole, the built ones too). ``lay`` is not changed.
+    ``poles``, under their own keys). A pinned pole of another kind than ``pole`` is not kept: it
+    is laid again in the new kind (3.1, Rory 11-08: nothing the diff found built reaches the
+    cover; 2.0.1 had kept a built pole of the old kind from ``out/standing.json``). ``lay`` is
+    not changed.
 
     2.1 (power domains, ``fkcore.domains``): ``only``, the keys of the entities and poles of one
     domain (None: all of them); every other entity's tiles stay taken, and its poles are no wire
@@ -493,8 +492,8 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     if frame is not None:
         ground.bounds = tuple(frame)
 
-    # The committed poles that still fit: kept as they stand (wire nodes, prunable last); one of
-    # another kind only when it stands built (``standing``) and takes the same footprint.
+    # The committed poles of this kind that still fit: kept as they stand (wire nodes, prunable
+    # last).
     kept, names = [], {}
     for e in sorted(pinned, key=lambda e: natural_key(e.key)):
         try:
@@ -502,9 +501,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         except (KeyError, ValueError):
             continue
         spot = (min(x for x, _y in tiles), min(y for _x, y in tiles))
-        if e.name != pole and (standing is None or e.key not in standing
-                               or cat.kind(e.name) != "electric-pole"
-                               or cat.size(e.name) != cat.size(pole)):
+        if e.name != pole:
             continue
         if not ground.free(spot):
             continue
@@ -589,7 +586,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         groups = _groups(nodes)
 
     # 3. Prune: a new pole whose entities others power too, and whose loss splits nothing, goes.
-    # New poles first (newest first), then the pinned ones, and a standing pole only when it
+    # New poles first (newest first), then the pinned ones, and a pinned pole only when it
     # powers nothing at all (a new one never replaces it). A bridge kept to join a pole that went
     # is looked at again.
     rects = [rect for _k, rect in electric]
@@ -801,13 +798,12 @@ def _why_not(ground, rect, s, pole, size):
 
 
 def apply_cover(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=(),
-                standing=None, only=None, deny=(), attrs=None, poles=None):
+                only=None, deny=(), attrs=None, poles=None):
     """A new Layout: ``lay`` without ``owner``'s previous poles, with the pinned ones that still
     fit, the new ones and the record ``cover <owner> power pole=<pole>``. ``lay`` is not changed.
     ``poles``: :func:`cover_power`'s, when the caller has them already."""
     if poles is None:
-        poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned, standing, only, deny,
-                                  attrs)
+        poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned, only, deny, attrs)
     out = copy.deepcopy(lay)
     out.entities = {k: e for k, e in out.entities.items() if not _is_own_pole(e, owner, cat)}
     old = out.covers.get(owner)

@@ -213,7 +213,6 @@ def _hands(ctx, o):
 
 
 _FORCE_FILE = "force.json"                           # in out/: the force's hands, by diff
-_STANDING_FILE = "standing.json"                     # in out/: the poles built, by diff (2.0.1)
 _STAMP_FILE = "source.json"             # in out/<step>/: the source its checkpoint was laid from
 _LAID_FILE = "layout-source.json"       # in out/: the source write_layout's .fkp files came from
 #: the source files of a game codebase (beside the build script): what a layout is laid from.
@@ -308,54 +307,11 @@ def _save_hands(ctx, r):
     return 1 + a, 1 + b
 
 
-def _save_standing(ctx, rep, roboports=None):
-    """The poles the diff finds built (ok) in ``out/standing.json``, updated over the diff's
-    scope and kept elsewhere: the next build's cover step runs where there is no game link, and
-    keeps a built pole of another kind than its own (2.0.1). ``roboports`` (2.1.3): every roboport
-    that stands with power, [[x, y, logistic radius, construction radius]], for the next build's
-    ``cover robots`` (kept as it was when this diff read none)."""
-    path = os.path.join(ctx.out, _STANDING_FILE)
-    poles, ports = {}, None
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            was = json.load(fh)
-        poles, ports = dict(was.get("poles") or {}), was.get("roboports")
-    if roboports is not None:
-        ports = [list(p) for p in roboports]
-    for v in rep.verdicts:
-        if not v.key or not ctx.cat.has_entity(v.name) \
-                or ctx.cat.kind(v.name) != "electric-pole":
-            continue
-        if v.verdict.split()[0] == "ok":
-            poles[v.key] = v.name
-        else:
-            poles.pop(v.key, None)
-    os.makedirs(ctx.out, exist_ok=True)
-    data = {"poles": dict(sorted(poles.items()))}
-    if ports is not None:
-        data["roboports"] = ports
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(data, fh, indent=0)
-        fh.write("\n")
-
-
-def _standing_roboports(ctx):
-    """The roboports the last diff found standing with power, [(x, y, logistic radius,
-    construction radius)] in map coordinates, or None when no diff has said (2.1.3)."""
-    path = os.path.join(ctx.out, _STANDING_FILE)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            ports = json.load(fh).get("roboports")
-    except (OSError, ValueError, AttributeError):
-        return None
-    if not isinstance(ports, list):
-        return None
-    return [tuple(float(v) for v in p[:4]) for p in ports if len(p) >= 4]
-
-
 def _read_roboports(ctx, r):
-    """The live read behind ``_standing_roboports`` and ``REACH``: [(x, y, logistic radius,
-    construction radius)], or None when the read fails."""
+    """The diff's live read of the roboports that stand with power, for ``REACH`` and
+    ``UNREACHED`` (the diff's and report_bom's business, this build only; 3.1: no cover step
+    reads it, see ``fk robots``): [(x, y, logistic radius, construction radius)], or None when the
+    read fails."""
     from . import link, robots
     tag = f"roboports-{os.getpid()}"
     try:
@@ -365,21 +321,6 @@ def _read_roboports(ctx, r):
         return None
     rows = got if isinstance(got, list) else list(got.values()) if isinstance(got, dict) else []
     return [tuple(float(v) for v in p[:4]) for p in rows if len(p) >= 4]
-
-
-def _standing(ctx, factory):
-    """The keys (``power/p3``) of ``factory``'s poles the last diff found built, or None when no
-    diff has said (then a pole of another kind is never kept, as before)."""
-    path = os.path.join(ctx.out, _STANDING_FILE)
-    if ctx.surface is None or not os.path.exists(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            poles = json.load(fh).get("poles") or {}
-    except (OSError, ValueError):
-        return None
-    head = f"{ctx.surface.name}:{factory}/"
-    return {k[len(head):] for k in poles if k.startswith(head)}
 
 
 def _factories(ctx):
@@ -460,6 +401,9 @@ def _plot_ground(t, p):
     parts = [f"{sum(1 for b in t.water if inside(b))} water",
              f"{sum(1 for b in t.cliff_tiles if inside(b))} cliff",
              f"{sum(1 for b in t.other if inside(b))} other blocked tiles"]
+    if t.entities_read is not None:
+        parts.append(f"{sum(1 for b in t.entities if inside(b))} standing-entity tiles "
+                     "(read-terrain --entities)")
     for res, ps in sorted(t.patches.items()):
         held = [(pt.n, sum(1 for tile in pt.tiles if inside(tile))) for pt in ps]
         held = [(n, k) for n, k in held if k]
@@ -1553,7 +1497,9 @@ def _own(prev, owner, prefix):
 def s_cover_power(ctx, args):
     """Poles for every electric entity (``fkcore.cover``). 1.7 (Rory, 2026-10-21: pin and patch):
     the committed poles stay where they still fit and new ones go only where coverage is missing;
-    ``--fresh`` lays every pole anew, as before."""
+    ``--fresh`` lays every pole anew, as before. 3.1 (Rory 11-08: the world never feeds a step):
+    what the diff found built does not reach here; a pinned pole of another kind than ``--pole``
+    is laid again in the new kind, and what stands is the diff's difference."""
     o = _opts(args, pole="medium-electric-pole")
     pole, _note = availmod.choose("pole", o["pole"], need=_need(ctx, "electric-pole"))
     if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
@@ -1568,15 +1514,13 @@ def s_cover_power(ctx, args):
     lines, checks = [], []
     for factory, lay in list(ctx.layouts.items()):
         keep_out = _frame_blocked(ctx, factory, lay.size) | _empty_slots(ctx, factory, lay)
-        standing = _standing(ctx, factory)
         doms = domains.active(ctx.flats.get(factory))
         if doms is not None:
             # 2.1: two power lines or more are domains, each its own network (fkcore.domains)
             prev = ctx.previous.get(factory)
             new, dlines, dchecks = domains.cover_domains(
                 ctx.flats[factory], lay, ctx.cat, doms, pole, keep_out=keep_out,
-                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"),
-                standing=standing)
+                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"))
             ctx.layouts[factory] = new
             lines += [f"{factory}: {ln}" for ln in dlines]
             checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in dchecks]
@@ -1593,10 +1537,10 @@ def s_cover_power(ctx, args):
                                                  keep_out=keep_out)
         else:
             poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
-                                           pinned=pinned, standing=standing)
+                                           pinned=pinned)
         # 2.1.26: the poles just laid, not a second cover_power (the live world's took ~30 s each)
         new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
-                                standing=standing, poles=poles)
+                                poles=poles)
         ctx.layouts[factory] = new
         if units:
             lines.append(f"{factory}: by unit: {rep.units[0]} sealed modules laid, "
@@ -1624,7 +1568,9 @@ def s_cover_robots(ctx, args):
     already reaches (the kit's roboport and every roboport joined to it) needs none (1.2). 1.7 (pin
     and patch): the committed roboports stay where they still fit and reach a chest; ``--fresh``
     places them all anew, as before. 3.0 (U5, Rory): no storage chest beside a roboport any more;
-    ``--storage`` is ignored with one line."""
+    ``--storage`` is ignored with one line. 3.1 (Rory 11-08): the roboports that stand in the
+    world never decide where new ones go (2.1.3's chain from the last diff's read is gone); the
+    design says, and ``fk robots`` reports what stands against it."""
     from . import robots
     o = _opts(args, roboport="roboport", storage=None)
     if ctx.surface is not None and ctx.surface.mode == "lab":
@@ -1632,8 +1578,6 @@ def s_cover_robots(ctx, args):
     storage = None
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
-    # 2.1.3: new roboports only where one that stands builds them (the last diff's read)
-    standing = _standing_roboports(ctx)
     lines, checks = [], []
     if o["storage"] not in (None, "none", "off"):
         lines.append("cover robots: --storage is gone in 3.0 (no chest beside a roboport); ignored")
@@ -1643,16 +1587,12 @@ def s_cover_robots(ctx, args):
         prev = ctx.previous.get(factory)
         pinned = [] if o.get("fresh") is True else \
             _own(prev, "robots", "r")
-        reach = robots.in_frame(places, ctx.layouts, factory, standing)
         new, rep = robots.apply_robots(lay, ctx.cat, keep_out=keep_out, roboport=o["roboport"],
-                                       served=near, storage=storage, pinned=pinned, reach=reach)
+                                       served=near, storage=storage, pinned=pinned)
         ctx.layouts[factory] = new
         lines.append(f"{factory}: {rep.summary()}")
         checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in rep.checks]
         checks += _invariant_checks(factory, fkp.invariants(new, ctx.cat))
-    if standing is not None:
-        lines.append(f"  {len(standing)} roboports stand with power (the last diff): a new one "
-                     "goes only where they, or one laid in reach of them, build it")
     return lines, checks
 
 
@@ -2343,11 +2283,7 @@ def s_diff(ctx, args):
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
         pass
     if ctx.surface.mode != "lab":
-        ctx.roboports = _read_roboports(ctx, r)
-    try:
-        _save_standing(ctx, rep, ctx.roboports)   # for the next build's cover steps, on the laptop
-    except (OSError, ValueError):
-        pass
+        ctx.roboports = _read_roboports(ctx, r)      # REACH and UNREACHED, this build only
     ghosts = sorted({v.name for v in rep.verdicts if v.verdict == "ghost"})
     if ghosts:
         from . import supply

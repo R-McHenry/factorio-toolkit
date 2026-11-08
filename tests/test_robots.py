@@ -188,5 +188,78 @@ class SurfaceNetworkTest(unittest.TestCase):
         self.assertNotIn("storage chests beside", text)
 
 
+def standing(x, y, powered=True):
+    return robots.Standing("roboport", x, y, 25.0, 55.0, powered)
+
+
+class StandingReportTest(unittest.TestCase):
+    """3.1 (Rory 11-08): an agent that built too many roboports runs ``fk robots`` and sees how
+    few would do. A pure read: the surface's roboports against the design's logistic chests."""
+    CHESTS = [("nauvis:a/in/c0", "requester-chest", 10.5, 10.5),
+              ("nauvis:a/out/c1", "passive-provider-chest", 40.5, 10.5),
+              ("nauvis:b/in/c0", "requester-chest", 90.5, 10.5),
+              ("nauvis:far/c0", "requester-chest", 300.5, 10.5)]
+    # 20,10 and 30,10 both cover c0 and c1; 50,10 covers c1 only; 80,10 covers b/c0; 120,10
+    # covers nothing but bridges 80,10 to 160,10, which covers nothing either; 300,10 has no power
+    PORTS = [standing(20, 10), standing(30, 10), standing(50, 10), standing(80, 10),
+             standing(120, 10), standing(160, 10), standing(300, 10, powered=False)]
+
+    def test_coverage_redundancy_and_a_minimal_set(self):
+        rep = robots.report(self.PORTS, self.CHESTS, CAT)
+        self.assertEqual((len(rep.standing), len(rep.powered), len(rep.unpowered)), (7, 6, 1))
+        self.assertEqual([c[0] for c in rep.uncovered], ["nauvis:far/c0"])    # no power there
+        self.assertEqual(rep.networks, 1)
+        # one of 20,10 / 30,10 goes, 50,10 goes (c1 has the other), 160,10 reaches no chest and
+        # is a leaf; 120,10 would split nothing once 160,10 is gone, and reaches no chest either
+        gone = {p.at for p in rep.redundant}
+        self.assertEqual(len(rep.redundant), 4, gone)
+        self.assertTrue(gone & {"20,10", "30,10"} and not gone >= {"20,10", "30,10"}, gone)
+        self.assertTrue({"50,10", "160,10", "120,10"} <= gone, gone)
+        self.assertNotIn("80,10", gone)                      # the only one reaching b/c0
+        self.assertEqual(len(rep.minimal), 3)                # c0+c1 together, b/c0, far/c0
+        lines = rep.lines("nauvis")
+        self.assertIn("robots nauvis: 7 roboports stand (6 with power, 1 network); 4 logistic "
+                      "chests in the design", lines[0])
+        self.assertIn("covered: 3 of 4 chests inside a powered roboport's logistic square; "
+                      "uncovered: far/c0 at 300.5,10.5", lines[1])
+        self.assertIn("redundant: 4 of the 6 powered", lines[2])
+        self.assertIn("2 of them reach no chest", lines[2])
+        self.assertIn("minimal: 3 roboports would cover every chest", lines[3])
+        self.assertIn("without power: 1 (they serve nothing): 300,10", lines[4])
+        self.assertIn("nothing changed", lines[-1])
+
+    def test_a_bridge_between_covering_roboports_is_not_redundant(self):
+        # 20,10 covers c0; 120,10 covers a chest of its own; 70,10 covers nothing but joins them
+        chests = [self.CHESTS[0], ("nauvis:b/c", "requester-chest", 130.5, 10.5)]
+        rep = robots.report([standing(20, 10), standing(70, 10), standing(120, 10)], chests, CAT)
+        self.assertEqual(rep.networks, 1)
+        self.assertEqual(rep.redundant, [])
+        self.assertEqual(len(rep.minimal), 2)
+
+    def test_an_area_cuts_chests_and_the_roboports_that_serve_it(self):
+        rep = robots.report(self.PORTS, self.CHESTS, CAT, area=(0, 0, 60, 20))
+        self.assertEqual([c[0] for c in rep.chests], ["nauvis:a/in/c0", "nauvis:a/out/c1"])
+        self.assertEqual({p.at for p in rep.standing}, {"20,10", "30,10", "50,10", "80,10"})
+        self.assertEqual(rep.uncovered, [])
+        self.assertIn("area 0,0,60,20", rep.lines("nauvis")[0])
+        empty = robots.report(self.PORTS, self.CHESTS, CAT, area=(500, 0, 600, 20))
+        self.assertIn("no logistic chest to cover here", empty.lines("nauvis")[1])
+        self.assertEqual(empty.minimal, [])
+
+    def test_the_read_rows_and_the_lua(self):
+        rows = [["roboport", 8, 8, 25, 55, True], ["roboport", 60, 8, 0, 0, False], ["x"]]
+        got = robots.standing_rows(rows, CAT)
+        self.assertEqual([(p.at, p.lr, p.cr, p.powered) for p in got],
+                         [("8,8", 25.0, 55.0, True), ("60,8", 25.0, 55.0, False)])  # catalog radii
+        from fkcore import link
+        lua = robots.lua_standing("nauvis", "player", "t")
+        link.assert_safe(lua)
+        for word in ("create_entity", "destroy", "order_deconstruction", "build_blueprint"):
+            self.assertNotIn(word, lua)
+        self.assertNotIn("area =", lua)
+        self.assertIn("area = {{0.0, 0.0}, {10.0, 10.0}}",
+                      robots.lua_standing("nauvis", "player", "t", (0, 0, 10, 10)))
+
+
 if __name__ == "__main__":
     unittest.main()
