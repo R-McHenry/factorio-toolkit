@@ -1,8 +1,8 @@
 # boot.fk: a small temporary iron factory near the plant: ore and coal into four furnaces, the
 # plates into one provider chest by direct insertion (robots build the first rows from it).
 # It is placed "temporary until main.running" in nauvis.surface.
-iron  = MinerRow<n=2, resource=iron-ore>   @(8, 2, rot 2)
-coal  = MinerRow<n=1, resource=coal>       @(14, 2, rot 2)
+iron  = MinerRow<n=2, resource=iron-ore>   @(11, 9, rot 2)
+coal  = MinerRow<n=1, resource=coal>       @(17, 6, rot 2)
 smelt = SmelterRow<n=4, recipe=iron-plate> @(8, 11)
 box   = Chest<provider>                    @(2, 20)
 

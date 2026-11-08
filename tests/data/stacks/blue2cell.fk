@@ -1,2 +1,2 @@
 # the hand-patched 6-row blue science unit, pinned as it stands in the lab
-unit = Literal<file="blue2cell.json", box="1614,409,1632,415"> @(0, 0)
+unit = Literal<file="blue2cell.json", box="1614,409,1632,415"> @(-1614, -409)

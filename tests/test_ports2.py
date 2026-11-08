@@ -191,7 +191,7 @@ class PortTileTest(unittest.TestCase):
         # the rib turned a quarter turn clockwise: the recorded tile is in its own frame, so it
         # stays where the build first chose it, and the carrier lands where the turn puts it
         _f1, lay1, _r1 = build(RIB)
-        turned = RIB.replace("rib = Rib @(40, 10)", "rib = Rib @(40, 10, rot 1)")
+        turned = RIB.replace("rib = Rib @(40, 10)", "rib = Rib @(50, 10, rot 1)")   # 3.0.1: its origin
         _f2, lay2, r2 = build(turned, lay1)
         self.assertEqual(lay2.ports["rib.iron"], lay1.ports["rib.iron"])
         self.assertEqual(lay2.ports["rib.iron"], fkpmod.PortRec("rib.iron", 0, 4, 4, "R",

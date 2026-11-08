@@ -14,8 +14,8 @@ SPM10 = os.path.join(os.path.dirname(__file__), "..", "games", "spm10", "main.fk
 LAB_KXM = os.path.join(os.path.dirname(__file__), "..", "games", "lab-kxm")
 
 BASE = """
-ore   = MinerRow<n=2, resource=iron-ore>  @(14, 0, rot 2)
-coal  = MinerRow<n=1, resource=coal>      @(24, 0, rot 2)
+ore   = MinerRow<n=2, resource=iron-ore>  @(17, 7, rot 2)
+coal  = MinerRow<n=1, resource=coal>      @(27, 4, rot 2)
 smelt = SmelterRow<n=2, recipe=iron-plate> @(6, 12)
 pipes = AsmRow<n=1, recipe=pipe>           @(6, 24)
 net ore_: ore -> smelt
@@ -24,8 +24,8 @@ net fuel: coal -> smelt
 
 
 TWO_SMELTERS = """
-ore    = MinerRow<n=2, resource=iron-ore>   @(14, 0, rot 2)
-coal   = MinerRow<n=1, resource=coal>       @(24, 0, rot 2)
+ore    = MinerRow<n=2, resource=iron-ore>   @(17, 7, rot 2)
+coal   = MinerRow<n=1, resource=coal>       @(27, 4, rot 2)
 smelt  = SmelterRow<n=2, recipe=iron-plate> @(6, 12)
 smelt2 = SmelterRow<n=2, recipe=iron-plate> @(16, 12)
 pipes  = AsmRow<n=1, recipe=pipe>           @(6, 24)
@@ -166,8 +166,8 @@ class SeveralDriversTest(unittest.TestCase):
 
     def test_three_drivers_two_consumers(self):
         flat, lay = build("""
-            ore    = MinerRow<n=2, resource=iron-ore>   @(14, 0, rot 2)
-            coal   = MinerRow<n=1, resource=coal>       @(24, 0, rot 2)
+            ore    = MinerRow<n=2, resource=iron-ore>   @(17, 7, rot 2)
+            coal   = MinerRow<n=1, resource=coal>       @(27, 4, rot 2)
             smelt  = SmelterRow<n=2, recipe=iron-plate> @(6, 12)
             smelt2 = SmelterRow<n=2, recipe=iron-plate> @(16, 12)
             smelt3 = SmelterRow<n=2, recipe=iron-plate> @(26, 12)
@@ -274,7 +274,7 @@ class SeveralDriversTest(unittest.TestCase):
         a1 = build("""
             s   = Assembler<recipe=transport-belt>        @(10, 10)
             m   = Assembler<recipe=splitter>              @(14, 10)
-            row = AsmRow<n=1, recipe=underground-belt>    @(13, 7, rot 3)
+            row = AsmRow<n=1, recipe=underground-belt>    @(13, 10, rot 3)
             net x: s -> m, row
         """)
         connected(self, a1[0], route.route_layout(*a1, CAT))
@@ -424,8 +424,8 @@ class LabKxmTest(unittest.TestCase):
 
 
 PLATES = """
-ore   = MinerRow<n=2, resource=iron-ore>   @(14, 0, rot 2)
-coal  = MinerRow<n=1, resource=coal>       @(24, 0, rot 2)
+ore   = MinerRow<n=2, resource=iron-ore>   @(17, 7, rot 2)
+coal  = MinerRow<n=1, resource=coal>       @(27, 4, rot 2)
 smelt = SmelterRow<n=2, recipe=iron-plate> @(6, 12)
 a1 = Assembler<recipe=iron-gear-wheel>     @(4, 24)
 a2 = Assembler<recipe=iron-gear-wheel>     @(10, 24)

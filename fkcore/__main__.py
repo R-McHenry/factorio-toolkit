@@ -472,6 +472,30 @@ def _talk(a):
     return 0
 
 
+def _migrate_origins(a, cat):
+    """``fk migrate-origins FILE [--write]`` (3.0.1): see ``fkcore.origins``."""
+    from . import origins
+    fkp_path = os.path.splitext(a.file)[0] + ".fkp"
+    layout = fkp.load(fkp_path) if os.path.exists(fkp_path) else None
+    try:
+        texts, notes = origins.migrate(a.file, cat, layout)
+    except Exception as exc:                 # noqa: BLE001 - say why, change nothing
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for note in notes:
+        print(f"  {note}")
+    for path, text in sorted(texts.items()):
+        if a.write:
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        print(f"  {'wrote' if a.write else 'would write'} {path}")
+    if not texts:
+        print("  no turned hint changes: nothing to write")
+    elif not a.write:
+        print("  (--write writes them)")
+    return 0
+
+
 def _migrate_surface(a):
     """``fk migrate-surface GAME`` (2.0.43, PLAN-GLOBAL phase B): write the world design
     ``<surface>.fk`` from the surface's ``place`` lines, and put ``design`` in the surface file.
@@ -806,6 +830,11 @@ def _capture(a, cat):
               "the file)")
     print(f'  use it anywhere, a module included:  X = Literal<file="{rel}"> @(x, y)'
           f"   (or fk sim place game\\{rel.replace('/', chr(92))} @X,Y)")
+    if a.source == "design":
+        print("  its (0, 0) is the instance's origin: at the instance's own @(x, y) it lays the "
+              "tiles the instance laid")
+    elif "entities" in data:
+        print("  its (0, 0) is the map's (0, 0): the file holds world positions")
     return 0
 
 
@@ -1410,6 +1439,11 @@ def main(argv=None):
                                                        "`design` to its surface file (2.0.43, "
                                                        "PLAN-GLOBAL phase B)")
     ms.add_argument("game")
+    mo = sub.add_parser("migrate-origins", description="3.0.1: rewrite a design's turned "
+                        "@(x, y, rot r) hints from the turned frame's corner to the instance's "
+                        "origin, so it lays what it laid before (fkcore.origins)")
+    mo.add_argument("file", help="the factory's .fk (its imports are rewritten too)")
+    mo.add_argument("--write", action="store_true", help="write the files (default: show)")
     ct = sub.add_parser("contract", description="every sealed module's contract: each port's "
                         "direction, item, rate at full speed, where it crosses and what it got "
                         "(fkcore.contract)")
@@ -1724,6 +1758,8 @@ def main(argv=None):
     cat = Catalog.load()
     if a.cmd == "migrate-surface":
         return _migrate_surface(a)
+    if a.cmd == "migrate-origins":
+        return _migrate_origins(a, cat)
     if a.cmd in ("merge", "insert", "chests-to-net", "net-to-chests"):
         return _rewire(a)
     if a.cmd == "measure":

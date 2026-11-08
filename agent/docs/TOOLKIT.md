@@ -1191,6 +1191,11 @@ place iron = iron plot 40,-20 30x30          # factory iron, from iron.fk, on it
 `fk migrate-surface` writes a world design from a surface's place lines, and `fk look --source
 design` draws the surface as designed rather than as built.
 
+Every `@(x, y)` is an origin (3.0.1): a turned instance turns about it, and a Literal's file
+(0, 0) lands on it. So a row, module or blueprint that grows never moves what stood. `fk
+migrate-origins FILE --write` rewrites a design written before 3.0.1 (turned frames placed by
+their top-left corner) so it lays what it laid.
+
 ## The build script
 
 `game\nauvis.build.fkb` is the list of steps `fk build` runs: one step per line, each reading

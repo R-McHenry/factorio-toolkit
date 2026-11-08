@@ -16,8 +16,8 @@ BENCH = os.path.join(os.path.dirname(__file__), "..", "games", "v2-bench")
 def factory(n, drills=30, extra="", sinks=7):
     boxes = "".join(f"box{i} = Chest<provider> @({4 + 3 * i}, 96)\n" for i in range(sinks))
     return f"""
-ore   = MinerRow<n={drills}, resource=iron-ore> @(2, 0, rot 2)
-coal  = MinerRow<n=4, resource=coal>          @(56, 0, rot 2)
+ore   = MinerRow<n={drills}, resource=iron-ore> @({2 + drills * 3 // 2}, 7, rot 2)
+coal  = MinerRow<n=4, resource=coal>          @(62, 7, rot 2)
 smelt = SmelterArray<n={n}, recipe=iron-plate{extra}> @(4, 14)
 {boxes}net ore_:   ore -> smelt
 net fuel:   coal -> smelt

@@ -235,8 +235,8 @@ class PinnedTest(unittest.TestCase):
 
 
 SMELTER = """
-ore   = MinerRow<n=18, resource=iron-ore> @(4, 0, rot 2)
-coal  = MinerRow<n=2, resource=coal>      @(34, 0, rot 2)
+ore   = MinerRow<n=18, resource=iron-ore> @(31, 7, rot 2)
+coal  = MinerRow<n=2, resource=coal>      @(37, 7, rot 2)
 smelt = SmelterRow<n=26, recipe=iron-plate> @(4, 11)
 c1 = Chest<provider> @(1, 24)
 c2 = Chest<provider> @(1, 26)

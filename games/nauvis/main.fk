@@ -5,10 +5,10 @@
 # so their ore belts also leave west. Columns 0..15 are a corridor the router owns, and bands of
 # rows leave three-tile gaps between them; rows 0-1 stay free so poles can reach the top miner
 # row. The router lays every net's belts; nothing here is a route.
-iron_mine    = MinerRow<n=10, resource=iron-ore>   @(16, 2, rot 2)
-coal_iron    = MinerRow<n=2, resource=coal>        @(34, 2, rot 2)
-copper_mine  = MinerRow<n=4, resource=copper-ore>  @(40, 2, rot 2)
-coal_copper  = MinerRow<n=1, resource=coal>        @(49, 2, rot 2)
+iron_mine    = MinerRow<n=10, resource=iron-ore>   @(31, 9, rot 2)
+coal_iron    = MinerRow<n=2, resource=coal>        @(37, 9, rot 2)
+copper_mine  = MinerRow<n=4, resource=copper-ore>  @(46, 9, rot 2)
+coal_copper  = MinerRow<n=1, resource=coal>        @(52, 6, rot 2)
 iron_smelt   = SmelterRow<n=16, recipe=iron-plate>   @(16, 12)
 copper_smelt = SmelterRow<n=6, recipe=copper-plate>  @(51, 12)
 

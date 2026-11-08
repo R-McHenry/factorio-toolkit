@@ -3,5 +3,5 @@
 # kickoff's own capture (plant-w3.json): the plant block, and the chain of poles from its west side
 # to the starter kit. Inside the world plot they are the plot's own entities, so you may move,
 # extend or rebuild around them.
-reactor = Literal<file="plant-w3.json", box="-34,-39,-17,-23"> @(0, 0)
-bridge  = Literal<file="plant-w3.json", box="-22,-22,8,10">    @(12, 17)
+reactor = Literal<file="plant-w3.json", box="-34,-39,-17,-23"> @(34, 39)
+bridge  = Literal<file="plant-w3.json", box="-22,-22,8,10">    @(34, 39)

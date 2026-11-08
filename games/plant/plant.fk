@@ -26,7 +26,7 @@ t2      = SteamTurbine                            @(10, 7, rot 1)
 pump    = OffshorePump                            @(7, 0)
 cells   = Chest<requester, item=uranium-fuel-cell, rate=0.005/s, request=20, max=50, trash> @(0, 6)
 spent   = Chest<plain, chest=iron-chest>          @(0, 5)       # off the network: robots never empty it
-link    = Literal<file="plant-w3.json", box="-22,-22,7,9"> @(11, 16)   # the pole chain to spawn
+link    = Literal<file="plant-w3.json", box="-22,-22,7,9"> @(33, 38)   # the pole chain to spawn
 
 net water:       pump -> hx
 net steam:       hx -> t1, t2

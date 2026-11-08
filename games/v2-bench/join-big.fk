@@ -4,8 +4,8 @@
 # ONE iron net. Each consumer puts its product into two chests, so no output inserter binds (one
 # fast inserter is 2.5/s).
 module IronWorks {
-  ore   = MinerRow<n=10, resource=iron-ore>   @(4, 2, rot 2)
-  coal  = MinerRow<n=1, resource=coal>        @(22, 2, rot 2)
+  ore   = MinerRow<n=10, resource=iron-ore>   @(19, 9, rot 2)
+  coal  = MinerRow<n=1, resource=coal>        @(25, 6, rot 2)
   smelt = SmelterRow<n=16, recipe=iron-plate> @(4, 12)
   net ore_: ore -> smelt
   net fuel: coal -> smelt

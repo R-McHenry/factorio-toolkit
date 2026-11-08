@@ -8,7 +8,7 @@ position.
 # smelting.fk: iron ore into plates, on a line of furnace cells from your library
 import FurnaceCell from "cells.fk"
 
-ore   = MinerRow<n=4, resource=iron-ore>  @(10, 2, rot 2)     # 4 drills, turned 180
+ore   = MinerRow<n=4, resource=iron-ore>  @(16, 9, rot 2)     # 4 drills, turned 180
 col   = Stack<cell=FurnaceCell, n=8, plate=iron-plate, ore=iron-ore> @(10, 12)   # 8 furnaces
 box   = Chest<provider, limit=4>          @(30, 40)
 
@@ -18,8 +18,13 @@ net plates: col.pl_out -> box             # the plates into a provider chest (ro
 
 ## Instances
 
-`name = Kind<param=value, ...> @(x, y)` or `@(x, y, rot r)`. The position is the instance's
-top-left tile inside the factory's plot; `rot` turns it r quarter turns clockwise (0 to 3).
+`name = Kind<param=value, ...> @(x, y)` or `@(x, y, rot r)`. The position is where the
+instance's own origin goes, its (0, 0), inside the factory's plot. `rot` turns the instance r
+quarter turns clockwise (0 to 3) about that point. So a row or module that grows never moves
+what stood, turned or not. Turned 180 (`rot 2`), it lies up and to the left of (x, y). A single
+machine (a chest, a pump) has no origin to turn about: (x, y) is its top-left tile at every rot.
+A Literal's origin is its file's (0, 0). `fk migrate-origins FILE` rewrites a design written
+before 3.0.1, when (x, y) was the turned instance's top-left corner, so it lays what it laid.
 `@patch(iron-ore)` instead of a position puts a miner row on that ore.
 
 ## The library
@@ -1103,7 +1108,7 @@ is an `rate-not-met` line, not an error. With `n=auto` lines the build sizes the
 ```
 import FurnaceCell from "cells.fk"
 module Smelting {                 # a reusable part, written like a factory
-  ore   = MinerRow<n=4, resource=iron-ore> @(0, 0, rot 2)
+  ore   = MinerRow<n=4, resource=iron-ore> @(6, 7, rot 2)   # turned about (6, 7): it lies above-left
   smelt = Stack<cell=FurnaceCell, n=8> @(0, 10)
   net ore_: ore -> smelt.ore_in
 }

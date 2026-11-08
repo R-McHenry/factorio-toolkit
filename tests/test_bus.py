@@ -152,7 +152,7 @@ class TemplateTest(unittest.TestCase):
     def test_turned(self):
         # running south (rot 1) its sides are e and w; a load from the west, a tap to the east
         flat, lay, notes = laid("""
-            bus = Bus<belts=2, length=12, item=iron-plate, load=w1, tap=e9> @(4, 0, rot 1)
+            bus = Bus<belts=2, length=12, item=iron-plate, load=w1, tap=e9> @(8, 0, rot 1)
             src = Chest<requester, item=iron-plate, rate=1/s> @(0, 1)
             box = Chest<provider, limit=2> @(10, 9)
             net a: src -> bus.load1
@@ -191,7 +191,7 @@ class TemplateTest(unittest.TestCase):
               net a: src -> bus.load1
               net b: bus.tap1 -> box
             }
-            iron = Iron @(0, 0, rot ROT)
+            iron = Iron @(40, 40, rot ROT)   # 3.0.1: room to turn about its origin
         """
         for rot in range(4):
             flat, lay, notes = laid(text.replace("ROT", str(rot)))
@@ -517,7 +517,7 @@ class RoutedTest(unittest.TestCase):
         self.assertEqual(checks, [])
 
     ONE_LANE = """
-        ore   = MinerRow<n=18, resource=iron-ore>          @(8, 30, rot 2)
+        ore   = MinerRow<n=18, resource=iron-ore>          @(35, 37, rot 2)
         coal  = Chest<requester, item=coal, rate=1/s>      @(1, 18)
         smelt = SmelterRow<n=26, recipe=iron-plate>        @(4, 18)
         bus   = Bus<belts=4, length=60, item=iron-plate, load=s2, tap=n28> @(0, 8)

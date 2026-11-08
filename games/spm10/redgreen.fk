@@ -5,7 +5,7 @@
 iron_mine    = MinerRow<n=10, resource=iron-ore>   @(0, 0)
 coal_iron    = MinerRow<n=2, resource=coal>        @(17, 0)
 copper_mine  = MinerRow<n=4, resource=copper-ore>  @(22, 0)
-coal_copper  = MinerRow<n=1, resource=coal>        @(30, 0, rot 1)
+coal_copper  = MinerRow<n=1, resource=coal>        @(34, 0, rot 1)
 iron_smelt   = SmelterRow<n=16, recipe=iron-plate>   @(0, 9)
 copper_smelt = SmelterRow<n=6, recipe=copper-plate>  @(34, 9)
 

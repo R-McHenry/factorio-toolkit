@@ -20,9 +20,9 @@ from fkcore.lang import FkSyntaxError
 CAT = Catalog.load()
 
 RED = """
-iron_ore   = MinerRow<n=auto, resource=iron-ore>            @(16, 2, rot 2)
-copper_ore = MinerRow<n=auto, resource=copper-ore>          @(46, 2, rot 2)
-coal       = MinerRow<n=auto, resource=coal>                @(64, 2, rot 2)
+iron_ore   = MinerRow<n=auto, resource=iron-ore>            @(22, 9, rot 2)
+copper_ore = MinerRow<n=auto, resource=copper-ore>          @(49, 9, rot 2)
+coal       = MinerRow<n=auto, resource=coal>                @(67, 9, rot 2)
 iron       = SmelterRow<n=auto, recipe=iron-plate>          @(16, 14)
 copper     = SmelterRow<n=auto, recipe=copper-plate>        @(46, 14)
 gears      = AsmRow<n=auto, recipe=iron-gear-wheel>         @(16, 26)
@@ -191,8 +191,8 @@ class NetsTest(unittest.TestCase):
         self.assertEqual(counts(sz), dict(HAND, red=20))
 
     def test_a_sink_with_a_rate_asks_its_rate(self):
-        text = ("ore   = MinerRow<n=auto, resource=iron-ore>   @(10, 2, rot 2)\n"
-                "coal  = MinerRow<n=auto, resource=coal>       @(30, 2, rot 2)\n"
+        text = ("ore   = MinerRow<n=auto, resource=iron-ore>   @(16, 9, rot 2)\n"
+                "coal  = MinerRow<n=auto, resource=coal>       @(33, 9, rot 2)\n"
                 "smelt = SmelterRow<n=auto, recipe=iron-plate> @(10, 12)\n"
                 "box   = Chest<provider, rate=2/s>             @(4, 22)\n"
                 "net ore_: ore -> smelt\nnet fuel: coal -> smelt\nnet plates: smelt -> box\n")
@@ -283,8 +283,8 @@ class FitTest(unittest.TestCase):
 
     def test_a_grown_row_into_the_next_one_and_past_the_plot(self):
         # 6 plates/s: 19.2 furnaces -> 20, 40 tiles; 6.0 ore/s: 12 drills, 18 tiles
-        text = ("ore   = MinerRow<n=auto, resource=iron-ore>   @(0, 0, rot 2)\n"
-                "coal  = MinerRow<n=1, resource=coal>          @(16, 0, rot 2)\n"
+        text = ("ore   = MinerRow<n=auto, resource=iron-ore>   @(19, 7, rot 2)\n"
+                "coal  = MinerRow<n=1, resource=coal>          @(3, 7, rot 2)\n"
                 "smelt = SmelterRow<n=auto, recipe=iron-plate> @(0, 10)\n"
                 "box   = Chest<provider, rate=6/s>             @(30, 12)\n"
                 "net ore_: ore -> smelt\nnet fuel: coal -> smelt\nnet plates: smelt -> box\n")
@@ -292,8 +292,8 @@ class FitTest(unittest.TestCase):
         self.assertEqual(counts(sz), {"ore": 12, "smelt": 20})
         checks = size.fit(sz, self.PLACES, CAT)
         self.assertEqual([(c.code, c.where, c.msg) for c in checks], [
-            ("does-not-fit", "t ore", "n=12 (auto) makes it 18x7 at @(0, 0): its frame overlaps coal's "
-                            "(3x4 at @(16, 0)) on 2x4 tiles"),
+            ("does-not-fit", "t ore", "n=12 (auto) makes it 18x7 at @(19, 7, rot 2): its frame overlaps coal's "
+                            "(3x4 at @(3, 7, rot 2)) on 2x4 tiles"),
             ("does-not-fit", "t smelt", "n=20 (auto) makes it 40x7 at @(0, 10): its frame overlaps box's "
                               "(1x1 at @(30, 12)) on 1x1 tiles")])
         small = sized(text.replace("rate=6/s", "rate=1/s"))   # 4 furnaces, 2 drills: room enough
@@ -396,8 +396,8 @@ class FlowTest(unittest.TestCase):
         self.assertEqual({c.code for s, c in ctx.checks if s == "place"}, {"malformed"})
 
     def test_a_sized_net_past_a_yellow_lane_says_so_after_route(self):
-        fk = ("ore   = MinerRow<n=auto, resource=iron-ore>      @(16, 2, rot 2)\n"
-              "coal  = MinerRow<n=auto, resource=coal>          @(60, 2, rot 2)\n"
+        fk = ("ore   = MinerRow<n=auto, resource=iron-ore>      @(46, 9, rot 2)\n"
+              "coal  = MinerRow<n=auto, resource=coal>          @(63, 9, rot 2)\n"
               "iron  = SmelterRow<n=auto, recipe=iron-plate>    @(16, 14)\n"
               "gears = AsmRow<n=5, recipe=iron-gear-wheel>      @(16, 26)\n"
               "box   = Chest<provider, limit=4>                 @(10, 38)\n"

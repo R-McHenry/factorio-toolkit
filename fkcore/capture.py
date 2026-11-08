@@ -113,8 +113,11 @@ def from_game(r, surface, force, area, tag="capture"):
 def from_design(lay, cat, path):
     """-> [entity dicts]: instance ``path`` of layout ``lay``, its own entities (machines, a
     template's belts) and every carrier standing inside its frame (its own nets' routes), at
-    positions relative to the frame's corner. Cover poles and roboports stay out: the build
-    covers the Literal where it lands."""
+    positions relative to the instance's origin (3.0.1: its ``@(x, y)``, so the Literal placed
+    where the instance was lays the same tiles, and its file keeps its origin when what it
+    holds grows; a turned instance's, whose layout record is its turned corner, relative to its
+    entities' top-left tile). Cover poles and roboports stay out: the build covers the Literal
+    where it lands."""
     rec = lay.insts.get(path)
     if rec is None:
         near = sorted(p for p in lay.insts if path in p)[:6]
@@ -127,7 +130,10 @@ def from_design(lay, cat, path):
     tiles = set()
     for e in mine:
         tiles |= fkpmod.tiles_of(cat, e)
-    x0, y0 = min(t[0] for t in tiles), min(t[1] for t in tiles)
+    if rec.rot % 4 == 0 and rec.kind != "Literal":
+        x0, y0 = float(rec.x), float(rec.y)
+    else:
+        x0, y0 = min(t[0] for t in tiles), min(t[1] for t in tiles)
     out = []
     for e in sorted(mine, key=lambda e: fkpmod.natural_key(e.key)):
         row = {"name": e.name, "x": _num(float(e.x) - x0), "y": _num(float(e.y) - y0)}

@@ -56,7 +56,7 @@ pb = Pair @(0, 20)
 # 2.1.32: gb is ga turned 180 degrees (a `>` bay's chain): one key, its routes ga's turned
 TURNED = CELL + """
 ga = Gears @(0, 0)
-gb = Gears @(0, 12, rot 2)
+gb = Gears @(20, 22, rot 2)
 """
 
 

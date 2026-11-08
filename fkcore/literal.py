@@ -23,9 +23,11 @@ reactor's temperature read), and each circuit wire between two entities inside t
 ``wire``. V1 has no circuit model, so only a Literal carries them. Copper wires are not kept: the
 codec derives them.
 
-``box`` keeps the entities whose position lies inside it (tile coordinates, x0 <= x < x1) and
-makes its corner the Literal's frame origin, so a Literal placed at its plot's corner sits where
-the file says. Without a box the frame starts at the entities' top-left tile.
+``box`` keeps the entities whose position lies inside it (tile coordinates, x0 <= x < x1) and is
+the Literal's frame. Without a box the frame is the entities' tiles. 3.0.1 (origins, not edges):
+the frame is only the Literal's extent. Its origin is the file's own (0, 0), and ``@(x, y)`` puts
+that point at (x, y) (``expand.origin_hints``), so a file that grows west or north moves nothing
+that stood, and several Literals cut from one capture at one ``@(x, y)`` sit as they stood.
 
 2.1 (PLAN-2.1 H): a JSON file may name its machines, ``"names": {"asm10": 37}``, a name to the
 index of an entity in the file's list (from 0; a blueprint's entity order when the file holds

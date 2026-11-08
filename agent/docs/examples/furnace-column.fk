@@ -13,7 +13,7 @@ module FurnaceCell size 7x3 {
   net p: pl_in, f -> pl_out
 }
 
-ore = MinerRow<n=6, resource=iron-ore> @(10, 0, rot 2)
+ore = MinerRow<n=6, resource=iron-ore> @(19, 7, rot 2)
 col = Stack<cell=FurnaceCell, n=8>     @(10, 12)
 box = Chest<provider>                  @(30, 40)
 

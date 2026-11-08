@@ -1,9 +1,10 @@
-"""A sub-module instance's rot turns its whole contents inside the module's frame."""
+"""A sub-module instance's rot turns its whole contents about the module's origin (3.0.1: its
+@(x, y); before, inside its frame, with the turned frame's corner on (x, y))."""
 import math
 import os
 import unittest
 
-from fkcore import compose, connect, expand, fkp, lang, route
+from fkcore import connect, expand, fkp, lang, route
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate
 
@@ -12,8 +13,8 @@ NAUVIS = os.path.join(os.path.dirname(__file__), "..", "games", "nauvis")
 
 BLOCK = """
 module Block {
-    ore   = MinerRow<n=2, resource=iron-ore>    @(14, 0, rot 2)
-    coal  = MinerRow<n=1, resource=coal>        @(24, 0, rot 2)
+    ore   = MinerRow<n=2, resource=iron-ore>    @(17, 7, rot 2)
+    coal  = MinerRow<n=1, resource=coal>        @(27, 4, rot 2)
     smelt = SmelterRow<n=2, recipe=iron-plate>  @(6, 12)
     gears = AsmRow<n=1, recipe=iron-gear-wheel> @(6, 24)
     net ore_: ore -> smelt
@@ -21,7 +22,7 @@ module Block {
     net plate: smelt -> gears
 }
 """
-X0, Y0 = 4, 4                       # where every test puts the module
+X0, Y0 = 40, 40                     # where every test puts the module (room to turn about it)
 ROWS = ("b/ore", "b/coal", "b/smelt", "b/gears")
 
 
@@ -36,9 +37,18 @@ def placed(rot):
     return build(BLOCK + f"b = Block @({X0}, {Y0}, rot {rot})\n")
 
 
-def turned(x, y, d, rot, size):
-    """A point of the rot-0 layout where turning the module ``rot`` puts it."""
-    tx, ty, td = compose.turn(float(x) - X0, float(y) - Y0, d, rot, size)
+def about(x, y, d, rot):
+    """(x, y) and direction d turned ``rot`` quarter turns clockwise about (0, 0)."""
+    for _ in range(rot % 4):
+        x, y = -y, x
+        if d is not None:
+            d = (d + 4) % 16
+    return x, y, d
+
+
+def turned(x, y, d, rot, size=None):
+    """A point of the rot-0 layout where turning the module ``rot`` about its origin puts it."""
+    tx, ty, td = about(float(x) - X0, float(y) - Y0, d, rot)
     return tx + X0, ty + Y0, td
 
 
@@ -98,23 +108,21 @@ class ModuleRotTest(unittest.TestCase):
                 self.assertEqual(got, want, (rot, path))
 
     def test_nested_modules_compose(self):
-        # Outer turns Block a quarter inside its own frame, then is turned a quarter itself
-        flat, lay, notes = build(BLOCK + "module Outer {\n    blk = Block @(2, 3, rot 1)\n}\n"
-                                 "o = Outer @(10, 5, rot 1)\n")
+        # Outer turns Block a quarter about Block's origin, then is turned a quarter itself
+        flat, lay, notes = build(BLOCK + "module Outer {\n    blk = Block @(40, 3, rot 1)\n}\n"
+                                 "o = Outer @(60, 50, rot 1)\n")
         self.assertEqual(notes, [n.replace("b/", "o/blk/", 1) for n in self.notes0])
         self.assertEqual(fkp.invariants(lay, CAT), [])
-        w, h = self.size
-        outer = (2 + h, 3 + w)                  # Block turned a quarter, at 2,3
         for key, e in self.lay0.entities.items():
-            x, y, d = compose.turn(float(e.x) - X0, float(e.y) - Y0, e.dir, 1, self.size)
-            x, y, d = compose.turn(x + 2, y + 3, d, 1, outer)
-            self.assertEqual(where(lay.entities["o/blk/" + key[2:]]), (e.name, x + 10, y + 5, d),
+            x, y, d = about(float(e.x) - X0, float(e.y) - Y0, e.dir, 1)
+            x, y, d = about(x + 40, y + 3, d, 1)
+            self.assertEqual(where(lay.entities["o/blk/" + key[2:]]), (e.name, x + 60, y + 50, d),
                              key)
         self.assertEqual(lay.insts["o/blk/ore"].rot, 0)        # 2 + 1 + 1
 
     def test_an_imported_literal_turns_with_its_module(self):
         lit = ('module Plant {\n    r = Literal<file="plant-w3.json", box="-34,-39,-17,-23"> '
-               '@(2, 1)\n}\n')
+               '@(36, 40)\n}\n')   # 3.0.1: the file's origin (its box's corner at 2, 1)
         src = os.path.join(NAUVIS, "t.fk")
         _flat, lay0, _notes = build(lit + f"p = Plant @({X0}, {Y0})\n", src)
         _flat, lay1, _notes = build(lit + f"p = Plant @({X0}, {Y0}, rot 1)\n", src)
@@ -122,7 +130,7 @@ class ModuleRotTest(unittest.TestCase):
         self.assertTrue(lay0.entities)
         for key, e in lay0.entities.items():
             self.assertEqual(where(lay1.entities[key]),
-                             (e.name,) + turned(e.x, e.y, e.dir, 1, (2 + 17, 1 + 16)), key)
+                             (e.name,) + turned(e.x, e.y, e.dir, 1), key)
 
     def test_nets_connect_after_routing_in_every_rot(self):
         for rot in range(4):

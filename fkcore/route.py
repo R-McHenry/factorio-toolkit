@@ -2788,7 +2788,7 @@ def _filter_loads(flat, lay, cat):
 
 #: PLAN-3.0 §4: the router's version a compiled module was laid by; a compiled module of another
 #: version is laid again. Bump it when a change to the router would lay a module otherwise.
-COMPILE_VERSION = "route-2.1.31"
+COMPILE_VERSION = "route-3.0.1"
 
 
 def _unit(net, sealed):
@@ -3339,10 +3339,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                   seeds=None, retry="changed", store=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
 
-    The nets route per compile unit (PLAN-3.0 §4): each sealed module's own nets in passes of
-    their own, innermost first, then the rest; ``retries`` counts passes per unit (default:
-    its nets). A sealed module routed whole is compiled: a twin of it later in the build, or in
-    a later build through ``store`` (a folder), takes its routes moved to the twin's frame.
+    The nets route per compile unit (PLAN-3.0 §4): each sealed module's own nets on their own,
+    innermost first, then the rest. FK_NEGOTIATE=1 (3.0.1): a unit's nets are negotiated
+    first, and each negotiated route is laid when its net comes up, if it still fits. A sealed
+    module routed whole is compiled: a twin of it later in the build, or in a later build
+    through ``store`` (a folder), takes its routes moved to the twin's frame.
 
     ``bounds`` (x0, y0, x1, y1) limits the search; default: the factory frame plus ``margin``
     tiles east and south (the frame starts at 0, 0). ``blocked``: ground no carrier may use,
@@ -3532,95 +3533,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     ents = list(base.entities.values())          # the ground: the layout and every carrier laid
     added, failed, how, swaps, rlines = {}, {}, {}, [], {}
 
-    # -- 2.1 passes (FK_NEGOTIATE=1 only: negotiation, then passes over a unit's nets) -----------
-    def one_pass(attempt, order, ground, prev_order, prev_plain, promo):
-        """One pass over ``order`` on ``ground``: -> (added, failed, how, swaps, ribbon lines,
-        each plain net's (carriers, how))."""
-        ents = list(ground)
-        added, failed, how, swaps, rlines = {}, {}, {}, [], {}
-        plain, same_ = {}, prev_order is not None
-        for k, net in enumerate(order):
-            same_ = same_ and k < len(prev_order) and prev_order[k] == net
-            _progress(attempt, k, order, net, promo)
-            av = avoid(net)
-            if net in ribs:
-                rib = ribs[net]
-                fnet, bnet = net_frames(rib.nets[0])
-                seen = (net, len(ground), tuple(sorted(added)), tuple(s[2] for s in swaps))
-                if seen not in rib_seen:
-                    rib_seen[seen] = ribmod.route(cat, rib, ents, fnet, js, bnet, limit,
-                                                  terrain, av, joints)
-                got, why, summary = rib_seen[seen]
-                if got is None:
-                    for m in rib.nets:
-                        if js[m].skip is None:
-                            failed[m] = why
-                    continue
-                for m, laid in got.items():
-                    added[m] = laid
-                    how[m] = why[m]
-                    ents += laid
-                rlines[net] = summary
-                continue
-            fnet, bnet = net_frames(net)
-            if same_ and net in prev_plain:
-                got, why = prev_plain[net]
-            else:
-                got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, av,
-                                      allow=joints)
-            plain[net] = (got, why)
-            if got is None and promo:
-                prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, av,
-                                       joints)
-                if prom is not None:
-                    got, why, mine = prom
-                    gone = {k for s in mine for k in s[0]}
-                    ents = [e for e in ents if e.key not in gone] + [e for s in mine for e in s[1]]
-                    _swap_added(added, mine)
-                    swaps += mine
-                    same_ = False
-            if got is None:
-                failed[net] = why
-                continue
-            if js[net].wide or js[net].pin:
-                got = _serving_only(flat, cat, js[net], ents, got)
-            added[net] = got
-            how[net] = why
-            ents += got
-        return added, failed, how, swaps, rlines, plain
-
-    def passes_of(order, ground):
-        """Lay ``order`` on ``ground`` in passes, the failed ones first each time, then one
-        promoting pass while a net is left; negotiated first (FK_NEGOTIATE=1). -> the best pass's
-        (added, failed, how, passes, order, swaps, ribbon lines)."""
-        tries = len(order) if retries is None else retries
-        best, repeats, tried = None, False, set()
-        prev_order, prev_plain = None, {}
-        got = _negotiate(flat, cat, js, order, ribs, list(ground), net_frames, claims,
-                         rib_of, joints, limit, terrain)
-        best = (got[0], got[1:])
-        repeats = not got[2]
-        for attempt in range(tries + 2):
-            promo = attempt == tries + 1
-            if promo and (best is None or not best[1][1]):
-                break
-            if repeats and not promo:
-                continue
-            u_added, u_failed, u_how, u_swaps, u_rlines, plain = one_pass(
-                attempt, order, ground, prev_order, prev_plain, promo)
-            prev_order, prev_plain = list(order), plain
-            score = (len(u_added), -len(u_swaps), -attempt)
-            if best is None or score > best[0]:
-                best = (score, (u_added, u_failed, u_how, attempt + 1, list(order), u_swaps,
-                                u_rlines))
-            if not u_failed:
-                break
-            reordered = [n for n in order if unrouted(n, u_failed)] + \
-                [n for n in order if not unrouted(n, u_failed)]
-            tried.add(tuple(order))
-            repeats = tuple(reordered) in tried
-            order = reordered
-        return best[1]
+    # -- FK_NEGOTIATE=1 (3.0.1): negotiation proposes a unit's routes; ``lay_net`` lays a
+    # proposed route when it still fits the ground, so seeds, holds, the memo and the group try
+    # apply to negotiated nets as to any. Empty unless FK_NEGOTIATE=1.
+    proposed = {}
 
     # -- 3.0: each net once, in order, keeping what it lays -----------------------------------------
     def unsearched(net, why):
@@ -3693,8 +3609,16 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             failed.pop(net, None)
             added[net], how[net] = got, why
             return ents + got
-        got, why = (None, failed.get(net)) if promo else \
-            _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, av, allow=joints)
+        offer = None if promo else proposed.pop(net, None)
+        if offer is not None:
+            taken = {t for e in ents for t in fkpmod.tiles_of(cat, e)}
+            if any(fkpmod.tiles_of(cat, e) & taken for e in offer[0]):
+                offer = None                  # the ground changed under it: searched as any net
+        if offer is not None:
+            got, why = offer
+        else:
+            got, why = (None, failed.get(net)) if promo else \
+                _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, av, allow=joints)
         if got is None and promo:
             # once more, crossing other nets' straight belts by promoting them
             prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, av,
@@ -3730,7 +3654,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         None when ``net`` finds no way even then: the ground, not the order, stops it. A sibling
         unit's routes are never lifted (a unit's failed net never rips up another unit's
         routes); a nested one's may be, laid again in its own frame (a top-level net past a
-        routing.fk Waypoint lifts the Waypoint's belt)."""
+        routing.fk Waypoint lifts the Waypoint's belt), but only a nested unit whose frame the
+        way enters (3.0.1): a module the way only runs beside keeps its routes."""
         lift = {e.key: other for other, laid in added.items() if inside(other, unit)
                 and other not in rib_of and other not in held_now for e in laid}
         fnet, bnet = net_frames(net)
@@ -3739,15 +3664,42 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                                bnet, limit, terrain, avoid(net), allow=joints)
         if got is None:
             return None
-        way = set()
+        path, way = set(), set()
         for e in got:
-            for x, y in fkpmod.tiles_of(cat, e):
-                way |= {(x + dx, y + dy) for dx in range(-GROUP_MARGIN, GROUP_MARGIN + 1)
-                        for dy in range(-GROUP_MARGIN, GROUP_MARGIN + 1)}
+            path |= fkpmod.tiles_of(cat, e)
+        for x, y in path:
+            way |= {(x + dx, y + dy) for dx in range(-GROUP_MARGIN, GROUP_MARGIN + 1)
+                    for dy in range(-GROUP_MARGIN, GROUP_MARGIN + 1)}
+
+        ends = set(js[net].ends())
+
+        def entered(v):
+            """The way enters ``v``'s frame, or the net ends at it (a port on its edge)."""
+            x0, y0, x1, y1 = sealed[v][:4]
+            return any(x0 <= x < x1 and y0 <= y < y1 for x, y in path) or \
+                any(x0 - 1 <= x <= x1 and y0 - 1 <= y <= y1 for x, y in ends)
+        units_in = {}
+
+        def liftable(other):
+            """``other``'s unit is ``unit``, or every sealed unit from it out to ``unit`` is one
+            the way enters."""
+            mine = _unit(other, sealed)
+            if mine == unit:
+                return True
+            if mine not in units_in:
+                chain, v = [], mine
+                while v and v != unit:
+                    chain.append(v)
+                    v = "/".join(v.split("/")[:-1])
+                    while v and v not in sealed and v != unit:
+                        v = "/".join(v.split("/")[:-1])
+                units_in[mine] = all(entered(c) for c in chain)
+            return units_in[mine]
         hits = {}
         for e in ents:
             other = lift.get(e.key)
-            if other is not None and other != net and fkpmod.tiles_of(cat, e) & way:
+            if other is not None and other != net and fkpmod.tiles_of(cat, e) & way \
+                    and liftable(other):
                 hits[other] = hits.get(other, 0) + 1
         return sorted(hits, key=lambda o: (-hits[o], o))[:gmax]
 
@@ -3898,23 +3850,15 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         keys = ranked(unit_keys[u])
         swaps_before = len(swaps)
         if negotiate_on():
-            u_added, u_failed, u_how, u_passes, u_order, u_swaps, u_rlines = passes_of(keys, ents)
-            if u_swaps:
-                gone = {k for s in u_swaps for k in s[0]}
-                ents = [e for e in ents if e.key not in gone] + [e for s in u_swaps for e in s[1]
-                                                                 if e.owner[1:] not in u_added]
-                _swap_added(added, u_swaps)
-            for net, laid in u_added.items():
-                ents = ents + laid
-            added.update(u_added)
-            failed.update(u_failed)
-            how.update(u_how)
-            swaps += u_swaps
-            rlines.update(u_rlines)
-            for k in u_order:
-                landed(k, 0.0)
-        else:
-            u_order, u_passes = keys, route_once(keys, u)
+            plain = [n for n in keys if n not in ribs and n not in seeds
+                     and not (memo.get(n) and not _named(n, fresh))]
+            if plain:
+                neg = _negotiate(flat, cat, js, plain, {}, list(ents), net_frames, claims,
+                                 rib_of, joints, limit, terrain)
+                _score, n_added, _f, n_how = neg[:4]
+                proposed.update({n: (laid, n_how.get(n, "")) for n, laid in n_added.items()})
+        u_order, u_passes = keys, route_once(keys, u)
+        proposed.clear()
         gidx = _Buckets(ents)
         order += [m for n in u_order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
         passes = max(passes, u_passes)

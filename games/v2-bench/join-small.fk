@@ -3,8 +3,8 @@
 # ONE iron net from every smelter row to every consumer row. Iron works export their plates as a
 # free endpoint (no chest net inside the module); consumers take plates as a free endpoint.
 module IronWorks {
-  ore   = MinerRow<n=3, resource=iron-ore>   @(4, 2, rot 2)
-  coal  = MinerRow<n=1, resource=coal>       @(13, 2, rot 2)
+  ore   = MinerRow<n=3, resource=iron-ore>   @(10, 9, rot 2)
+  coal  = MinerRow<n=1, resource=coal>       @(16, 6, rot 2)
   smelt = SmelterRow<n=4, recipe=iron-plate> @(4, 12)
   net ore_: ore -> smelt
   net fuel: coal -> smelt

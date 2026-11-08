@@ -48,7 +48,7 @@ e12 = Roboport @(1493, 938)   # E5 (~2835k): map 495,-60, W of the 7M iron (x520
 e13 = Roboport @(1493, 888)   # E5: map 495,-110
 e14 = Roboport @(1543, 888)   # E5: map 545,-110, between the iron and the copper (x520..560, y-172..-124); off the ore
 e15 = Roboport @(1493, 838)   # E6b (~2925k): map 495,-160: cu2_col reaches y-170, past e13/e14's construction reach (y-165): 26 ghosts sat uncovered
-u0 = Literal<file="captured/u0.json"> @(1424, 1100)   # lab-built uranium trigger outpost (FRICTION: MinerRow takes no fluid)
+u0 = Literal<file="captured/u0.json"> @(1694, 1400)   # lab-built uranium trigger outpost (FRICTION: MinerRow takes no fluid)
 
 # boot (map 12..28, -8..1), the hub seed by the kit's roboport. A0: gears -> belts (the fields
 # need 253, the kit has 200) and stone furnaces, from the kit's plates and stone. B: cable,

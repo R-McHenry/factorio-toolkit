@@ -600,6 +600,8 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     for path, (line, src) in sorted(flat._dnp_named.items()):
         if path not in flat.insts:
             raise ElabError(src, line, f"dnp {path.replace('/', '.')}: no such instance")
+    from . import expand as _expandmod
+    _expandmod.origin_hints(flat, cat, final=False)    # 3.0.1: turned about the origin
     _beacons(flat, cat)
     _bus_conns(flat, cat)
     _resolve_nets(flat, cat)
@@ -615,6 +617,12 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _port_checks(flat)
     _endpoint_checks(flat, cat)
     _auto_gates(flat, cat)
+    # 3.0.1: the turned pieces whose frames needed the nets
+    flat._origin_notes = _expandmod.origin_hints(flat, cat)
+    for note in flat._origin_notes:
+        where, _, msg = note.partition(": ")
+        line = flat.insts[where].line if where in flat.insts else 0
+        flat.checks.append(Check("by-corner", where.replace("/", "."), msg, line))
     from . import circuits
     flat.circuit = circuits.resolve(flat, cat)
     if flat.dnp:

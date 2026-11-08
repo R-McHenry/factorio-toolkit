@@ -27,7 +27,7 @@ module DrillTwo<resource=iron-ore> size 3x7 {
   port ore_out : out $resource @e3
   stack ore_in -> ore_out
   n = MinerRow<n=1, resource=$resource> @(0, 0)
-  s = MinerRow<n=1, resource=$resource> @(0, 3, rot 2)
+  s = MinerRow<n=1, resource=$resource> @(3, 7, rot 2)
   net o: ore_in, n, s -> ore_out
 }
 """

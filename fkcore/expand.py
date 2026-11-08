@@ -758,6 +758,114 @@ def _param_text(v):
     return str(v)
 
 
+#: 3.0.1 (Rory, 2026-11-08: "everything should be done by origins"): ``@(x, y, rot r)`` puts the
+#: instance's own origin, its (0, 0), at (x, y) and turns its contents r quarter turns clockwise
+#: about that point. A turned module that grows keeps every piece where it was; before 3.0.1 the
+#: turned frame's top-left corner landed on (x, y), so a turned module that grew moved all its
+#: contents. A single machine (a Pump, a Chest) can't grow: its (x, y) stays its top-left tile,
+#: turned or not, as in the game. False: the 3.0.0 reading (``fk migrate-origins`` reads the old
+#: hints with it).
+ORIGIN_HINTS = True
+
+
+def _turn_offset(rot, w, h):
+    """What ``compose.turn`` adds to a turn about the origin, for a frame of w x h."""
+    return ((0, 0), (h, 0), (w, h), (0, w))[rot % 4]
+
+
+def _about_origin(x, y, rot):
+    """(x, y) turned ``rot`` quarter turns clockwise about (0, 0)."""
+    for _ in range(rot % 4):
+        x, y = -y, x
+    return x, y
+
+
+def corner_hint(hint, frame):
+    """An origin hint (x, y, rot) of an instance whose own frame is ``frame`` (x0, y0, x1, y1, in
+    its unturned coordinates) -> the corner hint the layout code places by: the one that puts
+    every point p of the instance where turning p about its origin and moving it by (x, y) does."""
+    x, y, rot = hint
+    rot = int(rot) % 4
+    if not rot:
+        return hint
+    fx, fy = frame[0], frame[1]
+    rx, ry = _about_origin(fx, fy, rot)
+    sx, sy = _turn_offset(rot, frame[2] - fx, frame[3] - fy)
+    return _clean(x + rx - fx - sx), _clean(y + ry - fy - sy), hint[2]
+
+
+def origin_hint(hint, frame):
+    """The inverse of ``corner_hint``: a corner hint -> the origin hint that places the same."""
+    x, y, rot = hint
+    rot = int(rot) % 4
+    if not rot:
+        return hint
+    fx, fy = frame[0], frame[1]
+    rx, ry = _about_origin(fx, fy, rot)
+    sx, sy = _turn_offset(rot, frame[2] - fx, frame[3] - fy)
+    return _clean(x - rx + fx + sx), _clean(y - ry + fy + sy), hint[2]
+
+
+def literal_frame(inst):
+    """A Literal's frame (x0, y0, x1, y1) in its file's coordinates."""
+    _ents, (w, h), (fx, fy) = inst.literal[:3]
+    return fx, fy, fx + w, fy + h
+
+
+def turns_in_place(inst):
+    """A single machine: its hint is its top-left tile at every rot (it has no frame to grow)."""
+    return inst.module is None and inst.kind != "Literal" and _core(inst) in _SINGLE
+
+
+def origin_hints(flat, cat, final=True):
+    """3.0.1: every turned instance's ``@(x, y, rot r)`` read as its origin (``ORIGIN_HINTS``),
+    turned into the corner hint the layout code places by, innermost first (an instance's frame
+    is its children's, placed). The hint as written stays in ``hints["origin"]``; an instance
+    that has one is done. A turned instance waits while a turned instance inside it waits.
+    ``final`` False (elaboration's early pass, before the nets are resolved): an instance whose
+    frame isn't known yet waits for the final pass. -> notes, one per turned instance the final
+    pass can't place by its origin (its hint is left as written)."""
+    notes = []
+    if not ORIGIN_HINTS:
+        return notes
+    frames, waiting = {}, []
+    for path in sorted(flat.insts, key=lambda p: (-p.count("/"), p)):
+        inst = flat.insts[path]
+        hint = (inst.hints or {}).get("at")
+        if hint is None or "origin" in inst.hints:
+            continue
+        if inst.kind == "Literal" and inst.literal is not None:
+            # a Literal's origin is its file's (0, 0) (a box cut's too), not its top-left tile:
+            # a blueprint that grows west or north keeps every entity where it was
+            frame = literal_frame(inst)
+            x, y, rot = corner_hint(hint, frame)
+            inst.hints = dict(inst.hints, at=(_clean(x + frame[0]), _clean(y + frame[1]), rot),
+                              origin=hint)
+            continue
+        if not int(hint[2]) % 4 or turns_in_place(inst):
+            continue
+        if any(w.startswith(path + "/") for w in waiting):
+            waiting.append(path)
+            if final:
+                notes.append(f"{path}: @({hint[0]}, {hint[1]}, rot {hint[2]}) is placed by its "
+                             "corner, not its origin: a turned piece inside it is")
+            continue
+        try:
+            frame = _own_frame(flat, path, cat, frames)
+        except Exception as exc:             # noqa: BLE001 - a frame the layout can't know yet
+            frame, why = None, str(exc)
+        else:
+            why = "its frame isn't known"
+        if frame is None:
+            waiting.append(path)
+            if final:
+                notes.append(f"{path}: @({hint[0]}, {hint[1]}, rot {hint[2]}) is placed by its "
+                             f"corner, not its origin: {why}")
+            continue
+        inst.hints = dict(inst.hints, at=corner_hint(hint, frame), origin=hint)
+    return notes
+
+
 def _origin(flat, path, cat=None, size=(0, 0), frames=None):
     """Absolute (x, y, rot) of an instance, None when it has no ``@(x, y)`` hint. ``size`` is
     its own frame (w, h), unturned.

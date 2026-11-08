@@ -19,8 +19,8 @@ from tests.test_fkp import MINI
 CAT = Catalog.load()
 
 SMELT = """
-ore   = MinerRow<n=2, resource=iron-ore>   @(14, 0, rot 2)
-coal  = MinerRow<n=1, resource=coal>       @(24, 0, rot 2)
+ore   = MinerRow<n=2, resource=iron-ore>   @(17, 7, rot 2)
+coal  = MinerRow<n=1, resource=coal>       @(27, 4, rot 2)
 smelt = SmelterRow<n=4, recipe=iron-plate> @(6, 12)
 pipes = AsmRow<n=1, recipe=pipe>           @(6, 24)
 box   = Chest<provider>                    @(2, 30)
@@ -334,7 +334,7 @@ class PatchPairTest(unittest.TestCase):
 
     def test_a_driver_of_one_net_joins_its_own_lane(self):
         r = self.patched(SMELT.replace("pipes = AsmRow", "ore2  = MinerRow<n=1, resource=iron-ore>"
-                                                         "   @(32, 0, rot 2)\npipes = AsmRow")
+                                                         "   @(35, 4, rot 2)\npipes = AsmRow")
                          .replace("net ore_:   ore -> smelt", "net ore_:   ore, ore2 -> smelt"))
         # ore_ is the left lane: its new miner side-loads onto the pair's belt from the left
         self.assertRegex(r.patched[PAIR], r"^3 -> 1, ore2\.out: \d+ belts.*, side-loaded onto the "
@@ -343,7 +343,7 @@ class PatchPairTest(unittest.TestCase):
         self.assertEqual({e.net for e in new}, {"ore_"})
         self.assertTrue(all(e.key.split("/")[-1].startswith("l") for e in new))
         r = self.patched(SMELT.replace("pipes = AsmRow", "coal2 = MinerRow<n=1, resource=coal>"
-                                                         "       @(32, 0, rot 2)\npipes = AsmRow")
+                                                         "       @(35, 4, rot 2)\npipes = AsmRow")
                          .replace("net fuel:   coal -> smelt", "net fuel:   coal, coal2 -> smelt"))
         self.assertIn("29 of 29 carriers kept", r.patched[PAIR])
         self.assertEqual({e.net for e in self.new_carriers(r)}, {"fuel"})

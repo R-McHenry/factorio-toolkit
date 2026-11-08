@@ -1,6 +1,6 @@
 # smelter-array.fk: Rory's smelter stack, 24 stone furnaces fed by side-loading
-ore   = MinerRow<n=16, resource=iron-ore>     @(2, 0, rot 2)
-coal  = MinerRow<n=2, resource=coal>          @(30, 0, rot 2)
+ore   = MinerRow<n=16, resource=iron-ore>     @(26, 7, rot 2)
+coal  = MinerRow<n=2, resource=coal>          @(33, 7, rot 2)
 smelt = SmelterArray<n=24, recipe=iron-plate> @(6, 12)
 box1  = Chest<provider, limit=8>              @(4, 48)
 box2  = Chest<provider, limit=8>              @(8, 48)

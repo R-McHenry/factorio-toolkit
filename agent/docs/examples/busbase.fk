@@ -12,8 +12,8 @@
 
 module IronSmelt size 34x62 {
   port plate : out iron-plate @s16
-  ore   = MinerRow<n=16, resource=iron-ore> @(1, 2, rot 1)
-  coal  = MinerRow<n=2, resource=coal>      @(25, 30, rot 1)
+  ore   = MinerRow<n=16, resource=iron-ore> @(8, 2, rot 1)
+  coal  = MinerRow<n=2, resource=coal>      @(32, 30, rot 1)
   smelt = SmelterArray<n=24, recipe=iron-plate> @(11, 26)
   net ore_: ore -> smelt
   net fuel: coal -> smelt
@@ -22,8 +22,8 @@ module IronSmelt size 34x62 {
 
 module CopperSmelt size 34x62 {
   port plate : out copper-plate @s16
-  ore   = MinerRow<n=8, resource=copper-ore> @(1, 14, rot 1)
-  coal  = MinerRow<n=2, resource=coal>       @(25, 30, rot 1)
+  ore   = MinerRow<n=8, resource=copper-ore> @(8, 14, rot 1)
+  coal  = MinerRow<n=2, resource=coal>       @(32, 30, rot 1)
   smelt = SmelterArray<n=12, recipe=copper-plate> @(11, 26)
   net ore_: ore -> smelt
   net fuel: coal -> smelt
@@ -71,11 +71,11 @@ module Science size 44x50 {
   port iron   : in iron-plate         @s4
   port copper : in copper-plate       @s10
   port circ   : in electronic-circuit @s16
-  gears = AsmRow<n=2, recipe=iron-gear-wheel>         @(2, 28, rot 3)
-  red   = AsmRow<n=5, recipe=automation-science-pack> @(12, 20, rot 3)
+  gears = AsmRow<n=2, recipe=iron-gear-wheel>         @(2, 34, rot 3)
+  red   = AsmRow<n=5, recipe=automation-science-pack> @(12, 35, rot 3)
   insm  = Assembler<recipe=inserter>                  @(24, 36)
   beltm = Assembler<recipe=transport-belt>            @(24, 28)
-  green = AsmRow<n=6, recipe=logistic-science-pack>   @(32, 16, rot 3)
+  green = AsmRow<n=6, recipe=logistic-science-pack>   @(32, 34, rot 3)
   redbox   = Chest<provider, limit=8> @(14, 4)
   greenbox = Chest<provider, limit=8> @(34, 4)
   net fe:     iron -> gears, insm, beltm
