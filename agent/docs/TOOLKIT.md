@@ -440,44 +440,62 @@ is young and changes fast.
 The plan's repository is `.stage\` and its folders are `stages\`, both in the run folder, outside
 `game\`. `fk stage` changes `game\` only with `next --apply`.
 
-## The lab: `fk lab`
+## Building on the lab surface
 
-The game has a second surface, the lab, where you try a design for real before it goes into the
-base: its own force with the research done, building at once, free materials, and none of the
-fair-play rules (`docs\FAIR-PLAY.md`, "The lab"). Rory watches it with `/lab`. While your
-builders work and there seems to be nothing to do, the lab and planning (`fk stage`) are the two
-things worth doing, and workers can do most of the lab work.
+The lab is a game surface like any other, with a surface file like any base's: `surface lab`,
+`free` (a paste's ghosts are revived at once, nothing is built by robots, materials are free) and
+`force lab` (its own force, research done). None of the fair-play rules apply there
+(`docs\FAIR-PLAY.md`, "The lab"), and Rory watches it with `/lab`. To paste a blueprint there,
+build a module alone on it: `fk alone NAME --surface lab` gives NAME.fk (or a factory the world
+design places) a workspace `lab\NAME` with a surface file that places it on a slot of its own,
+runs the build script there, and the apply pastes it and revives it. The same command builds a
+module alone on any surface (`--surface nauvis`: robots build it, nothing is destroyed). Power,
+stock and infinity feeds are not part of a build: they are god-mode stand-ins you ask for by
+name, `fk standin NAME supply|feed|ore`, and only where things are free. `fk lab NAME` is the
+alias that does both: the build alone on the lab, then `supply` and `feed`.
 
 ```
-fk lab NAME                      NAME (a factory the world design places, or NAME.fk) built on
-                                 its own lab slot: powered, its requester chests filled, burners
-                                 given a first load of coal; says where Rory sees it
+fk lab NAME                      NAME (a factory the world design places, or NAME.fk) built alone
+                                 on its own lab slot, then the stand-ins: powered, its requester
+                                 chests filled, burners given coal, every open port fed; says
+                                 where Rory sees it
 fk lab NAME --from stages\4      the same from a stage's folder (or a scratch copy of game\)
 fk lab NAME --size 60x40         its plot size, when no plot places it (default 100x100)
+fk lab NAME --keep               laid over what stands (the slot not emptied, nothing stocked),
+                                 only the stale nets routed; with --with "apply --area A" for one
+                                 region of it
 fk lab NAME --measure 60         what its machines really make over 60 s, against the rate model
 fk lab NAME --clear              its slot emptied and freed
 fk lab --list                    the slots in use
-fk lab NAME --copy-ore 272,-72,312,-40 --to 4,2
+fk alone NAME [--surface S] [--size] [--keep] [--measure S] [--clear] [--list]
+                                 the general form: built alone on a slot of S (game\S.surface
+                                 gives its properties; the lab needs no file), no stand-ins
+fk standin NAME supply           power (an energy interface), the requesters' items, burners'
+                                 coal, module requests put in; run again, it tops them up
+fk standin NAME feed             an infinity chest and loader outside each open belt port, an
+                                 infinity pipe outside each fluid port; out ports empty into a
+                                 chest or pipe that deletes
+fk standin NAME ore --copy-ore 272,-72,312,-40 --to 4,2
                                  the world's ore in that map area (shape and amounts) copied
                                  onto NAME's slot, its top-left at 4,2 of NAME's plot
-fk lab NAME --ore iron-ore --area 0,0,30,20 [--amount 50000]
+fk standin NAME ore --ore iron-ore --area 0,0,30,20 [--amount 50000]
                                  that ore over that area of NAME's plot
-fk lab NAME --clear-ore          every ore tile of NAME's slot taken up
+fk standin NAME ore --clear-ore  every ore tile of NAME's slot taken up
 ```
 
 - A sealed module needs no lab file of its own: when NAME.fk only defines it (no instances at the
-  top), `fk lab NAME` builds it alone with 4 tiles round it and feeds every port: an infinity
+  top), `fk lab NAME` builds it alone with 4 tiles round it and `feed` gives every port: an infinity
   chest and a loader (2x1, on two whole tiles) outside a belt port (a pair `a | b` gets a loader
   on each lane), an infinity pipe outside a fluid port, and an `out` port empties into a chest or
   pipe that deletes what it gets. Nothing stands inside the frame. In a lab file of your own, a sealed instance's
   port that no net binds is fed the same way; a port you wire to your own chests is left alone.
 - The lab has no edge, and a factory of any size fits. Each factory gets its own slot, sized to
-  it in 200-tile cells, and keeps it while it fits; building it again empties the slot first,
-  and `fk lab` generates the ground under it. Its workspace is `lab\NAME` in the run
-  folder, never `game\`.
+  it in 200-tile cells, and keeps it while it fits; building it again empties the slot first
+  (a free surface: things are destroyed directly), and the ground under it is generated. Its
+  workspace is `lab\NAME` in the run folder (`<surface>\NAME` on another surface), never `game\`.
 - Drill rows get their ore seeded under them, so a smelting block runs as designed. To try drills
-  on a real patch's shape, build NAME once, copy the patch onto its slot (`--copy-ore`, the map
-  area round the patch, `--to` where your design puts its corner), and build again: a rebuild
+  on a real patch's shape, build NAME once, copy the patch onto its slot (`fk standin NAME ore
+  --copy-ore`, the map area round the patch, `--to` where your design puts its corner), and build again: a rebuild
   keeps the slot's ore, and the drills are seeded only where there is none. A requester
   chest is filled with what it asks for, so the machines run as fast as they can: the measure
   shows what the machines do when their inputs keep up, where the rate model counts the
@@ -700,8 +718,8 @@ tile, as before; without a layer it is the same text as before.
   It reads counts per cell, not every entity, so a look at the whole base is quick (a base of 1024
   x 1024 tiles and 87,000 entities reads in about 1.3 s). It gives no verdicts: look at zoom 1, or
   at 2 or 4 over a smaller area, for those. Zoom 1 always reads every entity.
-- **In play mode a zoomed-out look reads only charted chunks**, what your map view shows. An
-  uncharted chunk is blank. The lab is all charted.
+- **On a surface that is not free a zoomed-out look reads only charted chunks**, what your map
+  view shows. An uncharted chunk is blank. The lab is all charted.
 
 `--layers NAME,...` (or `--layers all`) adds one panel for each layer, design | live, each with
 legend lines under it. A layer's marks go on free cells, and its points go over anything.
@@ -982,7 +1000,8 @@ fk decon X0,Y0,X1,Y1 [--name E[,E]] [--cancel]
                                  what stands there (only those entities, with --name), or the
                                  orders go back. What the design still has there, the next build
                                  lays again: take it out of the .fk as well
-fk capture lab NAME              something built, as a file a Literal reads: a lab slot, an area
+fk capture lab NAME              something built, as a file a Literal reads: a lab slot (slot NAME
+                                 --surface S on another surface), an area
 fk capture world X0,Y0,X1,Y1     of the game (fk sim game capture world ...: of the planner), or
 fk capture design [FACTORY/]INST an instance of your laid-out design. Then
                                  X = Literal<file="captured/NAME.json"> @(x, y) puts it anywhere,
@@ -1146,8 +1165,7 @@ The world is two files. `game\nauvis.surface` says what is true of the world its
 
 ```
 # nauvis.surface
-surface  nauvis
-mode     play                                 # fair play: you see where you look; alerts come to you
+surface  nauvis                               # not `free`: fair play, robots build, you see where you look
 terrain  map                                  # map.terrain.json: the bare ground, read at kickoff
 catalog  base
 design   nauvis.fk                            # the plots, from the world design
@@ -1157,6 +1175,13 @@ watch sanctioned: mark 2h                     # ... outside every plot: marked f
 notify   nearby                               # alerts for what is built: nearby, all or off
 target automation-science-pack 10/min         # a rate the whole surface should make
 ```
+
+A surface file has properties, not a mode (3.1). `free` says things are free there: a paste's
+ghosts are revived at once by script, nothing is built by robots, a look may take the whole
+design as its area, and notify defaults to `all`. `force NAME` says whose the paste is (default
+`player`). The lab's file is `surface lab`, `free`, `force lab`; a planet's will say what is true
+of it. An old `mode play | lab` line is still read for one release; `fk migrate-surface` writes
+it as the properties.
 
 ```
 # nauvis.fk: the world design

@@ -238,16 +238,16 @@ def check_own():
     with LaptopServer("own", scenario="fk-play") as srv:
         with srv.rcon() as r:
             r.lua(link.lua_generate_area(s, f, (-32, -32, 64, 64)))
-            rep = applymod.apply(r, composed(MINI), cat, mode="play", force=f, policy=watch,
+            rep = applymod.apply(r, composed(MINI), cat, force=f, policy=watch,
                                  net_items=nets1)
             r.lua(link.lua_revive(s, (0, -10, 40, 20)))
             rep = applymod.apply(r, composed(MINI + "e extra/c0 wooden-chest 16.5,5.5\n"), cat,
-                                 mode="play", force=f, policy=watch, net_items=nets1, own=rep.own)
+                                 force=f, policy=watch, net_items=nets1, own=rep.own)
             ghost = at(r, 26.5, 5.5)
             r.lua(f"local b = game.get_surface('{s}').find_entity('transport-belt', {{14.5, 0.5}}) "
                   "b.get_transport_line(1).insert_at_back({name = 'iron-plate', count = 1}) "
                   "rcon.print('ok')")
-            rep = applymod.apply(r, composed(v2), cat, mode="play", force=f, policy=watch,
+            rep = applymod.apply(r, composed(v2), cat, force=f, policy=watch,
                                  net_items=nets2, own=rep.own)
             got = {"chest before": ghost, "m1": at(r, 14.5, 3.5), "chest": at(r, 26.5, 5.5),
                    "b2": at(r, 14.5, 0.5)}
@@ -395,14 +395,14 @@ local c = 0
 for cx = 9, 10 do for cy = 9, 10 do if f.is_chunk_charted(s, {{cx, cy}}) then c = c + 1 end end end
 rcon.print(c)""").strip()
             print(f"charted chunks under the plot: {charted} of 4")
-            rep = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            rep = applymod.apply(r, sur, cat, area=area, force=f)
             print("\n".join(rep.lines()))
             ghosts = read(r, True)
             r.lua(link.lua_revive(s, area))
             built = read(r, False)
             r.lua(f"game.get_surface('{s}').find_entity('inserter', {ins})"
                   f".order_deconstruction('{f}') rcon.print('ok')")
-            rep2 = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            rep2 = applymod.apply(r, sur, cat, area=area, force=f)
             print("\n".join(rep2.lines()))
             again = r.lua(
                 f"local o = {{}} for _, e in pairs(game.get_surface('{s}').find_entities_filtered"
@@ -503,7 +503,7 @@ rcon.print(c)""").strip()
             print("as the old factory left them:")
             judge("before", read(r), True)
             with mock.patch.object(link, "paste", lambda *a, **k: "0"):
-                rep = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+                rep = applymod.apply(r, sur, cat, area=area, force=f)
             print("\n".join(rep.lines()))
             bad = judge("ghosts", read(r), False)
             r.lua(f"""
@@ -517,7 +517,7 @@ for _, g in pairs(s.find_entities_filtered{{area = {{{{{area[0]}, {area[1]}}}, {
 end
 rcon.print(n)""")
             bad += judge("built", read(r), True)
-            again = applymod.apply(r, sur, cat, area=area, mode="play", force=f)
+            again = applymod.apply(r, sur, cat, area=area, force=f)
             print("applied again: " + "; ".join(again.lines()[1:]))
     ok = (charted == "0" and rep.pasted == 0 and len(rep.turned) == 6 and not bad
           and again.turned == [])
@@ -676,12 +676,12 @@ rcon.print(c.first_signal.name .. c.comparator .. c.constant .. ' ' .. tostring(
     with LaptopServer("settings", scenario="fk-play") as srv:
         with srv.rcon() as r:
             r.lua(link.lua_generate_area(s, f, (-32, -32, 64, 64)))
-            rep = applymod.apply(r, composed, cat, area=area, mode="play", force=f, policy=watch)
+            rep = applymod.apply(r, composed, cat, area=area, force=f, policy=watch)
             r.lua(link.lua_revive(s, area))
             clean = applymod.diff(r, composed, cat, area, watch, force=f)
             print("tweaks:", r.lua(tweak).strip())
             seen = applymod.diff(r, composed, cat, area, watch, force=f)
-            rep = applymod.apply(r, composed, cat, area=area, mode="play", force=f, policy=watch,
+            rep = applymod.apply(r, composed, cat, area=area, force=f, policy=watch,
                                  own=rep.own)
             back = r.lua(after).strip()
             again = applymod.diff(r, composed, cat, area, watch, force=f)
@@ -971,7 +971,7 @@ rcon.print(helpers.table_to_json(o))"""
         with srv.rcon() as r:
             r.lua(link.lua_generate_area(s, f, (-64, -64, 64, 64)))
             print("base:", r.lua(_ROBOT_BASE).strip())
-            rep1 = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch,
+            rep1 = applymod.apply(r, v1, cat, force=f, policy=watch,
                                   keys=["lab:rb/"])
             print("\n".join(rep1.lines()))
             left, secs = _robots_wait(r, area)
@@ -979,7 +979,7 @@ rcon.print(helpers.table_to_json(o))"""
             print("poles (x,y-wired to), the world's own at 1.5,8.5:", r.lua(poles).strip())
             pass0 = wiresmod.run(r, v1, cat, rep1.area)
             print("the wire pass after rb's build:", pass0.line())
-            rep1b = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch,
+            rep1b = applymod.apply(r, v1, cat, force=f, policy=watch,
                                    keys=["lab:pb/"], own=rep1.own)
             print("\n".join(rep1b.lines()))
             left1, secs1 = _robots_wait(r, area)
@@ -995,7 +995,7 @@ rcon.print(helpers.table_to_json(o))"""
                   "s.find_entity('inserter', {11.5, 4.5}).get_wire_connector(defines.wire_connector_id.circuit_red, true)"
                   ".connect_to(s.find_entity('small-electric-pole', {7.5, 2.5}).get_wire_connector(defines.wire_connector_id.circuit_red, true)) "
                   "rcon.print('ok')")
-            rep2 = applymod.apply(r, v2, cat, mode="play", force=f, policy=watch, own=rep1b.own)
+            rep2 = applymod.apply(r, v2, cat, force=f, policy=watch, own=rep1b.own)
             print("\n".join(rep2.lines()))
             left2, secs2 = _robots_wait(r, area)
             print(f"robots did v2: {left2} left after {secs2:.0f} game s")
@@ -1199,12 +1199,12 @@ def check_fixes():
             # -- scaffold, no stock: plot sa at 200,0 (40x20)
             v1 = "e robots/r0 roboport 6,6\n"
             area = (200, 0, 240, 20)
-            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v1), cat, area, mode="play",
+            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v1), cat, area,
                                  force=f, policy=watch)
             r.lua(linkmod.lua_revive(s, area))
             make(r, "roboport", 230, 14)              # an old roboport, not the toolkit's
             v2 = "e robots/r0 roboport 18,6\n"
-            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v2), cat, area, mode="play",
+            rep = applymod.apply(r, design("sa", 200, 0, 40, 20, v2), cat, area,
                                  force=f, policy=watch, own=rep.own)
             results["moved roboport ordered out"] = (at(r, "roboport", 206, 6), "built(decon)")
             results["old roboport, no stock: ordered out"] = (at(r, "roboport", 230, 14),
@@ -1217,7 +1217,7 @@ def check_fixes():
             # -- scaffold with stock: plot sb at 300,0 (20x20); the network holds 5 roboports
             area = (300, 0, 320, 20)
             rep = applymod.apply(r, design("sb", 300, 0, 20, 20, "e robots/r0 roboport 6,6\n"),
-                                 cat, area, mode="play", force=f, policy=watch)
+                                 cat, area, force=f, policy=watch)
             results["with stock, the old one is held"] = (at(r, "roboport", 318, 10), "built")
             results["held"] = (rep.held, 1)
     bad = 0
@@ -1406,7 +1406,7 @@ def check_vision():
             r.lua(link.lua_generate_area("lab", "lab", (area[0] - 64, area[1] - 64,
                                                         area[2] + 64, area[3] + 64)))
             sf, _lay, _p, s = look.composed(game, cat)
-            rep = applymod.apply(r, s, cat, mode="lab", force="lab")
+            rep = applymod.apply(r, s, cat, free=True, force="lab")
             print("\n".join(rep.lines()[:3]))
             print("setup:", r.lua(VISION_SETUP).strip())
             time.sleep(1)
@@ -1982,7 +1982,7 @@ def check_domains():
                                          ["lab:two/power-b/", "lab:two/b1/", "lab:two/b2/"]])):
                 first, own = None, None
                 for keys in steps:
-                    rep = applymod.apply(r, s, cat, mode="play", force=f, policy=watchp,
+                    rep = applymod.apply(r, s, cat, force=f, policy=watchp,
                                          keys=keys, own=own)
                     own = rep.own
                     print(f"plot {plot}, apply {' '.join(keys)}: {rep.lines()[0]}"
@@ -2577,7 +2577,7 @@ def check_bobinserters():
             with srv.rcon() as r:
                 r.lua(link.lua_generate_area(s, f, (-64, -64, 64, 64)))
                 print("base:", r.lua(_BOB_BASE).strip())
-                rep = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch)
+                rep = applymod.apply(r, v1, cat, force=f, policy=watch)
                 print("\n".join(rep.lines()))
                 print("single ghost:", link.ghosts(r, s, f, [alone]))
                 left, secs = _robots_wait(r, area)
@@ -2604,7 +2604,7 @@ def check_bobinserters():
                 d2 = applymod.diff(r, v1, cat, area, watch, force=f, own=rep.own)
                 hand = [x.line() for x in d2.settings]
                 print("a diff after a hand edit of i2's drop:", hand)
-                rep2 = applymod.apply(r, v1, cat, mode="play", force=f, policy=watch, own=rep.own)
+                rep2 = applymod.apply(r, v1, cat, force=f, policy=watch, own=rep.own)
                 print("\n".join(rep2.lines()))
                 _robots_wait(r, area)
                 after = json.loads(r.lua(_BOB_READ).strip())

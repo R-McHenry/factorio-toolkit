@@ -257,7 +257,7 @@ class DnpGameTest(unittest.TestCase):
                     mock.patch.object(link, "paste", lambda *a, **k: "0"), \
                     mock.patch.object(applymod, "paste_blueprint",
                                       lambda rows, *a, **k: pasted.extend(rows) or "bp"):
-                rep = applymod.apply(r, self.s, CAT, None, mode="play", policy=WATCH,
+                rep = applymod.apply(r, self.s, CAT, None, policy=WATCH,
                                      net_items=NETS, own=self.rec, confirm=confirm)
             self.assertNotIn(self.key, [row["src"] for row in pasted])
             took = (self.e.name, float(self.e.x), float(self.e.y)) in \

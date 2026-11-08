@@ -1,14 +1,14 @@
-"""lab_kit: a robot kit on the lab surface, so play-rule builds can be watched there (Rory: "I like
-to see stuff happening").
+"""robot_kit: a robot kit on the lab surface, so robot builds can be watched there (Rory: "I like
+to see stuff happening"; 3.1: was lab_kit).
 
-    python3 tools/lab_kit.py GAME_DIR [--clear X0,Y0,X1,Y1]
+    python3 tools/robot_kit.py GAME_DIR [--clear X0,Y0,X1,Y1]
 
-Built directly (lab rules: the lab force, free materials), from the game codebase's own design:
+Built directly (a free surface: the lab force, free materials), from the game codebase's own design:
 the surface .fkp's ``kit/r0`` roboport (with 50 construction and 20 logistic robots),
 ``kitpower/e0`` energy interface (20 MW) and ``kitpower/p0`` pole, and two storage chests inside
 the surface file's ``kit`` claim, holding what the design needs (its bill of materials, twice) and
 the plates its requesters ask for. ``--clear`` first destroys everything in that area of the lab
-surface (never characters). Then ``fk build`` (play mode, ``force lab``) pastes the factories as
+surface (never characters). Then ``fk build`` on a surface file without ``free`` but with ``force lab`` pastes the factories as
 ghosts and the robots build them from the chests. One RCON call per step (fkcore.link).
 """
 from __future__ import annotations

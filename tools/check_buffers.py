@@ -1,9 +1,10 @@
-"""lab_buffers: the 2.1 buffer designs built on a laptop server's lab and measured (PLAN-2.1 G).
+"""check_buffers: the 2.1 buffer designs built alone on a laptop server's lab surface and measured
+(PLAN-2.1 G; 3.1: was lab_buffers).
 
-    python tools/lab_buffers.py [line|one|loop|all]
+    python tools/check_buffers.py [line|one|loop|all]
 
 Each check starts a laptop server ("buffers", scenario fk-play), builds its design with ``fk lab``
-(``fkcore.lab.build``: the lab flow, an apply in lab mode, power, the requesters stocked), runs the
+(``fkcore.lab.build``: ``fkcore.alone`` on the free lab surface, then the stand-ins power and stock), runs the
 game fast for a stretch of game time (``ticks_to_run``, paused between reads) and compares what
 the game did with what the rate model says (``rates.solve``, its ``BUFFER`` lines):
 
@@ -32,7 +33,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
-from fkcore import codec, lab, rates  # noqa: E402
+from fkcore import codec, lab, rates, standin  # noqa: E402
 from fkcore.catalog import Catalog  # noqa: E402
 from fkcore.elaborate import elaborate_file  # noqa: E402
 from laptop_server import LaptopServer, _run_to  # noqa: E402
@@ -213,7 +214,7 @@ def check_one():
             reads = []
             for k in range(1, 11):                      # ten game minutes, a read each
                 _run_to(r, a["tick"] + k * 3600)
-                r.lua(lab.lua_supply(box))              # the requesters topped up
+                r.lua(standin.lua_supply(lab.SURFACE, lab.FORCE, box))              # the requesters topped up
                 reads.append(_read(r, box))
     flat, model = _model(game, "one")
     out.append("model: " + "; ".join(rates.buffer_lines(model)))

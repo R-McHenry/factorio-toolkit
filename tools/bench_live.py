@@ -1,9 +1,10 @@
-"""lab_bench: exercise the V1 core against the live game, on the lab surface only (no play).
+"""bench_live: exercise the V1 core against a live game, on a free surface (the lab; 3.1: was
+lab_bench, when the lab was a mode).
 
-Run on the game host from a deployed v5 dir:  python3 tools/lab_bench.py [--plot X,Y] [--steps ...]
+Run on the game host from a deployed v5 dir:  python3 tools/bench_live.py [--plot X,Y] [--steps ...]
 Every game call is one RCON command with a 5 s timeout; nothing registers a handler or a
 command (fkcore.link refuses that Lua). Everything happens on the ``lab`` surface for the ``lab``
-force, whose rules allow direct building and free materials; nauvis is only read (alerts check).
+force, where things are free (direct building, free materials); nauvis is only read (alerts check).
 
 Steps (each prints numbers; all of them go into the JSON report):
   info     the map: tick, scenario, surfaces, forces, the lab force's research, players

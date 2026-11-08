@@ -1,7 +1,7 @@
-"""lab_kxm: the live check of games/lab-kxm (a k -> m sushi net) on the lab surface.
+"""kxm_live: the live check of games/lab-kxm (a k -> m sushi net) on the lab surface (3.1: was lab_kxm).
 
 After ``fk build games/lab-kxm/lab.build.fkb`` has applied the plot (the diff says OK n/n), this
-gives the plot what the lab lacks and watches the net work:
+gives the plot what bare ground lacks (stand-ins, god mode) and watches the net work:
 
 - power: an electric energy interface beside one of the design's poles (the lab surface has no
   generator; the lab bench measures the same way);
@@ -9,7 +9,7 @@ gives the plot what the lab lacks and watches the net work:
 - every ``--every`` seconds, a snapshot of the plot: what each consumer chest holds. Done when
   every consumer holds every driver's item, or after ``--seconds``.
 
-Run on the game host from a deployed v5 dir:  python3 tools/lab_kxm.py [--seconds 120]
+Run on the game host from a deployed v5 dir:  python3 tools/kxm_live.py [--seconds 120]
 Every game call is one RCON command with a 5 s timeout; nothing registers a handler or a
 command (fkcore.link refuses that Lua); everything happens inside the plot, on the lab surface,
 for the lab force. ``--say`` only prints a chat line ("[fk5 router] ...").

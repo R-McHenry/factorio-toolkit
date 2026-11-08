@@ -1,6 +1,6 @@
-"""lab_lanes: the V2 lane and inserter facts, measured on a laptop test server.
+"""measure_lanes: the V2 lane and inserter facts, measured on a laptop test server (3.1: was lab_lanes).
 
-    python tools/lab_lanes.py [TEST ...]    TEST: protos drop sideload ugside splitter drill pickup
+    python tools/measure_lanes.py [TEST ...]    TEST: protos drop sideload ugside splitter drill pickup
                                             rates (default: all of these), and Rory's benchmarks:
                                             balancer stack (about a minute), stackcoal (4 min).
                                             Prints every case and writes out/lab-lanes.json.

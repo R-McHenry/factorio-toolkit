@@ -84,9 +84,16 @@ use the game link, and only with FK_LINK=on)
   with the game link (FK_LINK=on, on the game host):
     measure GAME_DIR --area X0,Y0,X1,Y1 [--seconds 30]
                                           what the machines there make, against the model
-    lab GAME_DIR NAME [--from DIR] [--size WxH] | NAME --measure S | NAME --clear | --list
-                                          a factory (or a stage's) built on its own lab slot,
-                                          powered and stocked; then what it really makes
+    alone GAME_DIR NAME [--surface S] [--from DIR] [--size WxH] [--keep] | NAME --measure SECS
+          | NAME --clear | --list         a module built alone on a slot of a surface (3.1;
+                                          default lab); then what it really makes there
+    standin GAME_DIR NAME supply|feed|ore [--surface S] [ore: --ore R --area A | --copy-ore A
+          [--to X,Y] | --clear-ore]       a god-mode stand-in on it, by name: power, stock and
+                                          fuel; a source or sink at each open port; ore (free
+                                          surfaces only)
+    lab GAME_DIR NAME [--from DIR] [--size WxH] [--keep] | NAME --measure S | NAME --clear | --list
+                                          the lab alias: alone --surface lab, then the stand-ins
+                                          supply and feed
     map GAME_DIR save NAME | saves | load NAME | restart | pause | resume
                                           the live map: saved, loaded (the server restarted on
                                           it), started over, paused (fkcore.mapctl; the host)
@@ -111,8 +118,8 @@ use the game link, and only with FK_LINK=on)
     request GAME_DIR X,Y|KEY ITEM N [--name ENTITY] [--inventory NAME]
                                           an item request: robots bring N of ITEM from the
                                           network to the entity that stands there (a proxy)
-    capture GAME_DIR lab NAME | world X0,Y0,X1,Y1 | design [FACTORY/]INST [--to FILE]
-                                          something built (a lab slot, an area of the game or
+    capture GAME_DIR slot NAME [--surface S] | lab NAME | world X0,Y0,X1,Y1 | design [FACTORY/]INST
+            [--to FILE]                   something built (a slot of a module alone, an area of the game or
                                           the planner, a laid-out instance) as a Literal file:
                                           Literal<file=...> anywhere, a module included
     lua GAME_DIR CODE | --file F          run a Lua chunk in the game (RCON); its rcon.print is the
@@ -261,13 +268,12 @@ def _alerts(a, cat):
 
 def _free_read(a, cat):
     from . import freereads
-    from .apply import force_for
     try:
         sf = surfacemod.load_game(a.game)
     except (surfacemod.SurfaceError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    force = a.force or force_for(sf.mode)
+    force = a.force or sf.force_name
     if a.cmd == "stats" and (a.sample or a.history or a.page):
         return _run_stats(a, cat, force, sf.name)
     if a.cmd == "chart":
@@ -305,7 +311,6 @@ def _run_stats(a, cat, force, surface):
 def _capital(a, cat):
     """``capital``: the working capital read (fkcore.capital), or a change to what is parked."""
     from . import capital
-    from .apply import force_for
     store = capital.Store(a.game, _area(a.area) if a.area else None)
     cfg = store.config
     if a.park or a.unpark or a.weight:
@@ -338,7 +343,7 @@ def _capital(a, cat):
     except (surfacemod.SurfaceError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    force = a.force or force_for(sf.mode)
+    force = a.force or sf.force_name
     return _world(a, cat, "capital", lambda r: capital.run(
         r, a.game, cat, force, sf.name, _area(a.area) if a.area else None, a.brief))
 
@@ -506,19 +511,30 @@ def _migrate_origins(a, cat):
 def _migrate_surface(a):
     """``fk migrate-surface GAME`` (2.0.43, PLAN-GLOBAL phase B): write the world design
     ``<surface>.fk`` from the surface's ``place`` lines, and put ``design`` in the surface file.
-    The place lines stay as commented-out record; nothing else changes."""
+    The place lines stay as commented-out record; nothing else changes. 3.1: afterwards (or
+    alone, with ``--mode-only`` or when the design needs no migration), every ``*.surface`` of
+    the game with an old ``mode`` line gets it written as the properties it implied (``free``
+    and ``force lab``, or nothing)."""
     from . import root as rootmod
     game = a.game
+    if getattr(a, "mode_only", False):
+        if not _migrate_modes(game):
+            print(f"migrate-surface {game}: no surface file has a mode line")
+        return 0
     try:
         sf = surfacemod.load_game(game, derive=False)
     except (surfacemod.SurfaceError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if sf.design:
+        if _migrate_modes(game):
+            return 0
         print(f"error: {sf.name} already has `design {sf.design}`: nothing to migrate",
               file=sys.stderr)
         return 2
     if not sf.places:
+        if _migrate_modes(game):
+            return 0
         print(f"error: {os.path.basename(sf.path)} has no place lines to migrate", file=sys.stderr)
         return 2
     rootname = f"{sf.name}.fk"
@@ -561,7 +577,30 @@ def _migrate_surface(a):
             print(f"  note {note}")
     print(f"  the design derives {len(after.places)} plots; "
           f"`fk build` reads it from now on (`place` lines no longer place anything)")
+    _migrate_modes(game)
     return 0
+
+
+def _migrate_modes(game):
+    """3.1: every ``*.surface`` of ``game`` with an old ``mode`` line gets it written as the
+    properties it implied (``surfacemod.migrate_mode``). -> how many files changed."""
+    modes = 0
+    for f in sorted(os.listdir(game)):
+        if not f.endswith(".surface"):
+            continue
+        path = os.path.join(game, f)
+        with open(path, encoding="utf-8") as fh:
+            was = fh.read()
+        now, mode = surfacemod.migrate_mode(was)
+        if mode is None:
+            continue
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(now)
+        modes += 1
+        print(f"migrate-surface {f}: `mode {mode}` written as "
+              + ("`free` and `force lab`" if mode == "lab" else "nothing (it implied none)")
+              + " (3.1: a surface has properties, not a mode)")
+    return modes
 
 
 def _migrate_mismatch(was, now):
@@ -580,9 +619,8 @@ def _migrate_mismatch(was, now):
 
 
 def _force_surface(game):
-    from .apply import force_for
     sf = surfacemod.load_game(game)
-    return getattr(sf, "force", None) or force_for(sf.mode), sf.name
+    return sf.force_name, sf.name
 
 
 def dnp_edit(text, names, off=False):
@@ -752,7 +790,7 @@ def _decon(a, cat):
 def _capture(a, cat):
     """fk capture (2.0.62): something built, as a Literal file that can go anywhere
     (fkcore.capture)."""
-    from . import capture, lab, link
+    from . import alone, capture, link
     to = a.to or os.path.join("captured", f"{re.sub(r'[^A-Za-z0-9_-]+', '-', a.what)}.json")
     dest = to if os.path.isabs(to) else os.path.join(a.game, to)
     try:
@@ -793,21 +831,29 @@ def _capture(a, cat):
             if r is None:
                 return 2
             with r:
-                if a.source == "lab":
-                    held = lab.slots(a.game)
+                if a.source in ("lab", "slot"):
+                    # 3.1: a slot of a module built alone on a surface (`lab` is `slot --surface lab`)
+                    surface = alone.LAB if a.source == "lab" else (a.surface or alone.LAB)
+                    held = alone.slots(a.game, surface)
                     if a.what not in held:
                         raise capture.CaptureError(
-                            f"no lab slot {a.what} (slots: {', '.join(sorted(held)) or 'none'})")
+                            f"no slot {a.what} on {surface} (slots: "
+                            f"{', '.join(sorted(held)) or 'none'})")
                     x, y, w, h = held[a.what]
                     area = (x, y, x + w, y + h)
-                    surface, force = lab.SURFACE, lab.FORCE
+                    force = alone.surface_of(a.game, a.what, surface).force_name
+                    if getattr(a, "force_name", None):
+                        force = a.force_name
                 else:
                     area = _area(a.what)
                     force, surface = _force_surface(a.game)
                     if getattr(a, "surface", None):
                         surface = a.surface
-                        if surface == lab.SURFACE:
-                            force = lab.FORCE
+                        path = os.path.join(a.game, f"{surface}.surface")
+                        if os.path.exists(path):
+                            force = surfacemod.load(path, derive=False).force_name
+                        elif surface == alone.LAB:
+                            force = "lab"
                     if getattr(a, "force_name", None):
                         force = a.force_name
                 got = capture.from_game(r, surface, force, area)
@@ -989,14 +1035,75 @@ def _measure(a, cat):
     return 0
 
 
+def _slots_line(held, surface):
+    return f"slots on {surface}: " + (", ".join(f"{n} at {x},{y} ({w}x{h})"
+                                              for n, (x, y, w, h) in sorted(held.items()))
+                                    or "none in use")
+
+
+def _alone(a, cat):
+    """fk alone (3.1): a module built alone on a slot of a surface (fkcore.alone)."""
+    from . import alone
+    surface = a.surface or alone.LAB
+    if a.list or not a.name:
+        print(_slots_line(alone.slots(a.game, surface), surface))
+        return 0
+    r = _game_link("alone")
+    if r is None:
+        return 2
+    size = tuple(int(v) for v in a.size.lower().split("x")) if a.size else None
+    try:
+        with r:
+            if a.clear:
+                lines = alone.clear(r, a.game, a.name, surface)
+            elif a.measure is not None:
+                lines = alone.measure_alone(r, a.game, a.name, a.measure, cat, surface)
+            else:
+                lines = alone.build(r, a.game, a.name, a.src, size, cat, extra=a.extra,
+                                    keep=a.keep, surface=surface).lines
+    except (alone.AloneError, surfacemod.SurfaceError) as exc:
+        print(f"error: alone: {exc}", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    return 0
+
+
+def _standin(a, cat):
+    """fk standin (3.1): a god-mode stand-in on a module built alone, by name (fkcore.standin)."""
+    from . import alone, standin
+    surface = a.surface or alone.LAB
+    r = _game_link("standin")
+    if r is None:
+        return 2
+    try:
+        sf = alone.surface_of(a.game, a.name, surface)
+        standin.require_free(sf, f"standin {a.what}")
+        x, y, w, h = alone.slots(a.game, surface)[a.name]
+        with r:
+            if a.what == "supply":
+                line, _got = standin.supply(r, surface, sf.force_name, alone.box(x, y, w, h))
+                lines = [line.strip()]
+            elif a.what == "feed":
+                ctx = alone.layout(a.game, a.name, surface, cat)
+                px, py = sf.places[a.name].x, sf.places[a.name].y
+                lines = [ln.strip() for ln in standin.feed(r, ctx, a.name, surface, sf.force_name,
+                                                           px, py)] or ["no open port to feed"]
+            else:
+                to = tuple(int(float(v)) for v in a.to.split(","))
+                lines = standin.ore(r, a.game, a.name, surface, a.ore, a.area, a.amount,
+                                    a.copy_ore, to, a.clear_ore)
+    except (alone.AloneError, standin.StandinError, surfacemod.SurfaceError) as exc:
+        print(f"error: standin: {exc}", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    return 0
+
+
 def _lab(a, cat):
-    """fk lab (2.0.3): a design built and measured on the lab surface (fkcore.lab)."""
+    """fk lab: the lab alias (fkcore.lab): fk alone --surface lab, then the lab's stand-ins."""
     from . import lab
     if a.list or not a.name:
-        held = lab.slots(a.game)
-        print("lab slots: " + (", ".join(f"{n} at {x},{y} ({w}x{h})"
-                                         for n, (x, y, w, h) in sorted(held.items()))
-                               or "none in use"))
+        print(_slots_line(lab.slots(a.game), lab.SURFACE))
         return 0
     r = _game_link("lab")
     if r is None:
@@ -1011,10 +1118,10 @@ def _lab(a, cat):
                 lines = lab.ore(r, a.game, a.name, a.ore, a.area, a.amount, a.copy_ore, to,
                                 a.clear_ore)
             elif a.measure is not None:
-                lines = lab.measure_lab(r, a.game, a.name, a.measure, cat)
+                lines = lab.measure(r, a.game, a.name, a.measure, cat)
             else:
                 lines = lab.build(r, a.game, a.name, a.src, size, cat, extra=a.extra, keep=a.keep)
-    except lab.LabError as exc:
+    except (lab.LabError, lab.standin.StandinError, surfacemod.SurfaceError) as exc:
         print(f"lab: {exc}", file=sys.stderr)
         return 2
     print("\n".join(lines))
@@ -1355,10 +1462,9 @@ def _robots(a, cat):
     """``robots [--area A] [--force F]`` (3.1, fkcore.robots.report): the roboports that stand,
     read once, against the design's logistic chests. A read and a report; it changes nothing."""
     from . import link, robots
-    from .apply import force_for
     area = _area(a.area)
     sf, _lay, _path, s = _composed(a.game, cat)
-    force = a.force or sf.force or force_for(sf.mode)
+    force = a.force or sf.force_name
     chests = [(k, e.name, float(e.x), float(e.y)) for k, e in s.entities.items()
               if e.name in robots.LOGISTIC_CHESTS and not e.attrs.get("dnp")]
 
@@ -1486,6 +1592,8 @@ def main(argv=None):
                                                        "`design` to its surface file (2.0.43, "
                                                        "PLAN-GLOBAL phase B)")
     ms.add_argument("game")
+    ms.add_argument("--mode-only", dest="mode_only", action="store_true",
+                    help="3.1: only write an old `mode` line as the surface's properties")
     mo = sub.add_parser("migrate-origins", description="3.0.1: rewrite a design's turned "
                         "@(x, y, rot r) hints from the turned frame's corner to the instance's "
                         "origin, so it lays what it laid before (fkcore.origins)")
@@ -1676,7 +1784,37 @@ def main(argv=None):
     mp.add_argument("game")
     mp.add_argument("verb")
     mp.add_argument("rest", nargs=argparse.REMAINDER)
-    lb = sub.add_parser("lab")
+    al = sub.add_parser("alone", description="3.1: a module built alone on a slot of a surface "
+                        "(fkcore.alone); free surfaces revive the ghosts, others leave them to "
+                        "robots. Power, stock and feeds are stand-ins: fk standin")
+    al.add_argument("game")
+    al.add_argument("name", nargs="?")
+    al.add_argument("--surface", help="the surface (default lab); GAME/<surface>.surface gives "
+                    "its properties, the lab needs none")
+    al.add_argument("--from", dest="src")
+    al.add_argument("--size")
+    al.add_argument("--measure", type=float, help="what its machines make over SECONDS")
+    al.add_argument("--with", dest="extra", action="append", default=[], metavar="'STEP OPTS'",
+                    help="a step's options for this build only, as fk build --with")
+    al.add_argument("--clear", action="store_true")
+    al.add_argument("--keep", action="store_true",
+                    help="build over what stands (the slot not emptied)")
+    al.add_argument("--list", action="store_true")
+    si = sub.add_parser("standin", description="3.1: a god-mode stand-in on a module built alone "
+                        "(fkcore.standin): supply (power, stock, fuel), feed (a source or sink at "
+                        "each open port), ore. Only where things are free")
+    si.add_argument("game")
+    si.add_argument("name")
+    si.add_argument("what", choices=("supply", "feed", "ore"))
+    si.add_argument("--surface", help="the surface the module stands alone on (default lab)")
+    si.add_argument("--ore")                      # 2.0.56: RESOURCE over --area
+    si.add_argument("--area")
+    si.add_argument("--amount", type=int, default=100000)
+    si.add_argument("--copy-ore", dest="copy_ore")    # X0,Y0,X1,Y1 of the world
+    si.add_argument("--to", default="0,0")
+    si.add_argument("--clear-ore", dest="clear_ore", action="store_true")
+    lb = sub.add_parser("lab", description="the lab alias: fk alone NAME --surface lab, then the "
+                        "lab's stand-ins (supply, feed); --measure tops the requesters up first")
     lb.add_argument("game")
     lb.add_argument("name", nargs="?")
     lb.add_argument("--from", dest="src")
@@ -1742,15 +1880,15 @@ def main(argv=None):
     cp = sub.add_parser("capture", description="something built, as a Literal file that can go "
                         "anywhere (fkcore.capture)")
     cp.add_argument("game")
-    cp.add_argument("source", choices=("lab", "world", "design"))
-    cp.add_argument("what", help="lab: a slot's NAME; world: X0,Y0,X1,Y1; design: "
-                    "[FACTORY/]INST")
+    cp.add_argument("source", choices=("lab", "slot", "world", "design"))
+    cp.add_argument("what", help="slot: the NAME of a module built alone (--surface; `lab` is "
+                    "slot --surface lab); world: X0,Y0,X1,Y1; design: [FACTORY/]INST")
     cp.add_argument("--to", help="the file (default captured/<what>.json, in GAME_DIR)")
     cp.add_argument("--fkp", help="design: the layout to read (default the committed one)")
-    cp.add_argument("--surface", help="world: the surface to read (default the run's own; the "
-                    "lab's is `lab`, force `lab`)")
-    cp.add_argument("--force", dest="force_name", help="world: the force whose build it is "
-                    "(default the run's own, or `lab` on the lab surface)")
+    cp.add_argument("--surface", help="world, slot: the surface to read (default the run's own); "
+                    "its GAME/<surface>.surface names the force")
+    cp.add_argument("--force", dest="force_name", help="world, slot: the force whose build it is "
+                    "(default the surface file's)")
     lu = sub.add_parser("lua")
     lu.add_argument("game")
     lu.add_argument("code", nargs="?")
@@ -1831,6 +1969,10 @@ def main(argv=None):
         return _map(a)
     if a.cmd == "lab":
         return _lab(a, cat)
+    if a.cmd == "alone":
+        return _alone(a, cat)
+    if a.cmd == "standin":
+        return _standin(a, cat)
     if a.cmd == "capture":
         return _capture(a, cat)
     if a.cmd == "walk":

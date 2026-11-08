@@ -1,4 +1,5 @@
-"""fkcore.apply against a fake game link (no game): scope, anchor, lab correction, play reports."""
+"""fkcore.apply against a fake game link (no game): scope, anchor, the free surface's paste
+correction, the robot build's reports."""
 import unittest
 from unittest import mock
 
@@ -43,10 +44,11 @@ class ApplyTest(unittest.TestCase):
         self.rows = applymod.scope_rows(self.s, keys=["nauvis:mini/"])
         self.want = [(r["name"], float(r["x"]), float(r["y"])) for r in self.rows]
 
-    def run_apply(self, things, mode):
+    def run_apply(self, things, free):
         r = FakeRcon(things)
         with mock.patch.object(link, "snapshot", fake_snapshot(things)):
-            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"], mode=mode)
+            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"], free=free,
+                                 force="lab" if free else None)
         return r, rep
 
     def test_scope_by_plot_keys(self):
@@ -54,7 +56,7 @@ class ApplyTest(unittest.TestCase):
         self.assertTrue(all(r["src"].startswith("nauvis:mini/") for r in self.rows))
 
     def test_lab_paste_where_designed(self):
-        r, rep = self.run_apply(self.want, "lab")
+        r, rep = self.run_apply(self.want, True)
         self.assertEqual((rep.design, rep.present, rep.corrected, rep.misplaced), (19, 19, None, 0))
         self.assertEqual(rep.revived, 19)
         self.assertEqual(rep.force, "lab")
@@ -69,13 +71,13 @@ class ApplyTest(unittest.TestCase):
         lua = r.lua
         r.lua = lambda body: said if "g.revive()" in body else lua(body)
         with mock.patch.object(link, "snapshot", fake_snapshot(self.want)):
-            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"], mode="lab")
+            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"], free=True)
         self.assertEqual(rep.revived, 0)
         self.assertIn(f"revive: {said}", rep.notes)
 
     def test_lab_shifted_paste_is_measured_and_pasted_again(self):
         shifted = [(n, x + 1, y) for n, x, y in self.want]
-        r, rep = self.run_apply(shifted, "lab")
+        r, rep = self.run_apply(shifted, True)
         self.assertEqual(rep.corrected, (1.0, 0.0))
         self.assertEqual(len(r.pastes), 2)
         self.assertEqual(r.pastes[1][0], r.pastes[0][0] - 1)
@@ -83,7 +85,7 @@ class ApplyTest(unittest.TestCase):
     def test_play_reports_a_shifted_paste_and_cleans_nothing(self):
         # shifted clear of the design (a 1-tile shift of a belt row lands on its own belts)
         shifted = [(n, x, y + 10) for n, x, y in self.want]
-        r, rep = self.run_apply(shifted, "play")
+        r, rep = self.run_apply(shifted, False)
         self.assertEqual((rep.force, rep.misplaced, rep.revived), ("player", 19, 0))
         # (the paste's own script inventory is destroyed; no entity is)
         self.assertFalse(any("e.destroy()" in c or "g.revive()" in c for c in r.calls))
@@ -99,7 +101,7 @@ class ApplyTest(unittest.TestCase):
         for seed, seeds in ((True, 1), (False, 0)):
             r = FakeRcon(want)
             with mock.patch.object(link, "snapshot", fake_snapshot(want)):
-                rep = applymod.apply(r, s, CAT, mode="lab", seed=seed)
+                rep = applymod.apply(r, s, CAT, free=True, seed=seed)
             self.assertEqual(sum("amount =" in c for c in r.calls), seeds)
             gen = next(c for c in r.calls if "request_to_generate_chunks" in c)
             self.assertIn("request_to_generate_chunks({cx * 32 + 16, cy * 32 + 16}, 0)", gen)
@@ -107,7 +109,7 @@ class ApplyTest(unittest.TestCase):
 
     def test_anchor_is_the_tile_box_centre(self):
         x0, y0, x1, y1 = applymod.scope_area(self.rows, CAT, margin=0)
-        r, _rep = self.run_apply(self.want, "lab")
+        r, _rep = self.run_apply(self.want, True)
         self.assertEqual(r.pastes[0], ((x0 + x1) / 2, (y0 + y1) / 2))
 
     def test_a_built_entity_ordered_out_still_needs_its_ghost(self):
@@ -165,7 +167,7 @@ class ApplyTest(unittest.TestCase):
         with mock.patch.object(link, "snapshot", snap), \
                 mock.patch.object(link, "ghosts",
                                   return_value={"n": 1, "missed": {"filters": 1}}) as ghosts:
-            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"], mode="play")
+            rep = applymod.apply(r, self.s, CAT, keys=["nauvis:mini/"])
         entities, wires = ghosts.call_args.args[3], ghosts.call_args.args[4]
         self.assertEqual(entities, [codec.entity_json(self.rows[0], 1)])
         self.assertEqual(wires, [])

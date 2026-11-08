@@ -1,4 +1,4 @@
-"""tools/lab_fluids.py, offline: its lakes cover every offshore pump's water, and every fixture it
+"""tools/fluids_live.py (was lab_fluids), offline: its lakes cover every offshore pump's water, and every fixture it
 touches lies inside the fluids worker's lab region. No game here."""
 import importlib.util
 import os
@@ -8,8 +8,8 @@ from fkcore import link
 from fkcore.catalog import Catalog
 
 CAT = Catalog.load()
-_PATH = os.path.join(os.path.dirname(__file__), "..", "tools", "lab_fluids.py")
-_SPEC = importlib.util.spec_from_file_location("lab_fluids", _PATH)
+_PATH = os.path.join(os.path.dirname(__file__), "..", "tools", "fluids_live.py")
+_SPEC = importlib.util.spec_from_file_location("fluids_live", _PATH)
 tool = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(tool)
 

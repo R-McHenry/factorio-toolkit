@@ -1,8 +1,8 @@
-"""lab_ribbons: the eight-belt smelter bus routed as a ribbon, built on a laptop server and
-measured (2.1 ribbons, PLAN-2.1 "Bus routing: ribbons").
+"""check_ribbons: the eight-belt smelter bus routed as a ribbon, built on a laptop server's lab
+surface and measured (2.1 ribbons, PLAN-2.1 "Bus routing: ribbons"; 3.1: was lab_ribbons).
 
-    python tools/lab_ribbons.py            # the bus as it is
-    python tools/lab_ribbons.py --rock     # a 2x2 rock on the last run's belts 2 and 3
+    python tools/check_ribbons.py            # the bus as it is
+    python tools/check_ribbons.py --rock     # a 2x2 rock on the last run's belts 2 and 3
 
 ``tests/nest/bus-ribbon.fk`` (its ore from three requesters here, 5/s each: one requester's
 inserter brings about 6/s, and the eight columns take 15/s): eight SmeltColumns side by side (2.1.12's bus), ``net each
@@ -11,9 +11,9 @@ lays the eight plate nets as one ribbon: they join it one by one under the colum
 south and end side by side on the chests' eight ports.
 
 A laptop server ("ribbons", scenario fk-play) builds it with ``fk lab`` (``fkcore.lab.build``:
-the lab flow, an apply in lab mode, power, the requesters stocked), runs the game fast for four
-minutes to start up (the belts fill) and then two minutes measured, the ore requester topped up
-every 30 game seconds (``lab.lua_supply``), and reads:
+``fkcore.alone`` on the free lab surface, then the stand-ins power and stock), runs the game fast
+for four minutes to start up (the belts fill) and then two minutes measured, the ore requester
+topped up every 30 game seconds (``standin.lua_supply``), and reads:
 
 - per column: the plates its three furnaces made (products_finished), per minute;
 - per chest: the plates it took in, plus what the belt into it holds more than before;
@@ -40,7 +40,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
-from fkcore import lab  # noqa: E402
+from fkcore import alone, lab, standin  # noqa: E402
 from fkcore.catalog import Catalog  # noqa: E402
 from laptop_server import LaptopServer, _run_to  # noqa: E402
 
@@ -160,7 +160,7 @@ def main():
             box = (x - 2, y - 2, x + SIZE[0] + 2, y + SIZE[1] + 2)
             r.lua("game.tick_paused = true rcon.print(1)")
             now = int(r.lua("rcon.print(game.tick)").strip())
-            supply = lab.lua_supply(lab._box(x, y, w, h))
+            supply = standin.lua_supply(lab.SURFACE, lab.FORCE, alone.box(x, y, w, h))
 
             def go(ticks):
                 # the ore requester holds about a minute's worth: topped up every 30 game s

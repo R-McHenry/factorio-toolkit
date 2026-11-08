@@ -10,7 +10,7 @@ one). Everything is generated here, offline: no game, no committed file.
 Per case it prints one row: the net's flow (demand), the max-flow of what was laid on the lane
 graph as it is (``fkcore.maxflow``, ``lanes=True``), what the consumers get under the game's rules
 (``rules``: ``fkcore.routed``, the splitters splitting evenly; 2.1.24, which the real game in
-``tools/hourglass_lab.py`` agrees with to a few percent), reach (``fkcore.connect``'s verdict: every
+``tools/hourglass_live.py`` agrees with to a few percent), reach (``fkcore.connect``'s verdict: every
 producer reaches every consumer, no SPILL), the waist (the runs crossing the vertical line midway between the columns, and the fewest
 across any vertical line of the gap), belts, underground ends, splitters, inserters, the runs the
 router added, its belt cost (steiner's costs) and the route time. The m2m router fills both lanes
@@ -162,7 +162,7 @@ def measure(name, cat, m2m=True, gap=GAP, router=None):
 def rules(flat, layout, cat):
     """What the consumers get under the game's rules (``fkcore.routed``: a splitter splits
     evenly until an output backs up; a lane serves its first inserters first): the lab measures
-    the same (``tools/hourglass_lab.py``, 2.1.24)."""
+    the same (``tools/hourglass_live.py``, 2.1.24)."""
     from fkcore import routed
     r = routed.solve(flat, layout, cat)
     return sum(sum(r.res.delivered.get((k, ""), {}).values()) for k in flat.machines
