@@ -88,8 +88,8 @@ class ReachTest(unittest.TestCase):
         self.assertEqual([r[0] for r in robots.reach(rows, self.STANDING, CAT)], ["z", "a"])
 
 
-def _ctx(verdicts, roboports, mode="play"):
-    sf = types.SimpleNamespace(name="nauvis", mode=mode)
+def _ctx(verdicts, roboports, free=False):
+    sf = types.SimpleNamespace(name="nauvis", free=free)
     return types.SimpleNamespace(last_diff=types.SimpleNamespace(verdicts=verdicts),
                                  roboports=roboports, surface=sf, cat=CAT)
 
@@ -108,7 +108,7 @@ class ReportBomReachTest(unittest.TestCase):
     def test_nothing_read_nothing_said(self):
         vs = [Verdict("not-placed", "wooden-chest", 600.5, 0.5, "k")]
         self.assertIsNone(flow._reach(_ctx(vs, None)))
-        self.assertIsNone(flow._reach(_ctx(vs, [(0.0, 0.0, 25.0, 55.0)], mode="lab")))
+        self.assertIsNone(flow._reach(_ctx(vs, [(0.0, 0.0, 25.0, 55.0)], free=True)))
         self.assertIsNone(flow._reach(_ctx(vs, [(600.0, 0.0, 25.0, 55.0)])))
 
 

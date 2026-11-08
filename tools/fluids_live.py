@@ -1,12 +1,13 @@
-"""lab_fluids: the lab fixtures and the measure for games/lab-fluids (the fluid nets, live).
+"""fluids_live: the fixtures and the measure for games/lab-fluids (the fluid nets, live, on the lab
+surface; 3.1: was lab_fluids).
 
-Run on the game host from a deployed v5 dir:  python3 tools/lab_fluids.py STEP [...]
+Run on the game host from a deployed v5 dir:  python3 tools/fluids_live.py STEP [...]
 Every game call is one RCON command with the link's 5 s timeout; nothing registers anything.
 Everything happens on the ``lab`` surface, inside the fluids worker's region (``REGION``); a
 step refuses any tile or entity outside it.
 
 The flow (``FK_LINK=on python3 -m fkcore build games/lab-fluids/lab.build.fkb``) builds the
-design. What lab ground and the lab rules leave to a fixture, and nothing else:
+design. What bare ground and a free surface leave to a fixture (god mode, by name), and nothing else:
 
   water    the surface file's ``lake-*`` claims become water tiles (lab ground has none, and an
            offshore pump is placed only on a shore): run before the build

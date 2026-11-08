@@ -38,6 +38,6 @@ The game's rules for this world, all in one place. The other docs are advice (`S
 
 ## The lab
 
-On a lab surface (`/lab`), none of this applies: materials are free, building is direct, and
-watching and measuring are global. The rules above are for the real game. `fk lab` builds and
-measures a design there (`docs\TOOLKIT.md`, "The lab").
+On a surface whose file says `free` (the lab, `/lab`), none of this applies: materials are free,
+building is direct, and watching and measuring are global. The rules above are for the real game.
+`fk lab` builds and measures a design there (`docs\TOOLKIT.md`, "Building on the lab surface").

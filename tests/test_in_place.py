@@ -219,7 +219,7 @@ class UpgradeTest(unittest.TestCase):
                 mock.patch.object(link, "paste", return_value="1"), \
                 mock.patch.object(wires, "run", return_value=wires.Pass()), \
                 mock.patch.object(link, "ghosts") as ghosts:
-            rep = applymod.apply(R(), self.s, CAT, mode="play", force="lab",
+            rep = applymod.apply(R(), self.s, CAT, force="lab",
                                  policy={"plots": "keep"})
         self.assertEqual(rep.upgraded, [("lab:f/~n/i0", "inserter", "fast-inserter")])
         self.assertEqual(ordered, [])

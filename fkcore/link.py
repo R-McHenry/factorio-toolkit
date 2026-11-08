@@ -1,7 +1,7 @@
 """fkcore.link: the game link (CORE-V1.md §9): RCON calls that read the game or make a named paste.
 
 Every call is one short RCON command with a 5 s socket timeout (Rory: game calls take seconds).
-The Lua sent here only reads, or builds through a blueprint paste, or (lab only) revives ghosts.
+The Lua sent here only reads, or builds through a blueprint paste, or (a free surface only) revives ghosts.
 **Nothing here registers an event handler or a command** (an RCON-registered handler made every
 save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
 
@@ -15,10 +15,10 @@ save unjoinable on 2026-10-18); ``assert_safe`` refuses any Lua that would.
   ``helpers.write_file`` into script-output and are read back from disk, so a big area never
   overflows an RCON reply; ``fkcore.scene.from_capture`` makes the scene.
 - ``paste(surface, force, bp, at)``: a superforced ``build_blueprint`` of a blueprint string from a
-  script inventory (the only world write). ``revive(surface, area)``: lab only, builds the area's
-  ghosts at once (lab rules: free materials).
+  script inventory (the only world write). ``revive(surface, area)``: a free surface only (the
+  lab), builds the area's ghosts at once (free materials).
 - ``decon(surface, force, area)``: marks the area for deconstruction; ``decon_list`` marks given
-  entities (name + position); ``destroy`` (lab only) removes.
+  entities (name + position); ``destroy`` (a free surface only) removes.
 - ``produced(force, surface, items)``: the force's production counts (two samples are a measure).
 - ``say(text)``: a line in game chat.
 - ``alerts(force)``: the game's alert panel of every player of the force, connected or not (the

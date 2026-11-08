@@ -150,10 +150,27 @@ class MigrateTest(World):
 
     def test_a_surface_without_place_lines_is_refused(self):
         with open(self.surface_path, "w", newline="\n") as fh:
-            fh.write("surface nauvis\nmode play\nterrain none\ncatalog base\n")
+            fh.write("surface nauvis\nterrain none\ncatalog base\n")
         code, report = self.migrate()
         self.assertEqual(code, 2)
         self.assertIn("no place lines to migrate", report)
+
+    def test_an_old_mode_line_is_written_as_the_properties(self):
+        # 3.1: the lab is a surface with properties; `mode lab` was the lab mode
+        with open(self.surface_path, "w", newline="\n") as fh:
+            fh.write("surface nauvis\nmode play\nterrain none\ncatalog base\n")
+        with open(os.path.join(self.dir, "lab.surface"), "w", newline="\n") as fh:
+            fh.write("surface lab\nmode     lab\nterrain none\n")
+        code, report = self.migrate()
+        self.assertEqual(code, 0, report)
+        self.assertIn("lab.surface: `mode lab` written as `free` and `force lab`", report)
+        with open(os.path.join(self.dir, "lab.surface"), encoding="utf-8") as fh:
+            sf = surface.loads(fh.read())
+        self.assertEqual((sf.free, sf.force_name, sf.notes), (True, "lab", []))
+        with open(self.surface_path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn("\nmode", text)
+        self.assertEqual(surface.loads(text).notes, [])
 
 
 class FlowTest(World):

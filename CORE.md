@@ -202,14 +202,17 @@ array).]
 ## Watch, notify, fair play [built: `sense` policies, notify nearby/all/off, the alert push with reminders, the free reads `stats` and `chart`; the `lab` scenario runs the test map, `/lab` used by Rory]
 
 - Foreign change, per region: `mark [expiry]` (sanctioned space), `keep` (plots), `revert`, `strict`.
-- Notify, per surface and actor: `nearby` (play default: only inside a look, sense or build), `all`
-  (lab default), `off`.
-- **`play`**: the diff, watcher and model-vs-world comparison read only where the agent looks or
+- Notify, per surface and actor: `nearby` (the default: only inside a look, sense or build), `all`
+  (the default on a `free` surface), `off`.
+- A surface file has properties, not a mode (3.1): `free` (ghosts revived by script, nothing built
+  by robots, direct building and destroying, a global look) and `force`. The two kinds below are
+  what a file without `free` and the lab's file (`free`, `force lab`) give.
+- **Not free** (a base): the diff, watcher and model-vs-world comparison read only where the agent looks or
   builds. Alerts panel, production statistics and charted map: free to read anywhere, never turned
   into alerts. **Pushed alerts are exactly the game's alert panel**, programmable-speaker alerts
   included, with occasional reminders while one persists. Building is ghosts and robots only.
-- **`lab`**: the `lab` surface in the same game, on its own `lab` force (its own research and stats).
-  Free materials, direct building, notify `all`, global diff, full-rate measuring. Rory watches with
+- **Free** (the `lab` surface in the same game, on its own `lab` force, its own research and stats):
+  free materials, direct building, notify `all`, global diff, full-rate measuring. Rory watches with
   `/lab`, registered in scenario/mod code, never RCON.
 
 ## The writer rule

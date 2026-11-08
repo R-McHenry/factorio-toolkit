@@ -1,11 +1,12 @@
 """fkcore.apply: the only world write (CORE: the writer rule), and the diff that judges it.
 
-``apply(r, s, cat, area, mode)`` pastes the composed layout ``s`` (a ``compose.Surface``) inside
-``area`` as one named blueprint. Every entity is keyed (``tags.src``), pole wires are derived, and
-it goes through ``link.paste`` (superforced: ghosts go over what stands in the way, and the game
-marks that for deconstruction). Then, by mode:
+``apply(r, s, cat, area, free=False)`` pastes the composed layout ``s`` (a ``compose.Surface``)
+inside ``area`` as one named blueprint. Every entity is keyed (``tags.src``), pole wires are
+derived, and it goes through ``link.paste`` (superforced: ghosts go over what stands in the way,
+and the game marks that for deconstruction). Then, by the surface's ``free`` property (3.1:
+surface files have properties, not a play or lab mode; ``fkcore.surface``):
 
-- ``play``: ghosts only; robots build them. A world entity in the area that the design does not
+- not free (the default, a base): ghosts only; robots build them. A world entity in the area that the design does not
   explain and the watch policy leaves to the apply (``unowned``) is ordered for deconstruction, an
   unbuilt ghost too (the game removes a ghost ordered out at once); ``marked`` and ``claimed``
   ones stay. The paste must land where designed: a shifted paste is reported (``not-where-designed``),
@@ -22,11 +23,11 @@ marks that for deconstruction). Then, by mode:
   robots take the old one up with what it holds and build the new one (``relaid``; the game
   keeps both, checked on a laptop test server, 2.0.77). ``ApplyReport.own`` is the record after
   the paste, for the caller to save.
-- ``lab``: the chunks under the area (and no others) are generated and charted first (a new
-  surface has none), each drill row's designed resource is seeded under it (lab ground has no
-  ore; ``seed=False`` when the surface has a real terrain, whose ore is already there), a
-  shifted paste is measured and pasted again, and the ghosts are revived at once (lab rules:
-  free materials).
+- ``free`` (the lab, or any surface where things are free): the chunks under the area (and no
+  others) are generated and charted first (a new surface has none), each drill row's designed
+  resource is seeded under it (bare ground has no ore; ``seed=False`` when the surface has a real
+  terrain, whose ore is already there), a shifted paste is measured and pasted again, and the
+  ghosts are revived at once (free materials).
 
 What the paste refuses (the game won't place an offshore pump from a blueprint: the kickoff
 found it on 2026-10-18, the V1 rehearsal again; nor anything on uncharted ground: a map with no
@@ -92,10 +93,11 @@ from . import own as ownmod
 from . import settings as settingsmod
 from . import wires as wiresmod
 from .fkp import natural_key
+from .surface import DEFAULT_FORCE
 
 __all__ = ["ApplyReport", "apply", "diff", "scope_rows", "scope_area", "default_area",
            "paste_blueprint", "turned_rows",
-           "force_for", "scaffold", "rip_points", "rip_load", "rip_minutes", "moved",
+           "scaffold", "rip_points", "rip_load", "rip_minutes", "moved",
            "rip_report"]
 
 #: a rip worth a RIP check: this many minutes of robot time, or this many structures
@@ -112,7 +114,7 @@ SCAFFOLD_KINDS = ("electric-pole", "roboport")
 class ApplyReport:
     surface: str
     force: str
-    mode: str
+    free: bool                         # the surface's property: revived by Lua, not robots
     area: tuple
     design: int = 0                    # entities in the scope
     pasted: int = 0                    # what build_blueprint placed (new ghosts)
@@ -146,15 +148,16 @@ class ApplyReport:
 
     def lines(self):
         a = ",".join(str(int(v)) for v in self.area)
-        head = (f"apply {self.surface} area {a} ({self.mode}, force {self.force}): {self.design} "
-                f"entities designed, {self.pasted} ghosts placed, {self.present} where designed")
+        head = (f"apply {self.surface} area {a} ({'free' if self.free else 'robots'}, force "
+                f"{self.force}): {self.design} entities designed, {self.pasted} ghosts placed, "
+                f"{self.present} where designed")
         out = [head]
-        if self.mode == "lab":
-            out.append(f"  lab: {self.chunks} chunks generated, {self.seeded} ore tiles seeded, "
+        if self.free:
+            out.append(f"  free: {self.chunks} chunks generated, {self.seeded} ore tiles seeded, "
                        f"{self.revived} revived, {self.revive_failed} not revivable"
                        + (f", paste corrected by {self.corrected}" if self.corrected else ""))
         else:
-            out.append(f"  play: {self.decon} unowned entities ordered for deconstruction"
+            out.append(f"  robots: {self.decon} unowned entities ordered for deconstruction"
                        + (f" ({self.dropped} of them the toolkit's own, dropped from the design)"
                           if self.dropped else "") + "; robots build the ghosts")
             if self.dnp_taken:
@@ -228,10 +231,6 @@ class ApplyReport:
 
 def _local(key):
     return (key or "").split(":", 1)[-1]
-
-
-def force_for(mode):
-    return "lab" if mode == "lab" else "player"
 
 
 def scope_rows(s, area=None, keys=None, dnp=False):
@@ -396,24 +395,25 @@ def diff(r, s, cat, area, policy, net_items=None, tag="diff", own=None, force=No
     return rep
 
 
-def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None, keys=None,
+def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None, keys=None,
           net_items=None, tag="apply", seed=True, own=None, confirm=False) -> ApplyReport:
     """Paste the design inside ``area`` (default: all of ``s``, and the toolkit's own entities it
-    dropped) as one named blueprint. ``own``: the record of what the applies pasted."""
+    dropped) as one named blueprint. ``free``: the surface's property (ghosts revived by Lua,
+    nothing built by robots). ``own``: the record of what the applies pasted."""
     t0 = time.time()
     given = area
     rows = scope_rows(s, area, keys)
     if area is None:
         area = default_area(s, cat, keys, own)
-    force = force or force_for(mode)
-    rep = ApplyReport(s.name, force, mode, tuple(area or (0, 0, 0, 0)), design=len(rows))
+    force = force or DEFAULT_FORCE
+    rep = ApplyReport(s.name, force, bool(free), tuple(area or (0, 0, 0, 0)), design=len(rows))
     if area is None:
         rep.notes.append("nothing designed in this scope")
         return rep
     standing = []
     poles = design_poles(s, cat)
     upped = {}
-    if mode != "lab" and policy is not None:
+    if not free and policy is not None:
         before = diff(r, s, cat, area, policy, net_items, tag=f"{tag}-before", own=own,
                       force=force, confirm=confirm)
         rep.dnp_kept = sum(1 for v in before.verdicts if v.verdict == "dnp-standing")
@@ -479,7 +479,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         rep.notes.append("nothing designed in this scope")
         rep.seconds = time.time() - t0
         return rep
-    if mode == "lab":
+    if free:
         rep.chunks = int(r.lua(link.lua_generate_area(s.name, force, area)).strip() or 0)
         ore = {}
         for e in s.entities.values():
@@ -504,7 +504,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
     rep.present = len(want & (set(seen) | up_now))
     ghosts = {k for k, gs in seen.items() if any(gs)}
     stray = ghosts - want
-    if stray and mode == "lab" and rep.present < len(want):
+    if stray and free and rep.present < len(want):
         shift = _shift(stray, want)
         if shift:
             r.lua(link.lua_destroy(s.name, area, names=["entity-ghost"]))
@@ -514,10 +514,10 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
             seen = _things(cap)
             rep.present = len(want & set(seen))
             stray = {k for k, gs in seen.items() if any(gs)} - want
-    if mode != "lab":
+    if not free:
         rep.misplaced = len(stray)
     placed = _placed(cap) | up_now
-    if mode != "lab" and not rep.misplaced:
+    if not free and not rep.misplaced:
         # what the paste left turned goes, and its single ghost takes its place (2.0.5)
         bad = turned_rows(rows, cap, cat)
         if bad:
@@ -540,7 +540,7 @@ def apply(r, s, cat, area=None, mode="play", force=None, label=None, policy=None
         if rep.placed_alone:
             seen = _things(link.snapshot(r, s.name, area, f"{tag}-ghosts"))
             rep.present = len(want & (set(seen) | up_now))
-    if mode == "lab":
+    if free:
         said = r.lua(link.lua_revive(s.name, area))
         got = said.split()
         # 2.1.31: a game error ("Cannot execute command ...") stopped the build after its route

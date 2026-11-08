@@ -1,7 +1,8 @@
-"""lab_sense: the in-game checks of the live look, notify and the alert push, on the lab surface.
+"""sense_live: the in-game checks of the live look, notify and the alert push, on the lab surface
+(3.1: was lab_sense).
 
 Run on the game host from a deployed v5 dir, after ``fk build games/lab-sense/lab.build.fkb`` has
-applied the game there:  ``python3 tools/lab_sense.py [--steps look,alerts,reads] [--force F]``.
+applied the game there:  ``python3 tools/sense_live.py [--steps look,alerts,reads] [--force F]``.
 Everything stands in the sensing worker's region of the lab surface (x 300..420, y 400..560);
 each build is announced in game chat; every game call is one short RCON command (the link
 refuses Lua that registers anything); everything placed is removed again.
@@ -160,9 +161,8 @@ def step_alerts(r, cat, a):
 
 def step_reads(r, cat, a):
     from fkcore import surface as surfacemod
-    from fkcore.apply import force_for
     sf = surfacemod.load_game(GAME)
-    force = force_for(sf.mode)
+    force = sf.force_name
     for line in freereads.stats_lines(freereads.stats(r, force, sf.name)):
         print(f"[reads] {line}")
     for line in freereads.stats_lines(freereads.stats(r, force, sf.name, ["iron-plate", "coal",

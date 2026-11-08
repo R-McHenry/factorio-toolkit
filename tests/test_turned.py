@@ -141,7 +141,7 @@ class TurnedTest(unittest.TestCase):
                 mock.patch.object(link, "paste", world.paste), \
                 mock.patch.object(link, "ghosts", world.ghosts), \
                 mock.patch.object(applymod, "_decon", world.decon):
-            return applymod.apply(world, self.new, CAT, mode="play", policy=WATCH,
+            return applymod.apply(world, self.new, CAT, policy=WATCH,
                                   net_items=NEW_ITEMS, own=own)
 
     def test_an_apply_on_uncharted_ground_lays_the_turned_ones_fresh(self):
@@ -225,7 +225,7 @@ class TurnedTest(unittest.TestCase):
         from types import SimpleNamespace
         from fkcore import flow
         rep = self.sense_old_block()
-        ctx = SimpleNamespace(surface=SimpleNamespace(name="nauvis", mode="play"))
+        ctx = SimpleNamespace(surface=SimpleNamespace(name="nauvis", free=False))
         check = flow._turned(ctx, rep)
         self.assertEqual(check.code, "re-laid")
         self.assertTrue(check.msg.startswith(

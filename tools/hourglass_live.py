@@ -1,6 +1,7 @@
-"""hourglass_lab: the hourglass bench in a real game (DESIGN-M2M.md, release 3: "the lab").
+"""hourglass_live: the hourglass bench in a real game, on a laptop server's lab surface
+(DESIGN-M2M.md, release 3: "the lab"; 3.1: was hourglass_lab).
 
-    python tools/hourglass_lab.py [--only NAME[,NAME]] [--routers m2m,today,balancer] [--big]
+    python tools/hourglass_live.py [--only NAME[,NAME]] [--routers m2m,today,balancer] [--big]
                                   [--warm 120] [--secs 180] [--step 2]
 
 Each case's layout (``tools/hourglass.py``) is pasted on a laptop server's lab surface

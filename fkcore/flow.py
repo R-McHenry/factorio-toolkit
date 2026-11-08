@@ -41,8 +41,8 @@ reach. They are checks, never gates. With a terrain, a lab ``apply`` seeds no or
 the terrain's.
 
 ``diff`` and ``apply`` use the game link (``fkcore.link``: RCON, 5 s per call; the
-surface file's name is the game surface, its mode picks the force and the rules, see
-``fkcore.apply``). The link is used only when ``FK_LINK=on`` is set (so a paper game run on the
+surface file's name is the game surface, its ``force`` and ``free`` properties pick whose the
+paste is and whether Lua revives it, see ``fkcore.apply``). The link is used only when ``FK_LINK=on`` is set (so a paper game run on the
 game host never pastes by accident); without it, or with no RCON password file or nothing
 listening, they report that they were skipped. Apart from those two steps it is pure: it reads
 the game codebase and writes ``out/`` and, in write_layout, the ``.fkp`` files.
@@ -400,9 +400,10 @@ def s_read_surface(ctx, args):
     path = os.path.join(ctx.root, f"{name}.surface")
     ctx.surface = surfacemod.load(path)
     sf = ctx.surface
-    lines = [f"surface {sf.name}: mode {sf.mode}, terrain {sf.terrain}, catalog {sf.catalog}, "
-             f"notify {sf.notify_mode}, watch plots {sf.watch['plots']} / sanctioned "
-             f"{sf.watch['sanctioned']}"]
+    lines = [f"surface {sf.name}: {'free, ' if sf.free else ''}force {sf.force_name}, terrain "
+             f"{sf.terrain}, catalog {sf.catalog}, notify {sf.notify_mode}, watch plots "
+             f"{sf.watch['plots']} / sanctioned {sf.watch['sanctioned']}"]
+    lines += [f"  note: {n}" for n in sf.notes]
     if sf.design:
         lines.append(f"design {sf.design}: {len(sf.places)} plots from its top-level sealed "
                      f"instances" + (f" (the {len(sf.lines_places)} place lines are not read "
@@ -1627,8 +1628,9 @@ def s_cover_robots(ctx, args):
     ``--storage`` is ignored with one line."""
     from . import robots
     o = _opts(args, roboport="roboport", storage=None)
-    if ctx.surface is not None and ctx.surface.mode == "lab":
-        return ["cover robots: lab mode revives the ghosts, no robots build here; nothing placed"], []
+    if ctx.surface is not None and ctx.surface.free:
+        return ["cover robots: a free surface revives its ghosts, no robots build here; nothing "
+                "placed"], []
     storage = None
     infra = _infra(ctx)
     places = ctx.surface.places if ctx.surface is not None else {}
@@ -2126,7 +2128,7 @@ def _reach(ctx):
     runs: a cover-robots roboport out of every area stood a ghost with the 47 entities it was to
     cover, and 26 ghosts of a big paste waited out of reach until the player found them."""
     from . import robots
-    if ctx.last_diff is None or ctx.roboports is None or ctx.surface.mode == "lab":
+    if ctx.last_diff is None or ctx.roboports is None or ctx.surface.free:
         return None
     rows = [(v.key, v.name, v.x, v.y) for v in ctx.last_diff.verdicts
             if v.verdict.split()[0] in _TO_LAY]
@@ -2342,7 +2344,7 @@ def s_diff(ctx, args):
         _save_hands(ctx, r)            # for the next build's rates and tiers, on the laptop
     except Exception:                  # noqa: BLE001 - they fall back to hand 1, and say so
         pass
-    if ctx.surface.mode != "lab":
+    if not ctx.surface.free:
         ctx.roboports = _read_roboports(ctx, r)
     try:
         _save_standing(ctx, rep, ctx.roboports)   # for the next build's cover steps, on the laptop
@@ -2375,13 +2377,13 @@ def s_diff(ctx, args):
     if turned:
         lines.append(f"  {turned.msg}")
         checks.append(turned)
-    if ctx.surface.mode != "lab":
+    if not ctx.surface.free:
         far = _unreached(ctx, r, rep)
         if far:
             lines.append(f"  {far.msg}")
             checks.append(far)
     pts = applymod.rip_points(rep)
-    if pts and ctx.surface.mode != "lab":
+    if pts and not ctx.surface.free:
         # 1.1: what the apply will take up, and how long the robots need for it (before it starts)
         from . import link
         try:
@@ -2471,8 +2473,7 @@ def _unreached(ctx, r, rep, batch=80):
 
 
 def _force(ctx):
-    from .apply import force_for
-    return getattr(ctx.surface, "force", None) or force_for(ctx.surface.mode)
+    return ctx.surface.force_name
 
 
 def s_apply(ctx, args):
@@ -2487,8 +2488,8 @@ def s_apply(ctx, args):
         return [f"apply: skipped, no game link ({ctx.link_error})"], []
     from . import apply as applymod
     area, keys = _scope(ctx, o)
-    rep = applymod.apply(r, ctx.composed, ctx.cat, area, mode=ctx.surface.mode,
-                         force=getattr(ctx.surface, "force", None), policy=ctx.surface,
+    rep = applymod.apply(r, ctx.composed, ctx.cat, area, free=ctx.surface.free,
+                         force=ctx.surface.force_name, policy=ctx.surface,
                          keys=keys, net_items=_net_items(ctx),
                          label=f"fk build {os.path.basename(ctx.script)}",
                          seed=ctx.ground is None, own=ownmod.load(ctx.root, ctx.surface.name),

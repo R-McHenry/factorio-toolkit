@@ -422,7 +422,8 @@ class FlowTest(unittest.TestCase):
                 return json.dumps(self.far)     # the indices the live read finds unreached
 
         ctx = flow.Ctx(self.dir, self.script, CAT, os.path.join(self.dir, "out"))
-        ctx.surface = type("S", (), {"name": "nauvis", "mode": "play", "force": "player"})()
+        ctx.surface = type("S", (), {"name": "nauvis", "free": False, "force": "player",
+                                      "force_name": "player"})()
         # the pole and the assembler stand out of reach now; the new roboport is in reach, and
         # its own area (55 tiles) will cover the assembler once it is built: only the pole stays
         c = flow._unreached(ctx, Link([1, 3]), Rep)

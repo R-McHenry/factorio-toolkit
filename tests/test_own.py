@@ -184,7 +184,7 @@ class ApplyTest(unittest.TestCase):
         r = FakeRcon()
         with mock.patch.object(link, "snapshot", snapshot_of(live)), \
                 mock.patch.object(link, "paste", lambda *a, **k: "0"):
-            rep = applymod.apply(r, self.s, CAT, area, mode="play", policy=WATCH,
+            rep = applymod.apply(r, self.s, CAT, area, policy=WATCH,
                                  net_items=NETS, own=rec)
         return r, rep
 
@@ -321,7 +321,7 @@ class RelayTest(unittest.TestCase):
             real = r.lua
             r.lua = lambda body: (order.append("decon") if "order_deconstruction" in body
                                   else None) or real(body)
-            rep = applymod.apply(r, self.s, CAT, None, mode="play", policy=WATCH,
+            rep = applymod.apply(r, self.s, CAT, None, policy=WATCH,
                                  net_items=NETS, own=self.rec)
         self.assertEqual(r.ordered, [("transport-belt", 14.5, 0.5)])
         self.assertEqual(order, ["decon", "paste"])
@@ -338,7 +338,7 @@ class RelayTest(unittest.TestCase):
         r = FakeRcon()
         with mock.patch.object(link, "snapshot", snapshot_of(self.live)), \
                 mock.patch.object(link, "paste", lambda *a, **k: "0"):
-            rep = applymod.apply(r, self.s, CAT, None, mode="play", policy=WATCH,
+            rep = applymod.apply(r, self.s, CAT, None, policy=WATCH,
                                  net_items=NETS, own=self.rec)
         self.assertEqual((r.ordered, rep.relaid), ([], []))
 

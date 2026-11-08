@@ -68,7 +68,7 @@ STEP_CMDS = {"route", "place", "report"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capital",
         "read-terrain", "measure", "adopt", "sense", "research", "tech", "recipes", "lua", "fresh",
-        "avail", "decon", "request", "walk", "map"}
+        "avail", "decon", "request", "walk", "map", "standin"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
 AREA_FIRST = ("fresh", "measure", "decon")
 #: files only the host writes: pulled, never pushed
@@ -443,9 +443,10 @@ def sim(cfg, rest):
 
 
 def _script():
-    """The run's build script: ``<surface>.build.fkb`` of the play-mode surface file in game\\,
-    else the first. 2.0.3: the first alone let a ``lab.build.fkb`` copied into game\\ take every
-    ``fk build`` of nauvis (it comes first alphabetically)."""
+    """The run's build script: ``<surface>.build.fkb`` of the first surface file in game\\ that
+    is not ``free`` (3.1; was: in play mode), else the first. 2.0.3: the first alone let a
+    ``lab.build.fkb`` copied into game\\ take every ``fk build`` of nauvis (it comes first
+    alphabetically)."""
     found = sorted(f for f in os.listdir(GAME) if f.endswith(".build.fkb"))
     if not found:
         sys.exit("fk: no <surface>.build.fkb in game\\")
@@ -454,10 +455,12 @@ def _script():
             continue
         try:
             with open(os.path.join(GAME, f), encoding="utf-8") as fh:
-                m = re.search(r"^\s*mode\s+(\w+)", fh.read(), re.M)
+                text = fh.read()
         except OSError:
             continue
-        if (m.group(1) if m else "play") == "play":
+        free = re.search(r"^\s*free\s*(?:yes|on|true)?\s*(?:#|$)", text, re.M | re.I) \
+            or re.search(r"^\s*mode\s+lab\b", text, re.M)
+        if not free:
             return f[:-len(".surface")] + ".build.fkb"
     return found[0]
 
@@ -611,19 +614,27 @@ def main(argv):
         code = local(cfg, ["stage", "."] + rest)
         footer(cfg)
         return code
-    if cmd == "lab":
+    if cmd in ("lab", "alone"):
+        if cmd == "alone" and ("-h" in rest or "--help" in rest):
+            print("fk alone NAME [--surface S] [--from DIR] [--size WxH] [--keep]: NAME built alone "
+                  "on a slot of surface S (default lab; game\\S.surface gives its properties); "
+                  "fk alone NAME --measure 60; --clear; --list. Power, stock and feeds are stand-ins: "
+                  "fk standin NAME supply|feed|ore (docs\\TOOLKIT.md, \"Building on the lab "
+                  "surface\")")
+            return 0
         if "-h" in rest or "--help" in rest:
-            print("fk lab NAME [--from DIR] [--size WxH]: NAME (a factory of game\\, or of DIR: a "
-                  "stage folder, a scratch copy) built on its own slot of the lab surface, powered "
-                  "and stocked; fk lab NAME --measure 60: what it makes there; fk lab NAME --clear; "
-                  "fk lab --list (docs\\TOOLKIT.md, \"The lab\")")
+            print("fk lab NAME [--from DIR] [--size WxH] [--keep]: NAME (a factory of game\\, or of "
+                  "DIR: a stage folder, a scratch copy) built alone on its own slot of the lab "
+                  "surface (fk alone NAME --surface lab), then the lab's stand-ins: power, stock, a "
+                  "feed at every open port; fk lab NAME --measure 60: what it makes there; fk lab "
+                  "NAME --clear; fk lab --list (docs\\TOOLKIT.md, \"Building on the lab surface\")")
             return 0
         if "--from" in rest and cfg["host"] != "local":
             i = rest.index("--from")
             if i + 1 >= len(rest) or not _ship(cfg, rest[i + 1]):
                 return 2
         push(cfg)
-        code = remote(cfg, ["lab", "."] + rest)
+        code = remote(cfg, [cmd, "."] + rest)
         pull(cfg)
         return code
     if cmd == "sim":

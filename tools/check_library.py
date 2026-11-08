@@ -1,11 +1,12 @@
-"""lab_library: the 2.1 library's cells built on a laptop server's lab, each against the row it
-replaces, and the sushi mall built from them (PLAN-2.1, "Rows in 2.1" and "G. Buffers").
+"""check_library: the 2.1 library's cells built alone on a laptop server's lab surface, each against
+the row it replaces, and the sushi mall built from them (PLAN-2.1, "Rows in 2.1" and "G. Buffers";
+3.1: was lab_library).
 
-    python tools/lab_library.py [cells|labs|acid|mall|all] [--minutes N] [--only a,b]
+    python tools/check_library.py [cells|labs|acid|mall|all] [--minutes N] [--only a,b]
 
 Every design is a file of ``tests/library``, built beside a copy of the kickoff template's
 ``game/cells.fk`` on a laptop server ("library", scenario fk-play) with ``fk lab``
-(``fkcore.lab.build``: its own slot, power, the requesters stocked). Then the game runs fast,
+(``fkcore.lab.build``: ``fkcore.alone`` on the lab surface, then the stand-ins power and stock). Then the game runs fast,
 paused between reads (``ticks_to_run``), and each slot is read: what its crafters finished, what
 its chests hold. The provider chests are emptied and the requesters topped up at every read.
 
@@ -37,7 +38,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
-from fkcore import lab, rates  # noqa: E402
+from fkcore import lab, rates, standin  # noqa: E402
 from fkcore.catalog import Catalog  # noqa: E402
 from fkcore.elaborate import elaborate_file  # noqa: E402
 from laptop_server import LaptopServer, _run_to  # noqa: E402
@@ -194,7 +195,7 @@ def check_cells(minutes=10, only=None, every=2):
             _run_to(r, now + 2 * 3600)                    # two game minutes to start up
             for n in names:
                 r.lua(_clear(boxes[n]))
-                r.lua(lab.lua_supply(boxes[n]))
+                r.lua(standin.lua_supply(lab.SURFACE, lab.FORCE, boxes[n]))
                 reads[n].append(_read(r, boxes[n]))
             t0 = reads[names[0]][0]["tick"]
             for k in range(1, int(minutes / every) + 1):
@@ -202,7 +203,7 @@ def check_cells(minutes=10, only=None, every=2):
                 for n in names:
                     reads[n].append(_read(r, boxes[n]))
                     r.lua(_clear(boxes[n]))
-                    r.lua(lab.lua_supply(boxes[n]))
+                    r.lua(standin.lua_supply(lab.SURFACE, lab.FORCE, boxes[n]))
             prod = r.lua("local o = {} for _, n in pairs({'iron-plate', 'copper-plate', "
                          "'steel-plate', 'stone-brick', 'iron-gear-wheel', 'transport-belt'}) do "
                          "local rc = game.forces.lab.recipes[n] if rc and rc.productivity_bonus > 0 "
@@ -256,7 +257,7 @@ def check_labs(seconds=60):
                 _run_to(r, now + k * 1800)
                 r.lua("game.forces.lab.research_progress = 0 rcon.print(1)")
                 for n in names:
-                    r.lua(lab.lua_supply(boxes[n]))
+                    r.lua(standin.lua_supply(lab.SURFACE, lab.FORCE, boxes[n]))
             r.lua("game.tick_paused = false game.speed = 1 rcon.print(1)")
             share = {n: {} for n in names}
             t0, samples = time.time(), 0
@@ -347,7 +348,7 @@ def check_mall(minutes=30, every=2, names=MALLS):
             _run_to(r, now + 3600)                       # a game minute to fill the loop
             for n in names:
                 r.lua(_clear(boxes[n]))
-                r.lua(lab.lua_supply(boxes[n]))
+                r.lua(standin.lua_supply(lab.SURFACE, lab.FORCE, boxes[n]))
                 reads[n].append(_read(r, boxes[n]))
             t0, w0 = reads[names[0]][0]["tick"], time.time()
             for k in range(1, int(minutes / every) + 1):
@@ -355,7 +356,7 @@ def check_mall(minutes=30, every=2, names=MALLS):
                 for n in names:
                     reads[n].append(_read(r, boxes[n]))
                     r.lua(_clear(boxes[n]))
-                    r.lua(lab.lua_supply(boxes[n]))
+                    r.lua(standin.lua_supply(lab.SURFACE, lab.FORCE, boxes[n]))
             took = time.time() - w0
     for n in names:
         flat, model = _model(game, n)

@@ -520,7 +520,7 @@ class RelayTest(unittest.TestCase):
         s = self.changed()
         with mock.patch.object(link, "snapshot", snapshot_of(self.live)), \
                 mock.patch.object(link, "paste", lambda *a, **k: "0"):
-            rep = applymod.apply(r, s, CAT, None, mode="play", policy=WATCH, net_items=NETS,
+            rep = applymod.apply(r, s, CAT, None, policy=WATCH, net_items=NETS,
                                  own=self.rec)
         e = s.entities[self.key]
         self.assertEqual(r.ordered, [])
