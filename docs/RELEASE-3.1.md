@@ -1,11 +1,11 @@
-# 3.1: surfaces, world reads, placements, one store (draft)
+# 3.1: surfaces, world reads, placements, one store
 
 3.1 is PLAN-3.1 (`..\assessment-20261108\PLAN-3.1.md`), Rory's direction of 2026-11-08: one
 consistent toolkit release with documentation to match, the fractured state of 3.0.x recovered
 from, nothing old migrated. Built as three waves on branches `claude/31-*`, merged onto main 3.0.3
 (`fa99ec8`) with `v3.1.0-dev.N` tags between. The language is unchanged. Read with the notes per
-wave: `docs\notes-31-surface.md`, `notes-31-store.md`, `notes-31-world.md`, and the placements
-note.
+wave: `docs\notes-31-surface.md`, `notes-31-store.md`, `notes-31-world.md` and
+`notes-31-placements.md`.
 
 ## Wave 1
 
@@ -77,13 +77,44 @@ note.
 
 ### Placements (31-placements)
 
-filled from docs/notes-31-placements.md at merge
+Rory, 11-08: agents either track what they put in the world with the toolkit, with their own
+method, or not at all, and then a conflicting design must produce a mismatch, never a silently
+adjusted plan or a build over or around. And it must be easy to pull a selection of world
+objects into new source so a new blueprint mates with and overlaps them.
+
+- **The registry** `out\placements\<surface>.json` (`fkcore/placements.py`): one record per
+  paste (id, module/instance, artifact `store:<key>` or `rows:<sha>`, origin, rotation, area,
+  tick, source build | alone | paste | register). A rebuild of the same id replaces its record.
+  Written by every `fk build` apply, every build alone, `fk paste` and `fk register`. The
+  per-entity record `out\own` stays underneath.
+- **The mismatch rule** (`sense.py`, `apply.py`, `flow.py`): a standing entity on a design tile
+  that the toolkit did not paste is a `conflict` naming its owner (`placement <id>`, `hand edit
+  by <player>`, `unknown`); the apply refuses those tiles, one line each with the resolving
+  command, and pastes the rest. No `--yes` overrides it. Mating (same name, position,
+  direction) is `ok`; inside another placement what the design does not match is `placed`.
+  New check `mismatch`; `hand_edits` no longer says "this build replaces it"; `upgrade in place`
+  applies to the toolkit's own only.
+- **Commands:** `fk placements`; `fk paste FILE --at X,Y [--rot R] [--as NAME]` (a captured
+  Literal file or blueprint string, ghosts at an origin, revived on a free surface);
+  `fk register AREA MODULE[/INSTANCE] | --as NAME` (what stands is that artifact; a placed
+  factory's standing entities become the toolkit's own so the next build converges them);
+  `fk capture --from ID|AREA --into FILE [--names]` (a Literal file anchored where it stands,
+  plus the two `.fk` lines to paste); `fk look ID`, `fk diff ID|AREA` (new as a command);
+  `fk adopt ID|AREA [--write]` (proposed `set` lines for settings changed in the world; the V1
+  `--into FACTORY/NET` carrier form stays).
+- **Tests:** `tests/test_placements.py` (23), including the capture, write module, place at
+  the anchor, build round trip: standing entities ok, new carriers ghosted, no mismatch.
+- **Open:** no mismatch check on a free surface (an apply there runs no diff first; `fk alone
+  --keep` lays over what stands as documented); store pruning by a placement's artifact; `fk
+  diff ID` for a build-alone placement judges against the game's design, not the workspace's;
+  the Lua paths of `fk paste`, `capture --from` and `register` are not yet checked against a
+  laptop server.
 
 ## Wave 3
 
 ### Documentation (31-docs)
 
-- `agent/docs/TOOLKIT.md` rewritten for 3.1 (1,270 lines to about 825): a command index, one
+- `agent/docs/TOOLKIT.md` rewritten for 3.1 (1,270 lines to 875): a command index, one
   compile store, one routing mode (`FK_NEGOTIATE=1` stays opt-in, one line), surfaces and their
   properties, "Building on the lab surface" with how to paste a blueprint there, "Bounds and
   obstacles" (the plot; `read-terrain --entities`; `fk robots`), the placements section.

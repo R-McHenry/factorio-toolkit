@@ -49,6 +49,12 @@ fk walk X,Y [--up 3] [--down 2]  what the machine there waits on, up and down it
 fk walk X,Y --frame X0,Y0,X1,Y1  a module frame drawn on the base: ready port lines
 fk measure X0,Y0,X1,Y1 [--seconds 30]   what the machines there really make, against the model
 fk robots [X0,Y0,X1,Y1]          the roboports that stand against the design's chests: how few would do
+fk placements                    the registry of what was pasted where (Placements)
+fk paste FILE --at X,Y [--rot R] [--as NAME]      a captured file or blueprint string as ghosts, recorded
+fk register X0,Y0,X1,Y1 MODULE[/INSTANCE] | --as NAME   what stands there is that artifact
+fk capture --from ID|AREA --into FILE             what stands, as a Literal file anchored where it stands
+fk diff ID|X0,Y0,X1,Y1           the diff of a placement or an area; fk look ID works too
+fk adopt ID|AREA [--write]       `set` lines proposed for settings changed in the world
 fk read-terrain --surface S --area A [--entities] [--replace]   bare ground, and what stands, as constraints
 fk stats | --items A,B | --history | --page   production, the run's history (free reads)
 fk stock | fk capital | fk chart | fk alerts | fk research [TECH] | fk tech NAME | fk recipes
@@ -505,7 +511,55 @@ it and the roboports whose logistic square meets it.
 
 ## Placements (3.1)
 
-filled from docs/notes-31-placements.md at merge
+A placement is one paste: which module (or file) stands where. The registry is
+`out\placements\<surface>.json`, one record per paste: id, module and instance, artifact
+(`store:<key>` from the compile store, else `rows:<sha>` of the pasted rows), origin, rotation,
+area, tick, source (`build`, `alone`, `paste`, `register`). A rebuild of the same id replaces its
+record; nothing piles up. Under it, `out\own\<surface>.json` still records every entity the
+toolkit pasted. Every `fk build` apply, every build alone and every `fk paste` writes a record.
+
+```
+fk placements                                    the registry, every surface
+fk paste FILE --at X,Y [--rot R] [--as NAME]     paste a captured Literal file or blueprint string as ghosts, origin at X,Y
+fk register X0,Y0,X1,Y1 MODULE[/INSTANCE]        what stands there is that artifact; records it, reports the differences
+fk register X0,Y0,X1,Y1 --as NAME                record something no module stands for
+fk capture --from ID|AREA --into FILE [--names]  write what stands as source: a Literal file anchored where it stands
+fk look ID          fk diff ID|AREA              the look and the diff over a placement's area, headed by its module and origin
+fk adopt ID|AREA [--write]                       propose `set` lines for settings changed in the world; --write appends them
+```
+
+**The mismatch rule.** A build pastes only onto tiles it can explain. A world entity standing
+(or pending as a ghost) on a design entity's tiles that the toolkit did not paste there is a
+MISMATCH: the diff names it and its owner (`placement <id>`, `hand edit by <player>`, or
+`unknown`), the apply refuses those design tiles, one line per conflict with the command that
+resolves it (`fk register`: it is that artifact; `fk capture --from`: put it in the source as a
+Literal the design mates with; `fk adopt X,Y --into FACTORY/NET`: a carrier into its net;
+`fk decon` or by hand: take it out), and pastes the rest. There is no `--yes` for a mismatch: the
+source changes, or the thing is registered, captured or taken out. Mating is no mismatch: an
+entity standing with the same name, position and direction as the design's is `ok`, and the
+toolkit's own (an earlier paste) is still taken up to the design or laid fresh. Inside another
+placement's area what the design does not match is `placed` (explained, no mark); elsewhere the
+watch policy (keep, mark, revert, strict) applies as before. Nothing is built over or around.
+
+**Mating with what stands** (new source over standing objects):
+
+1. Something stands in the world: a hand build, a `fk paste`, a registered legacy block.
+2. `fk capture --from std --into captured/std.json` (or `--from X0,Y0,X1,Y1`). The file is
+   anchored where it stands; the command prints the Literal line to paste.
+3. Write the module: `std = Literal<file="captured/std.json"> @(10, 10)`, then what is new:
+   `box = Chest<provider> @(22, 11)` and `net out: std.asm1 -> box`.
+4. Place the module where its frame is the world's (the world design, or a plot at 0,0); on a
+   plot at X,Y write `@(10 - X, 10 - Y)`.
+5. `fk build`: the diff says `ok` for every standing entity of the block (mated), the apply
+   pastes everything, the game leaves the standing ones and the new carriers are ghosts. No
+   `mismatch` line, and the build's placement covers the block.
+
+**`fk adopt ID|AREA`** reads the placement's settings and proposes source for each world edit it
+can express: a changed limit, request, filter or circuit condition becomes a `set` line shown as
+a diff of the module source (`--write` appends it); a changed recipe is said as the instance's
+parameter; a foreign carrier beside a net is `fk adopt X,Y --into FACTORY/NET` (the V1 form,
+unchanged); anything else is "needs a Literal patch", with the capture command that makes one.
+It never writes without `--write`.
 
 ## Saving, loading and starting over: `fk map`
 
@@ -709,7 +763,9 @@ and the capitals are the point.
   once when the network holds none for the new ones)
 - `on-water-or-cliff` / `no-water`: something designed stands on water or a cliff / an offshore
   pump whose water side is dry
-- `by-hand` (diff): the build replaces, removes or sets back something someone placed or changed
+- `by-hand` (diff): the build removes or sets back something someone placed or changed (a thing
+  on a design tile that the toolkit did not paste is a `mismatch` instead, and is refused, not
+  replaced; see Placements)
   by hand: who, what, where, on which design entity's tile, and what the paste does
   (`rory_618 changed inserter at 14.5,0.5 (mall/i0): logistic=copper-plate>7 (the paste sets
   logistic=iron-plate<50)`). To keep it, write it into the source; `stop_on by-hand` holds the
