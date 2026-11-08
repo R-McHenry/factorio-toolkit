@@ -253,6 +253,8 @@ class _Bounded(Grid):
         x0, y0, x1, y1 = self.box
         return not (x0 <= t[0] < x1 and y0 <= t[1] < y1) or t in self.occ
 
+    blocked.native_bounded = True     # steiner's native kernel knows this rule (box, then occ)
+
 
 def fluid_nets(flat, cat) -> set:
     """The nets whose items are all fluids (pipes, not belts)."""

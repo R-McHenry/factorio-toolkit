@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import heapq
 import math
+import os
 import time
 
 __all__ = ["Grid", "Tree", "FixedSink", "TapSink", "grow", "dw", "COSTS", "ribbon"]
@@ -529,9 +530,114 @@ def _starts(tree):
     return out
 
 
+# -- the native kernel (optional) ---------------------------------------------------------------
+# ``fkroute`` (v5/native/fkroute, Rust) runs _astar step for step with the same tie-breaks, so it
+# returns the same path. Without it, or with FK_NATIVE=0, the Python search below runs.
+try:
+    import fkroute as _native
+except ImportError:          # stdlib only: the native kernel is a speed-up, never a dependency
+    _native = None
+
+_UNSUPPORTED = object()
+
+
+def native_on():
+    """True when _astar runs in fkroute (installed, and FK_NATIVE is not 0)."""
+    return _native is not None and os.environ.get("FK_NATIVE", "1") != "0"
+
+
+def _native_grid(grid):
+    """The grid's fkroute.NativeGrid, built once and cached on it; None for a Grid subclass whose
+    blocked() the kernel does not know."""
+    blocked_fn = type(grid).blocked
+    if blocked_fn is Grid.blocked:
+        box = None
+    elif getattr(blocked_fn, "native_bounded", False):    # route._Bounded.blocked: box + occ
+        box = tuple(grid.box)
+    else:
+        return None
+    sp = grid.spans
+    key = (box, id(grid.occ), len(grid.occ), id(grid.fronts), len(grid.fronts), len(sp[0]), len(sp[1]))
+    got = grid.__dict__.get("_native")
+    if got is not None and got[0] == key:
+        return got[1]
+    tiles = grid.occ if box is not None else grid.occ | grid.fronts
+    ng = _native.NativeGrid(list(tiles), list(sp[0]), list(sp[1]), box)
+    grid.__dict__["_native"] = (key, ng)
+    return ng
+
+
+def _astar_native(tree, starts, sinks, targets, limit):
+    grid = tree.grid
+    if not targets:
+        return _UNSUPPORTED
+    ng = _native_grid(grid)
+    if ng is None:
+        return _UNSUPPORTED
+    spec = []
+    for s in sinks:
+        t = type(s)
+        if isinstance(s, FixedSink) and t.goal is FixedSink.goal and t.h is FixedSink.h:
+            spec.append((0, s.tile[0], s.tile[1], int(s.edir), 0))
+        elif isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
+            x0, y0, x1, y1 = s.rect
+            spec.append((1, x0, y0, x1, y1))
+        else:
+            return _UNSUPPORTED
+    k = tree.costs
+    tiles, res, spare = tree.tiles(), tree.reserved, tree.spare()
+    spans = tree.spans()
+    tapped = []
+    if grid.drop_taps:
+        for q, name, direction, _s in tree.taps:
+            r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
+            tapped.append((q[0] + DX[g0] * r, q[1] + DY[g0] * r))
+    st_list, st_spare, how_of, taken_of, g_of = [], [], {}, {}, {}
+    for st, g0, how, *taken in starts:
+        st_list.append((st, float(g0)))
+        st_spare.append(Tree.spare_tile(how[1], how[2]) if grid.drop_taps and how[0] == "split" else None)
+        if g0 < g_of.get(st, INF):
+            g_of[st] = g0
+            how_of[st] = how
+            taken_of[st] = frozenset(taken[0]) if taken else frozenset()
+
+    def tap_goal(i, path):
+        path = [tuple(p) for p in path]
+        return sinks[i].goal(path[-1], tree, path, taken_of[path[0]])
+
+    extra = set(tiles) | set(res) | set(spare)
+    got = _native.astar(ng, list(extra), list(spans[0]), list(spans[1]), st_list, st_spare, spec,
+                        list(targets), tapped, float(k["belt"]), float(k["turn"]), float(k["ug"]),
+                        int(k["max_ug"]), int(limit), tap_goal)
+    if got is None:
+        return None
+    path, i, gs = got
+    path = [tuple(p) for p in path]
+    return path, how_of[path[0]], i, gs
+
+
 def _astar(tree, starts, sinks, targets, limit=60000):
     """One A* from every start state to the nearest target sink; (path, how, sink, cost) or None.
-    A start is (state, g0, how) or (state, g0, how, taken): a tap is never planned on ``taken``."""
+    A start is (state, g0, how) or (state, g0, how, taken): a tap is never planned on ``taken``.
+    Runs in fkroute when it is installed (``native_on``), else in Python (``_astar_py``).
+    FK_NATIVE=check runs both and raises if they differ (the parity check)."""
+    mode = os.environ.get("FK_NATIVE", "1")
+    if _native is not None and mode != "0":
+        try:
+            got = _astar_native(tree, starts, sinks, targets, limit)
+        except (TypeError, OverflowError):     # a non-integer tile: the kernel takes ints only
+            got = _UNSUPPORTED
+        if got is not _UNSUPPORTED:
+            if mode == "check":
+                py = _astar_py(tree, starts, sinks, targets, limit)
+                if py != got:
+                    raise AssertionError(f"fkroute.astar differs from _astar_py: {got!r} != {py!r}")
+            return got
+    return _astar_py(tree, starts, sinks, targets, limit)
+
+
+def _astar_py(tree, starts, sinks, targets, limit=60000):
+    """The Python search: _astar's original, and its fallback."""
     k = tree.costs
     grid, tiles, res, spare = tree.grid, tree.tiles(), tree.reserved, tree.spare()
     sink_tiles = {s.tile for i, s in enumerate(sinks) if isinstance(s, FixedSink)}

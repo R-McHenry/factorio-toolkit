@@ -1,0 +1,17 @@
+[package]
+name = "fkroute"
+version = "0.1.0"
+edition = "2021"
+description = "Native kernels for fkcore's router (steiner._astar); fkcore falls back to pure Python without it."
+
+[lib]
+name = "fkroute"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
+rustc-hash = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
