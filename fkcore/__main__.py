@@ -1379,6 +1379,7 @@ def _design(a):
     """3.0 ``fk status|hold|unhold|unroute|seed``: the design database's net files
     (``fkcore.design``), read even while a build runs; a hold written now is taken when the router
     reaches that net."""
+    from . import compiled as compiledmod
     from . import design
     out = os.path.join(a.game, "out")
     factories = design.factories(out)
@@ -1390,6 +1391,8 @@ def _design(a):
         for f in factories:
             if a.net is None or a.net in design.read_all(out, f):
                 print("\n".join(design.status_lines(out, f, a.net)))
+        if a.net is None:
+            print("\n".join(compiledmod.status_lines(out)))    # 3.1: the compile store
         return 0
     where = [f for f in factories if a.net in design.read_all(out, f)]
     if a.cmd == "seed" and a.pieces and not where and len(factories) == 1:
@@ -1499,10 +1502,12 @@ def main(argv=None):
     sp.add_argument("--try", dest="try_", nargs=2, metavar="X,Y",
                     help="how a belt would go from tile A to tile B here; nothing laid")
     cp = sub.add_parser("compile", help="3.0: a sealed module's insides routed alone and stored "
-                                         "(out/design/modules); the world lays them from there")
+                                         "(out/compiled, the compile store); the next build "
+                                         "lays them from there")
     cp.add_argument("script")
     cp.add_argument("module")
-    st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design)")
+    st = sub.add_parser("status", help="3.0: the nets as the route step left them (out/design) "
+                                        "and the compile store (out/compiled)")
     st.add_argument("game")
     st.add_argument("net", nargs="?")
     for name, what in (("hold", "keep a net's route as it stands, whatever the router would do"),

@@ -1050,13 +1050,17 @@ def s_route(ctx, args):
     if o["failed"] not in ("keep", "drop"):
         raise FlowError(f"route --failed keep|drop, got {o['failed']!r}")
     area = _area(o["area"]) if o["area"] else None
-    # PLAN-3.0 §4: sealed modules compile once, into the game folder's out/compiled (fk lab shares
-    # its game's); --store DIR elsewhere, --store none to lay every module afresh
+    # 3.1, the one compile store (fkcore.compiled): the game folder's out/compiled (fk lab shares
+    # its game's); --store DIR elsewhere, --store none (or --compiled no) to lay every module
+    # afresh; --reuse-lab reads the lab builds' own stores too
     store = str(o["store"]) or ctx.compiled or os.path.join(ctx.out, "compiled")
-    if store.lower() in ("none", "no", "off"):
+    if store.lower() in ("none", "no", "off") or str(o["compiled"]) == "no":
         store = None
-    elif not os.path.isabs(store):
-        store = os.path.join(ctx.root, store)
+    else:
+        if not os.path.isabs(store):
+            store = os.path.join(ctx.root, store)
+        store = compiledmod.Store(store, more=_compiled_dirs(ctx, o["reuse_lab"]),
+                                  locked=availmod.locked)
     ctx.hand_requested = str(o["hand"])
     hand, _note = availmod.choose("hand", o["hand"], need=_need(ctx, "inserter"))
     limit, retries = (400000, None) if o["effort"] == "high" else (60000, None)
@@ -1120,25 +1124,6 @@ def s_route(ctx, args):
                     again[net] = "asked (--again / fk build --reroute)"
             if unknown:
                 lines.append(f"{factory}: --again names no net here: {', '.join(unknown)}")
-        # 3.0, sealed modules compile once (fkcore.compiled): a sealed instance whose inside the
-        # store holds lays its inner nets from it, translated to where it stands now
-        reuse = o["only"] == "stale" and not o["module"] and str(o["compiled"]) != "no"
-        if reuse or o["reuse_lab"]:
-            asked = _asked(flat, str(o["again"]))[0] if o["again"] else set()
-            # the stored inside wins over a committed route (the same inside, and it moves with the
-            # module); what the player pinned, held, seeded or asked for again stays theirs
-            keep_out = set(held) | set(seeds) | set(inside) | set(stood) | asked
-            keep_out |= {n for n, why in again.items() if "by you" in why}
-            comp, used, refused = compiledmod.reuse(_compiled_dirs(ctx, o["reuse_lab"]), flat,
-                                                    lay, ctx.cat, skip=keep_out,
-                                                    locked=availmod.locked)
-            for net, ents in comp.items():
-                pinned[net] = ents
-                again.pop(net, None)
-            lines += [f"{factory}: compiled  {p}: {k} inner nets from its stored inside ({m} {key})"
-                      for p, (m, key, k) in sorted(used.items()) if k]
-            lines += [f"{factory}: compiled  {p}: its stored inside ({m}) holds {', '.join(bad)}, "
-                      f"not researched here: routed again" for p, (m, bad) in sorted(refused.items())]
         blocked = _frame_blocked(ctx, factory, lay.size)
         # 2.1.19: a long route says how far it is, every route.PROGRESS_EVERY seconds
         saved = route.PROGRESS
@@ -1193,19 +1178,17 @@ def s_route(ctx, args):
             lines += [f"  standing  {n}: unrouted; its last route ({k} carriers) stands until it "
                       f"routes (route --failed keep)" for n, k in sorted(standing.items())]
         _write_nets(ctx, factory, r, held, seeds, stood)
-        if str(o["compiled"]) != "no":
-            stored = _store_compiled(ctx, flat, lay, r)
-            if stored:
-                lines.append(f"{factory}: compiled  stored the inside of {', '.join(stored)} "
-                             "(out/design/modules): laid from there wherever it stands next")
+        # 3.1: what the compile store did for each sealed unit (route.Routed.compiled)
+        comp = {n for c in r.compiled.values() if c["from"] == "store" for n in c["nets"]}
+        lines += _compiled_lines(factory, r)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
         lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept"
                      + (f", {len(r.patched)} patched" if r.patched else "")
-                     + f" ({len(pinned) - len(comp)} pinned from the committed .fkp"
-                     + (f", {len(comp)} from compiled modules" if comp else "")
+                     + f" ({len(pinned)} pinned from the committed .fkp"
+                     + (f", {len(comp)} laid from the compiled store" if comp else "")
                      + f"), {len(r.failed)} failed, "
                      f"{r.passes} pass{'es' if r.passes != 1 else ''}"
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
@@ -1233,69 +1216,75 @@ def s_route(ctx, args):
 
 def _route_compile(ctx, module, hand_word):
     """``route --compile MODULE`` (``fk compile MODULE``): every placed sealed instance of MODULE
-    routed alone, its inner nets only, and stored (fkcore.compiled); one per inside, so two
-    instances that are the same inside route once. Nothing else is laid, written or pasted."""
+    routed alone (its own nets and its children's, the router's compile units) and stored in
+    the one compile store (fkcore.compiled); a twin routes once. Nothing else is laid, written
+    or pasted."""
     hand, _note = availmod.choose("hand", hand_word, need=_need(ctx, "inserter"))
+    store = compiledmod.Store(ctx.compiled or os.path.join(ctx.out, "compiled"),
+                              locked=availmod.locked)
     lines = []
     for factory, lay in ctx.layouts.items():
         flat = ctx.flats[factory]
-        mine = [p for p in compiledmod.sealed_roots(flat, lay)
-                if (flat.insts[p].module or flat.insts[p].kind) == module]
-        done = {}
-        for path in mine:
-            key = compiledmod.inside_key(flat, lay, ctx.cat, path)
-            if key in done:
-                lines.append(f"{factory}: compile {path}: the same inside as {done[key]}")
-                continue
-            done[key] = path
-            if compiledmod.load([ctx.out], compiledmod._module(flat, path), key):
-                lines.append(f"{factory}: compile {path}: already compiled ({module} {key})")
-                continue
-            nets = set(compiledmod.inner_nets(flat, path))
-            began = time.time()
-            r = route.route_layout(flat, lay, ctx.cat, hand=hand, pipe=_pipe(ctx, "", []),
-                                   blocked=_frame_blocked(ctx, factory, lay.size),
-                                   skip=[n for n in flat.nets if n not in nets])
-            took = time.time() - began
-            failed = sorted(n for n in r.failed if n in nets)
-            if failed:
-                lines.append(f"{factory}: compile {path}: {len(failed)} of {len(nets)} inner nets "
-                             f"did not route ({', '.join(failed)}), not stored ({took:.1f} s)")
-                continue
-            compiledmod.save(ctx.out, flat, lay, ctx.cat, path, r.layout, key)
-            lines.append(f"{factory}: compile {path}: {len(nets)} inner nets routed and stored "
-                         f"({module} {key}, {took:.1f} s); the world lays them from there")
+        mine = sorted(p for p in lay.insts if p in flat.sealed and p in flat.insts
+                      and (flat.insts[p].module or flat.insts[p].kind) == module)
         if not mine:
             lines.append(f"{factory}: compile: no sealed instance of {module} is placed here")
+            continue
+        inside = {n for n in flat.nets if any(n.startswith(p + "/") for p in mine)}
+        began = time.time()
+        r = route.route_layout(flat, lay, ctx.cat, hand=hand, pipe=_pipe(ctx, "", []),
+                               blocked=_frame_blocked(ctx, factory, lay.size),
+                               skip=[n for n in flat.nets if n not in inside], store=store)
+        took = time.time() - began
+        for path in mine:
+            c = r.compiled.get(path)
+            if c is None:
+                lines.append(f"{factory}: compile {path}: no net of its own to route")
+            elif c["from"] == "store":
+                lines.append(f"{factory}: compile {path}: already compiled ({module} {c['key']})")
+            elif c["from"] and c["from"].startswith("twin "):
+                lines.append(f"{factory}: compile {path}: the same inside as {c['from'][5:]}")
+            elif c["stored"]:
+                lines.append(f"{factory}: compile {path}: {len(c['nets'])} nets routed and stored "
+                             f"({module} {c['key']}, {took:.1f} s); the next build lays them "
+                             "from there")
+            else:
+                failed = sorted(n for n in r.failed if n in c["nets"])
+                lines.append(f"{factory}: compile {path}: {len(failed)} of {len(c['nets'])} nets "
+                             f"did not route ({', '.join(failed)}), not stored ({took:.1f} s)")
+        lines += [f"{factory}: {ln}" for ln in r.lines if ln.startswith("compiled  old")]
     return lines, []
 
 
+def _compiled_lines(factory, r):
+    """The route step's lines on the compile store: what each sealed unit was laid from, the
+    entries written, the entries refused (an entity the force can't build)."""
+    lines = []
+    for path, c in sorted(r.compiled.items()):
+        if c["from"] == "store":
+            lines.append(f"{factory}: compiled  {path}: {len(c['nets'])} nets laid from the store "
+                         f"({c['module']} {c['key']})")
+        elif c["refused"]:
+            lines.append(f"{factory}: compiled  {path}: its stored entry ({c['module']}) holds "
+                         f"{', '.join(c['refused'])}, not researched here: routed again")
+    stored = sorted(p for p, c in r.compiled.items() if c["stored"])
+    if stored:
+        lines.append(f"{factory}: compiled  stored {', '.join(stored)} (out/compiled): laid from "
+                     "there wherever each stands next")
+    return lines
+
+
 def _compiled_dirs(ctx, lab):
-    """The module stores the route step reads: this build's own ``out``, and with ``route
-    --reuse-lab`` every lab build's (``<run>/lab/<name>/out``, fkcore.lab)."""
-    dirs = [ctx.out]
+    """The stores the route step reads besides its own: with ``route --reuse-lab`` every lab
+    build's (``<run>/lab/<name>/out/compiled``, fkcore.lab; a lab build of the game folder
+    writes the game's own store, so this is for a lab built elsewhere)."""
+    dirs = []
     if lab:
         labs = os.path.join(os.path.dirname(os.path.abspath(ctx.root)), "lab")
         if os.path.isdir(labs):
-            dirs += [os.path.join(labs, d, "out") for d in sorted(os.listdir(labs))
-                     if os.path.isdir(os.path.join(labs, d, "out"))]
+            dirs += [os.path.join(labs, d, "out", "compiled") for d in sorted(os.listdir(labs))
+                     if os.path.isdir(os.path.join(labs, d, "out", "compiled"))]
     return dirs
-
-
-def _store_compiled(ctx, flat, lay, r):
-    """Store the inside of every sealed instance whose inner nets all routed (fkcore.compiled),
-    unless the store has it already. -> the instances stored."""
-    out = []
-    for path in compiledmod.sealed_roots(flat, lay):
-        nets = compiledmod.inner_nets(flat, path)
-        if not nets or any(n in r.failed for n in nets):
-            continue
-        key = compiledmod.inside_key(flat, lay, ctx.cat, path)
-        if key is None or compiledmod.load([ctx.out], compiledmod._module(flat, path), key):
-            continue
-        if compiledmod.save(ctx.out, flat, lay, ctx.cat, path, r.layout, key):
-            out.append(path)
-    return out
 
 
 def _area(spec):

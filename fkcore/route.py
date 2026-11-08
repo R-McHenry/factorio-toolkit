@@ -111,6 +111,7 @@ from fnmatch import fnmatchcase
 from dataclasses import dataclass, field
 
 from . import arms as armsmod
+from . import compiled as compiledmod
 from . import connect as connectmod
 from . import fkp as fkpmod
 from . import steiner as steinermod
@@ -268,6 +269,10 @@ class Routed:
     again: dict = field(default_factory=dict)      # net -> why its committed route was not kept
     maxflow: dict = field(default_factory=dict)    # 2.1 --m2m: net -> why its max-flow is short
     memo: dict = field(default_factory=dict)       # 3.0: net -> {key, why} of a net that failed
+    #: 3.1, the compile store: sealed unit -> {module, key, nets (its own, in order), from
+    #: ("routed", "twin <unit>", "store", or None: not keyed), stored (1 when this run wrote it),
+    #: refused (names the force can't build in the stored entry, which was not taken)}
+    compiled: dict = field(default_factory=dict)
 
 
 class _Bounded(Grid):
@@ -2792,10 +2797,8 @@ def _filter_loads(flat, lay, cat):
     return out
 
 
-#: PLAN-3.0 §4: the router's version a compiled module was laid by; a compiled module of another
-#: version is laid again. Bump it when a change to the router would lay a module otherwise.
-# 3.0.2 + lab: the compile key leaves out rails other modules own (bumped from route-3.0.2)
-COMPILE_VERSION = "route-3.0.3"
+# 3.1: the router's version is ``compiled.ROUTER``, the one constant of the one compile store
+# (route.COMPILE_VERSION, 2.1.31..3.0.3, is retired with the router's own store).
 
 
 def _unit(net, sealed):
@@ -2857,13 +2860,17 @@ class _UnitTurn:
         return (h + 2) % 4 if self.half else h
 
 
-def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
-    """The compile key of sealed unit ``u`` (PLAN-3.0 §4): a hash of everything its own nets
-    ``mine`` are laid to, relative to its frame -- the router's version, the frame's size, the
-    instances placed in it, every entity standing in it (machines, Literals, its children's
-    routes), the terrain in it, and each net's ends and items. Two units with one key are laid
-    the same. -> the key, or None when a net's name is not the unit's own."""
-    import hashlib
+def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=(), seeds=None,
+             settings=()):
+    """The compile key of sealed unit ``u`` (3.1, the one key of the compile store,
+    ``fkcore.compiled``): a sha over everything its own nets ``mine`` are laid to, relative to
+    its frame -- ``compiled.ROUTER``, the frame's size, the instances placed in it (the module's
+    source and parameters, as they elaborate), every entity standing in it (machines, Literals,
+    its children's routes, a held route), the keys of the sealed units inside it
+    (``child_keys``: [(relative path, key)]), the catalog's version and the footprint of every entity name in
+    the frame, the terrain in it, the router's ``settings`` (hand, ribbon tiers, pipe), and each
+    net's ends, items, lanes and seed (``seeds``: {net: carriers}). Two units with one key are
+    laid the same. -> the key (20 hex), or None when a net's name is not the unit's own."""
     x0, y0, x1, y1, _tiles = sealed[u]
     rec = lay.insts.get(u)
     rel = {n: _renamed(n, u, "") for n in mine}
@@ -2878,7 +2885,8 @@ def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
 
     # 2.1.32: a unit turned 180 degrees is keyed in its unturned frame (a `>` bay's chains are
     # its unturned twin's, turned): its routes are stored unturned (``_store_save``)
-    parts = [COMPILE_VERSION, x1 - x0, y1 - y0, rec.kind, 0 if tf.half else rec.rot]
+    parts = [compiledmod.ROUTER, x1 - x0, y1 - y0, rec.kind, 0 if tf.half else rec.rot,
+             sorted(child_keys, key=repr), repr(settings)]
     kids = []
     for p, r in lay.insts.items():
         if not p.startswith(u + "/"):
@@ -2905,11 +2913,20 @@ def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
     # 2.1.35: a rail or signal another module owns (a shared lane's ramp, the planned signals)
     # is left out of the key: it differs from twin to twin at the frame's edge, and ``_fits``
     # still rejects a moved route that would stand on it
-    parts.append(sorted((e.name,) + tf.point(e.x, e.y) + (tf.d16(e.dir) if e.dir is not None
-                                                          else -1,)
-                        for e in _near(ground, x0, y0, x1, y1)
-                        if x0 <= e.x < x1 and y0 <= e.y < y1
-                        and not ("rail" in e.name and not e.key.startswith(u + "/"))))
+    standing = sorted((e.name,) + tf.point(e.x, e.y) + (tf.d16(e.dir) if e.dir is not None
+                                                        else -1,)
+                      for e in _near(ground, x0, y0, x1, y1)
+                      if x0 <= e.x < x1 and y0 <= e.y < y1
+                      and not ("rail" in e.name and not e.key.startswith(u + "/")))
+    parts.append(standing)
+    # 3.1: the catalog facts the routes are laid against: its version and each name's footprint
+    facts = [getattr(cat, "version", None)]
+    for name in sorted({s[0] for s in standing}):
+        try:
+            facts.append((name, cat.size(name)))
+        except Exception:                 # noqa: BLE001 (a name the catalog has no row for)
+            facts.append((name, None))
+    parts.append(facts)
     if terrain:
         parts.append(sorted(tile((x, y)) for x in range(x0, x1) for y in range(y0, y1)
                             if (x, y) in terrain))
@@ -2927,7 +2944,12 @@ def _compile_key(flat, lay, cat, js, u, sealed, mine, ground, terrain):
                                      for h, held in feeds))
                              for t, (need, feeds) in j.lanes.items()),
                       j.skip, j.fluid, j.straight, j.wide, j.pin, j.m2m is not None,
-                      len(j.parts)))
+                      len(j.parts),
+                      # 3.1: a seed (fk seed) is an input of the net: it is in the key
+                      sorted((key_of(e.key), e.name) + tf.point(e.x, e.y) + (tf.d16(e.dir)
+                                                                              if e.dir is not None
+                                                                              else -1,)
+                             for e in (seeds or {}).get(n, ()))))
     return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:20]
 
 
@@ -3017,15 +3039,6 @@ def _prefixed(rel, u):
     return re.sub(r"(^|[|+])", lambda m: m.group(1) + u + "/", rel)
 
 
-_STORE_NAMES = {}                        # store dir -> its file names (``_store_load``)
-_STORE_DATA = {}                         # a stored file's path -> what it holds
-
-
-def _store_path(store, ckey):
-    import os
-    return os.path.join(store, f"{ckey}.json")
-
-
 def _unit_rel(routes, u, frame, rot=0):
     """Sealed unit ``u``'s routes ({net: carriers}) in its own terms: its nets' names relative to
     it, the carriers relative to its frame (unturned, ``_UnitTurn``): the compiled store's form.
@@ -3063,56 +3076,31 @@ def _unit_abs(nets, u, frame, rot=0):
     return out
 
 
-def _store_save(store, ckey, u, frame, routes, rot=0):
-    """Write sealed unit ``u``'s routes ({net: carriers}) to the compiled store, relative to its
-    frame (unturned), under its compile key. -> 1 when written, 0 when the key was there already
-    or the store can't be written."""
-    import json
-    import os
-    path = _store_path(store, ckey)
-    if os.path.exists(path):
-        return 0
+def _store_save(store, ckey, module, u, frame, routes, rot=0, inputs=None):
+    """Write sealed unit ``u``'s routes ({net: carriers}) to the compile store
+    (``compiled.Store``), relative to its frame (unturned), under ``module`` and its key. -> 1
+    when written, 0 when the key was there already or the store can't be written."""
     nets = _unit_rel(routes, u, frame, rot)
     if nets is None:
         return 0
-    try:
-        os.makedirs(store, exist_ok=True)
-        tmp = f"{path}.tmp"
-        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump({"version": COMPILE_VERSION, "module": u, "nets": nets}, fh)
-        os.replace(tmp, path)
-        _STORE_NAMES.setdefault(store, set()).add(os.path.basename(path))
-    except OSError:
-        return 0
-    return 1
+    return store.save(module, ckey, u, nets, inputs)
 
 
-def _store_load(store, ckey, u, frame, rot=0):
-    """Sealed unit ``u``'s routes from the compiled store under ``ckey``, moved to its frame:
-    -> {net: carriers}, or None when the store has none."""
-    import json
-    import os
-    # 2.1.32: the store's names listed once a build (a miss opened a file that wasn't there for
-    # every unit, ~10 s of a megabase grid's route on Windows); what this build saves is added
-    names = _STORE_NAMES.get(store)
-    if names is None:
-        try:
-            names = _STORE_NAMES[store] = set(os.listdir(store))
-        except OSError:
-            names = _STORE_NAMES[store] = set()
-    if f"{ckey}.json" not in names:
+def _store_load(store, ckey, module, u, frame, rot=0):
+    """Sealed unit ``u``'s routes from the compile store under ``module`` and ``ckey``, moved to
+    its frame: -> {net: carriers}, or None when the store has none it may take."""
+    nets = store.load(module, ckey)
+    if nets is None:
         return None
-    path = _store_path(store, ckey)
-    data = _STORE_DATA.get(path)          # a stored file is never written again (_store_save)
-    if data is None:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = _STORE_DATA[path] = json.load(fh)
-        except (OSError, ValueError):
-            return None
-    if data.get("version") != COMPILE_VERSION:
-        return None
-    return _unit_abs(data.get("nets", {}), u, frame, rot)
+    return _unit_abs(nets, u, frame, rot)
+
+
+def _module_of(flat, lay, u):
+    """The module name sealed unit ``u`` is an instance of (the store's folder)."""
+    inst = flat.insts.get(u)
+    if inst is not None and (inst.module or inst.kind):
+        return compiledmod.module_name(inst.module or inst.kind)
+    return compiledmod.module_name(lay.insts[u].kind)
 
 
 def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
@@ -3830,10 +3818,24 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for other, tiles in claims.items():
         for t in tiles:
             claimed.setdefault(t, set()).add(other)
-    twins, compiled, reused = {}, {}, {}
+    # 3.1: the one compile store (fkcore.compiled); a path names the game folder's
+    if isinstance(store, str):
+        store = compiledmod.Store(store)
+    from . import fluid_route as fluidmod
+    settings = (tuple(_HANDS), tuple(getattr(ribmod, "_UG", ()) or ()), tuple(fluidmod._LAY),
+                _M2M)
+    twins, compiled, reused, keys_of, cinfo = {}, {}, {}, {}, {}
     for u in units:
         mine = nets_of[u]
-        ckey = _compile_key(flat, lay, cat, js, u, sealed, mine, gidx, terrain) if u else None
+        ckey = None
+        if u:
+            child_keys = [(c[len(u) + 1:], k) for c, k in keys_of.items()
+                          if c.startswith(u + "/")]
+            ckey = unit_key(flat, lay, cat, js, u, sealed, mine, gidx, terrain, child_keys,
+                            seeds, settings)
+            keys_of[u] = ckey
+            cinfo[u] = {"module": _module_of(flat, lay, u), "key": ckey, "nets": list(mine),
+                        "from": None, "stored": 0, "refused": []}
         if ckey is not None:
             got, src = None, None
             if ckey in twins:
@@ -3846,8 +3848,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                                     lay.insts[src].rot)
                     got = None if rel is None else _unit_abs(rel, u, sealed[u], lay.insts[u].rot)
             elif store:
-                got = _store_load(store, ckey, u, sealed[u], lay.insts[u].rot)
+                got = _store_load(store, ckey, cinfo[u]["module"], u, sealed[u],
+                                  lay.insts[u].rot)
                 src = "the compiled store" if got is not None else None
+                cinfo[u]["refused"] = store.refused.get((cinfo[u]["module"], ckey), [])
             if got is not None and set(got) == set(mine) \
                     and _fits(cat, got, gidx, sealed[u], net_frames(mine[0])[0], terrain,
                               claimed, set(mine)):
@@ -3859,6 +3863,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                     gidx.extend(got[net])
                 order += mine
                 reused[u] = src
+                cinfo[u]["from"] = "store" if src == "the compiled store" else f"twin {src}"
                 for net in mine:
                     landed(net, 0.0)
                 continue
@@ -3881,6 +3886,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 and len(swaps) == swaps_before:
             twins.setdefault(ckey, u)
             compiled[u] = ckey
+            cinfo[u]["from"] = "routed"
     added, failed, how, rib_lines = dict(added), dict(failed), dict(how), dict(rlines)
     new = base.copy()
     for gone, _new, _text in swaps:
@@ -3987,9 +3993,19 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         stored = 0
         for u, ckey in compiled.items():
             if store and all(n in added and n not in failed for n in nets_of[u]):
-                stored += _store_save(store, ckey, u, sealed[u],
-                                      {n: [new.entities.get(e.key, e) for e in added[n]]
-                                       for n in nets_of[u]}, lay.insts[u].rot)
+                x0, y0, x1, y1, _t = sealed[u]
+                inputs = {"frame": [x1 - x0, y1 - y0],
+                          "nets": [_renamed(n, u, "") for n in nets_of[u]],
+                          "children": sorted((c[len(u) + 1:], k) for c, k in keys_of.items()
+                                             if c.startswith(u + "/")),
+                          "seeded": sorted(_renamed(n, u, "") for n in nets_of[u]
+                                           if seeds.get(n)),
+                          "settings": repr(settings)}
+                cinfo[u]["stored"] = _store_save(
+                    store, ckey, cinfo[u]["module"], u, sealed[u],
+                    {n: [new.entities.get(e.key, e) for e in added[n]] for n in nets_of[u]},
+                    lay.insts[u].rot, inputs)
+                stored += cinfo[u]["stored"]
         twin = sum(1 for s in reused.values() if s != "the compiled store")
         lines.append(f"compile   {len(sealed_units)} sealed module{'s' if len(sealed_units) != 1 else ''}"
                      f", each routed on its own in its frame "
@@ -3997,6 +4013,8 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                      "laid this build, "
                      f"{len(reused) - twin} from the compiled store"
                      + (f", {stored} stored" if store else ""))
+        if store and store.out:
+            lines += compiledmod.old_lines(store.out)
     for net, size, settled, took in groups:
         if size is None:
             lines.append(f"group     {net}: no way even with the nets laid this run lifted: the "
@@ -4009,7 +4027,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
     return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again,
-                  short, known)
+                  short, known, cinfo)
 
 
 def seal_checks(flat, lay, cat):
