@@ -1,8 +1,10 @@
-# ribbon-bus.fk: four smelter columns, a belt of plates each, laid side by side (toolkit 2.1)
-#
-# Each SmeltColumn is a Stack of three FurnaceCells with the ore along its foot; stacked east, the
-# columns share the ore. `net each` gives every column's plates a belt of its own, and the four
-# belts run to the chests as one ribbon, in order, side by side.
+# ribbon-bus.fk: four smelter columns, a belt of plates each, laid side by side. Plot 200x200
+# (any). Each SmeltColumn is a Stack of three FurnaceCells with the ore along its foot; stacked
+# east, the columns share the ore. Shows: cells within cells, `cols[*].pl`, `net each`, a ribbon.
+# Run:  fk build --to report_checks    fk look --design --zoom 4
+# Expect: out\route.txt ends `ribbon plates: 4 belts side by side (plates_0, plates_1, plates_2,
+# plates_3) ... 2 bus turns, 0 crossings, 179 belts ...`; 450 plates/min, 112.5 to each belt;
+# `ribbon-bus: 60 nets: 60 connected, 0 open, 0 unrouted`.
 import SmeltColumn from "cells.fk"
 
 ore  = Chest<requester, item=iron-ore, rate=7.5/s> @(0, 4)

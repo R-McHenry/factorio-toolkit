@@ -1,7 +1,10 @@
-# furnace-column.fk: electric furnaces as a stack of your own cells (2.0.53). A cell is one
-# electric furnace between two belts: the ore runs up the west belt through every cell, the plates
-# come back down the east one. No coal, and each furnace takes two modules. Change the cell and
-# every furnace in the column changes with it; n= is how many.
+# furnace-column.fk: electric furnaces as a stack of your own cells. Plot 31x41. A 7x3 cell of one
+# electric furnace between an ore belt and a plate belt, with two productivity modules (modules=);
+# Stack<cell=FurnaceCell, n=8> lines up eight; six drills feed it.
+# Run:  fk rates furnace-column.fk    fk build --to report_checks
+# Expect: the first five furnaces full (`iron-plate 36.45`), the sixth at a third, the last two
+# `iron-ore short on col/0/o`: 3 ore/s is ore for 5.3 furnaces, served in belt order; `no-limit
+# furnace-column box` (the provider has no limit=).
 module FurnaceCell size 7x3 {
   port ore_in  : in  iron-ore   @s0
   port ore_out : out iron-ore   @n0

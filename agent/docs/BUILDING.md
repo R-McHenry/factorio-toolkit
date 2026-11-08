@@ -98,7 +98,7 @@ change. A cell you write earns a place in your library once it has built and mea
 the lab; until then it lives in the one module that needs it.
 
 A machine the library has no cell for goes in one the same way: wrap it (a Literal of the
-machine and its own inserters, the machine named; LANGUAGE.md, "Wrapped machines"), place it in
+machine and its own inserters, the machine named; LANGUAGE.md, "Literals"), place it in
 a cell whose nets the router lays, and stack the cell. `WrappedDrillCell` is the pattern. Stack
 cells, not machines: a cell is the small unit that routes on its own.
 

@@ -1,8 +1,10 @@
-# plastic-cell.fk: a cell of your own around a Machine (toolkit 2.1)
-#
-# One chemical plant on plastic. The gas runs up through every cell on a pipe (a fluid port pair),
-# the coal up the west belt, and the plastic comes back down the east one. Machine<entity=...> is
-# any crafting building of the game; the prelude's ChemPlant is the same one with a name.
+# plastic-cell.fk: a cell of your own around a Machine. Plot 200x200 (any). Shows: `kind`,
+# `Machine<entity, recipe>`, a sealed module with ports, `stack NEAR -> FAR`, a fluid port pair
+# (the gas runs up through all four cells on one pipe), a module parameter ($fuel), InfinityPipe
+# as a stand-in where things are free.
+# Run:  fk check plastic-cell.fk    fk rates plastic-cell.fk    fk lab plastic-cell
+# Expect: `check plastic-cell: 31 machines, 24 nets, 0 check lines`; four plants at full speed,
+# `plastic-bar 120.00` each; `plastic-cell: 24 nets: 24 connected, 0 open, 0 unrouted`.
 kind Plastics = Machine<entity=chemical-plant, recipe=plastic-bar>
 
 module PlasticCell<fuel=coal> size 12x5 {
