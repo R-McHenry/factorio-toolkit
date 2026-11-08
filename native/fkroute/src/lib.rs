@@ -25,18 +25,21 @@ pub struct NativeGrid {
     spans: [FxHashSet<T>; 2],
     bbox: Option<(i64, i64, i64, i64)>,
     dense: OnceLock<Vec<bool>>, // a bounded grid's blocked tiles as a bitmap over its box
+    soft: FxHashMap<T, f64>,    // negotiated: the extra cost of a step onto a tile another net holds
 }
 
 #[pymethods]
 impl NativeGrid {
     #[new]
-    #[pyo3(signature = (blocked, span0, span1, bbox=None))]
-    fn new(blocked: Vec<T>, span0: Vec<T>, span1: Vec<T>, bbox: Option<(i64, i64, i64, i64)>) -> Self {
+    #[pyo3(signature = (blocked, span0, span1, bbox=None, soft=None))]
+    fn new(blocked: Vec<T>, span0: Vec<T>, span1: Vec<T>, bbox: Option<(i64, i64, i64, i64)>,
+           soft: Option<Vec<(T, f64)>>) -> Self {
         NativeGrid {
             occ: blocked.into_iter().collect(),
             spans: [span0.into_iter().collect(), span1.into_iter().collect()],
             bbox,
             dense: OnceLock::new(),
+            soft: soft.unwrap_or_default().into_iter().collect(),
         }
     }
 }
@@ -390,7 +393,10 @@ where
             let step = s.belt + if nd != d { s.turn } else { 0.0 };
             if !blocked((nx, ny)) {
                 let ns = (nx, ny, nd, 0);
-                let cost = gs + step;
+                let mut cost = gs + step;
+                if !grid.soft.is_empty() {
+                    cost += grid.soft.get(&(nx, ny)).copied().unwrap_or(0.0);
+                }
                 if cost < *g.get(&ns).unwrap_or(&f64::INFINITY) {
                     g.insert(ns, cost);
                     parent.insert(ns, Some(st));
@@ -419,7 +425,10 @@ where
                 }
                 if seen_block && !blocked((tx, ty)) {
                     let ns = (tx, ty, d, 1);
-                    let cost = gs + s.ug;
+                    let mut cost = gs + s.ug;
+                    if !grid.soft.is_empty() {
+                        cost += grid.soft.get(&(tx, ty)).copied().unwrap_or(0.0);
+                    }
                     if cost < *g.get(&ns).unwrap_or(&f64::INFINITY) {
                         g.insert(ns, cost);
                         parent.insert(ns, Some(st));
@@ -649,6 +658,7 @@ impl Tree {
     #[inline]
     fn free(&self, cx: &Ctx, tl: &Tiles, t: T) -> bool {
         !cx.grid.blocked(t) && !tl.own.contains_key(&t) && !self.reserved.contains(&t) && !tl.spare.contains(&t)
+            && !cx.grid.soft.contains_key(&t)
     }
 
     fn spans(&self) -> [FxHashSet<T>; 2] {

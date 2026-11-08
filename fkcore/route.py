@@ -1229,12 +1229,13 @@ def _ladder(near, box):
 
 
 def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
-               allow=frozenset(), promoted=frozenset()):
+               allow=frozenset(), promoted=frozenset(), soft=None):
     """One net's route in ``box``: first in its own neighbourhood (``_near_box``), then, if that
     fails, in the whole box, so bounding the search never loses a route the box allowed. 2.1.26:
     when the whole box would cost more than ``WALK_BUDGET``, in boxes twice as big in turn, as far
     as the budget allows; then it fails, saying how far it looked. ``promoted``: tiles freed for it
-    (``_route_promoted``)."""
+    (``_route_promoted``). ``soft``: {tile: extra cost} of the tiles only other nets' routes hold
+    (``_negotiate``): its tree or hub may lay belts there, paying."""
     near = _near_box(job, box)
     seeds = _seeds_of(job)
     if near is None:
@@ -1252,7 +1253,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
                    f"the route's walk budget")
             break
         got, how = _route_in(cat, job, ents, frames, js, b, limit, terrain, avoid, spans, allow,
-                             promoted)
+                             promoted, soft)
         if got is not None:
             break
     if got is not None or not (job.wide or job.pin):
@@ -1261,7 +1262,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
     plain = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
                    sources=list(job.sources), owners=list(job.owners), anchors=dict(job.anchors))
     got, text = _route_one(cat, plain, ents, frames, js, box, limit, terrain, avoid, spans, allow,
-                           promoted)
+                           promoted, soft)
     if got is None:
         return None, how
     what = "both lanes" if job.wide else f"lane {job.pin}"
@@ -1269,7 +1270,7 @@ def _route_one(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spa
 
 
 def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
-              allow=frozenset(), promoted=frozenset()):
+              allow=frozenset(), promoted=frozenset(), soft=None):
     net = job.net
     if job.parts:
         joined = _prejoined(job)
@@ -1301,13 +1302,20 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
             laid = _settle_leaves(cat, _carriers(job, straight, net), ents, allow=allow)
             if laid is not None:
                 return laid, f"a straight belt, {len(straight)} carriers"
+    # negotiated: the tree or hub may lay belts on what only other nets' routes hold, paying (a
+    # tile its own ground blocks stays blocked)
+    if soft:
+        soft = {t: c for t, c in soft.items() if t not in blocked}
+    soft_blocked = blocked
     if job.m2m is not None:
         from . import m2m as m2mmod
         plan, how = m2mmod.route(cat, job, blocked, spans, clear, box, limit, ents)
     elif job.mode == "hub":
-        plan, how = _hub_job(cat, job, blocked, spans, clear, box, limit)
+        with steinermod.soft_ground(soft):
+            plan, how = _hub_job(cat, job, soft_blocked, spans, clear, box, limit)
     else:
-        plan, how = _tree_job(cat, job, blocked, spans, clear, box, limit)
+        with steinermod.soft_ground(soft):
+            plan, how = _tree_job(cat, job, soft_blocked, spans, clear, box, limit)
     if plan is None:
         # 2.0.48: a belt that runs straight through, every machine handing on or off it by one
         # inserter (a stack cell's through belt: no room for a tree's turns or hub)
@@ -2235,6 +2243,175 @@ def route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=6000
         _M2M = saved_m2m
 
 
+# -- negotiation (PathFinder): nets share ground at a price until none overlaps ---------------------
+#: rounds, the price of a tile another net holds (x2 each round), the history a contested tile adds
+NEG_ROUNDS, NEG_PRES, NEG_GROW, NEG_HIST = 8, 1.0, 2.0, 1.0
+
+
+def negotiate_on():
+    """FK_NEGOTIATE=1: route_layout negotiates before its passes (opt-in while it is measured)."""
+    return os.environ.get("FK_NEGOTIATE", "0") == "1"
+
+
+def _holds(cat, laid):
+    """(the tiles a net's carriers stand on, the tiles they forbid another net: those, the tiles
+    their belts point into, the tiles their hands reach; their tunnels' spans per axis) --
+    ``_ground``'s and ``_ug_spans``' rules for one net."""
+    on, forbid = set(), set()
+    for e in laid:
+        ts, fs, hs, _ins = _ent_ground(cat, e)
+        on.update(ts)
+        forbid.update(ts)
+        forbid.update(fs)
+        forbid.update(hs)
+    return on, forbid, _ug_spans(cat, laid)
+
+
+def _negotiate(flat, cat, js, order, ribs, base_ents, net_frames, claims, rib_of, joints, limit,
+               terrain):
+    """Every net routed as if alone but for a price: on the hard ground (the layout, ribbons,
+    terrain, claims), a belt may go where another net's route is, paying (1 + history) *
+    (1 + pres * nets there) - 1 a tile (``soft``; its tree and hub only, never a splitter or a
+    tap). A clash: a net's carrier on a tile another net's route forbids, or two nets' tunnels
+    overlapping on one axis. Round by round the clashing nets are routed again, ``pres`` doubling
+    and every contested tile's history growing, until none clashes (PathFinder); a net that
+    cannot move (a straight belt, a pair) keeps its tiles and the others go round it. Nets still
+    clashing after ``NEG_ROUNDS`` are laid again on hard ground, in order, each seeing the rest.
+    Ribbons are laid first, on hard ground, as a pass lays them. -> the pass loop's ``best``."""
+    from . import ribbons as ribmod
+    added, failed, how, rlines = {}, {}, {}, {}
+    hard = list(base_ents)
+    plain = []
+
+    def avoid_of(net):
+        out = set()
+        for other, tiles in claims.items():
+            if other != net and rib_of.get(other) != net:
+                out |= tiles
+        return out
+
+    for key in order:
+        if key not in ribs:
+            plain.append(key)
+            continue
+        rib = ribs[key]
+        fnet, bnet = net_frames(rib.nets[0])
+        got, why, summary = ribmod.route(cat, rib, hard, fnet, js, bnet, limit, terrain,
+                                         avoid_of(key), joints)
+        if got is None:
+            for m in rib.nets:
+                if js[m].skip is None:
+                    failed[m] = why
+            continue
+        for m, laid in got.items():
+            added[m] = laid
+            how[m] = why[m]
+            hard += laid
+        rlines[key] = summary
+
+    routes, holds, hist = {}, {}, {}
+    total = {}                       # tile -> how many nets' routes forbid it
+
+    def hold(net, h):
+        old = holds.pop(net, None)
+        if old is not None:
+            for t in old[1]:
+                total[t] -= 1
+                if not total[t]:
+                    del total[t]
+        if h is not None:
+            holds[net] = h
+            for t in h[1]:
+                total[t] = total.get(t, 0) + 1
+
+    todo, rounds, clash = list(plain), 0, set()
+    for rnd in range(NEG_ROUNDS):
+        rounds = rnd + 1
+        pres = NEG_PRES * NEG_GROW ** rnd
+        for k, net in enumerate(todo):
+            _progress(rnd, k, todo, net, which="negotiate")
+            fnet, bnet = net_frames(net)
+            avoid = avoid_of(net)
+            mine = holds[net][1] if net in holds else ()
+            soft = {}                    # _route_in keeps what its own ground blocks out of it
+            for t, n in total.items():
+                n -= t in mine
+                if n > 0:
+                    soft[t] = (1.0 + hist.get(t, 0.0)) * (1.0 + pres * n) - 1.0
+            got, why = _route_one(cat, js[net], hard, fnet, js, bnet, limit, terrain, avoid,
+                                  allow=joints, soft=soft)
+            if got is not None and (js[net].wide or js[net].pin):
+                got = _serving_only(flat, cat, js[net], hard, got)
+            if got is None:
+                routes.pop(net, None)
+                hold(net, None)
+                failed[net] = why
+                continue
+            failed.pop(net, None)
+            routes[net], how[net] = got, why
+            hold(net, _holds(cat, got))
+        # a clash: a net's carrier on a tile another net's route forbids (its own ends excepted:
+        # _ground frees those for it)
+        owners, tunnels = {}, ({}, {})
+        for net, (_on, forbid, spans) in holds.items():
+            for t in forbid:
+                owners.setdefault(t, []).append(net)
+            for ax in (0, 1):
+                for t in spans[ax]:
+                    tunnels[ax].setdefault(t, []).append(net)
+        clash, bad = set(), set()
+        for a, (on, _forbid, _spans) in holds.items():
+            ends = set(js[a].ends())
+            for t in on:
+                if t in ends:
+                    continue
+                others = [b for b in owners.get(t, ()) if b != a]
+                if others:
+                    clash.add(a)
+                    clash.update(others)
+                    bad.add(t)
+        for ax in (0, 1):
+            for t, nets in tunnels[ax].items():
+                if len(set(nets)) > 1:
+                    clash.update(nets)
+                    bad.add(t)
+        for t in bad:
+            hist[t] = hist.get(t, 0.0) + NEG_HIST
+        if not clash:
+            break
+        todo = [n for n in plain if n in clash or n in failed]
+
+    # still overlapping: rip those up, lay them again on hard ground in order
+    for net in clash:
+        routes.pop(net, None)
+        hold(net, None)
+    for k, net in enumerate([n for n in plain if n in clash]):
+        _progress(rounds, k, plain, net, which="negotiate: settle")
+        fnet, bnet = net_frames(net)
+        ents = hard + [e for laid in routes.values() for e in laid]
+        got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid_of(net),
+                              allow=joints)
+        if got is not None and (js[net].wide or js[net].pin):
+            got = _serving_only(flat, cat, js[net], ents, got)
+        if got is None:
+            failed[net] = why
+            how.pop(net, None)
+            continue
+        failed.pop(net, None)
+        routes[net], how[net] = got, why
+    for net in plain:
+        if net in routes:
+            added[net] = routes[net]
+    _NEG_LAST.clear()
+    _NEG_LAST.update(rounds=rounds, settled=len(clash), routed=len(added), failed=len(failed),
+                     why={n: str(w)[:160] for n, w in failed.items()})
+    return ((len(added), 0, 0), added, failed, how, rounds, list(order), [], rlines)
+
+
+#: the last negotiation's numbers: rounds, nets settled on hard ground, routed, failed
+_NEG_LAST = {}
+
+
 def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=60000,
                   blocked=(), patch=None) -> Routed:
     """Route every net of ``flat`` that has no carriers in ``lay`` yet; -> Routed.
@@ -2360,6 +2537,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     # answer (the promoting pass re-laid all 278 nets of the 20261030-2352 world, ~60 s, to try
     # promoting its four that failed)
     prev_order, prev_plain = None, {}
+    if negotiate_on():
+        # negotiated first (FK_NEGOTIATE=1): every net routed with the others' routes soft; the
+        # passes below run only when it leaves a net unrouted, and the better result is kept
+        best = _negotiate(flat, cat, js, order, ribs, list(base.entities.values()), net_frames,
+                          claims, rib_of, joints, limit, terrain)
+        repeats = not best[2]           # every net routed: no pass to run
     for attempt in range(retries + 2):
         # 2.0.78: the last pass, only when the others left a net unrouted, may promote belts
         promo = attempt == retries + 1

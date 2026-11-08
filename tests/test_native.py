@@ -91,6 +91,34 @@ class NativeParity(unittest.TestCase):
                 self.assertEqual(_run("1", grid, root, sinks, order),
                                  _run("0", grid, root, sinks, order))
 
+    def test_soft_ground(self):
+        """Negotiated ground: belts pay to step on soft tiles, splitters and taps keep off them;
+        the same trees both ways, and a soft tile costs what it says."""
+        crossed = 0
+        for seed in range(150):
+            grid, root, sinks = (_reversed_case if seed % 2 else _case)(seed)
+            if not sinks:
+                continue
+            rnd = random.Random(seed + 99)
+            soft = {(rnd.randrange(24), rnd.randrange(18)): rnd.choice((0.5, 2.0, 9.0))
+                    for _ in range(60)}
+            with steiner.soft_ground(soft):
+                g2 = Grid(grid.occ, (), grid.spans)
+            g2.drop_taps, g2.keep_clear = grid.drop_taps, grid.keep_clear
+            self.assertIs(g2.soft, soft)
+            with self.subTest(seed=seed):
+                a = _run("1", g2, root, sinks)
+                self.assertEqual(a, _run("0", g2, root, sinks))
+                tiles = {(s[0], s[1]) for s, _mv in a[0]}
+                crossed += bool(tiles & set(soft))
+                for s, mv in a[0]:
+                    if mv[0] == "split":
+                        _n, m = steiner.Tree.split_tiles(s, mv[1])
+                        self.assertNotIn(m, soft)
+                self.assertFalse({q for q, *_r in a[2]} & set(soft))
+        self.assertGreater(crossed, 10)             # belts did step on soft tiles
+        self.assertEqual(Grid(set()).soft, {})      # outside soft_ground: none
+
     def test_walk_and_hubs(self):
         """route._walk and route._hubs: the same dict (in the same order) and the same hubs."""
         from fkcore import route

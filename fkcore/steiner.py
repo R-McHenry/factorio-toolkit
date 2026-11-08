@@ -62,6 +62,7 @@ Pure, stdlib only.
 """
 from __future__ import annotations
 
+import contextlib
 import heapq
 import math
 import os
@@ -88,10 +89,30 @@ def _axis(h):
 
 
 # -- the ground ---------------------------------------------------------------------------------
+#: The soft ground of a negotiated route (``soft_ground``): {tile: extra cost} for tiles other nets
+#: hold this round. A Grid made while it is set takes it as ``Grid.soft``.
+_SOFT = None
+
+
+@contextlib.contextmanager
+def soft_ground(soft):
+    """Grids made inside take ``soft`` ({tile: extra cost}): a belt may step onto such a tile,
+    paying its extra cost; no splitter and no tap goes there (route's negotiation)."""
+    global _SOFT
+    old, _SOFT = _SOFT, (soft or None)
+    try:
+        yield
+    finally:
+        _SOFT = old
+
+
 class Grid:
     """Blocked tiles, plus the tiles a foreign belt points into (a belt there would get its items
     side-loaded) and the hidden spans of foreign undergrounds per axis (no same-axis tunnel may
-    overlap one: fk.route has the same interleave rule in fkc.build._fix_ug_interleave)."""
+    overlap one: fk.route has the same interleave rule in fkc.build._fix_ug_interleave).
+    ``soft``: {tile: extra cost} a belt step pays there (empty but in a negotiated route)."""
+
+    soft = {}
 
     def __init__(self, blocked, fronts=(), spans=None):
         self.occ = set(blocked)
@@ -99,6 +120,8 @@ class Grid:
         self.spans = spans or {0: set(), 1: set()}
         self.keep_clear = set()      # no split's spare (reversed) output may point at these
         self.drop_taps = False       # laid reversed: taps drop onto their belt
+        if _SOFT:
+            self.soft = _SOFT
 
     def blocked(self, t):
         return t in self.occ or t in self.fronts
@@ -266,7 +289,7 @@ class Tree:
 
     def free(self, t):
         return (not self.grid.blocked(t) and t not in self.tiles() and t not in self.reserved
-                and t not in self.spare())
+                and t not in self.spare() and t not in getattr(self.grid, "soft", ()))
 
     @staticmethod
     def split_tiles(s, side):
@@ -557,12 +580,15 @@ def _native_grid(grid):
     else:
         return None
     sp = grid.spans
-    key = (box, id(grid.occ), len(grid.occ), id(grid.fronts), len(grid.fronts), len(sp[0]), len(sp[1]))
+    soft = getattr(grid, "soft", None) or {}
+    key = (box, id(grid.occ), len(grid.occ), id(grid.fronts), len(grid.fronts), len(sp[0]), len(sp[1]),
+           id(soft), len(soft))
     got = grid.__dict__.get("_native")
     if got is not None and got[0] == key:
         return got[1]
     tiles = grid.occ if box is not None else grid.occ | grid.fronts
-    ng = _native.NativeGrid(list(tiles), list(sp[0]), list(sp[1]), box)
+    ng = _native.NativeGrid(list(tiles), list(sp[0]), list(sp[1]), box,
+                            [(t, float(c)) for t, c in soft.items()])
     grid.__dict__["_native"] = (key, ng)
     return ng
 
@@ -642,6 +668,7 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
     grid, tiles, res, spare = tree.grid, tree.tiles(), tree.reserved, tree.spare()
     sink_tiles = {s.tile for i, s in enumerate(sinks) if isinstance(s, FixedSink)}
     spans = tree.spans()
+    soft = getattr(grid, "soft", None)    # negotiated: a step onto a tile another net holds pays
 
     def blocked(t):
         return grid.blocked(t) or t in tiles or t in res or t in spare
@@ -704,7 +731,10 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
             nx, ny = x + DX[nd], y + DY[nd]
             step = k["belt"] + (k["turn"] if nd != d else 0.0)
             if not blocked((nx, ny)):
-                _push(heap, g, parent, (nx, ny, nd, 0), st, gs + step, hh)
+                cost = gs + step
+                if soft:
+                    cost += soft.get((nx, ny), 0.0)
+                _push(heap, g, parent, (nx, ny, nd, 0), st, cost, hh)
             if ex or nd != d or (x, y) in tapped:
                 continue
             seen_block = False
@@ -719,7 +749,10 @@ def _astar_py(tree, starts, sinks, targets, limit=60000):
                 if span & grid.spans[_axis(d)] or span & spans[_axis(d)]:
                     break
                 if seen_block and not blocked((tx, ty)):
-                    _push(heap, g, parent, (tx, ty, d, 1), st, gs + k["ug"], hh)
+                    cost = gs + k["ug"]
+                    if soft:
+                        cost += soft.get((tx, ty), 0.0)
+                    _push(heap, g, parent, (tx, ty, d, 1), st, cost, hh)
     return None
 
 
