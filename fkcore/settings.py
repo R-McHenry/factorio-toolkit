@@ -96,6 +96,8 @@ class Drift:
     want: str                     # what the design has ("" for none)
     clears: bool = False          # the design has none, and a paste clears it (a request)
     wires: bool = False           # a difference in circuit wires (the wire pass sets them)
+    #: 3.1 (fk adopt): the standing entity's differing fields, as the game exports them
+    fields: dict = None
 
     def line(self):
         who = (f"{self.user} changed" if self.user else
@@ -264,7 +266,7 @@ def drifts(want, have, verdicts, users):
             clears = not w
             out.append(Drift(v.key, v.name, v.x, v.y, users.get(k),
                              describe({f: hf[f] for f in keys if f in hf}) or "nothing set", w,
-                             clears))
+                             clears, fields={f: hf[f] for f in keys if f in hf}))
         if ww != hw:
             # a wire the design lacks stays after a paste (the laptop server, 2026-10-24): the
             # apply's wire pass cuts it (2.1)

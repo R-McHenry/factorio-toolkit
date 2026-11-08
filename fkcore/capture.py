@@ -100,6 +100,31 @@ def world_list(bp, at):
              "by": _num(r["y"])} for r, p in zip(rows, at)]
 
 
+def anchored(got, anchor, cat):
+    """3.1 (``fk capture --from``): a game read ``got`` ({bp, n, names, at}) as a Literal file
+    anchored at ``anchor`` (a whole tile, the placement's origin or the area's corner): the
+    entities in the blueprint's order with their positions relative to the anchor (``wx``,
+    ``wy``) and their blueprint positions (``bx``, ``by``: how each is set), the ``bp``, the
+    machine ``names``, the ``ports`` and the ``anchor``. ``Literal<file="..."> @(ax, ay)`` then
+    puts every entity back exactly where it stands, so a module written against the file mates
+    with the standing objects (ok) and adds its own as ghosts."""
+    listed = world_list(got.get("bp"), got.get("at"))
+    if listed is None:
+        raise CaptureError("the capture's entities and its blueprint do not line up (an older game "
+                           "link?); fk capture world AREA writes the blueprint alone")
+    ax, ay = anchor
+    data = {"bp": got["bp"], "anchor": [int(ax), int(ay)],
+            "entities": [{"name": e["name"], "wx": _num(e["wx"] - ax), "wy": _num(e["wy"] - ay),
+                          "bx": e["bx"], "by": e["by"]} for e in listed]}
+    named = names_of_bp(got["bp"], cat)
+    if named:
+        data["names"] = named
+    edge = ports_of_bp(got["bp"], cat)
+    if edge:
+        data["ports"] = edge
+    return data
+
+
 def from_game(r, surface, force, area, tag="capture"):
     """-> {bp, n, names}: ``area`` blueprinted in the game."""
     from . import link

@@ -68,7 +68,8 @@ STEP_CMDS = {"route", "place", "report"}
 #: commands that need the game: they run on the host, with the link on
 HOST = {"chat", "say", "poll", "ack", "alerts", "stats", "chart", "stock", "capital",
         "read-terrain", "measure", "adopt", "sense", "research", "tech", "recipes", "lua", "fresh",
-        "avail", "decon", "request", "walk", "map", "robots", "standin"}
+        "avail", "decon", "request", "walk", "map", "robots", "standin",
+        "paste", "register", "diff", "placements"}
 #: host commands whose first word may be the area, as for look: ``fk fresh X0,Y0,X1,Y1``
 AREA_FIRST = ("fresh", "measure", "decon", "robots")
 #: files only the host writes: pulled, never pushed
