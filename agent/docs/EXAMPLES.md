@@ -260,11 +260,13 @@ them. The terrain is one file the design names (`terrain patch`, read once with
 `fk read-terrain`): `fk build` and `fk layout` read that file, and nothing reads the world on
 the way.
 
-**What goes wrong here.** The four left-out drills are still the net's drivers, so the build's
-next step says `no-route mixed-patch net ore_: its route does not connect 4 driver->consumer
-pairs` and `report_checks` names them, `not in the layout: ore/m4, ore/m5, ore/m6, ore/m7`; the
-net stays unrouted. Write the row for what the patch holds: `n=auto 4..30` on that strip gives
-`sized: ore n=4 (auto 4..30)`, the row turned N-S (`4/4 drills on iron-ore`), and the net routes.
+**What goes wrong here.** Nothing stops: a drill left out at place is no end of its net (the
+row stands, the drill does not), so `route` lays the four standing drills' belt (`routed ore_:
+1 -> 1, 53 belts`) and `report_checks` reads `mixed-patch: 1 nets: 1 connected, 0 open, 0
+unrouted` with `sinks 4 of 4 makers on a net reach a sink`. The row still makes half of what
+`n=8` promised (`rates` counts the drills written, not the drills placed), so write the row for
+what the patch holds: `n=auto 4..30` on that strip gives `sized: ore n=4 (auto 4..30)`, the row
+turned N-S (`4/4 drills on iron-ore`), and nothing is left out.
 
 **Aside: smelter-array.fk.** `SmelterArray<n=24, recipe=iron-plate>` is the older stack row,
 furnaces on both sides of each plate belt; the library's `SmelterPair` replaces it. On paper

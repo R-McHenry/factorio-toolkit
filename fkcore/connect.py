@@ -236,6 +236,9 @@ class NetReport:
     fluid: bool = False            # a fluid net: judged over the fluid boxes
     leaks: list = field(default_factory=list)
     ug_sideloads: list = field(default_factory=list)    # [(belt, underground)]: lane-dependent
+    #: endpoints the place step left out of an instance that stands (43-mines: a mixed row's
+    #: drills with no filter slot): not ends of the net, named apart from ``missing``
+    left_out: list = field(default_factory=list)
 
     @property
     def connected(self):
@@ -928,6 +931,8 @@ def _status_line(r):
         msg += f"; unpaired {', '.join(r.unpaired)}"
     if r.missing:
         msg += f"; not in the layout: {', '.join(r.missing)}"
+    if r.left_out:
+        msg += f"; left out at place: {', '.join(r.left_out)}"
     if not r.drivers and not r.consumers and not r.carriers:
         # 2.0.12: a declared net that nothing uses has nothing to route; as UNROUTED it would
         # hold every paste now that the build script stops on UNROUTED by default
@@ -1079,10 +1084,21 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
     leaks += _fluid_leaks(g, owners, None if nets is None else table)
     ug_sides = [(a, b) for a, b, via in g.edges() if via == "ug_sideload"]
     mine_boxes = _boxes_by_key(g)
+    standing = {k.rsplit("/", 1)[0] for k in g.nodes}        # the instances with an entity here
     reports, checks = {}, []
     for name in sorted(table, key=natural_key):
         drivers, consumers = table[name]
         missing = [k for k in _keys(drivers + consumers) if k not in g.nodes]
+        # 43-mines (PLAN-ORGANIC M1): a machine of an instance that stands in the layout but
+        # has no entity itself was left out at place (a mixed row's drill whose mining area
+        # reaches another resource; `mixed-patch` names it). It is not an end of the net: the
+        # four standing drills route, the net is connected, and the line says who was left out
+        # ("not in the layout" stays for an instance that is not placed at all).
+        left_out = [k for k in missing if k.rsplit("/", 1)[0] in standing]
+        if left_out:
+            drivers = [k for k in drivers if k not in left_out]
+            consumers = [k for k in consumers if k not in left_out]
+            missing = [k for k in missing if k not in left_out]
         reached, unreached, reach_of = 0, [], {}
         contact = bool(items.get(name)) and all(
             i in CONTACT for _k, i in items[name][0] + items[name][1] if i is not None)
@@ -1118,7 +1134,7 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
                        or (g.nodes[k].kind == "pipe-to-ground" and k not in g.fluid_pairs)],
                       name in fluid,
                       [lk for lk in leaks if lk.net == name],
-                      [(a, b) for a, b in ug_sides if name in g.nodes[a].nets])
+                      [(a, b) for a, b in ug_sides if name in g.nodes[a].nets], left_out)
         reports[name] = r
         if not r.connected:
             checks.append(_status_line(r))
