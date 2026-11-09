@@ -32,10 +32,13 @@ from __future__ import annotations
 
 __all__ = ["LANES", "RULES", "left", "right", "near", "moves", "carry", "drop_lane",
            "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK", "CARRIERS", "fed",
-           "tile_mask", "mask_bit"]
+           "tile_mask", "mask_bit", "DIRS", "VIAS", "table"]
 
 LANES = ("L", "R")
 KEEP = ("straight", "turn", "tunnel", "splitter")
+DIRS = (0, 4, 8, 12)
+#: every move ``moves`` knows
+VIAS = KEEP + ("side", "ug_side")
 SIDE_RANK = (1, 2)       # side-load: the lane entering further upstream first, then the other
 DROP_RANK = 3            # an inserter's or a drill's drop onto a belt: after every belt feed
 
@@ -185,3 +188,20 @@ def mine_lane(drill_dir, belt_dir):
     of the tile towards the drill (in line: the right lane)."""
     side = (drill_dir + 8) % 16
     return "L" if side == left(belt_dir) else "R"
+
+
+def table():
+    """Every rule as data, for a reader that keeps no rule of its own (the native kernel takes it
+    once at import: ``fkroute.physics(table())``, PLAN-4.0 K1): ``moves`` for every via in
+    ``VIAS``, every direction pair and both underground ends, as rows ``(via, src_dir, dst_dir,
+    ug, edges, blocked)``; ``drop_lane``, ``turn_drop_lane`` and ``mine_lane`` for every argument,
+    as rows of their arguments and the lane. Directions as this module's, 0, 4, 8, 12."""
+    return {
+        "vias": list(VIAS),
+        "moves": [(via, s, d, ug) + moves(via, s, d, ug)
+                  for via in VIAS for s in DIRS for d in DIRS for ug in ("in", "out")],
+        "drop_lane": [(a, b, drop_lane(a, b)) for a in DIRS for b in DIRS],
+        "turn_drop_lane": [(c, g, s, turn_drop_lane(c, g, s)) for c in DIRS for g in DIRS
+                           for s in DIRS],
+        "mine_lane": [(a, b, mine_lane(a, b)) for a in DIRS for b in DIRS],
+    }

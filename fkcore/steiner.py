@@ -651,6 +651,27 @@ try:
 except ImportError:          # stdlib only: the native kernel is a speed-up, never a dependency
     _native = None
 
+#: the kernel this module drives: an older fkroute (another grow/astar signature, no physics
+#: table) is left alone and the Python search runs, as without one
+_NATIVE_NEEDS = (0, 3)
+
+
+def _kernel_fits(mod):
+    try:
+        v = tuple(int(x) for x in str(getattr(mod, "__version__", "0")).split(".")[:2])
+    except ValueError:
+        return False
+    return v >= _NATIVE_NEEDS and hasattr(mod, "physics")
+
+
+if _native is not None and not _kernel_fits(_native):
+    _native = None
+if _native is not None:
+    # PLAN-4.0 K1: the lane physics reaches the kernel as data, once; nothing in Rust states a
+    # lane rule (the carriers' fed verdicts stay Grid.lane_ok's tile_mask bits)
+    from . import lanephys as _lanephys
+    _native.physics(_lanephys.table())
+
 _UNSUPPORTED = object()
 
 

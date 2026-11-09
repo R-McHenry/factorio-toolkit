@@ -237,6 +237,28 @@ class NativeParity(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 _run("check", grid, root, sinks)
 
+    def test_physics_table_is_lanephys(self):
+        """PLAN-4.0 K1: the kernel's lane physics is lanephys's table, every lookup for every
+        argument; the table was taken at import and is taken once."""
+        n = steiner._native
+        self.assertTrue(n.physics_ready())
+        self.assertFalse(n.physics(lanephys.table()))        # already set: the first import won
+        for via in lanephys.VIAS:
+            for s in lanephys.DIRS:
+                for d in lanephys.DIRS:
+                    for ug in ("in", "out"):
+                        self.assertEqual(n.physics_lookup("moves", via, s, d, ug),
+                                         lanephys.moves(via, s, d, ug), (via, s, d, ug))
+        for a in lanephys.DIRS:
+            for b in lanephys.DIRS:
+                self.assertEqual(n.physics_lookup("drop_lane", a, b), lanephys.drop_lane(a, b))
+                self.assertEqual(n.physics_lookup("mine_lane", a, b), lanephys.mine_lane(a, b))
+                for c in lanephys.DIRS:
+                    self.assertEqual(n.physics_lookup("turn_drop_lane", a, b, c),
+                                     lanephys.turn_drop_lane(a, b, c))
+        with self.assertRaises(ValueError):
+            n.physics_lookup("moves", "drop", 0, 4, "in")
+
     def test_unknown_grid_falls_back(self):
         class Odd(Grid):
             def blocked(self, t):
