@@ -469,6 +469,118 @@ open, 0 unrouted; 0 SPILL; 234 entities, 210 edges, 2 underground pairs`. Where 
 place the beacons (a row), `beacons=8` on the instance counts them anyway (LANGUAGE.md, "Other
 kinds").
 
+**The achieved hull: shape.fk.** `docs\examples\shape.fk`, plot 36x30. Where `size WxH` stands a
+module may say `shape (x,y) (x,y) ...`: a closed polygon with whole-number corners about its
+origin. The file, without its step-2 lines:
+
+```
+module Mod shape (0,0) (24,0) (24,12) (16,20) (8,20) (0,12) {
+  port fe_in : in  iron-plate      @w4
+  port g_out : out iron-gear-wheel @e4
+  a = Assembler<recipe=iron-gear-wheel>
+  b = Assembler<recipe=iron-gear-wheel>
+  net fe: fe_in -> a, b
+  net g:  a, b -> g_out
+}
+m   = Mod @(2, 2)
+src = Chest<requester, item=iron-plate, rate=4/s> @(0, 6)
+net feed: src -> m.fe_in
+```
+
+The machines have no `@(x, y)`: `fk layout shape.fk Mod --write` places them inside the polygon
+(the box's two cut corners are blocked for it) and writes the hints into the module:
+
+```
+layout shape Mod: 2 instances, 2 placed now, 0 kept, 0 fixed; 2 nets; frame 24x20 (the shape of Mod (408 tiles in its 24x20 box))
+  a = Assembler<recipe=iron-gear-wheel> @(2, 2)
+  b = Assembler<recipe=iron-gear-wheel> @(5, 4)
+  estimated belts 21 -> 18 over 2 nets; every net reaches its consumers; 1 hot tiles: 0,4 x2; 3 sweeps
+```
+
+`fk build --to report_checks` routes the module alone in its frame as always (chapter 11), and
+then records what it actually covers, its **hull**: its machines and belts, one tile around them,
+clipped to the frame. `out\route.txt`'s compile lines end with:
+
+```
+  hull      m: 102 of the 408 tiles of its declared frame (25 %), 306 left free
+  hull      1 sealed module in out/frames.json: 1 new or changed
+```
+
+```
+shape: 3 nets: 3 connected, 0 open, 0 unrouted; 0 SPILL; 42 entities, 38 edges, 0 underground pairs
+```
+
+`fk explain shape.fk m` prints the polygon as rows of `#` (the frame) and `.` (the box outside
+it), 408 of them `#`, and under it the hull over the same box:
+
+```
+  hull      102 tiles of the 408 (built alone, out/frames.json; 306 left free):
+            ........................
+            .#####..................
+            .###########............
+            ########################
+            ########################
+            ########################
+            #########...............
+            ....#####...............
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+            ........................
+```
+
+Step 2: the parent uses what `m` left free. Add to the file
+
+```
+module Side size 6x6 {
+  port i : in iron-gear-wheel @n2
+  box = Chest<provider, limit=100> @(2, 2)
+  net x: i -> box
+}
+s = Side @(10, 16)
+net gears: m.g_out -> s.i
+```
+
+and `fk build --to report_checks` again. `s` stands inside `m`'s polygon, and `gears` runs from
+`m`'s east port down and across the polygon's free rows to `s`'s north port; there is no `overlap`
+line and no `crosses-frame`, because the frame the build reads for `m` is now its hull:
+
+```
+  routed    gears: 1 -> 1, 24 belts, 0 underground ends, 0 splitters
+  hull      s: 12 of the 36 tiles of its declared frame (33 %), 24 left free
+  hull      2 sealed modules in out/frames.json: 1 new or changed
+```
+
+```
+shape: 5 nets: 5 connected, 0 open, 0 unrouted; 0 SPILL; 71 entities, 66 edges, 0 underground pairs
+```
+
+**The idea.** A sealed module's frame has three sources, and each refines the last. The
+**declaration** (`size` or `shape`) is the module's claim before anything is built; it guides
+`fk layout` inside it and is the router's keep-out around it. The **territory** is the cell
+`fk layout` assigns an instance placed without `@` (`out\territories.json`, territory.fk in
+chapter 9); the build reads it as the instance's frame. The **hull** is what the module actually
+covers once built alone (`out\frames.json`, one entry per instance, in the module's own frame);
+the parent's next `fk layout` and `fk build` read it instead of the declaration, so the ground a
+module leaves free is its parent's: a neighbour's corner may stand there and a trunk may run
+through. The hull only refines: it never holds a tile outside the frame the module was built in,
+and a rebuild that changes nothing records the same hull and routes nothing. It is stamped with
+the module's inside (its machines, nets and hints as written): change the module and the next
+build reads the declaration again, then records a new hull. `fk layout FILE MODULE` lays a
+module's inside out in its declared or assigned frame, never in the hull it had, so a module can
+grow back to its claim. Built in one go, with step 2 in the file from the start, the first build
+has no hull to read: `s` shares its tiles with `m`'s polygon (`overlap shape s: port i opens at
+12,15, inside m's frame: a net from outside both can't reach it`) and `gears` is unrouted; the
+build after it, reading the hull, is the one above.
+
 ## 7. library-lines.fk: the library's cells
 
 `docs\examples\library-lines.fk`, plot 200x200:
