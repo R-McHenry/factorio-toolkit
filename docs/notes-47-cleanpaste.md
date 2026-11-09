@@ -42,7 +42,16 @@ can clear out an area consistently and have the base paste in cleanly."
 - `tests/test_cleanpaste.py`: the chest's settings in the .fkp and the blueprint; a free apply
   with a dropped row in the record destroys it and returns the record; the Lua names each thing.
 
-## Measured
+## Measured (the fk-t6 flower on the lab, this branch pinned)
 
-(the fk-t6 flower, after the merge: the stands re-pasted as infinity chests, no Lua swap, and a
-re-route of a net leaving no old carriers behind)
+- The stands' source changed to `Chest<infinity>`: the 26 `Stand` units keyed anew (`not in
+  the store; Stand's last entry differs in ...`), the route step 288 s, `26 routed, 3348 kept,
+  0 failed`; the apply placed 758 ghosts, 706 revived, 56 not: the design's infinity chests and
+  new belts met the Lua-placed chests and the old stand belts that no record held (the record
+  was still the seed, so nothing counted as dropped), and `out\own\lab.json` went from 0 to
+  48,942 rows.
+- `fk clear` on the 29 stand-in frames (88 entities each) and one more apply: 1727 ghosts
+  placed and revived, 2 not (Rory's hand-placed pump and pipes), `diff ... ok 48940` of 48942,
+  no Lua swap. The 126 `marked` left are old carriers outside the frames (the flower-level feeds'
+  earlier routes) and Rory's own; the policy keeps them until their owner decides.
+- From here a re-routed net's old carriers are in the record and go on the next apply.
