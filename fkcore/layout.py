@@ -33,6 +33,13 @@ FK_NATIVE=0 forces Python, FK_NATIVE=check runs both and raises on a difference.
 The command prints one source line per instance it placed, in the file's own syntax, and a
 routability report; ``--write`` puts the hints into the file. Nothing else in the build changes:
 ``place`` still reads the hints. Stdlib only; the kernel is a speed-up.
+
+``--from OUT`` (PLAN-ORGANIC R2, the loop's reading side) reads the last build's output and runs
+the round from it: each net's real carriers (the design database's net files) stand for its
+relaxed estimate in the report (real -> estimated), the negotiation's history (``pressure.json``,
+written when the route step negotiated) seeds the price field so an instance on a fought-over
+corridor is pushed first, and the placed instances move (as ``--all``). The tool never runs the
+build: ``fk layout --from out --write``, then ``fk build``, is the loop (R3), by hand.
 """
 from __future__ import annotations
 
@@ -103,6 +110,9 @@ class Spec:
     insts: list             # [SpecInst]
     nets: list              # [SpecNet]
     params: Params = field(default_factory=Params)
+    #: [((x, y), milli-tiles)]: where the price field lambda starts above zero (the last build's
+    #: fought-over tiles, ``--from``); the loop raises and decays it from there as from zero
+    price: list = field(default_factory=list)
 
 
 @dataclass
@@ -132,6 +142,10 @@ class _State:
             i = self.idx(t)
             if i is not None:
                 self.owner[i] = -2
+        for t, p in getattr(spec, "price", None) or ():
+            i = self.idx(t)
+            if i is not None and int(p) > self.price[i]:
+                self.price[i] = int(p)
         self.pinned = {}           # tile -> instance whose one-tile attach (a belt end, a port) it is:
                                    # no footprint there, and no other one-tile attach on it
         # (instance, group) -> the straight run of free tiles its belt end demands beyond itself:
@@ -523,10 +537,16 @@ def _stems(spec):
 
 
 def _place_native(spec):
-    stems = _stems(spec)
     args = _flatten(spec)
-    at, before, after, hot, sweeps, unreached = _native.place(*args, stems=stems) if stems \
-        else _native.place(*args)
+    kw = {}                      # the optional arguments only when they say something: the old
+    stems = _stems(spec)         # kernel's shape still works without them
+    if stems:
+        kw["stems"] = stems
+    price = [((int(t[0]), int(t[1])), int(p)) for t, p in (getattr(spec, "price", None) or ())
+             if int(p) > 0]
+    if price:
+        kw["price"] = price
+    at, before, after, hot, sweeps, unreached = _native.place(*args, **kw)
     return Result([None if a is None else tuple(a) for a in at], list(before), list(after),
                   [(tuple(t), u) for t, u in hot], sweeps, [tuple(e) for e in unreached])
 
@@ -874,49 +894,58 @@ def _module_file(path, module):
     return None
 
 
-# -- real costs from the last build (PLAN-ORGANIC R2, the reading side) ------------------------
+# -- the last build's facts (PLAN-ORGANIC R2, the reading side) --------------------------------
 _CARRIERS = ("transport-belt", "underground-belt", "splitter")
+_ROUTED = ("routed", "kept", "patched")
 
 
-def real_costs(path, built, out, module=None):
-    """{spec net index: carriers} the last build laid for the spec's nets, and where they were
-    read: a sealed ``module``'s unit from the compile store under ``out`` (``compiled.current``, the
-    key the last build wrote or laid from; its net names are relative to the unit), the file's
-    top level from the committed layout beside the file (``<name>.fkp``, its carriers keyed
-    ``~NET/...``). Carriers are belts, underground ends and splitters, as the notes count them.
-    Nothing is run: the build's output is read as it stands. -> (real, source) with real empty
-    and the reason as ``source`` when there is nothing to read."""
-    from . import compiled, fkp as fkpmod
-    from .route import _renamed
-    real = {}
-    if built.scope and module:
-        key = compiled.current(out, module)
-        if key is None:
-            return real, f"no compiled unit of {module} under {out}"
-        nets = compiled.Store(compiled.store_dir(out)).load(module, key)
-        if nets is None:
-            return real, f"the stored unit {module}/{key} is not readable (another ROUTER?)"
-        count = {n: sum(1 for row in rows if row[1].endswith(_CARRIERS))
-                 for n, rows in nets.items()}
-        for k, net in enumerate(built.spec.nets):
-            rel = _renamed(net.name, built.scope, "")
-            if rel in count:
-                real[k] = count[rel]
-        near = os.path.relpath(out, os.path.dirname(os.path.abspath(path))).replace(os.sep, "/")
-        return real, f"{near}/compiled/{module}/{key[:8]}"
-    lay_path = os.path.splitext(os.path.abspath(path))[0] + ".fkp"
-    if not os.path.exists(lay_path):
-        return real, f"no layout {os.path.basename(lay_path)} beside the file"
-    lay = fkpmod.load(lay_path)
-    count = {}
-    for key, e in lay.entities.items():
-        if key.startswith("~") and "/" in key and e.name.endswith(_CARRIERS):
-            net = key[1:].rsplit("/", 1)[0]
-            count[net] = count.get(net, 0) + 1
+def real_costs(built, out, factory):
+    """{spec net index: carriers} the last build laid for the spec's nets, read from the design
+    database's net files (``out/design/<factory>/nets``, ``fkcore.design``: the status and the
+    carriers the route step wrote per net, under the names the spec uses, at the top level and in
+    module mode alike). A net it routed counts its belts, underground ends and splitters (0 when
+    its ends met and nothing was laid); one it did not route (unrouted, held, skipped) or never
+    saw is left out and keeps its estimate. Nothing is run: the build's output is read as it
+    stands. -> (real, {spec net index: why} of the nets left out, the folder read)."""
+    from . import design
+    recs = design.read_all(out, factory)
+    real, left = {}, {}
     for k, net in enumerate(built.spec.nets):
-        if net.name in count:
-            real[k] = count[net.name]
-    return real, os.path.basename(lay_path)
+        rec = recs.get(net.name)
+        if rec is None:
+            left[k] = "not in the last build"
+        elif rec["status"] in _ROUTED:
+            real[k] = sum(1 for e in rec["ents"] if e.name.endswith(_CARRIERS))
+        else:
+            left[k] = rec["status"]
+    return real, left, f"{os.path.basename(os.path.normpath(out))}/design/{factory}/nets"
+
+
+def pressure_seed(built, out, factory, alpha):
+    """[((x, y), milli-tiles)]: where the price field starts for ``--from``: the negotiation's
+    history of the unit the spec lays out (``design.read_pressure``; the record's tiles are in
+    the unit's own frame, the spec's box), ``alpha`` (what a sweep adds per belt of overuse) per
+    round a tile was fought over. -> (seeds, one line saying what was read)."""
+    from . import compiled, design
+    rec = design.read_pressure(out, factory).get(built.scope)
+    if rec is None:
+        return [], ("no negotiation record" + (f" of {built.scope}" if built.scope else "")
+                    + " (a build with FK_NEGOTIATE=1 writes design/" + factory
+                    + "/pressure.json): the price field starts at zero")
+    x0, y0 = built.spec.box[0], built.spec.box[1]
+    seeds = [((int(x) + x0, int(y) + y0), int(round(float(v) * alpha)))
+             for x, y, v in rec.get("tiles", ())]
+    seeds = [(t, p) for t, p in seeds if p > 0]
+    rounds = f"{rec.get('rounds')} negotiation round{'s' if rec.get('rounds') != 1 else ''}"
+    if seeds:
+        note = f"{len(seeds)} tiles fought over in {rounds} seed the price field"
+    else:
+        note = f"no tile fought over in its {rounds}: the price field starts at zero"
+    if built.scope and rec.get("key") and rec.get("module"):
+        cur = compiled.current(out, rec["module"])
+        if cur is not None and cur != rec["key"]:
+            note += " (the unit's inside changed since: the store's current key differs)"
+    return seeds, note
 
 
 # -- the command ----------------------------------------------------------------------------------
@@ -938,17 +967,24 @@ def _plot_of(path, flat):
 def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=None, plot=None,
                 from_out=None):
     """-> (the report lines, exit code). The report: a head line, one source line per instance
-    placed, the check lines, the routability report, the timing line. ``from_out`` (an ``out``
-    folder): the last build's real carriers per net stand for the relaxed ``before`` in the
-    report (real -> estimated); a net the build did not route keeps its estimate."""
+    placed, the check lines, the routability report, the timing line. ``from_out`` (the last
+    build's ``out`` folder): the round runs from that build: its real carriers per net stand for
+    the relaxed ``before`` in the report (real -> estimated; a net it did not route keeps its
+    estimate), its negotiation history seeds the price field, and the placed instances move
+    (``all_``)."""
     if plot is None and not module:
         plot = _plot_of(path, flat)
     params = Params() if sweeps is None else Params(sweeps=int(sweeps))
+    if from_out is not None:
+        all_ = True              # a round of the loop moves what the last round placed
     try:
         built = build_spec(flat, cat, module, all_, plot, params)
     except ValueError as exc:
         return [f"layout {flat.name}: {exc}"], 2
     spec = built.spec
+    pnote = ""
+    if from_out is not None:
+        spec.price, pnote = pressure_seed(built, from_out, flat.name, params.alpha)
     t0 = time.perf_counter()
     res = place(spec)
     took = time.perf_counter() - t0
@@ -997,18 +1033,22 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
             + (" ..." if len(res.hot) > 8 else "")
     head = f"estimated belts {before // MILLI} -> {after // MILLI}"
     if from_out is not None:
-        real, source = real_costs(path, built, from_out, module)
+        real, left, source = real_costs(built, from_out, flat.name)
         if real:
             start = sum(real.get(n, max(0, res.before[n]) // MILLI) for n in range(len(spec.nets)))
-            kept = len(spec.nets) - len(real)
-            head = (f"real belts {start} ({source}, {len(real)} of {len(spec.nets)} nets"
-                    + (f"; {kept} without a route keep their estimate" if kept else "")
-                    + f") -> estimated {after // MILLI}")
-            per = ", ".join(f"{spec.nets[n].name} {real[n]}->{max(0, res.after[n]) // MILLI}"
-                            for n in sorted(real))
-            out.append(f"  real -> estimated per net: {per}")
+            head = f"real belts {start} -> estimated {after // MILLI}"
+            why = ""
+            if left:
+                why = "; " + ", ".join(f"{spec.nets[n].name} ({w})" for n, w in sorted(left.items())) \
+                    + (" keep their estimate" if len(left) > 1 else " keeps its estimate")
+            out.append(f"  from {source}: {len(real)} of {len(spec.nets)} nets routed by the last "
+                       f"build{why}; {pnote}")
+            out.append("  per net, real -> estimated: "
+                       + ", ".join(f"{spec.nets[n].name} {real[n]} -> {max(0, res.after[n]) // MILLI}"
+                                   for n in sorted(real)))
         else:
-            out.append(f"  from {from_out}: {source}")
+            out.append(f"  from {from_out}: no net of {flat.name} was built there ({source}); "
+                       f"{pnote}")
     out.append(f"  {head} over {len(spec.nets)} "
                f"nets; {reach}; {len(res.hot)} hot tiles{hot}; {res.sweeps} sweeps")
     out.append(f"  took {took:.1f} s ({which()})")
@@ -1024,7 +1064,8 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
 
 
 def main(a, flat, cat):
-    """``fk layout FILE [MODULE] [--all] [--write] [--sweeps N] [--plot WxH] [--from [OUT]]``."""
+    """``fk layout FILE [MODULE] [--all] [--write] [--sweeps N] [--plot WxH] [--from [OUT]]``;
+    ``--from`` moves the placed instances too (a round of the loop)."""
     plot = None
     if getattr(a, "plot", None):
         try:

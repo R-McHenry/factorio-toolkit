@@ -135,6 +135,7 @@ impl<'a> State<'a> {
         nets: &'a [SNet],
         reach: i64,
         stems: &[i64],
+        price: &[(T, i64)],
     ) -> Self {
         let (x0, y0, x1, y1) = bbox;
         let (w, h) = ((x1 - x0).max(0), (y1 - y0).max(0));
@@ -156,6 +157,14 @@ impl<'a> State<'a> {
         for &t in blocked {
             if let Some(k) = st.idx(t) {
                 st.owner[k] = -2;
+            }
+        }
+        // layout.Spec.price: where lambda starts above zero (the last build's fought-over tiles)
+        for &(t, p) in price {
+            if let Some(k) = st.idx(t) {
+                if p > st.price[k] {
+                    st.price[k] = p;
+                }
             }
         }
         for (n, net) in nets.iter().enumerate() {
@@ -532,8 +541,10 @@ fn full(st: &State, priced: bool) -> Full {
 /// fkcore.layout._place_py: -> (positions, before, after, hot tiles, sweeps, unreached).
 /// `stems` (optional, per net) is the straight run of free tiles a net's consumer belt ends
 /// demand beyond themselves (layout rule 5; the number is lanephys's, read through the spec).
+/// `price` (optional, [(tile, milli-tiles)]) is where the price field starts above zero
+/// (layout.Spec.price: the last build's fought-over tiles, `fk layout --from`).
 #[pyfunction]
-#[pyo3(signature = (bbox, blocked, insts, nets, params, stems=None))]
+#[pyo3(signature = (bbox, blocked, insts, nets, params, stems=None, price=None))]
 #[allow(clippy::type_complexity)]
 pub fn place(
     bbox: (i64, i64, i64, i64),
@@ -542,11 +553,13 @@ pub fn place(
     nets: Vec<SNet>,
     params: (i64, i64, i64, i64, Vec<i64>),
     stems: Option<Vec<i64>>,
+    price: Option<Vec<(T, i64)>>,
 ) -> PyResult<(Vec<Option<At>>, Vec<i64>, Vec<i64>, Vec<(T, i64)>, i64, Vec<(usize, usize)>)> {
     let (sweeps_cap, alpha, decay, reach, steps) = params;
     let steps = if steps.is_empty() { vec![1] } else { steps };
     let stems = stems.unwrap_or_default();
-    let mut st = State::new(bbox, &blocked, &insts, &nets, reach, &stems);
+    let price = price.unwrap_or_default();
+    let mut st = State::new(bbox, &blocked, &insts, &nets, reach, &stems, &price);
     for (i, inst) in insts.iter().enumerate() {
         if let Some(at) = inst.2 {
             st.put(i, Some(at));

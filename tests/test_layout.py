@@ -2,7 +2,8 @@
 net adjacent, spreads a crowded fan-out, never overlaps footprints, keeps ports and fixed instances,
 is deterministic, and the Rust kernel agrees with the Python reference on random specs; `fk layout`
 rewrites hints in place and the written mall builds and routes every net; the example's quoted output
-in EXAMPLES.md is what the command prints."""
+in EXAMPLES.md is what the command prints. PLAN-ORGANIC R: the pair stem (R1), `--from out` reading
+the last build's real carriers and negotiation history (R2), and the loop by hand (R3)."""
 import io
 import os
 import random
@@ -12,7 +13,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 
-from fkcore import flow, layout
+from fkcore import design, flow, layout
 from fkcore.catalog import Catalog
 from fkcore.elaborate import elaborate_file
 from fkcore.layout import Params, Spec, SpecInst, SpecNet, _place_py, place
@@ -82,6 +83,16 @@ def random_spec(seed, n_inst=6, box=22, sweeps=6, pairs=False):
         nets.append(SpecNet(f"n{n}", rnd.randint(1, 2), [(a, 0, True), (b, 0, False)], stem))
     blocked = [(rnd.randint(0, box - 1), rnd.randint(0, box - 1)) for _ in range(rnd.randint(0, 6))]
     return Spec((0, 0, box, box), blocked, insts, nets, Params(sweeps=sweeps))
+
+
+def priced_spec(seed):
+    """A random spec (pairs too) with a seeded price field on random tiles (R2)."""
+    spec = random_spec(seed, pairs=bool(seed % 2))
+    rnd = random.Random(seed * 7 + 1)
+    box = spec.box[2]
+    spec.price = [((rnd.randint(-1, box), rnd.randint(-1, box)), rnd.randint(1, 8) * 500)
+                  for _ in range(rnd.randint(1, 30))]
+    return spec
 
 
 class PlaceTest(unittest.TestCase):
@@ -235,13 +246,68 @@ class ParityTest(unittest.TestCase):
                 self.assertIsNotNone(layout._stems(spec))
                 self.assertEqual(layout._place_native(spec), _place_py(spec))
 
+    def test_python_and_rust_agree_on_prices(self):
+        """R2: a seeded price field, step for step."""
+        for seed in range(6):
+            with self.subTest(seed=seed):
+                spec = priced_spec(seed + 30)
+                self.assertTrue(spec.price)
+                self.assertEqual(layout._place_native(spec), _place_py(spec))
+
     def test_check_mode_runs_both(self):
         os.environ["FK_NATIVE"] = "check"
         try:
             place(random_spec(99, n_inst=4, sweeps=3))
             place(random_spec(98, n_inst=4, sweeps=3, pairs=True))
+            place(priced_spec(97))
         finally:
             del os.environ["FK_NATIVE"]
+
+
+class PriceTest(unittest.TestCase):
+    """R2: ``Spec.price`` seeds the price field (the last build's fought-over tiles): the walk pays
+    it, and a movable instance settles off the priced corridor."""
+
+    def test_seed_is_read_and_paid(self):
+        a = SpecInst("a", square(1, 1), (2, 8, 0), False)
+        b = SpecInst("b", square(1, 1), (12, 8, 0), False)
+        spec = Spec((0, 0, 16, 16), [], [a, b], [SpecNet("ab", 1, [(0, 0, True), (1, 0, False)])],
+                    Params(sweeps=1), [((7, 8), 3000), ((7, 8), 2000), ((99, 99), 5000)])
+        st = layout._State(spec)
+        st.put(0, (2, 8, 0))
+        st.put(1, (12, 8, 0))
+        self.assertEqual(st.price[st.idx((7, 8))], 3000, "the larger seed stands")
+        plain, _r, _u = st.eval_net(0, priced=False)
+        priced, _r, _u = st.eval_net(0, priced=True)
+        self.assertEqual(priced, plain + 2 * layout.MILLI,
+                         "one priced tile in the way: the walk goes round it (two tiles) rather "
+                         "than pay the three")
+        spec.price = [((x, y), 3000) for x in range(4, 11) for y in range(0, 16)]
+        st2 = layout._State(spec)
+        st2.put(0, (2, 8, 0))
+        st2.put(1, (12, 8, 0))
+        priced2, _r, _u = st2.eval_net(0, priced=True)
+        self.assertGreater(priced2, plain, "a priced wall across the board is paid")
+
+    def test_seed_pushes_off_the_corridor(self):
+        """A fixed row's belt end at (3, 10) drives a movable row's belt end. Unpriced the consumer
+        sits beside it (one tile of belt, body in row 9); with rows 9 to 12 priced as a fought-over
+        corridor it settles north of them, where the walk reaches by a tunnel under the driver's
+        body for three tiles instead of paying twenty for one."""
+        def run(price):
+            drv = SpecInst("d", belt_end(1, 1), (3, 9, 0), False)       # belt end at (3, 10)
+            m = SpecInst("m", belt_end(1, 1), None, True)
+            spec = Spec((0, 0, 20, 17), [], [drv, m],
+                        [SpecNet("n", 1, [(0, 0, True), (1, 0, False)])], Params(sweeps=20), price)
+            res = _place_py(spec)
+            no_overlap(self, spec, res)
+            self.assertEqual(res.unreached, [])
+            return res.at[1]
+        plain = run([])
+        self.assertIn(plain[1], range(9, 13), f"unpriced: beside the driver's belt end: {plain}")
+        corridor = [((x, y), 20 * layout.MILLI) for x in range(0, 20) for y in range(9, 13)]
+        pushed = run(corridor)
+        self.assertLessEqual(pushed[1], 7, f"off the priced rows, north of the driver: {pushed}")
 
 
 class HintLineTest(unittest.TestCase):
@@ -294,6 +360,15 @@ def paper_build(folder, name, plot="34x44"):
     return code, summary, carriers
 
 
+def net_carriers(folder, name, nets=None):
+    """The carriers the last build's route step laid for ``nets`` (default: every net) of
+    ``folder/name.fk``, from the design database's net files: what `fk layout --from` reads. An
+    instance's own belt (an AsmRow's) is no net's and is not counted."""
+    recs = design.read_all(os.path.join(folder, "out"), name)
+    return sum(1 for n, r in recs.items() if nets is None or n in nets
+               for e in r["ents"] if e.name.endswith(("transport-belt", "underground-belt", "splitter")))
+
+
 class CommandTest(unittest.TestCase):
     """`fk layout --write` on mall.fk with its hints removed: every instance placed, the file
     elaborates, and a paper build routes every net."""
@@ -323,19 +398,25 @@ class CommandTest(unittest.TestCase):
         self.assertIn(" 0 unrouted", summary)
         self.assertIn(" 0 open", summary)
         self.assertGreater(carriers, 0)
-        # R2's reading side: --from reads the built layout's carriers per net (the top level has
-        # no compiled unit) and the report starts from them
+        # R2's reading side: --from reads the build's net files (the nets' carriers; the AsmRow's
+        # own belt is no net's), the report starts from them, and the placed instances move
         lines3, _c = layout.layout_file(path, flat2, CAT, plot=(34, 44),
                                         from_out=os.path.join(d, "out"))
         text = "\n".join(lines3)
-        self.assertIn("real -> estimated per net:", text)
-        m = re.search(r"real belts (\d+) \(layout\.fkp, (\d+) of (\d+) nets\) -> estimated \d+",
-                      text)
+        self.assertIn("0 fixed", lines3[0], "--from moves the placed instances (as --all)")
+        self.assertIn("  from out/design/layout/nets: 8 of 8 nets routed by the last build; no "
+                      "negotiation record", text)
+        m = re.search(r"real belts (\d+) -> estimated \d+ over 8 nets", text)
         self.assertIsNotNone(m, text)
-        self.assertEqual(int(m.group(1)), carriers, "every carrier of the build is some net's")
-        self.assertEqual(m.group(2), m.group(3), "every net was routed")
-        lines4, _c = layout.layout_file(path, flat2, CAT, plot=(34, 44), from_out=os.path.join(d, "nowhere"))
+        real = net_carriers(d, "layout")
+        self.assertLess(real, carriers, "the AsmRow's own belt is not a net's")
+        self.assertEqual(int(m.group(1)), real, "the nets' carriers of the build")
+        self.assertRegex(text, r"per net, real -> estimated: belts \d+ -> \d+, cab 0 -> 0, circs "
+                               r"\d+ -> \d+, cu 0 -> 0, fe \d+ -> \d+")
+        lines4, _c = layout.layout_file(path, flat2, CAT, plot=(34, 44),
+                                        from_out=os.path.join(d, "nowhere"))
         self.assertTrue(any(l.startswith("  estimated belts ") for l in lines4), lines4)
+        self.assertTrue(any("no net of layout was built there" in l for l in lines4), lines4)
 
     def test_cli_prints_source_lines(self):
         from fkcore import __main__ as cli
@@ -391,13 +472,84 @@ class GroveTest(unittest.TestCase):
         self.assertIn(" 0 unrouted", summary)
         self.assertIn(" 0 open", summary)
         self.assertLessEqual(carriers, 256, "no more carriers than the hand layout")
-        # R2's reading side: a module's real carriers come from its compiled unit
+        # R2's reading side in module mode: the module's nets' real carriers from the net files
         lines2, _c = layout.layout_file(path, flat2, CAT, module="Grove",
                                         from_out=os.path.join(d, "out"))
         text = "\n".join(lines2)
-        self.assertRegex(text, r"real belts \d+ \(out/compiled/Grove/[0-9a-f]{8}, 8 of 8 nets\) -> "
-                               r"estimated \d+ over 8 nets")
-        self.assertRegex(text, r"real -> estimated per net: g/cu0_\|g/fe0_ \d+->\d+")
+        self.assertIn("  from out/design/grove/nets: 8 of 8 nets routed by the last build", text)
+        m = re.search(r"real belts (\d+) -> estimated \d+ over 8 nets", text)
+        self.assertIsNotNone(m, text)
+        self.assertEqual(int(m.group(1)), net_carriers(d, "grove", {n.name for n in built.spec.nets}))
+        self.assertRegex(text, r"per net, real -> estimated: g/cu0_\|g/fe0_ \d+ -> \d+")
+
+
+class LoopTest(unittest.TestCase):
+    """PLAN-ORGANIC R3, the loop by hand on the mall: round 1 `fk layout --write`, `fk build`;
+    round 2 `fk layout --from out --write`, `fk build`. The tool never runs the build. The
+    builds negotiate (FK_NEGOTIATE=1), so the route step writes the pressure record
+    (``out/design/<factory>/pressure.json``) round 2 seeds its price field from; the second build
+    has no more carriers than the first."""
+
+    def test_two_rounds_do_not_get_worse(self):
+        d = tempfile.mkdtemp(prefix="fkloop-")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.environ["FK_NEGOTIATE"] = "1"
+        self.addCleanup(os.environ.pop, "FK_NEGOTIATE", None)
+        path = stripped_mall(d)
+        out = os.path.join(d, "out")
+        flat = elaborate_file(path, CAT)
+        lines1, code = layout.layout_file(path, flat, CAT, write=True, plot=(34, 44))
+        self.assertEqual(code, 0)
+        code, summary1, _c = paper_build(d, "layout")
+        self.assertEqual(code, 0)
+        self.assertIn(" 0 unrouted", summary1)
+        first = net_carriers(d, "layout")
+        self.assertGreater(first, 0)
+        pressure = design.read_pressure(out, "layout")
+        self.assertIn("", pressure, "the top level negotiated and left its record")
+        rec = pressure[""]
+        self.assertEqual(rec["module"], "layout")
+        self.assertIsNone(rec["key"], "the top level is no compile unit: no store key")
+        self.assertGreaterEqual(rec["rounds"], 1)
+        for x, y, h in rec["tiles"]:
+            self.assertTrue(0 <= x < rec["frame"][0] and 0 <= y < rec["frame"][1], (x, y))
+            self.assertGreater(h, 0)
+        # round 2: from the build
+        flat2 = elaborate_file(path, CAT)
+        lines2, code = layout.layout_file(path, flat2, CAT, write=True, plot=(34, 44),
+                                          from_out=out)
+        self.assertEqual(code, 0)
+        text = "\n".join(lines2)
+        m = re.search(r"real belts (\d+) -> estimated (\d+) over 8 nets", text)
+        self.assertIsNotNone(m, text)
+        self.assertEqual(int(m.group(1)), first)
+        if rec["tiles"]:
+            self.assertRegex(text, rf"{len(rec['tiles'])} tiles fought over in {rec['rounds']} "
+                                   r"negotiation rounds? seed the price field")
+        else:
+            self.assertIn("no tile fought over", text)
+        code, summary2, _c = paper_build(d, "layout")
+        self.assertEqual(code, 0)
+        self.assertIn(" 0 unrouted", summary2)
+        second = net_carriers(d, "layout")
+        self.assertLessEqual(second, first, f"round 2 laid {second} carriers, round 1 {first}")
+        self.assertEqual(design.read_pressure(out, "layout").get("", {}).get("rounds"),
+                         rec["rounds"], "a build that lays nothing new keeps the record")
+
+    def test_record_follows_what_stands(self):
+        """The record is written when a step negotiated, kept when a step laid nothing, and
+        removed when a step laid routes without negotiating."""
+        d = tempfile.mkdtemp(prefix="fkpressure-")
+        self.addCleanup(shutil.rmtree, d, True)
+        units = {"": {"module": "m", "key": None, "frame": [4, 4], "rounds": 2, "pres": 2.0,
+                      "tiles": [[1, 1, 1.0]]}}
+        design.write_pressure(d, "m", units)
+        self.assertEqual(design.read_pressure(d, "m"), units)
+        design.write_pressure(d, "m", {}, routed=False)
+        self.assertEqual(design.read_pressure(d, "m"), units)
+        design.write_pressure(d, "m", {}, routed=True)
+        self.assertEqual(design.read_pressure(d, "m"), {})
+        design.write_pressure(d, "m", {}, routed=True)      # nothing there: no error
 
 
 class ExampleTest(unittest.TestCase):

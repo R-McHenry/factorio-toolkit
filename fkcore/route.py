@@ -274,6 +274,10 @@ class Routed:
     #: ("routed", "twin <unit>", "store", or None: not keyed), stored (1 when this run wrote it),
     #: refused (names the force can't build in the stored entry, which was not taken)}
     compiled: dict = field(default_factory=dict)
+    #: PLAN-ORGANIC R2: the negotiation's history per unit (FK_NEGOTIATE=1 only), unit path ('' the
+    #: top level) -> {module, key, frame [w, h], rounds, pres, tiles [[x, y, hist], ...] relative to
+    #: the unit's unturned frame}; ``fk layout --from`` seeds its price field from it
+    pressure: dict = field(default_factory=dict)
 
 
 class _Bounded(Grid):
@@ -3452,7 +3456,10 @@ def _negotiate(flat, cat, js, order, ribs, base_ents, net_frames, claims, rib_of
     _NEG_LAST.clear()
     _NEG_LAST.update(rounds=rounds, settled=len(clash), routed=len(added), failed=len(failed),
                      why={n: str(w)[:160] for n, w in failed.items()})
-    return ((len(added), 0, 0), added, failed, how, rounds, list(order), [], rlines)
+    # the last element (PLAN-ORGANIC R2): the contested tiles' history and the last round's pres,
+    # what the layout's price field starts from
+    return ((len(added), 0, 0), added, failed, how, rounds, list(order), [], rlines,
+            (dict(hist), NEG_PRES * NEG_GROW ** max(0, rounds - 1), rounds))
 
 
 #: the last negotiation's numbers: rounds, nets settled on hard ground, routed, failed
@@ -3984,6 +3991,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     settings = (tuple(_HANDS), tuple(getattr(ribmod, "_UG", ()) or ()), tuple(fluidmod._LAY),
                 _M2M)
     twins, compiled, reused, keys_of, cinfo = {}, {}, {}, {}, {}
+    pressure = {}                # R2: unit -> the negotiation's history (negotiate_on only)
     fpass = None                 # 3.1.4: the fluid world, built at the first unit with pipes
     fluid_done = []              # the fluid nets laid with their units (not in the pass after)
 
@@ -4130,6 +4138,18 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                                  rib_of, joints, limit, terrain)
                 _score, n_added, _f, n_how = neg[:4]
                 proposed.update({n: (laid, n_how.get(n, "")) for n, laid in n_added.items()})
+                hist, pres, rounds = neg[8]
+                if u:
+                    tf = _UnitTurn(sealed[u], lay.insts[u].rot)
+                    fw, fh = tf.w, tf.h
+                else:
+                    tf = _UnitTurn((0, 0, w, h), 0)
+                    fw, fh = w, h
+                pressure[u] = {
+                    "module": cinfo[u]["module"] if u else compiledmod.module_name(flat.name),
+                    "key": ckey, "frame": [fw, fh], "rounds": rounds, "pres": pres,
+                    "tiles": sorted([*tf.tile(t), round(v, 3)] for t, v in hist.items()
+                                    if 0 <= tf.tile(t)[0] < fw and 0 <= tf.tile(t)[1] < fh)}
         u_order, u_passes = keys, route_once(keys, u)
         proposed.clear()
         gidx = _Buckets(ents)
@@ -4291,7 +4311,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
     return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again,
-                  short, known, cinfo)
+                  short, known, cinfo, pressure)
 
 
 def seal_checks(flat, lay, cat):
