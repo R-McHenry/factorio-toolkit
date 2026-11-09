@@ -95,9 +95,87 @@ The four megabelt modules built alone offline (`tools/buildbench.py` on a copy o
 | plasticcol | | 0.3 s | 0.2 s |
 | redcol | | 0.7 s | 0.4 s |
 
+## Wave 2 (K4 and K5), branch `claude/40-kernel2`
+
+Cut from main 55655de (fkroute 0.3.0); merged main again after `claude/40-layout` landed
+(`place.rs`, `fk layout`). fkroute 0.4.0. Same laptop, same tools.
+
+### What landed
+
+- **K4** m2m's sinks as native kinds. `search.rs` knows `LeftTap` (kind 4) and `_EndTap` (kind
+  5) beside the plain tap: a `TapSpec` carries its pick rule and its avoid tiles. `LeftTap`'s
+  rule is `LeftTap.pick` step for step (a tail of 6, no tap off the tile before a tunnel when laid
+  reversed, one fixed side); the side is *read from the physics table*: for a state heading d laid
+  reversed the belt runs d + 2, and of its two sides the kernel takes the one whose inserter,
+  dropping towards the belt, fills the lane the sink names by `drop_lane` (`to_sinks`, once per
+  sink). Nothing in Rust says "the belt's right". `_EndTap`'s rule is its goal: the run's last
+  belt points into none of the belts it is handed. Python hands them over by a small protocol on
+  the sink class (`native_kind`, `native_extra()`), so `steiner` imports nothing of `m2m`;
+  `m2m.LeftTap` now names its lane (`lane = "L"`) and derives its side from `lanephys.drop_lane`
+  too (`_drop_side`), the same answer as the `(d + 3) % 4` it hard-coded. `route._hub_search`
+  lost its `tap is TapSink` gate: m2m's hub (`tap=LeftTap`) runs in `hub_search`. maxflow, the
+  played-rules pass and the augment orchestration stay Python, as planned; the augment loop's
+  A* runs native with no callback.
+- **K5** entities out. `grow` returns `(tree, entities, reversed, counts, problems, cost)`: the
+  forward and the reversed view exactly as `Tree.entities` / `_entities_reversed` lay them
+  (`grow.rs`: `entities`, `Tree::counts`, `Tree::problems` string for string; the tap entity via
+  `_tap_ent`'s rules: it faces its pickup and keeps the vectors that are not its direction's
+  default pair, which the kernel derives from the inserter's reach as `arms.default` does).
+  `hub_search` returns the winner's two entity lists and counts, or the first failure's problem
+  strings; no tree leaves it. `steiner.grow(net=)` returns a `_Grown` dict: a native result's
+  `"tree"` and a Python result's `"entities"` / `"reversed"` are built on first access, so the
+  router (`_tree_job`, `_hub_trees`, `_hub_search_native`, hourglass) reads the views and builds
+  no `Tree` for a native result; the Python hub's `_forward_ground` still asks for one (its own
+  step; the kernel's hub lays that ground itself). Check mode compares the tree and the log as
+  before and the entity views, counts, problems and cost on top.
+- `native_share` counts `astar_callback` (native A*s with a Python goal among their targets) and
+  names fallbacks by `_sink_spec`; m2m's searches were always counted (same entry points).
+- Tests: `test_m2m_left_taps` (LeftTap parity on 150 random reversed fields with Python's pick
+  forbidden; every tap on the left lane by `lanephys.drop_lane`), `test_m2m_end_taps` (_EndTap
+  parity in the augment loop's A*, Python's goal forbidden), `test_m2m_hub_runs_native`,
+  `test_entities_out` (every field kind, `_tree_from_native` forbidden, key order included); the
+  native hub test forbids a Tree too.
+
+### Numbers
+
+`native_share` (calls / seconds per side; wall is the unittest run inside the tool):
+
+| group | before (0.3.0) | after K4 | after K5 |
+|---|---|---|---|
+| test_route (25) | wall 4.3 s; grow 187 native (0.74 s) / 0; A* 1 / 0; hub 26 native (0.20 s) / 0 | wall 2.9 s; grow 187 (0.58 s); hub 26 (0.15 s); callbacks 0 | wall 4.1 s; grow 187 (0.77 s); hub 26 (0.22 s) |
+| pairs (40) | wall 8.7 s; grow 748 (1.08 s) / 0; A* 3; hub 3 (0.01 s) | wall 13.8 s; grow 748 (1.77 s) | wall 11.0 s; grow 748 (1.13 s) |
+| taps (13) | wall 1.4 s; grow 2; hub 14 (0.19 s) | wall 1.7 s; hub 14 (0.23 s) | wall 1.4 s; hub 14 (0.17 s) |
+| test_m2m (23) | wall 23.5 s; grow 124 native (0.10 s) / **60 Python (0.51 s, all LeftTap)**; A* **872 native (0.46 s), with the LeftTap/_EndTap callbacks** / 0; hub 4 native (0.02 s) / **12 Python (0.50 s)** | wall 38.3 s; grow 89 native (0.15 s) / 0; A* 180 native (0.21 s) / 0, **0 callbacks**; hub 16 native (0.39 s) / 0 | wall 16.7 s (21.9 s in a second run); grow 89 (0.06 s); A* 180 (0.10 s); hub 16 (0.24 s) |
+
+The three router groups were already at 0 Python grows / A* / hubs after wave 1; K4 takes m2m
+there too (the A* count falls 872 -> 180 because the 60 Python grows' steps were A*s: they now
+run inside the kernel's grow). What K5 saves is the Python rebuild inside each native call
+(`_tree_from_native`, `tree.cost()`, `counts()`, `problems()`, `entities()`): on test_m2m the
+native grow seconds fall 0.15 -> 0.06 and the hub 0.39 -> 0.24; on the three router groups the
+search seconds are within this laptop's noise (route 0.58 -> 0.77, pairs 1.77 -> 1.13: two
+runs of the same code move by that much, see wave 1), i.e. the rebuild was never a visible share
+there. The walls are dominated by the tests' own Python (m2m's max-flow and played pass): the
+same test_m2m ran 23.5 s, 38.3 s, 16.7 s and 21.9 s across the four measurements.
+
+`FK_NATIVE=check` after K4 and again after K5, all green: test_native (19 after K4: 66.9 s
+native-only / 58.2 s check; 20 after K5: 65.7 s / 51.7 s), test_m2m (23: 59.2 s after K4, 28.3 s
+after K5), test_route (25), test_route_taps (6, 6.5 s / 3.7 s), test_steiner_split_tap (3),
+test_lanes_pairs (30, 6.2 s / 3.5 s), test_lane_goal (6, 41.6 s / 23.7 s); after K5 also
+test_route_promote (4), test_port_pairs (4), test_route_units (3), test_route_cycle (1),
+test_route_ground (2).
+
+After merging main twice (`claude/40-layout`: `place.rs`; `claude/40-lanes`: `lane.rs`), the
+kernel rebuilt as 0.4.0 with all three branches' modules, `FK_NATIVE=check` green again on
+test_native (20, 57.4 s), test_m2m (23, 36.7 s), test_route, test_route_taps, test_steiner_split_tap,
+test_lanes_pairs, test_lane_goal (34.3 s), and on the merged branches' own test_lane_state (16,
+56.3 s check / 42.1 s native) and test_layout (11, 134.0 s check / 34.3 s native). test_m2m with
+`FK_NATIVE=0` (the pure Python search): 51.1 s wall against 25-32 s native.
+
 ## Open
 
-- K4 (m2m's sinks) and K5 (entities out) are wave 2. The kernel's physics table has no reader
-  until K4's drop lane.
-- `hub_search` returns trees, not entities, so Python still rebuilds a `Tree` per hub search
-  (two for the winner, one or two for a first failure); K5 removes that.
+- K6 (the ground) only if the profile asks: the route step on the real workloads is the
+  measure (`tools/buildbench.py` on grove alone and a lab bay), not yet re-run on 0.4.0.
+- `_forward_ground` (the Python hub's step) still builds a `Tree` from the kernel's raw tree
+  when the Python hub runs (a sink the kernel does not know, or FK_NATIVE=0); the native hub
+  needs none.
+- An installed `fkroute` older than 0.4 is ignored (`_NATIVE_NEEDS`), as before with 0.3.
