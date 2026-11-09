@@ -1,0 +1,25 @@
+# shape.fk: a module declared as a polygon; laid out and built inside it, the hull it achieves is
+# the frame its parent reads next. Plot 36x30. Two steps (chapter 6, "The achieved hull").
+# Run:  fk layout shape.fk Mod --write    fk build --to report_checks   (the step-2 lines not in yet)
+#       fk explain shape.fk m             then add step 2 and  fk build --to report_checks  again
+# Expect: `hull      m: 102 of the 408 tiles of its declared frame (25 %), 306 left free` in
+# out\route.txt; the second build routes `gears` through what m left free, with no `overlap` line.
+module Mod shape (0,0) (24,0) (24,12) (16,20) (8,20) (0,12) {
+  port fe_in : in  iron-plate      @w4
+  port g_out : out iron-gear-wheel @e4
+  a = Assembler<recipe=iron-gear-wheel>
+  b = Assembler<recipe=iron-gear-wheel>
+  net fe: fe_in -> a, b
+  net g:  a, b -> g_out
+}
+m   = Mod @(2, 2)
+src = Chest<requester, item=iron-plate, rate=4/s> @(0, 6)
+net feed: src -> m.fe_in
+# -- step 2: a second module's corner in the ground the first left free, and a net through it
+module Side size 6x6 {
+  port i : in iron-gear-wheel @n2
+  box = Chest<provider, limit=100> @(2, 2)
+  net x: i -> box
+}
+s = Side @(10, 16)
+net gears: m.g_out -> s.i

@@ -114,8 +114,9 @@ from . import arms as armsmod
 from . import compiled as compiledmod
 from . import connect as connectmod
 from . import fkp as fkpmod
+from . import hull as hullmod
 from . import steiner as steinermod
-from .expand import attach_points, frame_of, frame_shape_of, port_edges, record_misfit
+from .expand import attach_points, claim_shape_of, frame_of, frame_shape_of, port_edges, record_misfit
 from .steiner import COSTS, DropSink, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
 from .steiner import _UNSUPPORTED
@@ -3609,7 +3610,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         if not shape.is_box:
             owned_shape[path] = shape
         if path in flat.sealed:
-            sealed[path] = (x0, y0, x1, y1, mine)
+            # 43-hull (H5): the unit's own frame (its key, its store coordinates, its nets'
+            # search box) is what it claims, its territory or its declaration; the hull above
+            # is what every other net keeps out of
+            sealed[path] = (x0, y0, x1, y1, claim_shape_of(flat, lay, path, cat).tiles())
     w, h = lay.size or (0, 0)
     box = bounds or (0, 0, w + margin, h + margin)
     # the joint carriers a route may hand over into: a sealed module's port belts and a bus's load and
@@ -4399,6 +4403,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 short[net] = why
     sealed_units = [u for u in units if u]
     if sealed_units:
+        # 43-hull (H5): every sealed unit's achieved hull (its entities and carriers, the 1-tile
+        # closure, its gap, clipped to the frame it was routed in) into out/frames.json beside
+        # the design; the parent's next layout and build keep out of it instead of the claim
+        hull_lines = hullmod.record(flat, lay, cat, new, sealed, compiled, own_all, failed, store,
+                                    cinfo)
         stored = 0
         for u, ckey in compiled.items():
             # 3.1.4: the unit whole, its routes laid this run and those that stand
@@ -4428,6 +4437,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                      + (f", {stored} stored" if store else ""))
         if store and store.out:
             lines += compiledmod.old_lines(store.out)
+        lines += hull_lines
     for net, size, settled, took in groups:
         if size is None:
             lines.append(f"group     {net}: no way even with the nets laid this run lifted: the "

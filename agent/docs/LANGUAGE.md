@@ -42,7 +42,7 @@ net plates: col.pl_out -> box             # the plates into a provider chest
 | `copper` | `copper load: sw.right -> labs`: a copper wire between domains or to a switch's side | 10 |
 | `behave` | `behave fuel_saver on fuel_ctl { ... }`: what a control loop is meant to do (Circuits, below) | 9 |
 | `import` | `import SmelterPair, AsmCell1 from "cells.fk"`: modules and kinds from another file, with the modules and kinds they are built of. `import Gears from "gears.fk"` in the world design makes a file with no module a plot | 7, 12 |
-| `module` | `module NAME<p, q=default> [buffer] [size WxH] { ... }`: a reusable part written like a factory (Modules, below) | 6 |
+| `module` | `module NAME<p, q=default> [buffer] [size WxH \| shape (x,y) (x,y) ...] { ... }`: a reusable part written like a factory; its frame a box or a polygon (Modules, below) | 6 |
 | `port` | `port NAME : in\|out\|inout ITEM [\| ITEM2] @side[pos][L\|R]` inside a module (Modules, below) | 6 |
 | `stack` | `stack c_in -> c_out, p_out -> p_in` inside a cell: pairs each NEAR port with its FAR port (Stacks, below) | 6 |
 | `kind` | `kind Plastics = Machine<entity=chemical-plant, recipe=plastic-bar>`: a name with defaults; `kind CopperCell = FurnaceCell<plate=copper-plate, ore=copper-ore>` a kind of a module. The instance's own parameters win. At the top of a file; not of `Literal` or `Bus`, not inside a module, no loops | 6, 7 |
@@ -174,6 +174,8 @@ module GearRib size 16x10 {
 | `duty=`, `dnp` | every module takes them; any other parameter it doesn't declare is refused |
 | `buffer` | `module LoopEnd buffer size 1x3 { ... }`: its ports are a buffer's ends (Buffers, below) |
 | overlap | two sealed frames may overlap: an `overlap` line, and the shared tiles are both modules' to route on |
+| `shape` | `module Mod shape (0,0) (24,0) (24,12) (16,20) (8,20) (0,12) { ... }`: the frame as a closed polygon where `size WxH` stands, whole-number corners in tiles about the module's origin, its edges on tile boundaries; the tiles whose centres it holds are the frame, the rest of its box is the parent's ground. `@n12` is the shape's outermost tile in column 12; a column the shape does not reach is `port-off-frame` and the port moves to the nearest boundary tile of that side; a self-crossing or flat polygon is `bad-shape` and the module is read as its box. `@(x, y, rot r)` turns the polygon about its origin as it turns a box (chapter 6) |
+| the frame read | a sealed module's frame is read in three steps, each refining the last: the **hull** it achieved when it was last built (`out\frames.json`, written by the build: its machines and belts, one tile around, clipped to the frame it was built in; dropped when the module's inside changes), else the **territory** `fk layout` assigned the instance (`out\territories.json`), else the declaration. The parent's layout and build read the hull, so what a module leaves free is its parent's ground; `fk layout FILE MODULE` lays the inside out in the declared or assigned frame; `fk explain FILE INST` prints frame, territory and hull as rows of `#` and `.` (chapter 6) |
 | `fk explain FILE INST` | an instance as its entities and nets, with its size; a module's internals are its own and a parent change never re-routes them |
 
 ### Stacks: a line of cells
