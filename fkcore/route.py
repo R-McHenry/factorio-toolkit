@@ -1006,10 +1006,11 @@ def _grow_attempts(fixed, machines, sources=False, tap=TapSink, drops=None, net=
 def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None, net=None,
           cap=TAPS_MAX):
     """grow() towards ``fixed`` sinks and ``machines`` over ``_grow_attempts``' sink lists: the
-    first whose tree has no problems, else the last. -> (result, sinks)."""
+    first whose tree has no problems, else the last. -> (result, sinks); the result's
+    ``entities`` / ``reversed`` are the plan entities for ``net``."""
     res = sinks = None
     for sinks in _grow_attempts(fixed, machines, sources, tap, drops, net, cap):
-        res = grow(grid, root, sinks, limit=limit)
+        res = grow(grid, root, sinks, limit=limit, net=net if net is not None else "net")
         if not res["problems"]:
             break
     return res, sinks
@@ -1043,7 +1044,7 @@ def _tree_job(cat, job, blocked, spans, clear, box, limit):
     how = (f"{c['belts']} belts, {c['undergrounds']} underground ends, {c['splitters']} "
            f"{'merges' if reverse else 'splitters'}" + (f", {c['taps']} inserters" if c["taps"]
                                                          else ""))
-    return res["tree"].entities(sinks, net=job.net, reverse=reverse), how
+    return res["reversed" if reverse else "entities"], how
 
 
 # -- the hub --------------------------------------------------------------------------------------
@@ -1182,14 +1183,12 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink)
                          limit, sources=True, tap=tap, drops=job.drops, net=job.net)
     if rres["problems"]:
         return "drivers: " + "; ".join(rres["problems"][:2])
-    rtree = rres["tree"]
-    fgrid = _forward_ground(cat, job, blocked, spans, box, rtree, rsinks, (fx, fy))
-    fres, fsinks = _grow(fgrid, (fx, fy, f, 0), _consumer_sinks(job), job.taps, limit, net=job.net)
+    fgrid = _forward_ground(cat, job, blocked, spans, box, rres, (fx, fy))
+    fres, _fsinks = _grow(fgrid, (fx, fy, f, 0), _consumer_sinks(job), job.taps, limit, net=job.net)
     if fres["problems"]:
         return "consumers: " + "; ".join(fres["problems"][:2])
-    ftree = fres["tree"]
-    plan = rtree.entities(rsinks, net=net, reverse=True) + ftree.entities(fsinks, net=net)
-    return rtree.cost() + ftree.cost(), plan, rres["counts"], fres["counts"]
+    plan = rres["reversed"] + fres["entities"]
+    return rres["cost"] + fres["cost"], plan, rres["counts"], fres["counts"]
 
 
 def _driver_sinks(job):
@@ -1200,11 +1199,13 @@ def _consumer_sinks(job):
     return [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
 
 
-def _forward_ground(cat, job, blocked, spans, box, rtree, rsinks, front):
-    """The forward tree's ground once the reversed tree stands: what stood, the reversed tree's
-    tiles and the tiles its carriers point into (all but the hub's front tile, where the forward
-    tree starts), its tunnels among the spans."""
-    laid = _carriers(job, rtree.entities(rsinks, net=job.net, reverse=True), job.net)
+def _forward_ground(cat, job, blocked, spans, box, rres, front):
+    """The forward tree's ground once the reversed tree stands (``rres``: its grow result): what
+    stood, the reversed tree's tiles and the tiles its carriers point into (all but the hub's
+    front tile, where the forward tree starts), its tunnels among the spans. The Python hub's
+    step; the native hub (``fkroute.hub_search``) lays the same ground in the kernel."""
+    laid = _carriers(job, rres["reversed"], job.net)
+    rtree = rres["tree"]
     fb = set(blocked) | set(rtree.tiles())
     for e in laid:
         fb |= fkpmod.tiles_of(cat, e)
@@ -1432,9 +1433,10 @@ def _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap=TapSin
 
 def _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit, tap=TapSink):
     """_hub_search in the kernel: the candidates and, per candidate, the reversed and the forward
-    tree over ``_grow_attempts``' sink lists, in one call (``fkroute.hub_search``); the trees come
-    back and the plan is laid here. ``tap``: the driver machines' sink kind. _UNSUPPORTED where
-    the kernel can't: no kernel, a sink it does not know, a tile that is no int."""
+    tree over ``_grow_attempts``' sink lists, in one call (``fkroute.hub_search``); the winner's
+    plan entities and counts come back (PLAN-4.0 K5: no Tree is rebuilt here), or the first
+    failure's problems. ``tap``: the driver machines' sink kind. _UNSUPPORTED where the kernel
+    can't: no kernel, a sink it does not know, a tile that is no int."""
     if not steinermod.native_on():
         return _UNSUPPORTED
     ng = _native_box_grid(grid)
@@ -1458,42 +1460,18 @@ def _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit, tap=Ta
         best, fail, n = steinermod._native.hub_search(
             ng, nd, nc, ne, _HUBS, nclear, [s for s, _n in rspec], [nm for _s, nm in rspec],
             [s for s, _n in fspec], [nm for _s, nm in fspec], ins.rows,
-            steinermod._native_costs(COSTS), steinermod.IMPROVE, int(limit), _HUB_WINS)
+            steinermod._native_costs(COSTS), steinermod.IMPROVE, int(limit), _HUB_WINS, net=str(job.net))
     except (TypeError, OverflowError):
         return _UNSUPPORTED
     if n == 0:
         return None, "no free tile is reached from every driver and consumer (no hub)"
-
-    def trees(hub, f, ri, rout, fi, fout, ground):
-        """The Python trees of a candidate's two outputs (``ground``: the forward tree's grid is
-        built too, for its problems)."""
-        fx, fy = hub[0] + _DX[f], hub[1] + _DY[f]
-        rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
-        rsinks = ratt[ri]
-        rtree, _log = steinermod._tree_from_native(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), rsinks, None, rout)
-        if fout is None:
-            return rtree, rsinks, None, None
-        fgrid = _forward_ground(cat, job, blocked, spans, box, rtree, rsinks, (fx, fy)) if ground else grid
-        fsinks = fatt[fi]
-        ftree, _log = steinermod._tree_from_native(fgrid, (fx, fy, f, 0), fsinks, None, fout)
-        return rtree, rsinks, ftree, fsinks
-
     if best is None:
-        hub, f, side, ai, tout, rpair = fail
-        hub = tuple(hub)
-        if side == 0:
-            tree, sinks, _f, _s = trees(hub, f, ai, tout, None, None, False)
-            why = "drivers: " + "; ".join(tree.problems(sinks)[:2])
-        else:
-            ri, rout = rpair
-            _r, _rs, tree, sinks = trees(hub, f, ri, rout, ai, tout, True)
-            why = "consumers: " + "; ".join(tree.problems(sinks)[:2])
+        hub, f, side, problems = fail
+        why = ("drivers: " if side == 0 else "consumers: ") + "; ".join(problems[:2])
         return None, f"none of {n} hubs routes; first: hub {hub[0]},{hub[1]}: {why}"
-    hub, f, ri, rout, fi, fout = best
-    hub = tuple(hub)
-    rtree, rsinks, ftree, fsinks = trees(hub, f, ri, rout, fi, fout, False)
-    plan = rtree.entities(rsinks, net=job.net, reverse=True) + ftree.entities(fsinks, net=job.net)
-    return plan, _hub_how(rtree.counts(), ftree.counts(), hub, f)
+    hub, f, _ri, rplan, rc, _fi, fplan, fc = best
+    counts = [dict(zip(steinermod._COUNTS, c)) for c in (rc, fc)]
+    return rplan + fplan, _hub_how(counts[0], counts[1], tuple(hub), f)
 
 
 # -- one net --------------------------------------------------------------------------------------

@@ -244,6 +244,36 @@ class NativeParity(unittest.TestCase):
         self.assertGreater(found, 60)
         self.assertGreater(ended, 15)
 
+    def test_entities_out(self):
+        """PLAN-4.0 K5: the kernel hands back the plan entities (the forward view and the reversed
+        view as Tree.entities lays them: belts with their out heading, underground halves,
+        splitters, inserters with their arms canonicalised), the counts, the problem strings and
+        the cost; Python builds no Tree for them."""
+        kinds = {"arm": 0, "split": 0, "ug": 0, "problem": 0, "fixed_leaf": 0}
+        for seed in range(120):
+            for mk in (_case, _reversed_case, _taps_case, _m2m_case):
+                grid, root, sinks = mk(seed)
+                if not sinks:
+                    continue
+                with self.subTest(seed=seed, kind=mk.__name__):
+                    with mock.patch.dict(os.environ, {"FK_NATIVE": "0"}):
+                        py = steiner.grow(grid, root, sinks, limit=20000, net=f"n{seed}")
+                    with mock.patch.dict(os.environ, {"FK_NATIVE": "1"}), \
+                            mock.patch.object(steiner, "_tree_from_native", side_effect=AssertionError("a Tree was built")):
+                        nat = steiner.grow(grid, root, sinks, limit=20000, net=f"n{seed}")
+                        for k in ("entities", "reversed", "counts", "problems", "cost", "log"):
+                            self.assertEqual(nat[k], py[k], k)
+                        self.assertNotIn("tree", nat)
+                    for e in nat["entities"]:
+                        self.assertEqual(list(e), list(next(p for p in py["entities"] if p == e)))  # key order too
+                    kinds["arm"] += any("pick" in e for e in nat["entities"])
+                    kinds["split"] += any(e["name"] == "splitter" for e in nat["entities"])
+                    kinds["ug"] += any(e["name"] == "underground-belt" for e in nat["reversed"])
+                    kinds["problem"] += bool(nat["problems"])
+                    kinds["fixed_leaf"] += any(isinstance(s, FixedSink) for s in sinks) and not nat["problems"]
+        for k, n in kinds.items():
+            self.assertGreater(n, 5, k)
+
     def test_m2m_hub_runs_native(self):
         """PLAN-4.0 K4: route._hub_search with tap=m2m.LeftTap (m2m's hub) runs in the kernel, no
         Python hub search and no Python grow, and gives the Python composite's plan and report on
@@ -323,6 +353,7 @@ class NativeParity(unittest.TestCase):
         job, occ, spans, clear, box = self._hub_case(1)
         with mock.patch.object(route, "_hub_search_py", side_effect=AssertionError("python hub ran")), \
                 mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")), \
+                mock.patch.object(steiner, "_tree_from_native", side_effect=AssertionError("a Tree was built")), \
                 mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
             plan, how = route._hub_search(Catalog.load(), job, occ, spans, clear, box, 20000)
         self.assertIsNotNone(plan, how)
