@@ -16,6 +16,8 @@ build script. `docs\examples\` holds the files this guide quotes.
 > where it happened. The fix is always the same and always the designer's: seal the sub-unit
 > (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
 > inside one module can never touch another. Router options and effort levels do not fix a design.
+> Each level routes a handful of nets: `fk check` says `flat` for a level past 60, and the build's
+> `level` lines give every level's nets, seconds and frame (a minute at one level is too long).
 > The checks name the module and the cause; `BUILDING.md` "Hierarchy" says how to build it right.
 
 ## 1. Copy the file
@@ -132,12 +134,16 @@ Each step writes `game\out\<step>.txt` with its whole report. The ones to read:
 
 ```
 gears: 2 routed, 0 kept (0 pinned from the committed .fkp), 0 failed, 1 pass
+  level     the top level: 2 nets searched, 0 failed, 0.0 s, frame 12x13
   routed    gear: 1 -> 1, 6 belts, 0 underground ends, 0 splitters, 1 inserters
   routed    plates_in: 1 -> 1, 2 belts, 0 underground ends, 0 merges, 1 inserters
 ```
 
 `1 -> 1` is one driver to one consumer. A net that found no way says `not routed` with the
-reason, and the summary counts it under `failed`.
+reason, and the summary counts it under `failed`. `level` is one line per level that searched this
+build (the top of the file, or one sealed module, chapter 11): its nets, how many failed, the
+seconds and the frame. A level past 60 nets or 60 s is the check `flat`: the hierarchy is missing
+there.
 
 `out\report_checks.txt`, the verdict:
 

@@ -44,6 +44,10 @@ SIZES = {"gears": "16x16", "smelting": "26x26", "shared-belt": "26x23", "smelter
 #: 40-layout: the examples with no `@(x, y)` hints, laid out with `fk layout --write` (as the
 #: chapter does) before the paper build
 LAID_OUT = {"layout", "territory"}
+#: 43-mines (chapter 3): the examples that build on the terrain fixture `patch.terrain.json` with
+#: its own script `patch.build.fkb` (the template's steps through `place`): their plot on it. They
+#: are judged by the size, place and check lines the chapter quotes, not by a summary line
+TERRAIN = {"ore-patch": "0,0 60x40", "mixed-patch": "0,40 60x40"}
 #: the fk wrapper's own commands (agent/fk.py) besides fkcore's subcommands
 WRAPPER = {"build", "look", "wait", "stage", "lab", "alone", "sim", "map", "capture", "catalog",
            "route", "place", "report", "compile", "lua", "stats"}
@@ -79,11 +83,13 @@ def paper_build(name):
             shutil.copytree(p, os.path.join(d, f))
         else:
             shutil.copy(p, d)
+    script, terrain, plot = SCRIPT, "none", f"0,0 {SIZES.get(name, '200x200')}"
+    if name in TERRAIN:
+        script, terrain, plot = read(EX, "patch.build.fkb"), "patch", TERRAIN[name]
     with open(os.path.join(d, "nauvis.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(SCRIPT)
+        fh.write(script)
     with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(f"surface nauvis\nterrain none\nplace {name} = {name} plot 0,0 "
-                 f"{SIZES.get(name, '200x200')}\n")
+        fh.write(f"surface nauvis\nterrain {terrain}\nplace {name} = {name} plot {plot}\n")
     if name in LAID_OUT:
         from fkcore import layout as layoutmod
         from fkcore.elaborate import elaborate_file
@@ -112,6 +118,8 @@ class ExamplesBuildTest(unittest.TestCase):
         docs = squash(read(DOCS, "EXAMPLES.md"))
         start = squash(read(DOCS, "START.md"))
         for name in examples():
+            if name in TERRAIN:
+                continue
             with self.subTest(example=name):
                 code, summary, checks, d = paper_build(name)
                 self.addCleanup(shutil.rmtree, d, True)
@@ -125,6 +133,39 @@ class ExamplesBuildTest(unittest.TestCase):
                               f"  {summary}")
                 if name == "gears":
                     self.assertIn(squash(summary), start)
+
+    def test_the_patch_examples_build_on_their_terrain(self):
+        """43-mines (chapter 3): ore-patch.fk and mixed-patch.fk build to `place` on
+        patch.terrain.json with patch.build.fkb, and the size, place and check lines the chapter
+        quotes are the build's."""
+        docs = squash(read(DOCS, "EXAMPLES.md"))
+        for name in TERRAIN:
+            with self.subTest(example=name):
+                code, _summary, checks, d = paper_build(name)
+                self.addCleanup(shutil.rmtree, d, True)
+                self.assertEqual(code, 0, f"{name}: the build stopped")
+                place = read(d, "out", "place.txt")
+                placed = [l.strip() for l in place.splitlines() if l.strip().startswith("placed ")]
+                self.assertEqual(len(placed), 1, place)
+                self.assertIn(squash(placed[0]), docs, f"{name}: not quoted: {placed[0]}")
+                mixed = [c for c in checks if c[0] == "mixed-patch"]
+                if name == "ore-patch":
+                    sized = read(d, "out", "size.txt")
+                    self.assertIn("sized: ore n=14 (auto 4..30)", sized)
+                    quoted = [l.strip() for l in sized.splitlines()
+                              if l.startswith("sized:") or "@patch(iron-ore):" in l
+                              or "on their ore by place" in l]
+                    self.assertEqual(len(quoted), 3, sized)
+                    for line in quoted:
+                        self.assertIn(squash(line), docs, f"{name}: not quoted: {line}")
+                    self.assertEqual(mixed, [])
+                    self.assertIn("14/14 drills on iron-ore", placed[0])
+                else:
+                    self.assertEqual(len(mixed), 1, checks)
+                    code_, where, msg = mixed[0]
+                    self.assertIn(squash(f"{code_} {where}: {msg}"), docs, f"not quoted: {msg}")
+                    self.assertIn("4 of 8 drills placed", msg)
+                    self.assertTrue(placed[0].endswith("; 4 left out (mixed-patch)"), placed[0])
 
     def test_what_the_chapters_quote(self):
         """A few lines the chapters quote beyond the summary: the gates' amounts, the ribbon, the

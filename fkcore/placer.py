@@ -22,6 +22,14 @@ over the ore, not over the plot. Deterministic, pure, stdlib only. It never chan
 no spot holds every drill, :func:`largest_fit` says how many drills of the same row would fit,
 and where, for the report. :func:`cover` (M2) is ``n=auto``'s count: the most drills of the row,
 within its bounds, with a clean spot on the patch.
+
+**Patches from the design** (PLAN-ORGANIC M3, 43-mines): :func:`patches` reads the terrain file
+the design names (``read-terrain``: ``<name>.terrain.json``, ``fkcore.terrain``) and gives every
+patch of a resource as an :class:`OrePatch` (its tiles, amount, box and centroid, in the
+terrain's own map coordinates), largest first, numbered as the surface file's ``iron-ore#2``
+names them; :func:`patch` looks one up by that name and :func:`nearest_patch` picks the nearest
+that holds at least ``need`` tiles. The world placer's pins on ore (part T) read these; nothing
+here reads the world.
 """
 from __future__ import annotations
 
@@ -29,11 +37,12 @@ import math
 from dataclasses import dataclass
 
 from . import facts as _facts
+from . import terrain as _terrain
 from .catalog import MINING_RADIUS
 from .compose import turn
 
 __all__ = ["Spot", "shape", "mining_area", "place_on_patch", "largest_fit", "cover", "others",
-           "filter_slots"]
+           "filter_slots", "OrePatch", "patches", "patch", "nearest_patch"]
 
 _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)
@@ -67,6 +76,82 @@ class _Shape:
     bodies: list             # [frozenset] one per drill
     areas: list              # [frozenset] one per drill: its mining area
     ends: frozenset          # the tiles the row's routes start or end on (outside its entities)
+
+
+@dataclass(frozen=True)
+class OrePatch:
+    """One patch of one resource, as the terrain file holds it (map coordinates)."""
+    resource: str
+    n: int                   # 1 is the largest patch of the resource: the ``#k`` of ``iron-ore#k``
+    tiles: frozenset         # {(x, y)}: every tile of the patch (8-connected, ``terrain.patches``)
+    amount: int              # the ore on it
+    box: tuple               # (x0, y0, x1, y1), half-open
+    centroid: tuple          # (x, y): the mean of the tile centres, floats
+
+    @property
+    def name(self):
+        return f"{self.resource}#{self.n}"
+
+    @property
+    def size(self):
+        return self.box[2] - self.box[0], self.box[3] - self.box[1]
+
+    def __len__(self):
+        return len(self.tiles)
+
+
+def _resources(terrain):
+    """{resource: {tile: amount}} from what the caller has: a ``terrain.Terrain``, the path of a
+    ``.terrain.json``, the file's dict, a ``FrameGround`` (its ``ore``, in the factory frame) or
+    that mapping itself."""
+    if isinstance(terrain, str):
+        terrain = _terrain.load(terrain)
+    if isinstance(terrain, _terrain.Terrain):
+        return terrain.resources
+    if isinstance(terrain, _terrain.FrameGround):
+        return terrain.ore
+    if isinstance(terrain, dict) and "resources" in terrain and "surface" in terrain:
+        return _terrain.from_dict(terrain).resources
+    return terrain or {}
+
+
+def patches(terrain, resource=None):
+    """[OrePatch]: every patch of ``resource`` in ``terrain`` (every resource's when None), the
+    largest first within a resource and numbered from 1 as ``terrain.patches`` numbers them (the
+    ``#k`` a surface file's ``place ... patch iron-ore#2`` and a pin on ore use). ``terrain`` is a
+    ``terrain.Terrain``, the path of the ``.terrain.json`` the design names, the file's dict, a
+    ``FrameGround`` (then the tiles are in that plot's frame) or a {resource: {tile: amount}}
+    mapping. Pure; nothing is read from the world."""
+    res = _resources(terrain)
+    if resource is not None:
+        res = {resource: res[resource]} if resource in res else {}
+    out = []
+    for name, ps in sorted(_terrain.patches(res).items()):
+        for p in ps:
+            xs = sum(t[0] + 0.5 for t in p.tiles) / len(p.tiles)
+            ys = sum(t[1] + 0.5 for t in p.tiles) / len(p.tiles)
+            out.append(OrePatch(name, p.n, p.tiles, p.amount, p.box, (xs, ys)))
+    return out
+
+
+def patch(terrain, name):
+    """The OrePatch ``name`` names (``iron-ore#2``; plain ``iron-ore`` is its largest, ``#1``),
+    or None when the terrain has no such patch."""
+    resource, _hash, k = str(name).partition("#")
+    want = int(k) if k.strip().isdigit() else 1
+    return next((p for p in patches(terrain, resource) if p.n == want), None)
+
+
+def nearest_patch(terrain, resource, point, need=0):
+    """The patch of ``resource`` whose centroid is nearest ``point`` (x, y) among those with at
+    least ``need`` tiles, or None (PLAN-ORGANIC T4: a pin with no ``#k`` takes the nearest patch
+    that fits the need). Ties go to the larger patch, then the lower number."""
+    fit = [p for p in patches(terrain, resource) if len(p.tiles) >= need]
+    if not fit:
+        return None
+    px, py = float(point[0]), float(point[1])
+    return min(fit, key=lambda p: ((p.centroid[0] - px) ** 2 + (p.centroid[1] - py) ** 2,
+                                   -len(p.tiles), p.n))
 
 
 def mining_area(name, x, y):

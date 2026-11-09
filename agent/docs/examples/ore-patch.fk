@@ -1,0 +1,11 @@
+# ore-patch.fk: a miner row pinned to its ore and counted by the patch. Plot 60x40 at 0,0 on
+# docs\examples\patch.terrain.json (`terrain patch`: a 30x7 iron strip with a copper streak under
+# its west end). Shows: `@patch(iron-ore)` in place of `@(x, y)`, `n=auto 4..30` sized by what
+# the patch holds, the drills' mining areas kept off the copper.
+# Run:  fk build --to place    (then read out\size.txt and out\place.txt)
+# Expect: `sized: ore n=14 (auto 4..30)`; `placed ore: @patch(iron-ore) at 7,10 rot 0, the row runs
+# E-W (the iron-ore in the plot spans 30x7, long axis E-W): 14/14 drills on iron-ore ...`.
+ore = MinerRow<n=auto 4..30, resource=iron-ore> @patch(iron-ore)
+box = Chest<provider, limit=4>                  @(50, 30)
+
+net ore_: ore -> box

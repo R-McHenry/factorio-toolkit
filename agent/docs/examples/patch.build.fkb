@@ -1,0 +1,9 @@
+# patch.build.fkb: the steps ore-patch.fk and mixed-patch.fk need (EXAMPLES.md chapter 3): the
+# terrain the surface names, then size and place. In a run the template's nauvis.build.fkb has
+# the same steps (`read_terrain map`: name the fixture game\map.terrain.json, or change the line)
+# and `fk build --to place` runs them.
+read_surface    nauvis
+read_terrain    patch
+elaborate
+size
+place

@@ -282,6 +282,15 @@ class Routed:
     #: top level) -> {module, key, frame [w, h], rounds, pres, tiles [[x, y, hist], ...] relative to
     #: the unit's unturned frame}; ``fk layout --from`` seeds its price field from it
     pressure: dict = field(default_factory=dict)
+    #: PLAN-ORGANIC D5: what each level searched this build, unit path ('' the top level) ->
+    #: {nets: [the nets laid this run at that level], took: seconds}; a unit laid from the store
+    #: or as a twin searched nothing and is not here. fkcore.flow's `level` lines read it
+    levels: dict = field(default_factory=dict)
+
+
+#: PLAN-ORGANIC D5: the seconds one level (the top, or one sealed unit) may search before the
+#: build's `level` line calls it `flat`; elaborate.LEVEL_NETS is the count on paper
+LEVEL_SECONDS = 60.0
 
 
 class _Bounded(Grid):
@@ -4140,6 +4149,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 last_key[net] = fluid_key(net, ents)
             landed(net, took)
 
+    levels = {}                                      # PLAN-ORGANIC D5: unit -> what it searched
     for u in units:
         mine = list(nets_of.get(u, ()))              # the belt nets laid this run
         fl = fluid_units.get(u, [])                  # the fluid nets laid this run
@@ -4221,6 +4231,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             compiled[u] = ckey
             cinfo[u]["from"] = "standing"
             continue
+        t_level = time.monotonic()
         keys = ranked(unit_keys.get(u, []))
         swaps_before = len(swaps)
         if negotiate_on():
@@ -4250,6 +4261,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         passes = max(passes, u_passes)
         if fl:
             fluid_unit(u, fl)            # 3.1.4: the unit's pipes, on its belts
+        levels[u] = {"nets": list(lay_now), "took": time.monotonic() - t_level}
         if ckey is not None and not any(n in failed for n in lay_now) \
                 and len(swaps) == swaps_before:
             twins.setdefault(ckey, u)
@@ -4408,7 +4420,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
     return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again,
-                  short, known, cinfo, sorted(abut), pressure)
+                  short, known, cinfo, sorted(abut), pressure, levels)
 
 
 def seal_checks(flat, lay, cat):
