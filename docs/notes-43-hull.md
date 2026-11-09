@@ -101,12 +101,27 @@ The L, three builds: build 1 `4 routed`, `hull ell: 67 of the 240 tiles of its d
 (27 %), 173 left free`, 1 stored; build 2 `0 routed, 4 kept`, `hull ... unchanged`, 0 stored; the
 machine moved a tile inside: `hull.source` reads `declared`, build 3 records a new hull.
 
-## Test runs
+## The merge with main 66b8801
 
-Filled in at the end of the sitting (see the report): `tests.test_frame`, `tests.test_hull`,
-`tests.test_module_overlap`, `tests.test_route_units`, `tests.test_compiled`, `tests.test_design`,
-`tests.test_layout`, `tests.test_examples_docs`; `FK_NATIVE=check` on `test_frame`, `test_hull`
-and `test_layout`.
+`git merge main` after the work: one conflict, `tests/test_examples_docs.py` (43-mines'
+`TERRAIN` beside my `LAID_OUT` dict and `STEPS`; both kept). route.py, EXAMPLES.md and LANGUAGE.md
+merged on their own. Main's `size.fit` reads `planned_shape` and `own_frame` (43-mines): both keep
+their signatures, and `planned_shape` now answers for modules (hull first), so does-not-fit judges
+a module by its hull's tiles; `_module_shape` there stays as its fallback.
+
+## Test runs (on the merged tree, 7c736f9)
+
+- `tests.test_frame tests.test_hull tests.test_module_overlap tests.test_size tests.test_compiled
+  tests.test_route_units tests.test_design`: 95 tests, OK (36 s).
+- `tests.test_layout tests.test_examples_docs`: 31 tests, OK (93 s; shape.fk built in its two
+  steps, main's two-round stories of chapters 9 and 11 unchanged by the hull: the claim is the
+  key).
+- `FK_NATIVE=check python -m unittest tests.test_frame tests.test_hull`: 30 tests, OK; before the
+  merge, `FK_NATIVE=check tests.test_layout`: 11 OK (parity unchanged: no Rust touched).
+- Before the merge, on 90e20a0 + this branch: the same seven modules plus the docs test green
+  after the key fix; the three `test_compiled` failures and `--reuse-lab`'s of the hull-in-the-key
+  attempt are what decided the claim/hull split above; busbase's one-entity drift is what
+  decided the per-Flat snapshot.
 
 ## Decided here (say if otherwise)
 
@@ -145,10 +160,14 @@ and `test_layout`.
   the declared box (`build_spec`'s box is `inst.size`); the cell beyond the claim is the frame for
   the router and the parent, not for the inside's layout. Wave 1 cells equal the frames, so
   nothing shows yet.
-- A parent's trunk laid through a module's free ground stands inside the module's claimed box,
-  so the unit's `standing` key part changes on the next build (a `differs in standing` line, the
-  unit stored again; nothing searched, its nets stand). The key's `standing` filter is the
-  claim's box, in route.py.
+- **A parent's belt in a polygon's notch re-keys the unit once** (wave 1's rule, seen here): the
+  key's `standing` part takes every entity in the claim's *box* (`unit_parts`: `x0 <= e.x < x1
+  and y0 <= e.y < y1`), so the L's second build stores a second entry that differs in
+  `standing` and `catalog` only (the parent's `gears` belt through the notch; nothing searched,
+  its nets stand). The same will happen to a trunk laid through a module's hull-free ground. The
+  fix is one line in `unit_parts`, route.py's: filter `standing` by the claim's tiles
+  (`sealed[u][4]`), not its box. `tests.test_hull.HullRefinesTest` pins the present behaviour
+  (differs in at most `standing`, `catalog`; never `frame`, `width`, `height`).
 - `fk lab` / `fk alone` build a copy of the design in a workspace: their hulls go to the
   workspace's `out/frames.json`, not the game's. The world build records every unit's hull itself.
 - T1's "a module built alone has its hull as its need": `hull.achieved(flat, path)` is there for
