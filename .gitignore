@@ -5,3 +5,7 @@ out/
 
 # the golden check's frozen designs keep their out/ (force.json, avail.json)
 !tests/golden/*/out/
+
+# the tree's own Rust kernel (tools/native_build.py)
+fkroute.pyd
+fkroute.so
