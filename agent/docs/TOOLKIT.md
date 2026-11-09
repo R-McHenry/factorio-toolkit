@@ -153,8 +153,10 @@ carriers), and the next build starts from these, even when the last one stopped 
 status`, `fk hold`, `fk seed` and `fk route NET` work on them (chapter 11). A net the router can't
 find a way for can be sent through a piece from `game\routing.fk` (LANGUAGE.md). `out\route.txt`
 has a `group` line for each net that got a group try, a `ribbon` line per ribbon (chapter 8), and
-`compiled` lines for the store. `FK_NEGOTIATE=1` turns on an opt-in negotiation pass; it is
-measured, not the default.
+`compiled` lines for the store. Its summary counts what was searched: `5 routed, 737 kept, 584
+pass-through` means five nets were laid, 737 stand as they were, and 584 lay nothing (two ports
+that meet on one edge, a drill dropping straight in); a rebuild with no change searches nothing.
+`FK_NEGOTIATE=1` turns on an opt-in negotiation pass; it is measured, not the default.
 
 ### Sealed modules compile once
 
@@ -169,8 +171,13 @@ routed on its own each time (stacked, the pipes above and below would touch), so
 pipes straight through it, as the megabelt's cells do. The key hashes everything the inside is
 laid to (the frame, what stands in it, each net's ends, items, lanes and taps, the children's keys,
 the catalog and terrain facts, the router's settings, seeds and held routes, the router version),
-so a change inside routes it again by itself; nothing to clear. A module built alone on the lab
-from your game folder writes the same store. Entries written by an older router are not read, and
+so a change inside routes it again by itself; nothing to clear. When a module misses the store,
+the route step says which part of its key changed since the module's last entry (`compiled  a:
+not in the store; Gears's last entry (3f3459bd) differs in instances, net g/sources`), and
+`out\design\<factory>\units.json` records every sealed unit's key and its parts, build after
+build. A renamed instance is a new unit: every net under it is a new name, routed again (its
+sealed insides come from the store). A module built alone on the lab from your game folder
+writes the same store. Entries written by an older router are not read, and
 the route step and `fk status` say so once. Chapter 11 shows the lines.
 
 ### After the route: circuits, the paste, robots

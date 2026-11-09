@@ -636,12 +636,29 @@ def _entities(net, placed):
     return out
 
 
+def _edges_near(edges, ents, margin=2):
+    """The port edges of ``edges`` within ``margin`` tiles of the box ``ents`` span: a port with
+    no carrier of the ground on either side is no node of the judge's graph anyway."""
+    if not edges or not ents:
+        return edges
+    xs = [math.floor(float(e.x)) for e in ents]
+    ys = [math.floor(float(e.y)) for e in ents]
+    x0, y0, x1, y1 = min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin
+
+    def inside(t):
+        return x0 <= t[0] <= x1 and y0 <= t[1] <= y1
+    return {k: pe for k, pe in edges.items() if inside(pe.src) or inside(pe.dst)}
+
+
 def _judge(cat, base, extra, flat, net, new, edges=None):
     """``fkcore.connect`` on the layout with the new carriers: connected and no SPILL of them.
     ``edges``: the fluid ports' edges (2.1), so a port is the net's end."""
     fn = flat.nets[net]
-    rep = connectmod.connect(list(base) + list(extra) + list(new), cat,
-                             {net: (list(fn.drivers), list(fn.consumers))}, edges or None)
+    ents = list(base) + list(extra) + list(new)
+    # 3.1.5: only the ports near the ground judged: every fluid port of the layout went into each
+    # judge's graph (fen: 592 ports, about 0.4 s a net, most of a rebuild's route step)
+    rep = connectmod.connect(ents, cat, {net: (list(fn.drivers), list(fn.consumers))},
+                             _edges_near(edges, ents) or None)
     mine = {e.key for e in new}
     leaks = [lk for lk in rep.leaks if lk.src in mine or lk.dst in mine]
     r = rep.nets[net]
