@@ -1,0 +1,36 @@
+# mall-shared.fk: the compact mall's two rows and corridor (y 5..8), but gears and green circuits
+# are made once, in row A, and each is one net to every maker in row B that takes it (Rory,
+# 2026-10-24: "gears and green as one net each, rather than a factory next to each consumer").
+# The router decides how iron, gears and circuits share the corridor's belts and lanes.
+
+# row A at y 2: two gear makers, two cable -> circuit pairs (the cable by one inserter)
+g1     = Assembler<recipe=iron-gear-wheel>        @(2, 2)
+g2     = Assembler<recipe=iron-gear-wheel>        @(6, 2)
+k1     = Assembler<recipe=copper-cable>           @(10, 2)
+c1     = Assembler<recipe=electronic-circuit>     @(14, 2)
+k2     = Assembler<recipe=copper-cable>           @(18, 2)
+c2     = Assembler<recipe=electronic-circuit>     @(22, 2)
+
+# row B at y 9: the makers that take gears and circuits, and two that take what a neighbour makes
+ins    = Assembler<recipe=inserter, keep=100>     @(2, 9)
+asm    = Assembler<recipe=assembling-machine-1, keep=20> @(6, 9)
+drill  = Assembler<recipe=electric-mining-drill, keep=20> @(10, 9)
+yb     = Assembler<recipe=transport-belt>         @(14, 9)
+yu     = Assembler<recipe=underground-belt, keep=50> @(18, 9)
+pipe   = Assembler<recipe=pipe>                   @(22, 9)
+ptg    = Assembler<recipe=pipe-to-ground, keep=50> @(26, 9)
+
+# the one chest every product goes into, at the corridor's west end; the plates in
+box    = Chest<provider>                          @(0, 6)
+fe     = Chest<requester, item=iron-plate, rate=4/s>     @(29, 6)
+cu     = Chest<requester, item=copper-plate, rate=2/s>   @(16, 0)
+
+net fe:    fe -> g1, g2, c1, c2, ins, asm, drill, yb, yu, pipe, ptg
+net cu:    cu -> k1, k2
+net gear:  g1, g2 -> ins, asm, drill, yb
+net green: c1, c2 -> ins, asm, drill
+net k1o:   k1 -> c1
+net k2o:   k2 -> c2
+net ybo:   yb -> yu
+net po:    pipe -> ptg
+net products limited: ins, asm, drill, yu, ptg -> box

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 __all__ = ["LANES", "RULES", "left", "right", "near", "moves", "carry", "drop_lane",
            "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK", "CARRIERS", "fed",
-           "tile_mask", "mask_bit", "DIRS", "VIAS", "table"]
+           "tile_mask", "mask_bit", "DIRS", "VIAS", "table", "entry"]
 
 LANES = ("L", "R")
 KEEP = ("straight", "turn", "tunnel", "splitter")
@@ -134,24 +134,32 @@ CARRIERS = ("belt", "ug_in", "ug_out", "splitter")
 _EMPTY = frozenset()
 
 
+def entry(carrier, d, src, feeds):
+    """How a feed moving ``src`` enters a ``carrier`` heading ``d`` whose feeds are ``feeds``
+    [(heading, ...)] (the feed itself among them): a move kind of ``VIAS``, or None where
+    nothing goes in (head-on, a splitter's side, an exit's back, which is its tunnel). A belt fed
+    from one side with nothing behind turns; with something behind, or from both sides, the side
+    feed side-loads; an underground end takes a side feed as ``ug_side``."""
+    if src == d:
+        return None if carrier == "ug_out" else "straight"
+    if near(src, d) is None:
+        return None
+    if carrier == "belt":
+        behind = any(f[0] == d for f in feeds)
+        sides = sum(near(f[0], d) is not None for f in feeds)
+        return "turn" if sides == 1 and not behind else "side"
+    if carrier in ("ug_in", "ug_out"):
+        return "ug_side"
+    return None
+
+
 def fed(carrier, d, feeds):
     """({lane: nets}, lost nets) of a ``carrier`` heading ``d`` on a tile fed by ``feeds``
     [(the feeder's heading, {lane: nets})]: what each of its lanes holds, and the nets a feed
     loses (a blocked lane, a head-on belt, a splitter's side)."""
-    behind = any(src == d for src, _h in feeds)
-    sides = sum(near(src, d) is not None for src, _h in feeds)
     out, lost = {}, _EMPTY
     for src, held in feeds:
-        if src == d:
-            via = None if carrier == "ug_out" else "straight"     # an exit's back is the tunnel
-        elif near(src, d) is None:
-            via = None                                             # head-on
-        elif carrier == "belt":
-            via = "turn" if sides == 1 and not behind else "side"
-        elif carrier in ("ug_in", "ug_out"):
-            via = "ug_side"
-        else:
-            via = None                                             # a splitter's side
+        via = entry(carrier, d, src, feeds)
         if via is None:
             for nets in held.values():
                 lost |= frozenset(nets)

@@ -1,0 +1,36 @@
+# line.fk: an 11-tall strip. Iron and copper in (requester chests standing in for the base); the
+# first stages make gears, cable and circuits; then two belts of two items each (iron, copper,
+# gears, circuits) run east past a line of makers that take what they need.
+fe   = Chest<requester, item=iron-plate, rate=4/s>    @(0, 2)
+cu   = Chest<requester, item=copper-plate, rate=3/s>  @(7, 9)
+gm   = Assembler<recipe=iron-gear-wheel>              @(2, 4)
+cab  = Assembler<recipe=copper-cable>                 @(6, 5)
+ci   = Assembler<recipe=electronic-circuit>           @(10, 5)
+
+ins  = Assembler<recipe=inserter>                     @(14, 5)
+blt  = Assembler<recipe=transport-belt>               @(18, 5)
+drl  = Assembler<recipe=electric-mining-drill>        @(22, 5)
+asm  = Assembler<recipe=assembling-machine-1>         @(26, 5)
+p    = Assembler<recipe=pipe>                         @(30, 5)
+cab2 = Assembler<recipe=copper-cable>                 @(34, 5)
+lamp = Assembler<recipe=small-lamp>                   @(38, 5)
+
+x1 = Chest<provider, limit=1> @(15, 9)
+x2 = Chest<provider, limit=1> @(19, 9)
+x3 = Chest<provider, limit=1> @(23, 9)
+x4 = Chest<provider, limit=1> @(27, 9)
+x5 = Chest<provider, limit=1> @(31, 9)
+x6 = Chest<provider, limit=1> @(39, 9)
+
+net fe_:  fe -> gm, ci, ins, blt, drl, asm, p, lamp
+net cu_:  cu -> cab, cab2
+net gw:   gm -> ins, blt, drl, asm
+net kc:   cab -> ci
+net circ: ci -> ins, drl, asm, lamp
+net k2:   cab2 -> lamp
+net o1: ins -> x1
+net o2: blt -> x2
+net o3: drl -> x3
+net o4: asm -> x4
+net o5: p -> x5
+net o6: lamp -> x6

@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 mod grid;
 mod grow;
 mod hub;
+mod lane;
 mod physics;
 mod place;
 mod search;
@@ -28,6 +29,7 @@ fn fkroute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(grid::hubs, m)?)?;
     m.add_function(wrap_pyfunction!(grow::grow, m)?)?;
     m.add_function(wrap_pyfunction!(hub::hub_search, m)?)?;
+    m.add_function(wrap_pyfunction!(lane::lane_astar, m)?)?;
     m.add_function(wrap_pyfunction!(physics::physics, m)?)?;
     m.add_function(wrap_pyfunction!(physics::physics_ready, m)?)?;
     m.add_function(wrap_pyfunction!(physics::physics_lookup, m)?)?;
