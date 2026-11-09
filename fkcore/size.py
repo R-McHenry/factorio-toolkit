@@ -110,6 +110,8 @@ class Row:
     util: float = 0.0              # its machines' utilization at the counts
     binding: tuple | None = None   # what holds them there (rates' binding)
     nets: list = field(default_factory=list)      # [Want]: the feeds of the nets it drives
+    patch: str | None = None       # 3.1 (M2): an @patch row's line, what its patch gave or why not
+    covered: bool = False          # ... and the count is the patch's (within the bounds)
 
 
 @dataclass
@@ -770,9 +772,15 @@ def draw(flat, model, cat, memo=None):
     return total
 
 
-def size(makers, targets=None, previous=None, start=None, cat=None, payback=0.0) -> Sizing:
+def size(makers, targets=None, previous=None, start=None, cat=None, payback=0.0,
+         grounds=None) -> Sizing:
     """The counts of every ``n=auto`` row and Stack, and the picks of every ``modules=auto`` and
     ``machine=auto``, of the factories ``makers``, sized together.
+
+    3.1 (PLAN-ORGANIC M2): ``grounds`` ({factory: ``terrain.FrameGround``}, the terrain as each
+    plot sees it) gives every ``n=auto`` MinerRow pinned by ``@patch`` its count from its patch
+    (:func:`patch_counts`): the most drills within its bounds that stand on the resource with
+    their mining areas off every other one. The other rows size against that count.
 
     2.0.60: the picks are searched around the counts. For each combination of picks the counts
     are sized on the rate model (``_size_counts``); of the combinations that meet every want the
@@ -781,10 +789,15 @@ def size(makers, targets=None, previous=None, start=None, cat=None, payback=0.0)
     same output). Up to ``COMBOS`` combinations are each tried; past that, one choice at a time,
     the others held, until none changes."""
     base = {f: make({}) for f, make in makers.items()}
+    pinned = {}
+    if grounds:
+        from .catalog import Catalog
+        cat = cat or Catalog.load()
+        pinned = patch_counts(base, grounds, cat)
     choices = [(f, key, ch.menu) for f, flat in base.items()
                for key, ch in sorted(getattr(flat, "choices", {}).items())]
     if not choices:
-        return _size_counts(makers, targets, previous, start)
+        return _size_counts(makers, targets, previous, start, pinned)
     from .catalog import Catalog
     from .cost import design_cost
     cat = cat or Catalog.load()
@@ -796,7 +809,7 @@ def size(makers, targets=None, previous=None, start=None, cat=None, payback=0.0)
             mine = {f: {k: v for (g, k), v in picks.items() if g == f} for f in makers}
             wrapped = {f: (lambda sizes, make=make, p=mine[f]: make({**p, **sizes}))
                        for f, make in makers.items()}
-            sz = _size_counts(wrapped, targets, previous, start)
+            sz = _size_counts(wrapped, targets, previous, start, pinned)
             models = dict(sz.models)
             for f, flat in sz.flats.items():
                 models.setdefault(f, rates.solve(flat))
@@ -848,7 +861,25 @@ def size(makers, targets=None, previous=None, start=None, cat=None, payback=0.0)
     return sz
 
 
-def _size_counts(makers, targets=None, previous=None, start=None) -> Sizing:
+def patch_counts(flats, grounds, cat):
+    """{(factory, path): (k, text)} for every ``n=auto`` MinerRow pinned by ``@patch`` (M2): the
+    count its patch gives (``expand.patch_cover``; 0 with why when it gives none, and the row is
+    sized by rates)."""
+    out = {}
+    for f, flat in flats.items():
+        g = (grounds or {}).get(f)
+        for p, inst in flat.insts.items():
+            if (not inst.auto or inst.kind == "Stack" or "patch" not in inst.hints
+                    or "at" in inst.hints):
+                continue
+            lo, hi = inst.auto
+            k, _spot, text = expand.patch_cover(flat, p, cat, g, lo, hi)
+            if text is not None:
+                out[(f, p)] = (k, text)
+    return out
+
+
+def _size_counts(makers, targets=None, previous=None, start=None, pinned=None) -> Sizing:
     """The counts of every ``n=auto`` row and Stack of the factories ``makers`` ({factory:
     make(sizes) -> Flat}, see ``maker``), sized together: ``targets`` ({item: /s}) are the
     surface's. ``previous`` ({factory: committed Layout}) says what each had; ``start``
@@ -864,7 +895,7 @@ def _size_counts(makers, targets=None, previous=None, start=None) -> Sizing:
     stacks = {(f, p): inst.auto for f, flat in base.items() for p, inst in flat.insts.items()
               if inst.auto and inst.kind == "Stack"}
     if not stacks:
-        return _size_rows(makers, targets, previous, start)
+        return _size_rows(makers, targets, previous, start, pinned)
     every = {(f, p): inst.auto for f, flat in base.items() for p, inst in flat.insts.items()
              if inst.auto}
     wants = _wants(base, every, targets)
@@ -877,7 +908,7 @@ def _size_counts(makers, targets=None, previous=None, start=None) -> Sizing:
             fixed = {f: {p: n for (g, p), n in sc.items() if g == f} for f in makers}
             wrapped = {f: (lambda sizes, make=make, fx=fixed[f]: make({**fx, **sizes}))
                        for f, make in makers.items()}
-            sz = _size_rows(wrapped, targets, previous, rows_start)
+            sz = _size_rows(wrapped, targets, previous, rows_start, pinned)
             models = dict(sz.models)
             for f, flat in sz.flats.items():
                 if f not in models:
@@ -957,25 +988,35 @@ def _size_counts(makers, targets=None, previous=None, start=None) -> Sizing:
                   solves[0], grown + sz.grown)
 
 
-def _size_rows(makers, targets=None, previous=None, start=None) -> Sizing:
+def _size_rows(makers, targets=None, previous=None, start=None, pinned=None) -> Sizing:
     """The rows' counts (1.6): seed, grow along the binding chains, trim (the module doc). A
-    Stack's count is fixed here, by the sizes ``makers`` are given (``size``'s outer search)."""
+    Stack's count is fixed here, by the sizes ``makers`` are given (``size``'s outer search).
+    ``pinned`` ({(factory, path): (k, text)}, :func:`patch_counts`): an ``@patch`` row whose
+    patch gave a count keeps it (its bounds become k..k here; the report shows the written
+    ones)."""
     base = {f: make({}) for f, make in makers.items()}
     autos = {(f, p): inst.auto for f, flat in base.items() for p, inst in flat.insts.items()
              if inst.auto and inst.kind != "Stack"}
     if not autos:
         return Sizing(base, {}, [], [])
+    written = dict(autos)
+    pinned = pinned or {}
+    for c, (k, _text) in pinned.items():
+        if c in autos and k:
+            autos[c] = (k, k)
     run = _Run(makers, base)
     wants = _wants(base, autos, targets)
     first = dict(start) if start is not None else seed(base, autos, targets)
     counts = {c: min(max(int(first.get(c, lo)), lo), hi) for c, (lo, hi) in autos.items()}
     rows = {}
-    for c, (lo, hi) in autos.items():
+    for c, (lo, hi) in written.items():
         flat = base[c[0]]
         m = _first(flat, c[1])
         rows[c] = Row(c[0], c[1], flat.insts[c[1]].kind, counts[c], lo, hi, counts[c],
                       _was(previous, c, flat.insts[c[1]].kind), sink=m.sink,
                       rated=m.drain is not None)
+        if c in pinned:
+            rows[c].patch, rows[c].covered = pinned[c][1], bool(pinned[c][0])
     grown = 0
     while grown < _STEPS:
         got = run.at(counts)
@@ -1056,6 +1097,8 @@ def _auto(r):
 
 
 def _serves(r):
+    if r.covered:
+        return "its patch: what the ore holds (below)"
     if r.serves:
         direct = [w for w in r.serves if w.kind in ("feed", "drain")]
         ends = [w for w in r.serves if w.kind in ("target", "assert")]
@@ -1130,6 +1173,8 @@ def report(sz, cat=None):
     for r in sz.rows:
         lines.append(f"  {name(r):<{width}} {r.kind:<11} {r.n:>4} {r.seed:>4} "
                      f"{f'{r.lo}..{r.hi}':>8}  {_serves(r)}")
+        if r.patch:
+            lines.append(f"  {'':<{width}} {r.patch}")
         if r.was is not None and r.was != r.n:
             lines.append(f"  {'':<{width}} the committed layout has n={r.was}: the row "
                          f"{'grows' if r.n > r.was else 'shrinks'} by {abs(r.n - r.was)}")

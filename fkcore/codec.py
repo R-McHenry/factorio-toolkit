@@ -115,7 +115,7 @@ _UG_BACK = {v: k for k, v in _UG.items()}
 _OWN = ("entity_number", "name", "position", "direction", "tags")
 
 #: an entity's typed circuit settings (2.0), in the order the .fkp writes them
-CIRCUIT_ATTRS = ("if", "logistic", "read", "signal", "filter", "signals")
+CIRCUIT_ATTRS = ("if", "logistic", "read", "signal", "filter", "signals", "resource_filter")
 #: an entity's raw settings (2.1): JSON objects of control behaviour (``cb``) and blueprint
 #: (``bp``) fields
 RAW_ATTRS = ("cb", "bp")
@@ -262,6 +262,17 @@ def control_behavior(attrs, where="entity"):
         fields["use_filters"] = True
         fields["filters"] = [{"index": k + 1, "name": it, "quality": "normal", "comparator": "="}
                              for k, it in enumerate(str(flt).split("|"))]
+    rf = attrs.get("resource_filter")
+    if rf:
+        # 3.1 (PLAN-ORGANIC M1): a mining drill's resource filter, the blueprint entity's
+        # ``filter`` (BlueprintMiningDrillFilter: slot filters of resource entity names and a
+        # mode; the game's API docs, 2.1.24). A drill has slots only when its prototype sets
+        # ``filter_count`` (none in the base game: ``placer.filter_slots``), so the placer writes
+        # this attr on a modded drill only. The 2.0.77 field shape is to be confirmed on a laptop
+        # server (docs/notes-41-mines.md).
+        fields["filter"] = {"filters": [{"index": k + 1, "name": r}
+                                        for k, r in enumerate(str(rf).split("|"))],
+                            "mode": "whitelist"}
     if attrs.get("signals"):
         rows = []
         for k, part in enumerate(str(attrs["signals"]).split("|")):
