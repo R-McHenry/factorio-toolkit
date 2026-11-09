@@ -520,13 +520,18 @@ def _ring(w, h):
         + [(-2, y) for y in range(h)] + [(w + 1, y) for y in range(h)]
 
 
-def _shapes(frag):
+def _shapes(frag, frame=None):
     """``shapes`` of a fragment: per rotation the turned frame's tiles and its attach groups, with
-    the (role name, attach index, side) of each group (the same for every rotation)."""
+    the (role name, attach index, side) of each group (the same for every rotation). 41-hull:
+    ``frame`` (a sealed instance's ``expand.own_frame``, a polygon) gives the footprint per
+    rotation as the frame turned; None, or a box, is the fragment's box as before."""
     shapes, meta = [], []
     for rot in range(4):
         w, h = frag.size if rot % 2 == 0 else frag.size[::-1]
-        tiles = [(x, y) for y in range(h) for x in range(w)]
+        if frame is not None and not frame.is_box:
+            tiles = sorted(frame.turn(rot), key=lambda t: (t[1], t[0]))
+        else:
+            tiles = [(x, y) for y in range(h) for x in range(w)]
         groups, m = [], []
         for name in sorted(frag.roles):
             role = frag.roles[name]
@@ -637,10 +642,11 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
     """The spec of ``flat``'s top-level instances (or of the first instance of module type
     ``module``, inside its declared frame, its ports as fixed terminals). ``plot`` (w, h) is the
     top level's box when given; else a square with room for three times the instances' area."""
-    from .expand import fragment_of, _port_tile, _port_choice, ports_of
+    from .expand import fragment_of, _port_tile, _port_choice, ports_of, own_frame
     from .fragments import FragmentError
     notes, insts, paths = [], [], []
     scope = ""
+    blocked = []
     if module:
         scope = next((p for p, i in flat.insts.items() if i.module == module), None)
         if scope is None:
@@ -649,6 +655,13 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
             raise ValueError(f"{module} declares no size: a module is laid out inside its frame")
         w, h = flat.insts[scope].size
         box, box_from = (0, 0, int(w), int(h)), f"the frame of {module}"
+        own = own_frame(flat.insts[scope])
+        if own is not None and not own.is_box:
+            # 41-hull: inside a polygon frame, what the box holds outside the shape is the
+            # parent's ground: blocked for the layout
+            blocked = sorted(set(own.clip(box).tiles()) ^ {(x, y) for y in range(int(h))
+                                                                 for x in range(int(w))})
+            box_from = f"the shape of {module} ({own.area} tiles in its {int(w)}x{int(h)} box)"
     children = flat.scopes.get(scope, {})
     terms = {}                                   # net -> [(inst index, group, driver)]
     lane_of = getattr(flat, "lane_of", {}) or {}
@@ -683,7 +696,9 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
             except FragmentError as exc:
                 notes.append(f"skip {path}: {exc}")
                 continue
-            shapes, meta = _shapes(frag)
+            # 41-hull: a sealed instance's footprint is its frame per rotation (a polygon's
+            # tiles), not its box
+            shapes, meta = _shapes(frag, own_frame(inst) if inst.module is not None else None)
             size = frag.size
         at = inst.hints.get("at")
         at = None if at is None else tuple(int(v) for v in at)
@@ -706,11 +721,11 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
                 # together, so their shared tiles are no crowding)
                 terms.setdefault(lane_of.get(part, part), []).append((idx, g, side == "out"))
     if module:
-        w, h = flat.insts[scope].size
+        frame = own_frame(flat.insts[scope])
         for key in ports_of(flat, scope):
             port = flat.ports[key]
             try:
-                x, y, _out = _port_tile(port, int(w), int(h), _port_choice(flat, key))
+                x, y, _out = _port_tile(port, frame, _port_choice(flat, key))
             except FragmentError as exc:
                 notes.append(f"skip port {key}: {exc}")
                 continue
@@ -740,7 +755,7 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
         weights[pair] = max(weights.get(p, 1) for p in pair.split("|"))
     nets = [SpecNet(n, weights.get(n, 1), ts) for n, ts in sorted(terms.items())
             if any(d for _i, _g, d in ts) and any(not d for _i, _g, d in ts)]
-    spec = Spec(box, [], insts, nets, params or Params())
+    spec = Spec(box, blocked, insts, nets, params or Params())
     return Built(spec, paths, notes, scope, box_from)
 
 

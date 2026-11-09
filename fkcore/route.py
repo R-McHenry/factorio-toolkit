@@ -115,7 +115,7 @@ from . import compiled as compiledmod
 from . import connect as connectmod
 from . import fkp as fkpmod
 from . import steiner as steinermod
-from .expand import attach_points, frame_of, port_edges, record_misfit
+from .expand import attach_points, frame_of, frame_shape_of, port_edges, record_misfit
 from .steiner import COSTS, DropSink, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
 from .steiner import _UNSUPPORTED
@@ -1909,8 +1909,7 @@ def try_route(flat, lay, cat, a, b, bounds=None, margin=4, blocked=(), limit=600
     for path, rec in lay.insts.items():
         if rec.kind in ("Literal", "Bus") or path not in flat.insts:
             continue
-        x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
-        frames |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        frames |= frame_shape_of(flat, lay, path, cat).tiles()      # 41-hull: the frame's tiles
     w, h = lay.size or (0, 0)
     box = bounds or (0, 0, w + margin, h + margin)
     ents = list(lay.entities.values())
@@ -2984,6 +2983,10 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
     # its unturned twin's, turned): its routes are stored unturned (``_store_save``)
     parts = [compiledmod.ROUTER, x1 - x0, y1 - y0, rec.kind, 0 if tf.half else rec.rot,
              sorted(child_keys, key=repr), repr(settings)]
+    if len(_tiles) != (x1 - x0) * (y1 - y0):
+        # 41-hull: a polygon frame keys by its tiles too (relative to its box, as the unit's
+        # frame is); a box adds nothing, so every rectangle keys as before
+        parts.append(sorted(tile(t) for t in _tiles))
     kids = []
     for p, r in lay.insts.items():
         if not p.startswith(u + "/"):
@@ -3499,15 +3502,21 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     frames = set()
     owned = {}                                   # instance path -> its frame's tiles
     owned_rect = {}                              # instance path -> its frame (x0, y0, x1, y1)
+    owned_shape = {}                             # 41-hull: path -> its Frame when not a box
     sealed = {}                                  # module path -> its frame, for a sealed module
     for path, rec in lay.insts.items():
         if rec.kind in ("Literal", "Bus") or path not in flat.insts:
             continue
-        x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
-        mine = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        # 41-hull (H4): the keep-out is the frame's tiles, a polygon's included; what lies in
+        # the box outside a polygon is the parent's ground
+        shape = frame_shape_of(flat, lay, path, cat)
+        x0, y0, x1, y1 = shape.box
+        mine = shape.tiles()
         frames |= mine
         owned[path] = mine
         owned_rect[path] = (x0, y0, x1, y1)
+        if not shape.is_box:
+            owned_shape[path] = shape
         if path in flat.sealed:
             sealed[path] = (x0, y0, x1, y1, mine)
     w, h = lay.size or (0, 0)
@@ -3582,7 +3591,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 continue                              # a foreign sealed frame: the overlap is shared
             c0, d0, c1, d1 = max(a0, x0), max(b0, y0), min(a1, x1), min(b1, y1)
             if c0 < c1 and d0 < d1:
-                blocked |= {(x, y) for x in range(c0, c1) for y in range(d0, d1)}
+                if path in owned_shape:               # 41-hull: a polygon blocks its tiles only
+                    blocked |= owned_shape[path].clip((c0, d0, c1, d1)).tiles()
+                else:
+                    blocked |= {(x, y) for x in range(c0, c1) for y in range(d0, d1)}
         frames_of_unit[inner] = frozenset(blocked), (x0, y0, x1, y1)
         return frames_of_unit[inner]
     base = lay.copy()
@@ -4303,13 +4315,15 @@ def seal_checks(flat, lay, cat):
     (2.0.75: overlapping frames share those tiles)."""
     out = []
     boxes = {}
+    shapes = {}                                   # 41-hull: path -> its Frame (tiles, a polygon's)
     for path in lay.insts:
         if path in flat.insts and path in flat.sealed:
             try:
-                x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
+                shape = frame_shape_of(flat, lay, path, cat)
             except Exception:
                 continue
-            boxes[path] = (x0, y0, x1, y1)
+            boxes[path] = shape.box
+            shapes[path] = shape
 
     def shared(path, net, tiles):
         """True when ``net`` is a net of a sealed module foreign to ``path`` (neither inside the
@@ -4319,13 +4333,15 @@ def seal_checks(flat, lay, cat):
             return False
         q = max(scopes, key=len)
         return not q.startswith(path + "/") and not path.startswith(q + "/") \
-            and all(_in_box(t, boxes[q]) for t in tiles)
+            and all(t in shapes[q] for t in tiles)
 
     for path, rec in sorted(lay.insts.items()):
         if path not in boxes:
             continue
         x0, y0, x1, y1 = boxes[path]
-        frame = {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        frame = shapes[path]
+        where = f"{x0},{y0}..{x1 - 1},{y1 - 1}" if frame.is_box else \
+            f"{x0},{y0}..{x1 - 1},{y1 - 1} ({frame.area} tiles of the box: its shape)"
         for key, e in lay.entities.items():
             net = e.attrs.get("net")
             tiles = fkpmod.tiles_of(cat, e)
@@ -4334,7 +4350,7 @@ def seal_checks(flat, lay, cat):
                 # FRAME (2.0.40): the module's own contents past its declared size (2.0.37's rib:
                 # a row one tile past the south edge, its port under the assembler)
                 out.append(f"FRAME     {key} ({e.name}) is part of sealed module {path} but stands "
-                           f"outside its frame {x0},{y0}..{x1 - 1},{y1 - 1}: grow its size or "
+                           f"outside its frame {where}: grow its size or "
                            "move it in")
                 continue
             if not net:

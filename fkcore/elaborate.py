@@ -137,6 +137,9 @@ class Inst:
     auto: tuple | None = None      # n=auto: (lo, hi), the bounds of the count in params["n"]
     when: tuple | None = None      # its machines' own enable condition (2.0): (lang.Cond, scope)
     size: tuple | None = None      # a module's declared frame (2.0.28): (W, H)
+    #: 41-hull: the frame as a polygon (`shape`), vertices in the module's own frame; None for a
+    #: box. ``size`` is then its bounding box from the origin (``expand.own_frame`` reads both)
+    shape: list | None = None
     conns: list | None = None      # a Bus's connection list (2.0.32): [(name, lang.Ref)]
     #: 2.1, a kind's instance (``a = Assembler<...>``): the core kind it resolves to (``Machine``)
     #: and its parameters with the kinds' defaults under the written ones. ``kind`` and
@@ -178,6 +181,7 @@ class PortInst:
     lane: str | None = None    # "L" | "R" of a one-lane port as pinned, or None: chosen at layout
     right: list | None = None  # the right lane's items: the port is the pair `A | B`
     inout: bool = False  # 3.0: declared inout, ``dir`` the way its nets run (_settle_inout)
+    shape: list | None = None  # 41-hull: the module's frame as a polygon, None for a box
 
     @property
     def all_items(self):
@@ -354,6 +358,27 @@ def _uses(g, name):
                     out.append(n)
                     todo.append(n)
     return out
+
+
+def _module_shape(flat, mod, src):
+    """A module's ``shape`` vertices when it declares a polygon frame that is a frame (41-hull,
+    PLAN-ORGANIC H2), else None. A polygon that is no frame (self-crossing, no area, a corner
+    behind the origin) is a ``bad-shape`` check line, once per module, and the module is read as
+    its bounding box (``size``): a check warns, never gates."""
+    verts = getattr(mod, "shape", None)
+    if not verts:
+        return None
+    from .frame import shape_problem
+    seen = flat.__dict__.setdefault("_shape_ok", {})
+    if mod.name not in seen:
+        why = shape_problem(verts)
+        seen[mod.name] = why is None
+        if why is not None:
+            w, h = mod.size or (0, 0)
+            flat.checks.append(Check("bad-shape", f"module {mod.name}",
+                                     f"its shape is no frame: {why}; it is built as its {w}x{h} box",
+                                     mod.line))
+    return verts if seen[mod.name] else None
 
 
 def _placement_hints(inst):
@@ -762,7 +787,8 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
         flat.ports[key] = PortInst(key=key, name=p.name, dir=p.dir, items=list(p.items),
                                    side=p.side, pos=p.pos, scope=prefix, module=mod.name,
                                    size=mod.size, line=p.line, src=src, lane=p.lane,
-                                   right=None if p.right is None else list(p.right))
+                                   right=None if p.right is None else list(p.right),
+                                   shape=_module_shape(flat, mod, src))
         # a conduit: makes and takes every item on either lane at no rate of its own (rates._pools
         # joins the two nets that name it into one pool), so a crossing net meets itself here
         flat.machines[key] = Machine(key, prefix, "Port", "pipe" if fluid else "transport-belt",
@@ -842,13 +868,16 @@ def _expand(flat, mod, prefix, modules, cat, duty, src, stack, dnp=False):
             # 2.0.43 (PLAN-GLOBAL phase B): an instance line's own `size WxH` is the frame a plot
             # gets from its placement, and it seals the instance as the module's own `size` does
             size = getattr(inst, "size", None) or modules[inst.kind].size
+            # 41-hull: the module's `shape` is the instance's frame unless its own line gives a
+            # `size` (a box of its own, as a plot's placement does)
+            shape = None if getattr(inst, "size", None) else _module_shape(flat, modules[inst.kind], src)
             if size is not None:
                 flat.sealed.add(path)
                 for key, port in flat.ports.items():
                     if port.scope == path:
-                        port.size = size
+                        port.size, port.shape = size, shape
             node = Inst(path, inst.kind, inst.params, _placement_hints(inst), keys, inst.kind,
-                        flat.scopes[path], inst.line, size=size, conns=inst.conns)
+                        flat.scopes[path], inst.line, size=size, conns=inst.conns, shape=shape)
             if stacked is not None:
                 node.kind, node.params = "Stack", dict(stacked.params)
                 if stack_auto is not None:
@@ -3136,7 +3165,20 @@ def _port_checks(flat):
                     flat.checks.append(Check("port", f"port {key}",
                                              f"nothing inside {port.module} takes {item} from it",
                                              port.line))
-        if port.pos is not None and port.size is not None:
+        if port.pos is not None and port.size is not None and getattr(port, "shape", None):
+            # 41-hull (H3): on a polygon frame a pin names a column (n/s) or row (e/w) of the
+            # side's boundary; one the frame does not reach moves to the nearest boundary tile
+            from .frame import Frame
+            frame = Frame.from_polygon(port.shape)
+            if frame.boundary_at(port.side, port.pos) is None:
+                near = frame.boundary_near(port.side, port.pos)
+                what = "column" if port.side in "ns" else "row"
+                flat.checks.append(Check(
+                    "port-off-frame", f"port {key}",
+                    f"@{port.side}{port.pos}: the shape of {port.module} does not reach {what} "
+                    f"{port.pos} on its {port.side} side; the port stands at its nearest boundary "
+                    f"tile, {near[0]},{near[1]}", port.line))
+        elif port.pos is not None and port.size is not None:
             w, h = port.size
             along = w if port.side in "ns" else h
             if not 0 <= port.pos < along:

@@ -4,8 +4,9 @@
     import  := 'import' Name (',' Name)* 'from' STRING     # a module or a kind of that file
     kind    := 'kind' Name '=' Kind ('<' param (',' param)* '>')?   # a name with defaults (2.1)
     tiers   := 'tiers' Name ':' word (',' word)*        # what machine=auto may pick (2.1)
-    module  := 'module' Name ('<' mparam (',' mparam)* '>')? 'buffer'? ('size' WxH)? 'buffer'?
-               '{' stmt* '}'                            # buffer: before or after size, once
+    module  := 'module' Name ('<' mparam (',' mparam)* '>')? 'buffer'? (frame)? 'buffer'?
+               '{' stmt* '}'                            # buffer: before or after the frame, once
+    frame   := 'size' WxH | 'shape' ('(' num ',' num ')')+   # a box, or a closed polygon (41-hull)
     mparam  := name ('=' value)?                          # no default: required (2.1)
     stmt    := inst | net | lanes | bundle | assert | cover | signal | wire | behave | expect | set
              | port | copper
@@ -390,6 +391,9 @@ class Module:
     sets: list = field(default_factory=list)       # [Props]: properties on named objects (2.0.27)
     ports: list = field(default_factory=list)      # [Port]: the module's interface (2.0.28)
     size: tuple | None = None                      # (W, H) of its frame as written, or None
+    #: 41-hull (PLAN-ORGANIC H2): `shape (x,y) (x,y) ...`, the frame as a closed polygon in tiles
+    #: about the module's origin; ``size`` is then its bounding box from the origin
+    shape: list | None = None
     stacks: list = field(default_factory=list)     # [(near, far, line)]: stack pairs (2.0.48)
     dnps: list = field(default_factory=list)       # [Ref]: `dnp A, B.c` (2.0.63), do not populate
     buffer: bool = False                           # 2.1: `module NAME buffer { ... }`
@@ -678,6 +682,8 @@ class _P:
             if w < 1 or h < 1:
                 self.err(f"size {tok.text}: a frame is at least 1x1", tok)
             mod.size = (w, h)
+        elif self.accept("shape"):
+            mod.shape, mod.size = self.shape(mod.name)
         if self.accept("buffer"):
             if mod.buffer:
                 self.err(f"module {mod.name}: buffer is written twice")
@@ -692,6 +698,32 @@ class _P:
         finally:
             self.mparams = self.modname = None
         return mod
+
+    def shape(self, modname):
+        """``shape (x,y) (x,y) (x,y) ...`` where ``size WxH`` stands on a module line (41-hull,
+        PLAN-ORGANIC H2): the frame as a closed polygon, vertices in tiles about the module's
+        origin. -> (vertices, the bounding box (W, H) from the origin). Three vertices at least
+        and whole numbers are the grammar; whether the polygon is simple is the elaborator's
+        ``bad-shape`` check, not a syntax error."""
+        verts = []
+        while self.peek().text == "(" and self.peek().kind == "op":
+            self.next()
+            x = self.number()
+            self.expect(",")
+            y = self.number()
+            tok = self.expect(")")
+            if not isinstance(x, int) or not isinstance(y, int):
+                self.err(f"module {modname}: shape vertex ({x}, {y}) is not on a tile corner: "
+                         "whole numbers only", tok)
+            verts.append((x, y))
+        if len(verts) < 3:
+            self.err(f"module {modname}: a shape is three or more corners, like "
+                     "shape (0,0) (20,0) (20,10) (10,16) (0,10)")
+        if self.peek().text == "size" and self.peek().kind == "word":
+            self.err(f"module {modname}: a frame is a size or a shape, not both")
+        w = max(1, max(v[0] for v in verts) - min(0, min(v[0] for v in verts)))
+        h = max(1, max(v[1] for v in verts) - min(0, min(v[1] for v in verts)))
+        return verts, (w, h)
 
     def module_params(self, modname):
         """``<p, q=default, ...>`` after a module's name (2.1): a parameter without a default is
