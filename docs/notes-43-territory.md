@@ -242,6 +242,32 @@ ground. Fixed on main after the merge: a declared module's frame is its declarat
 is the ground its belts may cross), a module without a declaration would take its cell
 (`hull.Resolver.claim`).
 
+## T6 on the lab ground (integrating session, 2026-11-09 10:05-10:40)
+
+The lab is a flat lab-tile surface (`setup.lua`: `generate_with_lab_tiles`), so "the lab's real
+ground" has no water and no ore: the stand-in ground went into the terrain file and the world
+alike. In `lab-session\fk-t6` (a copy of fk-run2 on main `8ed76ca` with the kernel): chunks
+generated under 2100..3100 x -600..600, `fk read-terrain --surface lab --area 2100,-600,3100,600
+--name map` (0 blocked, 0 ore), then scratchpad `t6_ground.py` wrote 28 patches into
+`map.terrain.json`, one per stand, 32 wide and 33-k tall so the placer's largest-first numbering
+matches the names it put on the stands (`@patch("copper-ore#7")`: every unnamed `@patch(RES)`
+takes the patch nearest the plot centre, so 10 copper stands would have shared one), two crude
+patches of three 3x3 sites, two lakes; and `t6_paint.lua` painted the same into the lab (22662
+ore entities, 8600 water tiles). `lab.surface`: `place flower_ground = flower_ground plot
+2100,-600 1000x1200` (in 900x1024 the core, 300x424, found no spot between circuit and mesa once
+the stands took the rim's 40-tile bands: `no-fit core`).
+
+| | |
+|---|---|
+| `fk layout flower_ground.fk --write` | 36 of 36 placed (6 rivers, the core, 28 stands pinned, the shore), 60 sweeps (the cap), 80.4 s; estimated belts 22680 -> 9350 over 55 nets; 25 of 55 inter-module nets with cells touching; core at 315,388 |
+| the paper build (`fk build --to report_checks`, 10:20-10:38) | 6490 nets, **45 unrouted** (the corridor flower 48, the step-1 open flower 49), 36306 carriers (express), 7041 on the top-level nets (these include the 28 stand feeds from the rim, so not the open flower's measure) |
+| what failed at the top level | every paired-lane net's `_a`/`_b` members (the report artifact every flower build has), the two wells' crude pipes (the `Well` stand-in's pumpjack sits at frame offset 5,5 and misses the crude the pin centred the frame on: `no-ore` x2) and core's lab columns (core's own) |
+| what the pins fixed | every rim ore feed routed (the step-1 paper build failed two), and fen's acid, plastic-to-mesa and lube nets routed |
+| check lines | `flat` x12 (RiverCircuit 107 nets, Core 93, RiverMesa 91 ...; ridge 185 s and circuit 178 s at one level), `no-water` on the shore (unpinned: water is no patch; its pump stands off the lake), `short-feed` 5 (was 28 with unfed rim ports) |
+
+The lab paste and the comparison beside the corridor flower at -1100,100 were handed to Rory's
+"Agent rerouting invalidations" session at 10:40, which took fk-t6 over at Rory's word.
+
 ## Open
 
 - The time bar: 34.6 s alone against well under 14 s (above).
