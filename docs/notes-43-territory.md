@@ -1,6 +1,6 @@
 # 43-territory: the T fixes, pins on ore, the world command (PLAN-ORGANIC T, wave 2)
 
-Step 1 sha: (filled in after the commit)
+Step 1 sha: 23aaf45 (the three fixes, measured; the integrating session's two paper builds run from it)
 
 Branch `claude/43-territory`, cut from main 90e20a0 (3.1.4 + wave 1). Measured 2026-11-09 on this
 laptop, fkroute built from the tree (`python tools/native_build.py`), the open flower
