@@ -947,10 +947,11 @@ def _own_frame(flat, path, cat, frames):
     return (0, 0) + tuple(frag.size)
 
 
-def expand_factory(flat, cat, previous=None, ground=None, log=None):
+def expand_factory(flat, cat, previous=None, ground=None, log=None, checks=None):
     """-> (factory Layout, notes). ``previous`` supplies a Literal's pinned entities. ``ground``
     (a ``terrain.FrameGround``: blocked tiles, ore and the plot, in the factory frame) places the
-    ``@patch`` rows; ``log`` (a list) gets one line per row placed that way."""
+    ``@patch`` rows; ``log`` (a list) gets one line per row placed that way, and ``checks`` (a
+    list) a ``(code, path, msg)`` per check line they raise (``mixed-patch``, M1)."""
     lay = fkpmod.Layout("factory", flat.name)
     notes = []
     xmax = ymax = 0
@@ -1017,13 +1018,16 @@ def expand_factory(flat, cat, previous=None, ground=None, log=None):
         for e in _put(lay, path, inst, frag, binding, at, notes, cat):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     for path in on_patch:
-        at, line, frag, binding = _on_patch(flat, lay, path, cat, ground)
+        at, line, frag, binding, more = _on_patch(flat, lay, path, cat, ground)
         if at is None:
             notes.append(line)
             continue
         if log is not None:
             log.append(line)
-        for e in _put(lay, path, flat.insts[path], frag, binding, at, notes, cat):
+        if checks is not None and more.get("check"):
+            checks.append(more["check"])
+        for e in _put(lay, path, flat.insts[path], frag, binding, at, notes, cat,
+                      skip=more.get("skip", ()), extra=more.get("attrs")):
             xmax, ymax = _grow(cat, e, xmax, ymax)
     # 2.0.41 (PLAN-GLOBAL phase A): every port's tile, chosen facing its partner where neither a
     # pin nor a committed record holds it, and recorded in the .fkp under the port's own key
@@ -1042,16 +1046,21 @@ def role_net(binding, role):
     return None if None in nets else fkpmod.pair_net(*nets)
 
 
-def _put(lay, path, inst, frag, binding, at, notes, cat=None):
+def _put(lay, path, inst, frag, binding, at, notes, cat=None, skip=(), extra=None):
     """Write one placed fragment into ``lay`` under its keys; -> the entities added. A carrier
-    without lanes (an inserter) on a belt of two nets carries both (``ore+fuel``)."""
+    without lanes (an inserter) on a belt of two nets carries both (``ore+fuel``). ``skip``:
+    locals left out (a drill on a mixed patch, M1); ``extra``: {local: attrs} set on top."""
     x0, y0, rot = at
     params = {k: _param_text(v) for k, v in inst.params.items()}
     lay.insts[path] = fkpmod.Inst(path, inst.kind, params, x0, y0, rot, frag.sig)
     added = []
     for fe in frag.entities:
+        if fe.local in skip:
+            continue
         x, y, d = turn(float(fe.x), float(fe.y), fe.dir, rot, frag.size)
         attrs = dict(armsmod.turned(fe.attrs, rot))
+        if extra and fe.local in extra:
+            attrs.update(extra[fe.local])
         if fe.role is not None:
             net = role_net(binding, fe.role)
             if net is None:
@@ -1086,51 +1095,132 @@ def _taken(flat, lay, cat):
     return taken
 
 
+def _patch_span(res, ore, where):
+    xs, ys = [t[0] for t in ore], [t[1] for t in ore]
+    w, h = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+    return f"the {res} in {where} spans {w}x{h}, long axis {'E-W' if w >= h else 'N-S'}"
+
+
+def _drill_of(frag, cat):
+    return next((fe.name for fe in frag.entities if cat.kind(fe.name) == "mining-drill"), None)
+
+
+def _row_maker(flat, inst, frag):
+    outs = [b[1] for b in belts(flat, inst.machines[0], "out")]
+
+    def make(k):
+        return fragment("MinerRow", dict(frag.params, n=k), [], outs)
+    return make
+
+
 def _on_patch(flat, lay, path, cat, ground):
-    """(at, report line, fragment, binding) for a ``@patch`` row; at is None when it can't be
-    placed, and the line says why (and how many drills would fit: n is never changed)."""
+    """(at, report line, fragment, binding, more) for a ``@patch`` row; at is None when it can't
+    be placed, and the line says why (and how many drills would fit: n is never changed).
+    ``more`` (PLAN-ORGANIC M1, a mixed patch with no clean spot): ``skip``, the drills left out
+    (their mining area reaches another resource and the drill has no resource filter);
+    ``attrs``, {local: {resource_filter}} for a drill that has one; ``check``, the
+    ``("mixed-patch", path, msg)`` line."""
     inst = flat.insts[path]
     res = inst.hints["patch"]
     if _core(inst) != "MinerRow":
         return None, f"{path}: @patch places MinerRow rows only in V1; give it an @(x, y) hint", \
-            None, None
+            None, None, {}
     mines = _params(inst).get("resource")
     if mines != res:
-        return None, f"{path}: @patch({res}), but the row mines {mines}", None, None
+        return None, f"{path}: @patch({res}), but the row mines {mines}", None, None, {}
     if ground is None:
         return None, (f"{path}: @patch({res}) needs the terrain (read_terrain <name>) and the "
-                      "factory's plot"), None, None
+                      "factory's plot"), None, None, {}
     try:
         frag, binding = fragment_of(flat, path, cat)
     except FragmentError as exc:
-        return None, f"{path}: {exc}", None, None
+        return None, f"{path}: {exc}", None, None, {}
     n = int(_params(inst)["n"])
     ore = ground.ore.get(res, {})
     where = "the plot" + (f" (patch {ground.patch})" if ground.patch else "")
     if not ore:
-        return None, f"{path}: @patch({res}): no {res} inside {where}", None, None
+        return None, f"{path}: @patch({res}): no {res} inside {where}", None, None, {}
     taken = _taken(flat, lay, cat)
-    spot = placer.place_on_patch(frag, cat, ore, ground.blocked, taken, ground.box)
-    xs, ys = [t[0] for t in ore], [t[1] for t in ore]
-    w, h = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
-    span = f"the {res} in {where} spans {w}x{h}, long axis {'E-W' if w >= h else 'N-S'}"
+    drill = _drill_of(frag, cat)
+    other = placer.others(drill, res, ground.ore)
+    spot = placer.place_on_patch(frag, cat, ore, ground.blocked, taken, ground.box, other)
+    span = _patch_span(res, ore, where)
     if spot is None:
-        outs = [b[1] for b in belts(flat, inst.machines[0], "out")]
-
-        def make(k):
-            return fragment("MinerRow", dict(frag.params, n=k), [], outs)
-
-        k, alt = placer.largest_fit(make, n, cat, ore, ground.blocked, taken, ground.box)
+        k, alt = placer.largest_fit(_row_maker(flat, inst, frag), n, cat, ore, ground.blocked,
+                                    taken, ground.box, other)
         line = (f"{path}: @patch({res}): no spot in {where} puts all {n} drills on {res} with "
                 f"no row entity on blocked or taken ground ({span}); "
                 + (f"n={k} would fit, at {alt.x},{alt.y} rot {alt.rot}; n stays {n}" if k
                    else "not even one drill fits"))
-        return None, line, None, None
+        return None, line, None, None, {}
     line = (f"{path}: @patch({res}) at {spot.x},{spot.y} rot {spot.rot}, the row runs "
             f"{'E-W' if spot.rot % 2 == 0 else 'N-S'} ({span}): {spot.drills}/{n} drills on "
             f"{res}, {spot.under} ore tiles under them ({fmt_amount(spot.under_amount)}), "
             f"{spot.reach} in their mining areas ({fmt_amount(spot.reach_amount)})")
-    return (spot.x, spot.y, spot.rot), line, frag, binding
+    more = {}
+    if spot.mixed:
+        locals_ = [fe.local for fe in frag.entities if cat.kind(fe.name) == "mining-drill"]
+        touched = [locals_[i] for i, _r in spot.mixed]
+        hit = sorted({r for _i, r in spot.mixed})
+        slots = placer.filter_slots(drill)
+        head = (f"{len(touched)} of {n} drills' mining areas reach {', '.join(hit)} "
+                f"({', '.join(touched)}) at {spot.x},{spot.y} rot {spot.rot}, the spot where the "
+                "fewest do; ")
+        if slots:
+            more["attrs"] = {loc: {"resource_filter": res} for loc in touched}
+            tail = (f"{drill} has {slots} resource filter slot{'s' if slots != 1 else ''}: theirs "
+                    f"is set to {res}, so they mine nothing else")
+            line += f"; {len(touched)} filtered to {res} (mixed-patch)"
+        else:
+            more["skip"] = frozenset(touched)
+            tail = (f"{drill} has no resource filter slots in facts.json, so they are left "
+                    f"out: {n - len(touched)} of {n} drills placed")
+            line += f"; {len(touched)} left out (mixed-patch)"
+        more["check"] = ("mixed-patch", path, head + tail)
+    return (spot.x, spot.y, spot.rot), line, frag, binding, more
+
+
+def patch_cover(flat, path, cat, ground, lo, hi):
+    """(k, Spot, text) for an ``n=auto`` ``@patch`` MinerRow (PLAN-ORGANIC M2): the most drills
+    ``lo..hi`` whose row has a clean spot on its patch (``placer.cover``: bodies on the resource,
+    mining areas off every other one, clear of blocked ground and of the other instances' planned
+    frames); the text is the size step's line. (0, None, why) when the patch gives no count (no
+    terrain, no ore, not even ``lo`` fits clean) and the row is sized by rates as before; (0,
+    None, None) for a row ``place`` will refuse anyway (not a MinerRow, another resource)."""
+    inst = flat.insts[path]
+    res = inst.hints.get("patch")
+    if _core(inst) != "MinerRow" or _params(inst).get("resource") != res:
+        return 0, None, None
+    if ground is None:
+        return 0, None, f"@patch({res}) and no terrain: the patch gives no count; n sized by rates"
+    ore = ground.ore.get(res, {})
+    where = "the plot" + (f" (patch {ground.patch})" if ground.patch else "")
+    if not ore:
+        return 0, None, f"@patch({res}): no {res} inside {where}; n sized by rates"
+    try:
+        frag, _binding = fragment_of(flat, path, cat)
+    except FragmentError as exc:
+        return 0, None, f"{exc}; n sized by rates"
+    taken, cache = set(), {}
+    for other_path in flat.insts:
+        if other_path == path:
+            continue
+        box = planned_frame(flat, other_path, cat, cache)
+        if box is not None:
+            taken |= {(x, y) for x in range(int(box[0]), int(math.ceil(box[2])))
+                      for y in range(int(box[1]), int(math.ceil(box[3])))}
+    other = placer.others(_drill_of(frag, cat), res, ground.ore)
+    k, spot = placer.cover(_row_maker(flat, inst, frag), lo, hi, cat, ore, ground.blocked, taken,
+                           ground.box, other)
+    span = _patch_span(res, ore, where)
+    if not k:
+        return 0, None, (f"@patch({res}): not even n={lo} has a spot in {where} with every drill "
+                         f"on {res} and no mining area on another resource ({span}); n sized by "
+                         "rates")
+    text = (f"@patch({res}): {span}; {k} drills stand on it with their mining areas off other "
+            f"resources, the row {'E-W' if spot.rot % 2 == 0 else 'N-S'} at {spot.x},{spot.y} "
+            f"rot {spot.rot}, {spot.reach} ore tiles in reach ({fmt_amount(spot.reach_amount)})")
+    return k, spot, text
 
 
 def _grow(cat, e, xmax, ymax):

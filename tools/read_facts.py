@@ -91,6 +91,7 @@ for name, p in pairs(prototypes.entity) do
     r.crafting_speed = m(p, 'get_crafting_speed')
     r.crafting_categories = g(p, 'crafting_categories') and keys(p.crafting_categories)
     r.mining_speed = g(p, 'mining_speed') r.mining_drill_radius = g(p, 'mining_drill_radius')
+    if p.type == 'mining-drill' then r.filter_count = g(p, 'filter_count') end
     local dv = g(p, 'vector_to_place_result') if dv then r.drop_vector = {dv.x or dv[1], dv.y or dv[2]} end
     r.resource_categories = g(p, 'resource_categories') and keys(p.resource_categories)
     r.belt_speed = g(p, 'belt_speed') r.max_distance = g(p, 'max_underground_distance')
@@ -416,6 +417,10 @@ def build_facts(ents, things, conns, sset, sread):
                   "target_temperature", "maximum_temperature", "neighbour_bonus"):
             if e.get(k) is not None:
                 row[k] = clean(e[k])
+        if e["type"] == "mining-drill" and e.get("filter_count"):
+            # 3.1 (M1): a drill's resource filter slots (MiningDrillPrototype::filter_count,
+            # 2.0.7+; the base game's drills set none)
+            row["filter_count"] = int(e["filter_count"])
         if e.get("resource_categories") is not None:
             row["resource_categories"] = _list(e["resource_categories"])
         if e.get("crafting_categories") is not None:

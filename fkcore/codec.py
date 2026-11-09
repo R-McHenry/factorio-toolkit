@@ -115,7 +115,7 @@ _UG_BACK = {v: k for k, v in _UG.items()}
 _OWN = ("entity_number", "name", "position", "direction", "tags")
 
 #: an entity's typed circuit settings (2.0), in the order the .fkp writes them
-CIRCUIT_ATTRS = ("if", "logistic", "read", "signal", "filter", "signals")
+CIRCUIT_ATTRS = ("if", "logistic", "read", "signal", "filter", "signals", "resource_filter")
 #: an entity's raw settings (2.1): JSON objects of control behaviour (``cb``) and blueprint
 #: (``bp``) fields
 RAW_ATTRS = ("cb", "bp")
@@ -262,6 +262,17 @@ def control_behavior(attrs, where="entity"):
         fields["use_filters"] = True
         fields["filters"] = [{"index": k + 1, "name": it, "quality": "normal", "comparator": "="}
                              for k, it in enumerate(str(flt).split("|"))]
+    rf = attrs.get("resource_filter")
+    if rf:
+        # 3.1 (PLAN-ORGANIC M1): a mining drill's resource filter. The placer writes this attr
+        # only on a drill whose facts.json row has ``filter_count`` (``placer.filter_slots``);
+        # the 2.0.77 facts record none, so no drill gets it until tools/read_facts.py is re-run.
+        # The field shape below (a top-level ``filter`` of slot filters and a mode) is
+        # UNCONFIRMED against a game export: decode a filtered drill's blueprint with
+        # ``parse_blueprint`` on a laptop server and fix it here (docs/notes-41-mines.md).
+        fields["filter"] = {"filters": [{"index": k + 1, "name": r}
+                                        for k, r in enumerate(str(rf).split("|"))],
+                            "mode": "whitelist"}
     if attrs.get("signals"):
         rows = []
         for k, part in enumerate(str(attrs["signals"]).split("|")):

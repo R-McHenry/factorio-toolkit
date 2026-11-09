@@ -7,6 +7,11 @@ the factory frame, ``FrameGround.box``) so that
 - **no row entity is on blocked ground** (water, cliffs) or on a tile something placed already
   holds (``taken``: entity tiles, instance frames and their route ends); the row's frame covers
   nothing taken, and the tiles its routes start or end on are free and inside the plot;
+- **no drill's mining area holds a tile of another resource** (PLAN-ORGANIC M1, 3.1: ``other``,
+  the tiles of every other resource the drill would mine): a drill over iron and copper puts both
+  on the belt. A mixed patch with no clean spot takes the spot where the **fewest drills** touch
+  the other resource (``Spot.mixed`` names them), and the caller sets their resource filter or
+  leaves them out (``expand._on_patch``);
 - among those spots, the drills' **mining areas** (their union: 5x5 per electric drill) hold the
   most ore tiles, then the most ore, then the drill bodies the most ore; ties go north, then
   west, then to the lower rotation. Every rotation is tried, so a row is laid along a patch's
@@ -15,17 +20,20 @@ the factory frame, ``FrameGround.box``) so that
 The candidates are the origins that put the first drill's first tile on ore, so the search is
 over the ore, not over the plot. Deterministic, pure, stdlib only. It never changes ``n``: when
 no spot holds every drill, :func:`largest_fit` says how many drills of the same row would fit,
-and where, for the report.
+and where, for the report. :func:`cover` (M2) is ``n=auto``'s count: the most drills of the row,
+within its bounds, with a clean spot on the patch.
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 
+from . import facts as _facts
 from .catalog import MINING_RADIUS
 from .compose import turn
 
-__all__ = ["Spot", "shape", "mining_area", "place_on_patch", "largest_fit"]
+__all__ = ["Spot", "shape", "mining_area", "place_on_patch", "largest_fit", "cover", "others",
+           "filter_slots"]
 
 _H = {0: 0, 4: 1, 8: 2, 12: 3}
 _DX = (0, 1, 0, -1)
@@ -43,6 +51,12 @@ class Spot:
     reach: int               # ore tiles in the union of the drills' mining areas
     reach_amount: int
     size: tuple              # the turned frame, (w, h)
+    mixed: tuple = ()        # (drill index, other resource) per drill whose mining area holds
+                             # a tile of another resource (M1); () is a clean spot
+
+    @property
+    def clean(self):
+        return not self.mixed
 
 
 @dataclass
@@ -87,14 +101,45 @@ def shape(frag, cat, rot) -> _Shape:
     return _Shape(w, h, frozenset(ents), bodies, areas, frozenset(ends - ents))
 
 
-def place_on_patch(frag, cat, ore, blocked, taken, box):
+def others(drill, resource, ore):
+    """{tile: other resource}: the tiles of every resource but ``resource`` in ``ore``
+    ({resource: {tile: amount}}) that a ``drill`` would mine (its ``resource_categories`` against
+    the resource's category, ``facts.json``; a resource the facts don't know counts). Crude oil
+    under an electric drill is not another resource: the drill cannot mine it."""
+    cats = set(_facts.entity(drill).get("resource_categories") or ())
+    table = _facts.load().get("resources", {})
+    out = {}
+    for res, tiles in ore.items():
+        if res == resource:
+            continue
+        category = (table.get(res) or {}).get("category")
+        if cats and category is not None and category not in cats:
+            continue
+        for t in tiles:
+            out[t] = res if t not in out else f"{out[t]}+{res}"
+    return out
+
+
+def filter_slots(drill):
+    """How many resource filter slots a drill has: its facts.json row's ``filter_count``
+    (``MiningDrillPrototype::filter_count``, which ``tools/read_facts.py`` records for drills
+    since 3.1, M1), 0 when the row has none. The 2.0.77 facts predate that read, so every drill
+    is 0 until facts.json is re-read on a laptop server (docs/notes-41-mines.md)."""
+    return int(_facts.entity(drill).get("filter_count") or 0)
+
+
+def place_on_patch(frag, cat, ore, blocked, taken, box, other=None):
     """The best :class:`Spot` for ``frag`` (a MinerRow fragment), or None.
 
     ``ore``: {tile: amount} of the row's resource in the factory frame; ``blocked``: terrain
-    tiles; ``taken``: tiles held by what is placed already; ``box``: the plot, (x0, y0, x1, y1)."""
+    tiles; ``taken``: tiles held by what is placed already; ``box``: the plot, (x0, y0, x1, y1);
+    ``other``: {tile: resource} of the other resources the drills would mine (:func:`others`).
+    A clean spot (no mining area on another resource) beats every mixed one; among mixed spots
+    the fewest drills touching wins."""
     if not ore:
         return None
     bx0, by0, bx1, by1 = box
+    other = other or {}
     best, best_key = None, None
     for rot in range(4):
         sh = shape(frag, cat, rot)
@@ -107,16 +152,17 @@ def place_on_patch(frag, cat, ore, blocked, taken, box):
             if (ox, oy) in seen:
                 continue
             seen.add((ox, oy))
-            spot = _judge(sh, ox, oy, rot, ore, blocked, taken, (bx0, by0, bx1, by1))
+            spot = _judge(sh, ox, oy, rot, ore, blocked, taken, (bx0, by0, bx1, by1), other)
             if spot is None:
                 continue
-            key = (spot.reach, spot.reach_amount, spot.under_amount, -oy, -ox, -rot)
+            key = (-len(spot.mixed), spot.reach, spot.reach_amount, spot.under_amount, -oy, -ox,
+                   -rot)
             if best_key is None or key > best_key:
                 best, best_key = spot, key
     return best
 
 
-def _judge(sh, ox, oy, rot, ore, blocked, taken, box):
+def _judge(sh, ox, oy, rot, ore, blocked, taken, box, other=None):
     bx0, by0, bx1, by1 = box
     if not (bx0 <= ox and by0 <= oy and ox + sh.w <= bx1 and oy + sh.h <= by1):
         return None
@@ -140,18 +186,67 @@ def _judge(sh, ox, oy, rot, ore, blocked, taken, box):
         for i in range(ox, ox + sh.w):
             if (i, j) in taken:
                 return None
-    reach = set()
-    for area in sh.areas:
-        reach |= {(ox + i, oy + j) for i, j in area}
+    reach, mixed = set(), []
+    for k, area in enumerate(sh.areas):
+        tiles = {(ox + i, oy + j) for i, j in area}
+        reach |= tiles
+        if other:
+            touched = sorted({other[t] for t in tiles if t in other})
+            if touched:
+                mixed.append((k, "+".join(touched)))
     held = [ore[t] for t in reach if t in ore]
-    return Spot(ox, oy, rot, len(sh.bodies), under, amount, len(held), sum(held), (sh.w, sh.h))
+    return Spot(ox, oy, rot, len(sh.bodies), under, amount, len(held), sum(held), (sh.w, sh.h),
+                tuple(mixed))
 
 
-def largest_fit(make, n, cat, ore, blocked, taken, box):
+def largest_fit(make, n, cat, ore, blocked, taken, box, other=None):
     """(k, Spot) for the largest k < n whose row (``make(k)`` -> its fragment) has a spot, or
     (0, None): the report's 'n=8 does not fit; 6 would'."""
     for k in range(n - 1, 0, -1):
-        spot = place_on_patch(make(k), cat, ore, blocked, taken, box)
+        spot = place_on_patch(make(k), cat, ore, blocked, taken, box, other)
         if spot is not None:
             return k, spot
     return 0, None
+
+
+def cover(make, lo, hi, cat, ore, blocked, taken, box, other=None):
+    """(k, Spot): the most drills ``lo <= k <= hi`` whose row (``make(k)`` -> its fragment) has a
+    **clean** spot on the patch (every body on the resource, no mining area on another resource,
+    nothing on blocked or taken ground), or (0, None) when not even ``lo`` has one. PLAN-ORGANIC
+    M2: ``MinerRow<n=auto> @patch(RES)`` takes its count from the patch.
+
+    ``hi`` is first cut to the rows whose frame fits the ore's bounding box either way round,
+    then the count is found by bisection: a shorter row of the same kind stands wherever a longer
+    one does (its drills, belt and route end are the longer row's first ones), so fitting is
+    monotone in k."""
+    if not ore or hi < lo or lo < 1:
+        return 0, None
+    xs, ys = [t[0] for t in ore], [t[1] for t in ore]
+    long_, short = sorted((max(xs) - min(xs) + 1, max(ys) - min(ys) + 1), reverse=True)
+    while hi >= lo:
+        w, h = make(hi).size
+        if max(w, h) <= long_ and min(w, h) <= short:
+            break
+        hi -= 1
+    if hi < lo:
+        return 0, None
+
+    def clean(k):
+        spot = place_on_patch(make(k), cat, ore, blocked, taken, box, other)
+        return spot if spot is not None and spot.clean else None
+
+    top = clean(hi)
+    if top is not None:
+        return hi, top
+    good = clean(lo)
+    if good is None:
+        return 0, None
+    a, b = lo, hi                     # a fits clean, b does not
+    while b - a > 1:
+        m = (a + b) // 2
+        spot = clean(m)
+        if spot is not None:
+            a, good = m, spot
+        else:
+            b = m
+    return a, good

@@ -470,8 +470,17 @@ def s_size(ctx, args):
             payback = parse_duration(o["payback"])
         except ValueError as exc:
             raise FlowError(f"size --payback {o['payback']}: {exc}") from None
+    # 3.1 (PLAN-ORGANIC M2): an n=auto row pinned by @patch takes its count from its patch, the
+    # terrain as the plot sees it (the same ground place reads)
+    grounds = {}
+    if ctx.ground is not None:
+        for p in _factories(ctx):
+            if p.factory in makers:
+                grounds[p.factory] = terrainmod.frame_ground(ctx.ground, p,
+                                                             terrainmod.frame_size(p),
+                                                             patch=p.patch)
     sz = sizemod.size(makers, ctx.surface.targets if ctx.surface is not None else None, previous,
-                      cat=ctx.cat, payback=payback)
+                      cat=ctx.cat, payback=payback, grounds=grounds or None)
     lines, checks = sizemod.report(sz, ctx.cat)
     if not sz.rows and not sz.picks:
         return lines, checks
@@ -481,7 +490,8 @@ def s_size(ctx, args):
              and "at" not in sz.flats[r.factory].insts[r.path].hints]
     if patch:
         lines += ["", "  on their ore by place (@patch): " + ", ".join(
-            f"{r.path} n={r.n}" for r in patch) + "; place says when that many drills don't fit"]
+            f"{r.path} n={r.n}" + (" (what the patch holds)" if r.covered else "")
+            for r in patch) + "; place says when that many drills don't fit"]
     return lines, checks + sizemod.fit(sz, ctx.surface.places if ctx.surface else {}, ctx.cat)
 
 
@@ -630,14 +640,14 @@ def s_place(ctx, args):
     lines, checks = [], []
     for p in _factories(ctx):
         flat = ctx.flats[p.factory]
-        ground, placed = None, []
+        ground, placed, mixed = None, [], []
         if ctx.ground is not None:
             # a quarter-turned plot's frame depends on the factory's size, not known before it
             # is laid out: the placer takes the frame to be the plot's own extent
             ground = terrainmod.frame_ground(ctx.ground, p, terrainmod.frame_size(p),
                                              patch=p.patch)
         lay, notes = expand.expand_factory(flat, ctx.cat, ctx.previous.get(p.factory), ground,
-                                           placed)
+                                           placed, mixed)
         lay.name = p.factory
         pinned = _pinned_covers(lay, ctx.previous.get(p.factory), ctx.cat)
         if pinned:
@@ -654,6 +664,7 @@ def s_place(ctx, args):
         lines += [f"  {path}: {c}" for path, c in sorted(cls.items()) if c != "unchanged"]
         lines += [f"  placed {line}" for line in placed]
         checks += [Check("no-position", p.factory, n) for n in notes]
+        checks += [Check(code, f"{p.factory} {path}", msg) for code, path, msg in mixed]
         checks += _overlap_checks(p.factory, flat, lay, ctx.cat)
         checks += _invariant_checks(p.factory, fkp.invariants(lay, ctx.cat))
     return lines, checks

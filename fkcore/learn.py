@@ -117,6 +117,7 @@ for _, name in pairs(P.names) do
   if g(p, 'crafting_categories') then r.crafting_categories = keys(p.crafting_categories) end
   r.mining_speed = g(p, 'mining_speed')
   r.mining_radius = m(p, 'get_mining_drill_radius') or g(p, 'mining_drill_radius')
+  if p.type == 'mining-drill' then r.filter_count = g(p, 'filter_count') end
   if g(p, 'resource_categories') then r.resource_categories = keys(p.resource_categories) end
   local dv = g(p, 'vector_to_place_result') if dv then r.drop_vector = {dv.x or dv[1], dv.y or dv[2]} end
   r.belt_speed = g(p, 'belt_speed') r.max_distance = g(p, 'max_underground_distance')
@@ -317,6 +318,8 @@ def rows(raw, base):
             facts[k] = _clean(raw[k])
     if raw.get("mining_radius") is not None:
         facts["mining_drill_radius"] = _clean(raw["mining_radius"])
+    if raw["type"] == "mining-drill" and raw.get("filter_count"):
+        facts["filter_count"] = int(raw["filter_count"])     # 3.1 (M1): resource filter slots
     if raw.get("crafting_categories") is not None:
         facts["crafting_categories"] = _list(raw["crafting_categories"])
     if raw.get("module_slots"):

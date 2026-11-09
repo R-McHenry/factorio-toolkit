@@ -19,7 +19,7 @@ net plates: col.pl_out -> box             # the plates into a provider chest
 | statement | snippet | chapter |
 |---|---|---|
 | instance | `name = Kind<param=value, ...> @(x, y)` or `@(x, y, rot r)`: the instance's origin (its (0, 0)) goes at (x, y), inside the factory's plot; `rot` turns it r quarter turns clockwise about that point, so a row or module that grows never moves what stood. A single machine (a chest, a pump) has no origin to turn about: (x, y) is its top-left tile at every rot. A Literal's origin is its file's (0, 0). An instance without `@` is unplaced (nothing lays it, its nets stay unrouted) until `fk layout` places it and `--write` puts the hint on its line (chapter 9) | 1, 9 |
-| `@patch(iron-ore)` | `ore = MinerRow<n=4, resource=iron-ore> @patch(iron-ore)`: a miner row on that ore instead of a position (`@patch("iron-ore#2")` for a numbered patch) | 3 |
+| `@patch(iron-ore)` | `ore = MinerRow<n=4, resource=iron-ore> @patch(iron-ore)`: a miner row on that ore instead of a position (`@patch("iron-ore#2")` for a numbered patch). Every drill's body stands on the ore and no drill's mining area (5x5) reaches another resource; on a mixed patch with no such spot the row goes where the fewest drills do, and those are left out (a drill the game's facts give resource filter slots is filtered to the row's resource instead): the `mixed-patch` check line names them. With `n=auto` the count is what the patch holds | 3 |
 | `net` | `net NAME: drivers -> consumers`: one belt (or pipe; one lane of a shared belt, `lanes`). A ref names an instance (`gears`), a port (`line.c_in`), a cell's port (`cols[2].pl`, `cols[*].pl`) or a Literal's named machine (`std.asm1`). Options below | 1 |
 | `net ... items a, b:` | `net s items iron-plate, coal: ...`: the items declared; else what the drivers make | 7 |
 | `net ... width 2:` | `net plates width 2: smelt -> users`: both lanes of its belt (15/s on yellow); `width 8` is four belts side by side, a ribbon. 1, 2 or an even number | 8 |
@@ -135,7 +135,7 @@ joins two nets.
 
 | | |
 |---|---|
-| `Stack<cell=FurnaceCell, n=auto>`, `MinerRow<n=auto>`, a row `n=auto` | the `size` step gives it the fewest cells or machines that meet the surface's `target` lines, the factory's `assert` lines and what its consumers take (a net it drives, a chest or labs with a `rate=`); `n=auto 4..30` bounds it; `out\size.txt` says what each count serves (chapter 5) |
+| `Stack<cell=FurnaceCell, n=auto>`, `MinerRow<n=auto>`, a row `n=auto` | the `size` step gives it the fewest cells or machines that meet the surface's `target` lines, the factory's `assert` lines and what its consumers take (a net it drives, a chest or labs with a `rate=`); `n=auto 4..30` bounds it; `out\size.txt` says what each count serves (chapter 5). A `MinerRow<n=auto> @patch(RES)` takes its count from the patch instead: the most drills, within the bounds, standing on the ore with their mining areas off every other resource, laid along the patch's long axis; `size.txt` says what the patch gave. Several rows for a wide patch are yours to write |
 | `built=8`, `built=auto` on a Stack | 12 cells laid out, 8 built (DNP, below), or as many as the targets take |
 | `machine=auto` | picks from the kind's `tiers` line; one choice for every copy of a cell |
 | `modules=auto` | no modules, speed or productivity where the recipe allows; the cheapest pick in raw resources that meets every target (`size --payback 2h` also counts what it draws over two hours) |
