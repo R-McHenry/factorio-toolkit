@@ -1137,6 +1137,8 @@ def s_route(ctx, args):
             lines += [f"  standing  {n}: unrouted; its last route ({k} carriers) stands until it "
                       f"routes (route --failed keep)" for n, k in sorted(standing.items())]
         _write_nets(ctx, factory, r, held, seeds, stood)
+        # R2: what the negotiation fought over (FK_NEGOTIATE=1), for `fk layout --from`
+        design.write_pressure(ctx.out, factory, r.pressure, routed=bool(r.routed))
         # 3.1: what the compile store did for each sealed unit (route.Routed.compiled)
         comp = {n for c in r.compiled.values() if c["from"] == "store"
                 for n in c.get("laid", c["nets"])}

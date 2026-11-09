@@ -1998,6 +1998,12 @@ def main(argv=None):
     ly.add_argument("--sweeps", type=int, default=None, help="the cap on sweeps (default 150)")
     ly.add_argument("--plot", default=None, metavar="WxH",
                     help="the top level's frame (default: the surface file's plot, else room)")
+    ly.add_argument("--from", dest="from_out", nargs="?", const="out", default=None, metavar="OUT",
+                    help="a round of the loop from the last build's OUT (default: out beside the "
+                         "file): its real carriers per net stand for the estimate in the report "
+                         "(real -> estimated), its negotiation history (FK_NEGOTIATE=1 builds) "
+                         "seeds the price field, and the placed instances move (--all); then "
+                         "fk build again")
     ct = sub.add_parser("contract", description="every sealed module's contract: each port's "
                         "direction, item, rate at full speed, where it crosses and what it got "
                         "(fkcore.contract)")

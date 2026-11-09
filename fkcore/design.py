@@ -12,6 +12,10 @@ and see brief stats reports on nets that are in progress too."
   ``took``; ``key``, the ground an unrouted net failed on), then its carriers as a small .fkp. A
   net inside an instance (``mall/fe``) is ``nets/mall/fe.net``.
 - ``route.now``: what the route step is doing (the net, how far, since when).
+- ``pressure.json`` (PLAN-ORGANIC R2): the negotiation's history when the route step negotiated
+  (FK_NEGOTIATE=1): per compile unit the store's module and key, the frame, and the contested
+  tiles with how often each was fought over. ``fk layout --from`` seeds its price field from it,
+  so an instance on a fought-over corridor is pushed first. Nothing else reads it.
 
 The next build starts from these files: a routed net's carriers are kept (judged, patched or
 routed again as a committed route is), an unrouted one is not searched again on the same ground,
@@ -181,6 +185,35 @@ def layout(out, factory, statuses=("routed", "kept", "patched", "held")):
                 lay.entities[e.key] = e
                 keys.add(e.key)
     return lay
+
+
+def write_pressure(out, factory, units, routed=True):
+    """``pressure.json``: ``route.Routed.pressure`` as the step left it. A step that negotiated
+    nothing leaves the file alone when it laid nothing either (every route kept: the fight that
+    laid them is still the one that stands) and removes it when it laid routes without
+    negotiating (``routed``; FK_NEGOTIATE unset: the record no longer describes what stands)."""
+    import json
+    path = os.path.join(folder(out, factory), "pressure.json")
+    if not units:
+        if routed:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return
+    _write(path, json.dumps({"factory": factory, "units": units}, indent=1))
+
+
+def read_pressure(out, factory):
+    """{unit path: record} of ``pressure.json``, or {} when there is none."""
+    import json
+    try:
+        with open(os.path.join(folder(out, factory), "pressure.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    units = data.get("units") if isinstance(data, dict) else None
+    return units if isinstance(units, dict) else {}
 
 
 def write_now(out, factory, text):
