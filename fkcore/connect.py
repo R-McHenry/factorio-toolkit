@@ -318,10 +318,22 @@ def _port_joints(g, ports):
     for key in sorted(ports, key=natural_key):
         pe = ports[key]
         by_edge.setdefault((tuple(pe.src), tuple(pe.dst)), []).append(key)
+    index = None
+    if any(getattr(pe, "fluid", None) for pe in ports.values()):
+        # 43-hierarchy: one index of the boxes' connections and one set of the joins made, for
+        # every fluid port's edge (each edge scanned every box and hashed every join again:
+        # 6 of fen's 20 s no-op route step, in three graphs of its 592 ports)
+        by_conn = {}
+        for nid, b in g.boxes.items():
+            for c in b.conns:
+                if c.type == "normal":
+                    by_conn.setdefault((tuple(c.tile), tuple(c.target)), []).append((nid, c.flow))
+        done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
+        index = (by_conn, done)
     for (src, dst), keys in by_edge.items():
         keys.sort(key=lambda k: (tuple(ports[k].src) != tuple(ports[k].inside), natural_key(k)))
         if any(getattr(ports[k], "fluid", None) for k in keys):
-            _fluid_port_joints(g, ports, src, dst, keys)
+            _fluid_port_joints(g, ports, src, dst, keys, index)
             continue
         a, b = g.at.get(src), g.at.get(dst)
         if a is not None and b is not None:
@@ -348,28 +360,33 @@ def port_box(pe, which):
     return FluidBox(which, pe.fluid, "output" if gives else "input", ())
 
 
-def _fluid_port_joints(g, ports, src, dst, keys):
+def _fluid_port_joints(g, ports, src, dst, keys, index=None):
     """A fluid port's edge (2.1, fluid ports): the pipe (or machine box) on each side of the
     frame's edge joins the other there; that join becomes box -> port -> box, the port a node of
     its own with two boxes, one per net it ends (``port_box``), each joined only to its own side.
     So the port is the outside net's consumer and the inside net's driver (an in port), never a
     join between two nets. Two ports on one edge (stacked cells) chain, the out port first: the
     net between them joins their two outside boxes and lays nothing."""
-    def facing(tile, other):
-        out = []
+    if index is None:
+        by_conn = {}
         for nid, b in g.boxes.items():
-            if nid[0] in keys:
-                continue
             for c in b.conns:
-                if c.type == "normal" and c.tile == tile and c.target == other:
-                    out.append((nid, c.flow))
-        return out
+                if c.type == "normal":
+                    by_conn.setdefault((tuple(c.tile), tuple(c.target)), []).append((nid, c.flow))
+        done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
+    else:
+        by_conn, done = index
+
+    def facing(tile, other):
+        return [(nid, f) for nid, f in by_conn.get((tuple(tile), tuple(other)), ())
+                if nid[0] not in keys]
     a_side, b_side = facing(src, dst), facing(dst, src)
     a_ids, b_ids = {nid for nid, _f in a_side}, {nid for nid, _f in b_side}
     gone = [(x, y, v) for x, y, v in g.joins if v == "pipe" and
             ((x in a_ids and y in b_ids) or (x in b_ids and y in a_ids))]
     for x, y, v in gone:
         g.joins.remove((x, y, v))
+        done.discard((min(x, y, key=_box_key), max(x, y, key=_box_key), v))
         for u, w in ((x, y), (y, x)):
             if u in g.fluid:
                 g.fluid[u] = [kv for kv in g.fluid[u] if kv[0] != w]
@@ -382,7 +399,6 @@ def _fluid_port_joints(g, ports, src, dst, keys):
         for which in (PORT_OUTSIDE, PORT_INSIDE):
             g.boxes[(key, which)] = port_box(pe, which)
         chain.append(((key, first), (key, last)))
-    done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
     for nid, flow in a_side:
         head = chain[0][0]
         _fluid_join(g, (nid, flow), (head, g.boxes[head].production), "pipe", done)

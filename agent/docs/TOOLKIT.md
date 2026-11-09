@@ -399,7 +399,9 @@ the template stops on it), `feed-rides-on` (chapter 9), `no-limit` (chapter 6), 
 2), `could-pair` (chapter 3), `no-match` (a `set` that matches nothing), `two-nets`, `port`,
 `crosses-frame`, `overlap`, `flat` (a level that routes more than 60 nets, or searched more than
 60 s: the hierarchy is missing there), `ports-touch` (two fluid ports of different fluids on
-adjacent tiles of one side: the pipes join) (chapter 11), `CIRCUIT`, `cannot-filter`, `no-signal`, `no-wire`,
+adjacent tiles of one side: the pipes join), `no-pole-spot` (an entity in a sealed cell that no
+free tile inside the cell's frame can power from), `port-not-in-line` (a pair port `a | b` whose
+straight stem inside the frame has something standing in it) (chapter 11), `CIRCUIT`, `cannot-filter`, `no-signal`, `no-wire`,
 `wire-too-far`, `wires-share`, `gate-open`, `require-not-met`, `gate-auto`, `limited` (LANGUAGE.md,
 "Circuits"), `taken-up` (the build takes up a lot and the robots need minutes; `fk merge` when a
 factory moved), `rate-not-met` / `target-not-met`, `size` / `does-not-fit` (chapter 5),

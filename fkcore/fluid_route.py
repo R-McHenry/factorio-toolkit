@@ -174,6 +174,43 @@ def _abut(flat, lay, cat, net):
     return len({(tuple(edges[k].src), tuple(edges[k].dst)) for k in keys}) == 1
 
 
+def _direct(flat, lay, cat, net):
+    """43-hierarchy (PLAN-ORGANIC D2): a fluid net whose endpoint boxes all join directly as they
+    stand (a boiler straight onto its engine; fen's ``rx/f5_gas3``, two boxes on one edge): it is
+    connected and lays nothing, the fluid analogue of a belt job's ``direct``. Until now it was
+    routed each build (``0 pipes, 1 direct join``), laid nothing, so nothing pinned it, and the
+    next build routed it again: the one "routed" net of fen's no-op (a column's out port onto
+    a Pump just outside it). A net of port ends alone is ``_abut``'s."""
+    try:
+        ends = _ends(flat, lay, cat, net)
+    except _Skip:
+        return False
+    ports = getattr(flat, "ports", {})
+    pkeys = sorted({k for k, _i, _s, _b in ends if k in ports}, key=fkpmod.natural_key)
+    ekeys = sorted({k for k, _i, _s, _b in ends if k not in ports}, key=fkpmod.natural_key)
+    if len(ends) < 2 or not ekeys or any(k not in lay.entities for k in ekeys):
+        return False
+    edges = None
+    if pkeys:
+        every = port_edges(flat, lay, cat)
+        if any(k not in every for k in pkeys):
+            return False
+        edges = {k: every[k] for k in pkeys}
+    g = connectmod.graph([lay.entities[k] for k in ekeys], cat, edges)
+    nids = {(k, b.box) for k, _i, _s, b in ends}
+    parent = {n: n for n in nids}
+
+    def find(n):
+        while parent[n] != n:
+            parent[n] = parent[parent[n]]
+            n = parent[n]
+        return n
+    for a, b, _via in g.joins:
+        if a in nids and b in nids:
+            parent[find(a)] = find(b)
+    return len({find(n) for n in nids}) == 1
+
+
 def _ends(flat, lay, cat, net):
     """[(key, item, side, FluidBox)] of a fluid net's endpoints in ``lay``; raises _Skip. A fluid
     port's end (2.1) is the box ``_port_end`` gives it."""

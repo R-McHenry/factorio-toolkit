@@ -1140,15 +1140,15 @@ def s_route(ctx, args):
         # R2: what the negotiation fought over (FK_NEGOTIATE=1), for `fk layout --from`
         design.write_pressure(ctx.out, factory, r.pressure, routed=bool(r.routed))
         # 3.1: what the compile store did for each sealed unit (route.Routed.compiled)
+        through = set(r.passthrough)
         comp = {n for c in r.compiled.values() if c["from"] == "store"
-                for n in c.get("laid", c["nets"])}
+                for n in c.get("laid", c["nets"])} - through
         lines += _compiled_lines(factory, r)
         _write_units(ctx, factory, r)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
-        through = set(r.passthrough)
         lines.append(f"{factory}: {len(set(r.routed) - through)} routed, {len(r.kept)} kept"
                      + (f", {len(r.patched)} patched" if r.patched else "")
                      # 3.1.5: pass-through nets apart (an agent read "584 routed" on a no-op)

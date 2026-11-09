@@ -2212,13 +2212,23 @@ def _is_stub(e):
     return e.key.rsplit("/", 1)[-1][:1] == "z"
 
 
+def _pair(net):
+    """A lane pair ``A|B`` (two nets on one belt, 2.0): judged, patched and trimmed by its two
+    member nets, whose ends are the pair's (its own name has none)."""
+    return len(fkpmod.net_names(net) or [net]) > 1
+
+
 def _serving_only(flat, cat, job, ents, laid):
     """``laid`` less what serves no end (a tail past its last pickup): the rule a rebuild keeps a
-    committed route by (``_patch_net``), so the next build keeps this one as it stands."""
+    committed route by (``_patch_net``), so the next build keeps this one as it stands. A lane
+    pair is served by its two members' ends, as ``_standing`` judges it (43-hierarchy: ridge's
+    ``rx/steelE|rx/bka`` lost 9 of 298 carriers to the judge on its first rebuild, once)."""
     g = connectmod.graph(list(ents) + list(laid), cat, _ports(flat))
     table = connectmod.endpoints(flat)
-    keep = _serving(g, job.net, *_ends_of(flat, table, job, g, routed=False),
-                    {e.key for e in laid})
+    keys = {e.key for e in laid}
+    keep = set()
+    for m in fkpmod.net_names(job.net) or [job.net]:
+        keep |= _serving(g, m, *_ends_of(flat, table, job, g, routed=False, net=m), keys)
     out = [e for e in laid if e.key in keep or _is_stub(e)]
     return out if out else laid
 
@@ -3468,7 +3478,7 @@ def _negotiate(flat, cat, js, order, ribs, base_ents, net_frames, claims, rib_of
                     soft[t] = (1.0 + hist.get(t, 0.0)) * (1.0 + pres * n) - 1.0
             got, why = _route_one(cat, js[net], hard, fnet, js, bnet, limit, terrain, avoid,
                                   allow=joints, soft=soft)
-            if got is not None and (js[net].wide or js[net].pin):
+            if got is not None and (js[net].wide or js[net].pin or _pair(net)):
                 got = _serving_only(flat, cat, js[net], hard, got)
             if got is None:
                 routes.pop(net, None)
@@ -3519,7 +3529,7 @@ def _negotiate(flat, cat, js, order, ribs, base_ents, net_frames, claims, rib_of
         ents = hard + [e for laid in routes.values() for e in laid]
         got, why = _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, avoid_of(net),
                               allow=joints)
-        if got is not None and (js[net].wide or js[net].pin):
+        if got is not None and (js[net].wide or js[net].pin or _pair(net)):
             got = _serving_only(flat, cat, js[net], ents, got)
         if got is None:
             failed[net] = why
@@ -3695,6 +3705,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     # keyed and stored by no unit, so a module of pipes never compiled and the pass took the
     # build's minutes); the fluid nets outside every sealed module still go to the pass after
     fluid_units = {}
+    direct_fluid = set()             # the fluid pass-throughs whose boxes join directly
     fluid_abut = _fluid_plugin()
     for n in sorted(js, key=fkpmod.natural_key):
         if js[n].fluid and n not in have and n not in kept and js[n].skip is None:
@@ -3707,6 +3718,14 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             # (fen: 151 nets "laid from the store" on a no-op, the judge 60 s of a 76 s route)
             if fluid_abut is not None and fluid_abut._abut(flat, lay, cat, n):
                 abut.add(n)
+                continue
+            # 43-hierarchy (D2): a fluid net whose boxes join directly as they stand (fen's
+            # rx/f5_gas3: 0 pipes, 1 direct join) lays nothing too. It was routed each build,
+            # pinned by nothing, and was the one "routed" net of fen's no-op, with the fluid
+            # world built for its judge alone
+            if fluid_abut is not None and fluid_abut._direct(flat, lay, cat, n):
+                abut.add(n)
+                direct_fluid.add(n)
                 continue
             u = _unit(n, sealed)
             if u:
@@ -3874,7 +3893,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             failed[net] = why
             return ents
         failed.pop(net, None)
-        if js[net].wide or js[net].pin:
+        if js[net].wide or js[net].pin or _pair(net):
             got = _serving_only(flat, cat, js[net], ents, got)
         added[net] = got
         how[net] = why
@@ -4347,8 +4366,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 n_d, n_c = ((len(flat.nets[net].drivers), len(flat.nets[net].consumers))
                             if job.fluid and net in flat.nets
                             else (job.drivers(), job.consumers()))
-                lines.append(f"routed    {net}: {n_d} -> {n_c}, nothing "
-                             "to lay (its ports meet on one edge)")
+                why = ("its boxes join directly" if net in direct_fluid
+                       else "its ports meet on one edge")
+                lines.append(f"routed    {net}: {n_d} -> {n_c}, nothing to lay ({why})")
         elif net in kept:
             lines.append(f"kept      {net}: its carriers are already laid (pinned)")
         elif net in patched:
@@ -4419,8 +4439,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     lines += seal_checks(flat, new, cat)
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
+    # 43-hierarchy: a net laid with no carrier (a stored route of nothing) is a pass-through in
+    # the summary too: nothing was searched or laid, and nothing will pin it
+    through = set(abut) | {n for n in added if not added[n] and n not in failed}
     return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again,
-                  short, known, cinfo, sorted(abut), pressure, levels)
+                  short, known, cinfo, sorted(through), pressure, levels)
 
 
 def seal_checks(flat, lay, cat):
