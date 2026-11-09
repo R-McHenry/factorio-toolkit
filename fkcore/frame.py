@@ -82,6 +82,8 @@ def shape_problem(verts):
         dup = next(p for p in pts if pts.count(p) > 1)
         return f"vertex ({dup[0]}, {dup[1]}) is written twice"
     n = len(pts)
+    if all(_cross(pts[0], pts[1], p) == 0 for p in pts[2:]):
+        return "the shape has no area"          # every vertex on one line: no fold to name
     edges = [(pts[i], pts[(i + 1) % n]) for i in range(n)]
     for i in range(n):
         a, b = edges[i]

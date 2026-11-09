@@ -337,15 +337,19 @@ def build_view(game, surface="nauvis", cat=None):
             d = defs.get(i.kind)
             x0, y0 = i.x + p.x, i.y + p.y
             rows = None
-            if d and d["w"] and i.rot == 0:
-                box = [x0, y0, x0 + d["w"], y0 + d["h"]]
+            if d and d["w"]:
+                # 41-hull: the declared frame (a box, or the shape's tiles) turned about the
+                # instance's origin as the build turns it; a polygon's rows are drawn filled
+                from .frame import Frame
+                own = Frame.from_box(d["w"], d["h"])
                 if d.get("shape"):
                     try:
-                        from .frame import Frame
-                        rows = [[y, a, b] for y, a, b in
-                                Frame.from_polygon(d["shape"]).moved(x0, y0).runs()]
+                        own = Frame.from_polygon(d["shape"])
                     except ValueError:          # a bad shape: drawn as its box
-                        rows = None
+                        pass
+                turned = own.turn(i.rot).moved(x0, y0)
+                box = list(turned.box)
+                rows = None if turned.is_box else [[y, a, b] for y, a, b in turned.runs()]
             elif i.path in boxes:
                 box = [round(v, 1) for v in boxes[i.path]]
             else:

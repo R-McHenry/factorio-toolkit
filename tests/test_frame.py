@@ -18,6 +18,7 @@ from fkcore.frame import Frame, ShapeError, shape_problem
 CAT = Catalog.load()
 
 L_VERTS = [(0, 0), (20, 0), (20, 8), (10, 8), (10, 16), (0, 16)]      # a 20x16 box less its SE 10x8
+HEX_VERTS = [(0, 0), (20, 0), (20, 18), (12, 26), (8, 26), (0, 18)]   # a 20x18 box with a 1:1 foot
 
 ELL = """
 module Ell shape (0,0) (20,0) (20,8) (10,8) (10,16) (0,16) {
@@ -88,12 +89,16 @@ class FrameTest(unittest.TestCase):
         self.assertEqual(rows[0], "#" * 20)
         self.assertEqual(rows[8], "#" * 10 + "." * 10)
         self.assertTrue(f.contains(9, 15) and not f.contains(10, 8) and (19, 7) in f)
-        hexish = Frame.from_polygon([(0, 0), (20, 0), (20, 18), (12, 26), (4, 26), (0, 18)])
-        self.assertEqual(hexish.area, 20 * 18 + 8 * 8 + 4 * 8 + 8 * 4)   # the box, the slopes, the foot
+        # a box with a tapering foot: both slopes 1:1, so row y below 18 holds the tile centres
+        # strictly between x = y - 18 and x = 38 - y: 18, 16, ... 4 tiles (a centre on the edge
+        # is outside: the frame is the tiles whose centres the polygon holds)
+        hexish = Frame.from_polygon(HEX_VERTS)
+        self.assertEqual(hexish.area, 20 * 18 + sum(range(4, 19, 2)))
+        self.assertEqual(hexish.rows_text()[18], "." + "#" * 18 + ".")
         self.assertEqual(hexish.rows_text()[25], "." * 8 + "####" + "." * 8)
 
     def test_turn_is_compose_turn(self):
-        for verts in (L_VERTS, [(0, 0), (20, 0), (20, 18), (12, 26), (4, 26), (0, 18)]):
+        for verts in (L_VERTS, HEX_VERTS):
             f = Frame.from_polygon(verts)
             for rot in range(4):
                 t = f.turn(rot)
@@ -104,7 +109,9 @@ class FrameTest(unittest.TestCase):
     def test_grow_contains_boundary_and_nearest(self):
         f = Frame.from_polygon(L_VERTS)
         self.assertEqual(f.grow(1).box, (-1, -1, 21, 17))
-        self.assertEqual(f.grow(1).area, 240 + 2 * 20 + 2 * 16 + 4 - (10 * 8 - 10 - 8 + 1) + (10 * 8 - 72))
+        # the 22x18 box less what no tile of the L neighbours: the notch's inner 9x7, the east
+        # column beside the notch (x 20, y 9..16) and the south row beside it (y 16, x 11..19)
+        self.assertEqual(f.grow(1).area, 22 * 18 - 9 * 7 - 8 - 9)
         self.assertEqual(f.boundary("n"), [(x, 0) for x in range(20)])
         self.assertEqual(f.boundary("s"), [(x, 15) for x in range(10)] + [(x, 7) for x in range(10, 20)])
         self.assertEqual(f.boundary("e"), [(19, y) for y in range(8)] + [(9, y) for y in range(8, 16)])
@@ -124,7 +131,7 @@ class FrameTest(unittest.TestCase):
         self.assertEqual(f.overlap(arm).runs(), [(6, 8, 14), (7, 8, 14), (8, 8, 10), (9, 8, 10)])
         self.assertEqual(Frame.from_runs(f.runs()), f)
         self.assertEqual(Frame.from_tiles(f.tiles()), f)
-        self.assertEqual(f.clip((5, 5, 15, 12)).area, 5 * 3 + 5 * 4)
+        self.assertEqual(f.clip((5, 5, 15, 12)).area, 10 * 3 + 5 * 4)    # rows 5..7 full, 8..11 the stem
         self.assertEqual(f.moved(2, 3).box, (2, 3, 22, 19))
         self.assertTrue(f.overlaps_box((9, 9, 11, 11)) and not f.overlaps_box((10, 8, 20, 16)))
 
@@ -274,13 +281,14 @@ module Box size 8x6 {
         flat, lay, _ = placed(text.replace("c = Chest<provider, limit=100> @(16, 14)",
                                            "c = Chest<provider, limit=100> @(30, 14)\nbx = Box @(13, 11)"))
         self.assertEqual(expand.frame_overlaps(flat, lay, CAT), [])
-        # a box over the arm's corner: four shared tiles (x 10..11, y 8..9), not the 2x4 box
+        # a box over the arm's inner corner (ell stands at 2,2: its arm is y 2..9, its stem
+        # x 2..11): the shared box is 8x6 but only 32 of its 48 tiles are the L's
         flat, lay, _ = placed(text.replace("c = Chest<provider, limit=100> @(16, 14)",
-                                           "c = Chest<provider, limit=100> @(30, 14)\nbx = Box @(10, 6)"))
+                                           "c = Chest<provider, limit=100> @(30, 14)\nbx = Box @(8, 8)"))
         pairs = expand.frame_overlaps(flat, lay, CAT)
-        self.assertEqual(pairs, [("bx", "ell", (10, 6, 12, 10), 4)])
+        self.assertEqual(pairs, [("bx", "ell", (8, 8, 16, 14), 32)])
         checks = flow._overlap_checks("t", flat, lay, CAT)
-        self.assertIn("share 4 tiles in 2x4 at 10,6..11,9", checks[0].msg)
+        self.assertIn("share 32 tiles in 8x6 at 8,8..15,13", checks[0].msg)
 
     def test_explain_prints_the_frame_as_rows(self):
         flat, lay, _ = placed(ELL)
@@ -306,7 +314,7 @@ module Box size 8x6 {
         self.assertEqual(built.spec.box, (0, 0, 20, 16))
         self.assertEqual(set(built.spec.blocked), {(x, y) for x in range(10, 20) for y in range(8, 16)})
         self.assertIn("shape of Ell", built.box_from)
-        ports = [si for si in built.spec.insts if si.name.startswith("ell/")]
+        ports = [si for si, p in zip(built.spec.insts, built.paths) if p is None]    # the fixed terminals
         self.assertEqual({si.name: si.shapes[0][1][0][0] for si in ports},
                          {"ell/fe_in": (0, 8), "ell/g_out": (12, 0)})
         res = layout.place(built.spec)
