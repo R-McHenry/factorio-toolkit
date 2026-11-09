@@ -237,6 +237,26 @@ class NetTest(unittest.TestCase):
                           "8 carriers; not in the layout: ins/m0",
                           "SPILL net p: r/f0 drops into m/b, which is not a consumer of p"])
 
+    def test_a_machine_left_out_at_place_is_not_an_end(self):
+        # 43-mines (PLAN-ORGANIC M1): a mixed row's drill with no filter slot is left out at
+        # place; its instance stands (m/a is here), so m/z is no end of the net and the four
+        # standing drills' net is connected. An instance not placed at all stays "not in the
+        # layout" (ins/m0).
+        gap = "".join(f"\ne r/g{j} transport-belt {6.5 + j},4.5 E net=p" for j in range(3))
+        lay = L(self.BELT_ROUTE.replace("\n        e r/f1", gap + "\ne r/f1"))
+        rep = connect(lay, CAT, {"p": ([("m/a", "iron-gear-wheel"), ("m/z", "iron-gear-wheel")],
+                                       [("m/b", "iron-gear-wheel"), ("m/c", "iron-gear-wheel")])})
+        net = rep.nets["p"]
+        self.assertTrue(net.connected)
+        self.assertEqual((net.pairs, net.reached, net.left_out, net.missing), (2, 2, ["m/z"], []))
+        self.assertEqual(rep.checks, [])
+        rep = connect(lay, CAT, {"p": ([("m/a", "iron-gear-wheel"), ("m/z", "iron-gear-wheel")],
+                                       [("m/b", "iron-gear-wheel"), ("ins/m0", "iron-gear-wheel")])})
+        net = rep.nets["p"]
+        self.assertEqual((net.status, net.pairs, net.reached, net.left_out, net.missing),
+                         ("open", 2, 1, ["m/z"], ["ins/m0"]))
+        self.assertIn("not in the layout: ins/m0; left out at place: m/z", str(rep.checks[0]))
+
     def test_an_underground_side_load_connects_and_draws_no_line(self):
         # 2.0: whether its items get through is the lane graph's to say (the routed LANE line);
         # V1 warned UG_SIDELOAD on every one
