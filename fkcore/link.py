@@ -577,6 +577,20 @@ rcon.print(n)
 """
 
 
+def lua_unmark(surface, area):
+    """Where things are free (47-cleanpaste): the deconstruction marks a superforced paste left
+    on what stood in a ghost's way are noise (no robots come), and a marked pump or pipe looks
+    stuck to a player: cancel them in ``area``; -> how many."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, to_be_deconstructed = true}}) do
+  if e.valid and e.cancel_deconstruction(e.force) then n = n + 1 end
+end
+rcon.print(n)
+"""
+
+
 def lua_decon(surface, force, area):
     return f"""
 local s = game.get_surface({_q(surface)})

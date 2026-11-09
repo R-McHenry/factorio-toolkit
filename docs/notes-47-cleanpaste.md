@@ -54,4 +54,10 @@ can clear out an area consistently and have the base paste in cleanly."
   placed and revived, 2 not (Rory's hand-placed pump and pipes), `diff ... ok 48940` of 48942,
   no Lua swap. The 126 `marked` left are old carriers outside the frames (the flower-level feeds'
   earlier routes) and Rory's own; the policy keeps them until their owner decides.
-- From here a re-routed net's old carriers are in the record and go on the next apply.
+- From here a re-routed net's old carriers are in the record and go on the next apply: the core's
+  lab field redesigned (one paired red|green port a column) and fen's water pump added, the apply
+  said `free: 258 of the toolkit's own that the design dropped destroyed where they stood (261 in
+  the record)`.
+- The clean sequence, end to end: `fk clear . 2100,-600,3100,600 --surface lab` (49,116
+  entities destroyed, resources and characters kept) then `fk build --from apply`: 48,826 ghosts
+  placed and revived, 0 not revivable, `diff ... ok 48826`, nothing marked, nothing unowned.

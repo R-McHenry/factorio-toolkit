@@ -68,6 +68,9 @@ class FreeApplyTest(unittest.TestCase):
         self.assertEqual(len(destroys), 1)                        # one batch, the old belt
         self.assertIn("16.5", destroys[0])
         self.assertTrue(any("dropped destroyed" in n for n in rep.notes))
+        # and the marks a superforced paste leaves are cancelled after the revive (no robots here)
+        self.assertTrue(any("cancel_deconstruction" in c for c in r.calls))
+        self.assertEqual(rep.unmarked, 0)                         # the fake game marked nothing
 
     def test_the_destroy_lua_names_each_thing_and_its_ghost(self):
         lua = link.lua_destroy_list("lab", [("transport-belt", 16.5, 1.5), ("pipe", 3.5, 4.5)])

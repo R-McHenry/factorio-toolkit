@@ -134,6 +134,7 @@ class ApplyReport:
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     alone_missed: dict = field(default_factory=dict)  # settings those ghosts would not take
     landfill: int = 0                  # landfill tile ghosts laid under them on water (a pack)
+    unmarked: int = 0                  # free (47-cleanpaste): deconstruction marks cancelled after the revive
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
@@ -594,6 +595,14 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
             got = []
         rep.revived = int(got[0]) if got else 0
         rep.revive_failed = int(got[1]) if len(got) > 1 else 0
+        # 47-cleanpaste: what stood in a ghost's way was marked for deconstruction by the
+        # superforced paste; no robots come here, so the mark is cancelled (the diff names what
+        # stands there), and nothing looks stuck
+        rep.unmarked = _int(r.lua(link.lua_unmark(s.name, area)))
+        if rep.unmarked:
+            rep.notes.append(f"free: {rep.unmarked} deconstruction marks the paste left on what "
+                             "stands cancelled (nothing takes them up here; the diff says what "
+                             "stands in a ghost's way)")
     # 2.1: the wires as the design has them, quietly (the hand edits above named any made by hand)
     rep.wires = wiresmod.run(r, s, cat, area, poles, tag=f"{tag}-wires")
     rep.seconds = time.time() - t0
