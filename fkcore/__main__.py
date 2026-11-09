@@ -1986,6 +1986,18 @@ def main(argv=None):
                         "origin, so it lays what it laid before (fkcore.origins)")
     mo.add_argument("file", help="the factory's .fk (its imports are rewritten too)")
     mo.add_argument("--write", action="store_true", help="write the files (default: show)")
+    ly = sub.add_parser("layout", description="place the instances that have no @(x, y) hint by "
+                        "routability (PLAN-4.0 part P, fkcore.layout): prints one source line per "
+                        "instance placed and a routability report; --write puts the hints into the "
+                        "file")
+    ly.add_argument("file")
+    ly.add_argument("module", nargs="?", default=None,
+                    help="a sealed module's name: lay out its instances inside its frame")
+    ly.add_argument("--all", action="store_true", help="move the placed instances too")
+    ly.add_argument("--write", action="store_true", help="write the hints into the file")
+    ly.add_argument("--sweeps", type=int, default=None, help="the cap on sweeps (default 40)")
+    ly.add_argument("--plot", default=None, metavar="WxH",
+                    help="the top level's frame (default: the surface file's plot, else room)")
     ct = sub.add_parser("contract", description="every sealed module's contract: each port's "
                         "direction, item, rate at full speed, where it crosses and what it got "
                         "(fkcore.contract)")
@@ -2011,9 +2023,6 @@ def main(argv=None):
                     help="make ITEM with RECIPE (petroleum-gas=advanced-oil-processing)")
     pl.add_argument("--raw", default="", metavar="ITEM,...",
                     help="items that come in from elsewhere: not planned further")
-    lo = sub.add_parser("layout")
-    lo.add_argument("file")
-    lo.add_argument("--render", action="store_true")
     for name in ("explain", "unfold"):
         p = sub.add_parser(name)
         p.add_argument("file")
@@ -2490,23 +2499,9 @@ def main(argv=None):
         print(ch)
         return 0
     flat = _flat(a.file)
-    if a.cmd in ("layout", "explain", "unfold"):
+    if a.cmd in ("explain", "unfold"):
         previous = fkp.load(_fkp_path(a.file)) if os.path.exists(_fkp_path(a.file)) else None
         lay, notes = expand.expand_factory(flat, cat, previous)
-        if a.cmd == "layout":
-            try:
-                fkp.save(lay, _fkp_path(a.file), cat)
-            except fkp.InvariantError as exc:
-                print(f"error: {exc}", file=sys.stderr)
-                return 2
-            print(f"layout {flat.name}: {len(lay.insts)} instances, {len(lay.entities)} "
-                  f"entities, {lay.size[0]}x{lay.size[1]}, 0 invariant failures -> "
-                  f"{_fkp_path(a.file)}")
-            for note in notes:
-                print(f"  note {note}")
-            if a.render:
-                print(_render(lay, cat))
-            return 0
         net = a.inst.replace(".", "/")
         if a.cmd == "explain" and a.inst not in flat.insts and net in flat.nets:
             print(expand.explain_net(flat, net))      # 2.1: a net, and what limits it
@@ -2535,6 +2530,9 @@ def main(argv=None):
         for line in advice(flat):
             print(f"  advice {line}")
         return 0
+    if a.cmd == "layout":
+        from . import layout as layoutmod
+        return layoutmod.main(a, flat, cat)
     if a.cmd == "contract":
         from . import contract as contractmod
         try:
