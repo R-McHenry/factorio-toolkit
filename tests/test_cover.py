@@ -265,6 +265,29 @@ class UnitsTest(unittest.TestCase):
         self.assertEqual(len({p.key for p in poles}), len(poles))
         self.assertTrue(all(p.key.startswith("power/p") for p in poles))
 
+    def test_an_entity_no_spot_inside_its_unit_powers_is_a_check_line(self):
+        # 43-hierarchy (PLAN-ORGANIC D3; FRICTION 11-08): a beacon filling its sealed cell's
+        # frame leaves no pole spot inside it. That crashed `_why_not` (size None for a cell);
+        # now it is a `no-pole-spot` line naming the entity and the frame, the last pass still
+        # powers it from outside, and a twin cell gets the line too
+        from fkcore.cover import cover_power_units
+        text = ("e c0/b beacon 1.5,1.5\n"
+                "e c1/b beacon 11.5,1.5\n"
+                "e m/a assembling-machine-1 6.5,6.5 recipe=iron-gear-wheel\n")
+        lay = L(text, "20x10")
+        units = [("c0", (0, 0, 3, 3), ("Cell", 0)), ("c1", (10, 0, 13, 3), ("Cell", 0))]
+        poles, rep = cover_power_units(lay, CAT, units)
+        self.assertEqual(rep.units, (1, 1))
+        spots = [c for c in rep.checks if c.code == "no-pole-spot"]
+        self.assertEqual([c.where for c in spots], ["c0/b", "c1/b"])
+        self.assertNotIn("NO_POWER", [c.code for c in rep.checks])
+        self.assertIn("no free tile inside c0's 3x3 frame at 0,0 holds a medium-electric-pole "
+                      "that powers it (", spots[0].msg)
+        self.assertIn("outside the 3x3 frame at 0,0", spots[0].msg)
+        self.assertIn("a sealed module powers its own frame", spots[0].msg)
+        self.assertIn("c1's 3x3 frame at 10,0", spots[1].msg)
+        self.assertEqual(audit(lay, poles), ([], 1))
+
 
 class ExistingPolesTest(unittest.TestCase):
     def test_existing_poles_power_and_anchor_the_grid(self):

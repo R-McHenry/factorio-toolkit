@@ -105,8 +105,8 @@ with the starter base still running beside it until the new one carries the load
   shared belt puts everything on one lane (the megabelt's grove made 23 of its 87 circuits/s that
   way): use `net each`, or one net per column.
 - **A paired-lanes port runs straight into its column.** A port `a | b` needs a straight stem of
-  belt before the side-load (`lanephys`'s stem, four tiles): nothing may stand in that line, and
-  the port goes in line with the belt it feeds.
+  belt before the side-load (`lanephys`'s stem, three tiles): nothing may stand in that line, and
+  the port goes in line with the belt it feeds (`port-not-in-line` names what stands there).
 - **A sealed cell powers only its own frame.** A beacon or machine on a cell's edge that no free
   tile inside the cell can reach is unpowered there; move it into the parent, or leave the pole's
   tile free. Fluids too: a chemical plant and a refinery take their fluids on their short sides,
