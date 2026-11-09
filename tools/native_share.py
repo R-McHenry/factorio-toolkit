@@ -3,10 +3,11 @@
     python tools/native_share.py tests.test_route [tests.test_x ...]
 
 Wraps ``steiner``'s four search entry points (the native and the Python grow, the native and the
-Python A*), runs the named test modules, and prints calls and seconds per side plus why each grow
-fell back to Python (drop_taps, k>1, arms, a sink of its own, a grid the kernel does not know).
-The measure PLAN-4.0 part K is judged by: the router modules at 0 Python grows and 0 Python A*.
-Stdlib only; run from the v5 tree.
+Python A*) and ``route``'s two hub searches, runs the named test modules, and prints calls and
+seconds per side plus why each grow fell back to Python (a sink of its own, a grid the kernel
+does not know, a tile that is no int). A native hub search runs its grows inside the kernel, so
+they are not counted as grows. The measure PLAN-4.0 part K is judged by: the router modules at 0
+Python grows, 0 Python A* and 0 Python hub searches. Stdlib only; run from the v5 tree.
 """
 from __future__ import annotations
 
@@ -16,13 +17,14 @@ import time
 import unittest
 
 sys.path.insert(0, os.getcwd())
-from fkcore import steiner  # noqa: E402
+from fkcore import route, steiner  # noqa: E402
 
-counts = {"grow_native": 0, "grow_py": 0, "astar_native": 0, "astar_py": 0}
+counts = {"grow_native": 0, "grow_py": 0, "astar_native": 0, "astar_py": 0, "hub_native": 0, "hub_py": 0}
 times = {k: 0.0 for k in counts}
 why = {}
 
 _gn, _gp, _an, _ap = steiner._grow_native, steiner._grow_py, steiner._astar_native, steiner._astar_py
+_hn, _hp = route._hub_search_native, route._hub_search_py
 
 
 def _wrap(name, fn):
@@ -41,20 +43,22 @@ def _grow_native(grid, root, sinks, *a, **k):
     if out is steiner._UNSUPPORTED:
         counts["grow_native"] -= 1
         reasons = []
-        if grid.drop_taps:
-            reasons.append("drop_taps")
         for s in sinks:
-            if type(s) is steiner.TapSink:
-                if s.arms is not None:
-                    reasons.append("arms")
-                if int(s.k) > 1:
-                    reasons.append("k>1")
-            elif type(s) is not steiner.FixedSink:
+            if type(s) not in (steiner.TapSink, steiner.FixedSink, steiner.DropSink):
                 reasons.append(type(s).__name__)
+        if not sinks:
+            reasons.append("no-sinks")
         if steiner._native_grid(grid) is None:
             reasons.append("grid-subclass")
         key = ",".join(sorted(set(reasons))) or "other"
         why[key] = why.get(key, 0) + 1
+    return out
+
+
+def _hub_native(*a, **k):
+    out = _hn(*a, **k)
+    if out is steiner._UNSUPPORTED:
+        counts["hub_native"] -= 1
     return out
 
 
@@ -63,6 +67,8 @@ def main(names):
     steiner._grow_py = _wrap("grow_py", _gp)
     steiner._astar_native = _wrap("astar_native", _an)
     steiner._astar_py = _wrap("astar_py", _ap)
+    route._hub_search_native = _wrap("hub_native", _hub_native)
+    route._hub_search_py = _wrap("hub_py", _hp)
     t0 = time.perf_counter()
     suite = unittest.defaultTestLoader.loadTestsFromNames(names)
     res = unittest.TextTestRunner(verbosity=0).run(suite)

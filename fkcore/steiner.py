@@ -75,6 +75,7 @@ DX = (0, 1, 0, -1)
 DY = (-1, 0, 1, 0)
 INF = float("inf")
 COSTS = {"belt": 1.0, "turn": 0.6, "ug": 6.0, "split": 3.0, "tap": 2.0, "long_tap": 2.5, "max_ug": 5}
+IMPROVE = 8      # grow's rip-up and re-route rounds
 
 
 def _fdir(h):
@@ -1039,7 +1040,7 @@ def _detach(tree, sink_i, sinks):
     return tree
 
 
-def grow(grid, root, sinks, costs=None, improve=8, order=None, limit=60000):
+def grow(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=60000):
     """Forward tree search; {"tree", "cost", "counts", "problems", "seconds", "log"}.
     Runs whole in fkroute when it can (plain FixedSink / TapSink sinks on a Grid it knows), else
     in Python (``_grow_py``, whose steps still use the native A*). FK_NATIVE=check runs both and
@@ -1118,8 +1119,6 @@ def _grow_native(grid, root, sinks, costs, improve, order, limit):
     ng = _native_grid(grid)
     if ng is None:
         return _UNSUPPORTED
-    if grid.drop_taps:
-        return _UNSUPPORTED        # laid reversed: K3
     k = dict(COSTS, **(costs or {}))
     ins = _Inserters(k)
     got = _grow_specs(sinks, ins)
@@ -1134,7 +1133,7 @@ def _grow_native(grid, root, sinks, costs, improve, order, limit):
             "problems": tree.problems(sinks), "seconds": 0.0, "log": text}
 
 
-def _grow_py(grid, root, sinks, costs=None, improve=8, order=None, limit=60000):
+def _grow_py(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=60000):
     """The Python grow: grow's original, and its fallback."""
     t0 = time.time()
     tree = Tree(grid, root, costs)

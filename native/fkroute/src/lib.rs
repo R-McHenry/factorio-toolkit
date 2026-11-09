@@ -1,13 +1,15 @@
 //! fkroute: native kernels for fkcore's router.
 //!
 //! `grid`: the ground (NativeGrid), `walk` and `hubs`; `search`: `astar`, fkcore.steiner._astar
-//! step for step; `grow`: steiner.grow, the whole tree. The heap orders entries as Python's tuple
+//! step for step; `grow`: steiner.grow, the whole tree; `hub`: route._hub_search, the hub
+//! composite; `physics`: the lane physics as data. The heap orders entries as Python's tuple
 //! `(f, -g, state)` does, and costs are summed in the same order, so every kernel pops the same
 //! states and returns the same tree as the Python search it mirrors.
 use pyo3::prelude::*;
 
 mod grid;
 mod grow;
+mod hub;
 mod physics;
 mod search;
 
@@ -24,6 +26,7 @@ fn fkroute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(grid::walk, m)?)?;
     m.add_function(wrap_pyfunction!(grid::hubs, m)?)?;
     m.add_function(wrap_pyfunction!(grow::grow, m)?)?;
+    m.add_function(wrap_pyfunction!(hub::hub_search, m)?)?;
     m.add_function(wrap_pyfunction!(physics::physics, m)?)?;
     m.add_function(wrap_pyfunction!(physics::physics_ready, m)?)?;
     m.add_function(wrap_pyfunction!(physics::physics_lookup, m)?)?;

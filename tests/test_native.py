@@ -143,6 +143,81 @@ class NativeParity(unittest.TestCase):
         self.assertEqual(out["problems"], [], out["log"])
         self.assertEqual(len(out["tree"].taps), 2)
 
+    def test_reversed_runs_native(self):
+        """PLAN-4.0 K3: a tree laid reversed (drop_taps, keep_clear, k > 1, a long hand) grows in
+        the kernel, no Python grow."""
+        grown = 0
+        for seed in range(30):
+            grid, root, sinks = _reversed_case(seed)
+            if not sinks:
+                continue
+            with mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")):
+                with mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
+                    steiner.grow(grid, root, sinks, limit=20000)
+            grown += 1
+        self.assertGreater(grown, 20)
+
+    def _hub_case(self, seed):
+        from fkcore import route
+        rnd = random.Random(seed + 500)
+        w, h = 30, 22
+        occ = {(rnd.randrange(w), rnd.randrange(h)) for _ in range(rnd.randrange(30, 90))}
+
+        def tile():
+            while True:
+                t = (rnd.randrange(2, w - 2), rnd.randrange(2, h - 2))
+                if t not in occ:
+                    return t
+
+        def machines(prefix, n):
+            out = []
+            for j in range(n):
+                x0, y0 = rnd.randrange(3, w - 6), rnd.randrange(3, h - 6)
+                occ.update((x, y) for x in range(x0, x0 + 3) for y in range(y0, y0 + 3))
+                out.append((f"{prefix}{j}", (x0, y0, x0 + 3, y0 + 3)))
+            return out
+        starts = [(tile(), rnd.randrange(4)) for _ in range(rnd.randrange(1, 3))]
+        goals = [(tile(), rnd.randrange(4)) for _ in range(rnd.randrange(1, 3))]
+        sources, taps = machines("s", rnd.randrange(0, 2)), machines("c", rnd.randrange(0, 2))
+        job = route.NetJob("n", starts=starts, goals=goals, taps=taps, sources=sources)
+        occ -= set(job.ends())
+        clear = {(rnd.randrange(w), rnd.randrange(h)) for _ in range(20)}
+        return job, occ, {0: set(), 1: set()}, clear, (0, 0, w, h)
+
+    def test_hub_search(self):
+        """PLAN-4.0 K3: the hub composite in the kernel gives the Python composite's plan and
+        report (candidates, the reversed tree to the drivers and the forward tree to the consumers
+        per candidate, three wins, the first failure's reason), on random hub jobs."""
+        from fkcore import route
+        from fkcore.catalog import Catalog
+        cat = Catalog.load()
+        routed = failed = 0
+        for seed in range(60):
+            job, occ, spans, clear, box = self._hub_case(seed)
+            if job.mode != "hub":
+                continue
+            grid = route._Bounded(occ, box, spans)
+            with self.subTest(seed=seed), mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
+                got = route._hub_search_native(cat, job, grid, occ, spans, clear, box, 20000)
+                self.assertIsNot(got, steiner._UNSUPPORTED)
+                py = route._hub_search_py(cat, job, grid, occ, spans, clear, box, 20000)
+                self.assertEqual(got, py)
+                routed += got[0] is not None
+                failed += got[0] is None and "first:" in got[1]
+        self.assertGreater(routed, 10)
+        self.assertGreater(failed, 0)
+
+    def test_hub_search_runs_native(self):
+        from fkcore import route
+        from fkcore.catalog import Catalog
+        job, occ, spans, clear, box = self._hub_case(1)
+        with mock.patch.object(route, "_hub_search_py", side_effect=AssertionError("python hub ran")), \
+                mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")), \
+                mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
+            plan, how = route._hub_search(Catalog.load(), job, occ, spans, clear, box, 20000)
+        self.assertIsNotNone(plan, how)
+        self.assertIn("hub ", how)
+
     def test_soft_ground(self):
         """Negotiated ground: belts pay to step on soft tiles, splitters and taps keep off them;
         the same trees both ways, and a soft tile costs what it says."""

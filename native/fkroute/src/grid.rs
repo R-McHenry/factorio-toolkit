@@ -36,6 +36,12 @@ impl NativeGrid {
 }
 
 impl NativeGrid {
+    /// The same box and soft tiles over other blocked tiles and spans (the hub's per-candidate
+    /// grounds).
+    pub(crate) fn derived(&self, occ: FxHashSet<T>, spans: [FxHashSet<T>; 2]) -> NativeGrid {
+        NativeGrid { occ, spans, bbox: self.bbox, dense: OnceLock::new(), soft: self.soft.clone() }
+    }
+
     #[inline]
     pub(crate) fn blocked(&self, t: T) -> bool {
         if let Some((x0, y0, x1, y1)) = self.bbox {
@@ -185,12 +191,17 @@ pub(crate) fn hubs(
 ) -> PyResult<Vec<(T, i64)>> {
     let grid = grid.get();
     need_box(grid)?;
+    let ends: FxHashSet<T> = ends.into_iter().collect();
+    Ok(run_hubs(grid, &near_d, &near_c, &ends, most, reach))
+}
+
+/// route._hubs_py: the candidates, best first.
+pub(crate) fn run_hubs(grid: &NativeGrid, near_d: &[Vec<T>], near_c: &[Vec<T>], ends: &FxHashSet<T>, most: usize, reach: i64) -> Vec<(T, i64)> {
     if near_d.is_empty() || near_c.is_empty() {
-        return Ok(vec![]);
+        return vec![];
     }
     let dd: Vec<Walk> = near_d.iter().map(|s| run_walk(grid, s, reach)).collect();
     let dc: Vec<Walk> = near_c.iter().map(|s| run_walk(grid, s, reach)).collect();
-    let ends: FxHashSet<T> = ends.into_iter().collect();
     let all = || dd.iter().chain(dc.iter());
     let in_common = |t: T| !ends.contains(&t) && all().all(|w| w.get(t).is_some());
     let mut rows: Vec<(bool, i64, i64, i64, i64)> = Vec::new();
@@ -220,5 +231,5 @@ pub(crate) fn hubs(
             break;
         }
     }
-    Ok(out)
+    out
 }
