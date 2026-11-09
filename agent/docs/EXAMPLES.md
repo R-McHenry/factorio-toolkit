@@ -1069,11 +1069,15 @@ tile. A net the build did not route keeps its estimate and is named (`fe (unrout
 estimate`); with no build of the file in `out`, the line says `no net of layout was built there`.
 
 **territory.fk** (plot 40x40) is two sealed modules with no positions. Sealed modules without an
-`@` are placed as **territories**: each is a seed with an area need (its declared frame's area; a
-module without a `size` needs three times its instances' footprints), its territory is its cell in
-a weighted Voronoi diagram over the plot (the weights adapted until every cell holds its need; a
-tile nearer the plot's edge or a blocked region than any seed belongs to no one), and the same
-sweep moves the seeds until the belts between the modules' ports are short:
+`@` are placed as **territories**: each is a seed with an area need (its declared frame with 50 %
+room round it, so neighbouring cells meet; a module without a `size` needs three times its
+instances' footprints), its territory is its cell in a weighted Voronoi diagram over the plot (the
+weights adapted until every cell holds its need; a tile nearer the plot's edge or a blocked region
+than any seed belongs to no one), and the same sweep moves the seeds until the belts between the
+modules' ports are short. A net weighs what the modules declare behind their ports (the makers'
+full-speed output on one side, the consumers' appetite on the other, the smaller of the two in
+belts): here the gear belt is one belt, in a base a furnace column's ore pulls three or four times
+as hard as a circuit trickle.
 
 ```
 fk layout territory.fk --plot 40x40
@@ -1081,26 +1085,55 @@ fk layout territory.fk --plot 40x40
 
 ```
 layout territory: 2 modules, 2 placed now, 0 kept, 0 fixed; 1 nets; plot 40x40 (--plot); territories (fkroute)
-  a = Maker @(20, 8, rot 3)
-  b = Taker @(40, 8, rot 2)
-  cell a: 64 tiles of 64 needed (100 %)
-  cell b: 64 tiles of 64 needed (100 %)
-  estimated belts 32 -> 10 over 1 nets; every net reaches its consumers; 0 hot tiles; 9 sweeps
-  shared boundary: 0 of 1 nets between modules have their cells touching; apart: g (a|b)
+  a = Maker @(28, 0)
+  b = Taker @(32, 16, rot 3)
+  cell a: 95 tiles of 96 needed (98 %)
+  cell b: 126 tiles of 96 needed (131 %)  (over its need)
+  estimated belts 32 -> 4 over 1 nets; every net reaches its consumers; 0 hot tiles; 9 sweeps
+  shared boundary: 1 of 1 nets between modules have their cells touching
   territories: out\territories.json
   took 0.0 s (fkroute)
 ```
 
-One `cell` line per module gives its territory's area against its need (`off its need` when it
-misses by more than 5 %: a check, not a gate); `shared boundary` says which nets between modules
-have their cells touching, so their ports stand on a common boundary; `out\territories.json`
-holds every cell as row runs with the module's position, need, area and port tiles. A port on a
-cell's boundary faces its partner: a pinned `@s2` projected onto the cell, an unpinned one at the
-boundary tile nearest the partner. A declared frame is the module's claim inside its cell (the
-cell is the frame itself when the need is the frame's area, as here); the walk between ports
-keeps out of every placed frame, as the router does. `--write` puts the hints in, and `fk build
---to report_checks` gives `territory: 4 nets: 4 connected, 0 open, 0 unrouted; 0 SPILL; 30
-entities, 25 edges, 0 underground pairs`.
+One `cell` line per module gives its territory's area against its need (`under its need` or
+`over its need` when it misses by more than 5 %: a check, not a gate; a small frame's ring of
+tiles comes whole, so `b` is left over its need rather than under it); `shared boundary` says
+which nets between modules have their cells touching, so their ports stand on a common boundary;
+`out\territories.json` holds every cell as row runs with the module's position, need, area and
+port tiles. A port stands where its belt leaves the frame: the tile outside a pinned `@s2`, or,
+unpinned, outside the frame's side at the tile nearest the partner; the walk between ports keeps
+out of every placed frame, as the router does, crosses the two modules' own cells for free and
+pays a tile per tile inside a third's. A declared frame is the module's claim inside its cell;
+the cell is the frame with room round it, so two neighbours' cells meet. The sweep refines its
+step (32 down to 1 tile) when nothing moves or the estimate has not fallen for five sweeps, and
+stops at the finest. `--write` puts the hints in, and `fk build --to report_checks` gives
+`territory: 4 nets: 4 connected, 0 open, 0 unrouted; 0 SPILL; 24 entities, 19 edges, 0
+underground pairs` (30 entities and 25 edges in wave 1, when the two frames stood apart).
+
+**On a surface.** The same command on the top level of a surface's design, `fk layout
+nauvis.fk`, takes the surface file's plot as the box and its terrain (`terrain map`:
+`map.terrain.json` beside the design, what `read_terrain` reads) as the ground: water and
+cliffs are obstacles no cell crosses, and **ore is ground no module takes but one pinned on
+it**. A module instance with `@patch(iron-ore)` is pinned: its seed is the centroid of the
+nearest iron patch (`@patch("iron-ore#2")` names the second largest), its cell the patch's
+tiles grown to its need, and it does not move; the other modules' cells and frames stay off
+every patch. Two mines and a smelter on a 120x120 plot with two iron patches, a copper patch
+and a lake across the middle (`tests/test_territory.py`, `PINS`):
+
+```
+layout world: 3 modules, 3 placed now, 0 kept, 0 fixed; 2 nets; plot 120x120 (--plot); territories (fkroute)
+  mine = Mine @(68, 19) @patch(iron-ore)
+  mine2 = Mine @(2, 96) @patch("iron-ore#2")
+  smelt = Smelt @(72, 38, rot 1)
+  ground t: 600 blocked tiles (water, cliffs), 464 ore tiles in 3 patches; ore is blocked ground for every module but a pinned one
+  cell mine: 576 tiles of 576 needed (100 %)  pinned on iron-ore#1
+  cell mine2: 576 tiles of 576 needed (100 %)  pinned on iron-ore#2
+  cell smelt: 600 tiles of 600 needed (100 %)
+```
+
+`--write` puts `@(x, y)` beside the `@patch` (the build places the module there; the pin stays
+the design's word), and `out\territories.json` marks the cell `"pinned": "iron-ore#1"`. Without
+a terrain file the pin is a note (`no-terrain`) and the module is placed as a movable one.
 
 ## 10. power-shed.fk and steam.fk: power
 

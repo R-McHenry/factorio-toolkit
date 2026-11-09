@@ -1,10 +1,13 @@
-"""41-territory (PLAN-ORGANIC part T, wave 1): the world placer. The power diagram gives every
-movable seed a cell within 5 % of its need (or the cap), a fixed seed exactly its frame, nothing
-across an obstacle from its seed; the seeds' sweep puts a net's two ports on a shared boundary and
-is deterministic; the Rust kernel agrees with the Python reference on random specs; `fk layout`
+"""41-territory (PLAN-ORGANIC part T, wave 1) and 43-territory (wave 2): the world placer. The
+power diagram gives every movable seed a cell within 5 % of its need (or the cap), a fixed seed
+exactly its frame, nothing across an obstacle from its seed; a declared frame is the claim and
+the need has room round it, so neighbouring cells touch; the seeds' sweep puts a net's two ports
+on a shared boundary, stops on a plateau and is deterministic; the nets weigh what the modules'
+contracts declare; the Rust kernel agrees with the Python reference on random specs; `fk layout`
 dispatches a scope of unplaced sealed modules to it, writes out/territories.json and the hints;
 the open flower (tests/data/flower) tessellates in under a minute with the kernel."""
 import json
+import math
 import os
 import random
 import shutil
@@ -42,6 +45,76 @@ module Pair size 40x40 {
 pair = Pair @(0, 0)
 """
 
+# weights.fk: a plate source of 40/s behind one port, a sink with no appetite of its own behind
+# the other (weight: the supply), and a second net into a gear assembler (weight: its appetite,
+# the smaller side)
+WEIGHTS = """
+module Source size 12x12 {
+  port o  : out iron-plate @s2
+  port o2 : out iron-plate @s8
+  fe  = Chest<requester, item=iron-plate, rate=40/s> @(1, 1)
+  fe2 = Chest<requester, item=iron-plate, rate=40/s> @(1, 6)
+  net g: fe -> o
+  net h: fe2 -> o2
+}
+module Sink size 12x12 {
+  port i : in iron-plate @n4
+  box = Chest<provider, limit=4> @(3, 3)
+  net g: i -> box
+}
+module Gear size 12x12 {
+  port i : in iron-plate @n4
+  a = Assembler<recipe=iron-gear-wheel> @(3, 3)
+  box = Chest<provider, limit=4> @(8, 3)
+  net g: i -> a
+  net w: a -> box
+}
+module Three size 60x60 {
+  s = Source
+  k = Sink
+  g = Gear
+  net g: s.o -> k.i
+  net h: s.o2 -> g.i
+}
+three = Three @(0, 0)
+"""
+
+
+# world.fk on a synthetic terrain (T4, T5): two mines pinned on ore (the nearest iron patch, and
+# iron-ore#2 by name), a smelter free to move; water and ore are ground no other module takes
+PINS = """
+module Mine size 24x16 {
+  port o : out iron-ore @s4
+  d = Chest<requester, item=iron-ore, rate=30/s> @(1, 1)
+  net g: d -> o
+}
+module Smelt size 20x20 {
+  port i  : in iron-ore @n4
+  port i2 : in iron-ore @n14
+  box  = Chest<provider, limit=4> @(3, 3)
+  box2 = Chest<provider, limit=4> @(13, 3)
+  net g: i -> box
+  net h: i2 -> box2
+}
+mine = Mine @patch(iron-ore)
+mine2 = Mine @patch("iron-ore#2")
+smelt = Smelt
+net ore: mine.o -> smelt.i
+net ore2: mine2.o -> smelt.i2
+"""
+
+
+def synthetic_terrain():
+    """A 120x120 terrain: iron-ore#1 (20x14 at 70,20), iron-ore#2 (8x8 at 10,100), copper at
+    40,90, a lake across y 60..66 with a gap at x 50..70."""
+    from fkcore import terrain as terrainmod
+    iron = {(x, y): 1000 for x in range(70, 90) for y in range(20, 34)}
+    iron.update({(x, y): 500 for x in range(10, 18) for y in range(100, 108)})
+    copper = {(x, y): 800 for x in range(40, 52) for y in range(90, 100)}
+    water = frozenset((x, y) for x in range(120) for y in range(60, 66) if not 50 <= x < 70)
+    return terrainmod.Terrain("nauvis", (0, 0, 120, 120), 0, {"iron-ore": iron, "copper-ore": copper},
+                              water)
+
 
 def within(area, need, tol=5):
     return abs(area - need) * 100 <= tol * need
@@ -75,6 +148,17 @@ def random_tspec(seed, n=4, box=48, sweeps=3):
     for _ in range(rnd.randint(0, 3)):
         x, y = rnd.randint(0, box - 6), rnd.randint(0, box - 6)
         blocked.append((x, y, x + rnd.randint(1, 6), y + rnd.randint(1, 6)))
+    if rnd.random() < 0.4:
+        # T4: one seed pinned: its frame at a point, its cell a blob round it grown to its need
+        i = rnd.randrange(n)
+        sd = seeds[i]
+        w, h = sd.size
+        ax, ay = rnd.randint(0, box - w), rnd.randint(0, box - h)
+        blob = {(x, y) for x in range(max(0, ax - 2), min(box, ax + w + 2))
+                for y in range(max(0, ay - 2), min(box, ay + h + 2))}
+        runs = territory.runs_from_tiles(territory.grow_to_need(blob, sd.need, (0, 0, box, box)))
+        seeds[i] = Seed(sd.name, sd.size, sd.need, sd.min_width, (ax, ay, 0), False, sd.ports, runs,
+                        "iron-ore#1")
     params = TParams(sweeps=sweeps, steps=(8, 4, 2, 1), cells=(4, 4, 2, 1), final_cell=rnd.choice([1, 2]))
     return TSpec((0, 0, box, box), blocked, seeds, nets, edges, params)
 
@@ -148,6 +232,26 @@ class VoronoiTest(unittest.TestCase):
         b = voronoi_py(pts, [900, 700, 1100, 0], (0, 0, 100, 100), [(40, 40, 50, 50)], 2)
         self.assertEqual(a, b)
 
+    def test_framed_cells_grow_to_their_need_and_touch(self):
+        # 43-territory: a declared frame is the claim and the need has room round it; the
+        # keep-home floor keeps a framed seed live in the diagram, so its cell grows to the
+        # need (wave 1 let it sink to its frame) and two neighbours' cells meet
+        frames = [(10, 20, 30, 40), (44, 20, 64, 40)]
+        pts = [(2 * 20, 2 * 30), (2 * 54, 2 * 30)]
+        needs = [400 * 150 // 100, 400 * 150 // 100]
+        own, areas, _w, (gw, gh) = voronoi_py(pts, needs, (0, 0, 80, 60), [], 1, frames=frames)
+        for i in range(2):
+            self.assertTrue(within(areas[i], needs[i]), (i, areas[i], needs[i]))
+            self.assertGreater(areas[i], 400)
+        grid = territory.Grid((0, 0, 80, 60), 1)
+        cells = [territory.runs_of(own, grid, i) for i in range(2)]
+        self.assertEqual(territory.touching(cells), {(0, 1)})
+        # the frames stay their owners' outright
+        for i, (x0, y0, x1, y1) in enumerate(frames):
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    self.assertEqual(own[y * gw + x], i)
+
     def test_runs_of_cover_the_cell(self):
         grid = territory.Grid((0, 0, 20, 12), 4)
         own = [-1] * grid.n
@@ -157,6 +261,33 @@ class VoronoiTest(unittest.TestCase):
         self.assertEqual(sum(b - a for _y, a, b in runs), 5 * 16)
         self.assertEqual(runs[0], (0, 0, 8))
         self.assertEqual(runs[4], (4, 0, 12))
+
+    @unittest.skipUnless(territory.native_on(), "no fkroute with voronoi")
+    def test_pinned_cell_is_exactly_its_runs_over_the_ore_wall(self):
+        # T4: a pinned seed's cell is its runs, over the blocked ground (its ore) that walls
+        # every other seed out; the movable seed's cell stays off both
+        ore = (30, 30, 50, 44)
+        pin = [(y, 26, 54) for y in range(26, 48)]
+        own, areas, _w, (gw, _gh) = voronoi_py([None, (2 * 15, 2 * 70)], [0, 900], (0, 0, 80, 80), [ore], 1,
+                                               pins=[pin, None])
+        self.assertEqual(areas[0], 28 * 22)
+        for k, o in enumerate(own):
+            x, y = k % gw, k // gw
+            inside = 26 <= x < 54 and 26 <= y < 48
+            self.assertEqual(o == 0, inside, (x, y, o))
+        self.assertTrue(within(areas[1], 900))
+
+    def test_runs_and_rects(self):
+        tiles = {(x, y) for x in range(3, 7) for y in range(2, 5)} | {(10, 2), (11, 2), (10, 3)}
+        runs = territory.runs_from_tiles(tiles)
+        self.assertEqual(runs[:2], [(2, 3, 7), (2, 10, 12)])
+        self.assertEqual(sum(b - a for _y, a, b in runs), len(tiles))
+        rects = territory.rects_of_runs(runs)
+        self.assertIn((3, 2, 7, 5), rects)
+        self.assertEqual(sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in rects), len(tiles))
+        grown = territory.grow_to_need({(5, 5)}, 13, (0, 0, 20, 20), {(5, 4)})
+        self.assertEqual(len(grown), 13)
+        self.assertNotIn((5, 4), grown)
 
     @unittest.skipUnless(territory.native_on(), "no fkroute with voronoi")
     def test_python_and_rust_agree(self):
@@ -172,9 +303,13 @@ class VoronoiTest(unittest.TestCase):
             frames = [None] * 5
             if pts[1] is not None and rnd.random() < 0.5:
                 frames[1] = (pts[1][0] // 2, pts[1][1] // 2, pts[1][0] // 2 + 4, pts[1][1] // 2 + 3)
+            pins = [None] * 5
+            if pts[2] is not None and rnd.random() < 0.5:
+                cx, cy = pts[2][0] // 2, pts[2][1] // 2
+                pins[2] = [(y, max(0, cx - 4), min(60, cx + 5)) for y in range(max(0, cy - 3), min(60, cy + 4))]
             cell = rnd.choice([1, 2, 4, 8])
-            py = voronoi_py(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames)
-            rs = territory._native.voronoi(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames)
+            py = voronoi_py(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames, pins)
+            rs = territory._native.voronoi(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames, pins)
             self.assertEqual((list(rs[0]), list(rs[1]), list(rs[2]), tuple(rs[3])), py, s)
 
 
@@ -192,8 +327,9 @@ class PlaceSeedsTest(unittest.TestCase):
         self.assertEqual(res.unreached, [])
         self.assertTrue(all(a is not None for a in res.at))
         for i in range(2):
-            self.assertTrue(within(res.areas[i], spec.seeds[i].need), (i, res.areas[i]))
-        # the two ports stand on their cells' boundaries facing each other: a walk of a few tiles
+            # a 6x6 frame's ring comes in steps of 8 tiles (36, 44, ... 68, 76): never under 72
+            self.assertGreaterEqual(res.areas[i], spec.seeds[i].need, (i, res.areas[i]))
+        # the two ports stand outside their frames facing each other: a walk of a few tiles
         self.assertLessEqual(res.after[0], 4 * territory.MILLI, res.after)
         self.assertLessEqual(res.after[0], res.before[0])
         pa, pb = res.ports[(0, 0)], res.ports[(1, 0)]
@@ -224,11 +360,25 @@ class PlaceSeedsTest(unittest.TestCase):
         self.assertEqual(sum(b - a for _y, a, b in res.cells[0]), 100)
         self.assertTrue(all(20 <= y < 30 and a == 20 and b == 30 for y, a, b in res.cells[0]))
         self.assertEqual(res.unreached, [])
-        # the fixed frame's west port is where the movable module's belt arrives
-        self.assertEqual(res.ports[(0, 0)], (20, 25))
+        # the fixed frame's west port is where the movable module's belt arrives: the tile
+        # outside the frame
+        self.assertEqual(res.ports[(0, 0)], (19, 25))
         x, y, _rot = res.at[1]
         self.assertLess(x + 6, 21, "the movable module ends up west of the fixed one")
         self.assertGreaterEqual(y, 4, "off the blocked strip")
+
+    def test_plateau_stops_no_later_than_the_cap(self):
+        # 43-territory: with the plateau the loop stops at the finest step once the Lagrangian
+        # has not fallen for `plateau` sweeps; without it (0) the cap is the only stop
+        for s in range(4):
+            spec = random_tspec(s, sweeps=12)
+            spec.params.plateau = 0
+            a = _place_seeds_py(spec)
+            spec.params.plateau = 2
+            b = _place_seeds_py(spec)
+            self.assertLessEqual(b.sweeps, a.sweeps, s)
+            self.assertLessEqual(b.sweeps, 12)
+            self.assertEqual(len(b.at), len(spec.seeds))
 
     def test_deterministic_on_random_specs(self):
         for s in range(4):
@@ -278,7 +428,10 @@ class CommandTest(unittest.TestCase):
                                             "plot 40x40 (the frame of Pair); territories"), lines[0])
         self.assertTrue(any(l.strip().startswith("a = Maker @(") for l in lines), lines)
         self.assertTrue(any(l.strip().startswith("b = Taker @(") for l in lines), lines)
-        self.assertTrue(any(l.startswith("  cell pair/a: ") and "(off its need)" not in l for l in lines), lines)
+        # an 8x8 frame's ring comes whole (64 or 116 tiles, never 96): a cell is left over its
+        # need, never under it
+        self.assertTrue(any(l.startswith("  cell pair/a: ") and "(under its need)" not in l for l in lines), lines)
+        self.assertFalse(any("(under its need)" in l for l in lines), lines)
         self.assertTrue(any("estimated belts" in l and "every net reaches" in l for l in lines), lines)
         self.assertTrue(any(l.startswith("  shared boundary: ") for l in lines), lines)
         tpath = os.path.join(self.d, "out", "territories.json")
@@ -287,8 +440,9 @@ class CommandTest(unittest.TestCase):
             data = json.load(fh)
         self.assertEqual(sorted(data["cells"]), ["pair/a", "pair/b"])
         cell = data["cells"]["pair/a"]
-        self.assertEqual(cell["need"], 64)
-        self.assertTrue(within(cell["area"], 64))
+        self.assertEqual(cell["need"], 64 * TParams().room // 100)       # the frame with room
+        self.assertGreaterEqual(cell["area"], 64)
+        self.assertTrue(any(l.startswith("  shared boundary: 1 of 1 nets") for l in lines), lines)
         self.assertEqual(sum(x1 - x0 for _y, x0, x1 in cell["runs"]), cell["area"])
         self.assertIn("pair/a/o", cell["ports"])
         # --write: the hints go in, the file elaborates with both placed, a second run has no work
@@ -312,6 +466,112 @@ class CommandTest(unittest.TestCase):
         self.assertGreater(carriers, 0)
 
 
+class WeightsTest(unittest.TestCase):
+    """43-territory: a net weighs what the modules declare behind their ports, no rate model."""
+
+    def test_weights_from_the_contract(self):
+        d = tempfile.mkdtemp(prefix="fkterrw-")
+        self.addCleanup(shutil.rmtree, d, True)
+        path = os.path.join(d, "weights.fk")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(WEIGHTS)
+        flat = elaborate_file(path, CAT)
+        built = territory.build_tspec(flat, CAT, "three")
+        per = CAT.belt_throughput("transport-belt")
+        by_name = {n.name.rsplit("/", 1)[-1]: n for n in built.spec.nets}
+        self.assertEqual(sorted(by_name), ["g", "h"])
+        # g: 40/s of plates behind the source, a chest with no appetite behind the sink
+        self.assertEqual(territory.port_rate(flat, "three/s/o", "iron-plate", True), 40.0)
+        self.assertIsNone(territory.port_rate(flat, "three/k/i", "iron-plate", False))
+        self.assertEqual(by_name["g"].weight, math.ceil(40 / per))
+        self.assertGreater(by_name["g"].weight, 1)
+        # h: the gear assembler's appetite is the smaller side
+        want = sum(m.needs.get("iron-plate", 0.0) for k, m in flat.machines.items()
+                   if k.startswith("three/g/a/"))
+        self.assertGreater(want, 0)
+        self.assertEqual(territory.port_rate(flat, "three/g/i", "iron-plate", False), want)
+        self.assertEqual(by_name["h"].weight, max(1, math.ceil(min(40.0, want) / per)))
+
+
+class PinsTest(unittest.TestCase):
+    """T4 and T5: `fk layout world.fk` on a surface with a terrain: the plot is the box, the
+    water and the ore are ground no free module takes, a module with @patch is pinned on its
+    patch (the named one, else the nearest), its cell the patch grown to its need."""
+
+    def setUp(self):
+        from fkcore import terrain as terrainmod
+        self.d = tempfile.mkdtemp(prefix="fkpins-")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.path = os.path.join(self.d, "world.fk")
+        with open(self.path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(PINS)
+        with open(os.path.join(self.d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("surface nauvis\nterrain t\nplace world = world plot 0,0 120x120\n")
+        terrainmod.save(synthetic_terrain(), os.path.join(self.d, "t.terrain.json"))
+
+    def test_pins_on_ore_and_the_ground(self):
+        flat = elaborate_file(self.path, CAT)
+        self.assertEqual(territory.world_scope(flat), "")
+        lines, code = layout.layout_file(self.path, flat, CAT, sweeps=8)
+        self.assertEqual(code, 0, lines)
+        text = "\n".join(lines)
+        self.assertIn("plot 120x120", lines[0])
+        self.assertIn("pinned on iron-ore#1", text)
+        self.assertIn("pinned on iron-ore#2", text)
+        self.assertTrue(any(l.startswith("  ground t: ") for l in lines), text)
+        self.assertTrue(any(l.strip().startswith("mine = Mine @(") for l in lines), text)
+        with open(os.path.join(self.d, "out", "territories.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data["terrain"], "t")
+        t = synthetic_terrain()
+        iron1 = {(x, y) for x in range(70, 90) for y in range(20, 34)}
+        iron2 = {(x, y) for x in range(10, 18) for y in range(100, 108)}
+        ore = set(iron1) | set(iron2) | {(x, y) for x in range(40, 52) for y in range(90, 100)}
+        cells = {}
+        for name, c in data["cells"].items():
+            cells[name] = {(x, y) for y, x0, x1 in c["runs"] for x in range(x0, x1)}
+        # the pinned mines: the frame centred on the patch, the cell holding the patch and the need
+        for name, patch in (("mine", iron1), ("mine2", iron2)):
+            c = data["cells"][name]
+            self.assertEqual(c["pinned"], "iron-ore#1" if name == "mine" else "iron-ore#2")
+            x, y, _rot = c["at"]
+            cx = sum(t[0] + 0.5 for t in patch) / len(patch)
+            cy = sum(t[1] + 0.5 for t in patch) / len(patch)
+            self.assertLessEqual(abs(x + 12 - cx), 1.0, (name, c["at"]))
+            self.assertLessEqual(abs(y + 8 - cy), 1.0, (name, c["at"]))
+            self.assertTrue(patch <= cells[name], name)
+            self.assertGreaterEqual(c["area"], c["need"])
+            self.assertEqual(c["area"], len(cells[name]))
+        # the free module: its cell and its frame off every ore tile and the water
+        sm = cells["smelt"]
+        self.assertFalse(sm & ore)
+        self.assertFalse(sm & set(t.water))
+        x, y, rot = data["cells"]["smelt"]["at"]
+        frame = {(i, j) for i in range(x, x + 20) for j in range(y, y + 20)}
+        self.assertFalse(frame & ore)
+        self.assertFalse(frame & set(t.water))
+        self.assertFalse(frame & cells["mine"])
+        self.assertTrue(any("every net reaches" in l for l in lines), text)
+        # --write puts @(x, y) beside @patch, and the file reads back with both
+        lines, code = layout.layout_file(self.path, flat, CAT, write=True, sweeps=8)
+        self.assertTrue(any(l.startswith("  wrote 3 hints") for l in lines), lines)
+        flat2 = elaborate_file(self.path, CAT)
+        self.assertEqual(flat2.insts["mine"].hints.get("patch"), "iron-ore")
+        self.assertIn("at", flat2.insts["mine"].hints)
+        self.assertIn("at", flat2.insts["smelt"].hints)
+
+    def test_without_a_terrain_the_pin_is_a_note(self):
+        os.remove(os.path.join(self.d, "t.terrain.json"))
+        flat = elaborate_file(self.path, CAT)
+        lines, code = layout.layout_file(self.path, flat, CAT, sweeps=4)
+        self.assertEqual(code, 0, lines)
+        text = "\n".join(lines)
+        self.assertIn("no-terrain", text)
+        self.assertIn("(no terrain read); placed as a movable module", text)
+        self.assertNotIn("pinned on iron", text)
+        self.assertFalse(any(l.startswith("  ground ") for l in lines), text)
+
+
 @unittest.skipUnless(territory.native_on(), "the flower needs the kernel")
 class FlowerTest(unittest.TestCase):
     """The open flower (six rivers and the core unplaced, no corridors) tessellated in its 900x1024
@@ -333,8 +593,16 @@ class FlowerTest(unittest.TestCase):
         self.assertLess(took, 60, f"{took:.1f} s: " + "\n".join(lines))
         cells = [l for l in lines if l.startswith("  cell ")]
         self.assertEqual(len(cells), 7)
-        self.assertFalse(any("(off its need)" in l for l in cells), "\n".join(cells))
+        self.assertFalse(any("its need)" in l for l in cells), "\n".join(cells))
         self.assertTrue(any("every net reaches" in l for l in lines), "\n".join(lines))
+        # 43-territory: most inter-module nets have their cells touching, the sweep stops on
+        # its own before the cap
+        shared = next(l for l in lines if l.startswith("  shared boundary: "))
+        got, of = shared.split(":")[1].split("nets")[0].split("of")
+        self.assertGreater(int(got) * 2, int(of), shared)
+        belts = next(l for l in lines if "estimated belts" in l)
+        sweeps = int(belts.rsplit(";", 1)[1].split()[0])
+        self.assertLess(sweeps, TParams().sweeps, belts)
         with open(os.path.join(d, "out", "territories.json"), encoding="utf-8") as fh:
             data = json.load(fh)
         self.assertEqual(len(data["cells"]), 7)
