@@ -18,7 +18,7 @@ column or row; an unpinned port the boundary tile of its side nearest the partne
 walk runs on the coarse grid inside the terminals' window, a tile inside any cell priced
 ``trespass`` (the real router keeps out of a sealed frame), a tile several routes cross priced by
 lambda as the instance loop does. The step schedule is geometric (32 down to 1) and the grid
-follows it (8, 4, 2, 1 tiles a cell).
+follows it (8 tiles a cell for the two coarse steps, 4 after; the territories are cut at 1).
 
 Every quantity is an integer (half-tiles for the seed points, quarter-tile^2 for the weights,
 milli-tiles for the costs), so the Rust kernel (``fkroute.voronoi``, ``fkroute.place_seeds``:
@@ -1266,7 +1266,7 @@ def write_territories(path, built, res):
     for i, sd in enumerate(spec.seeds):
         data["cells"][built.paths[i]] = {
             "at": None if res.at[i] is None else list(res.at[i]),
-            "size": list(sd.size), "need": sd.need, "area": res.areas[i],
+            "size": list(sd.size), "need": sd.need, "min_width": sd.min_width, "area": res.areas[i],
             "runs": [list(r) for r in res.cells[i]],
             "ports": {sd.ports[pi][0]: list(res.ports[(i, pi)]) for pi in range(len(sd.ports))
                       if (i, pi) in res.ports}}
