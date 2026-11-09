@@ -9,7 +9,8 @@ Every example builds where it stands (`fk check docs\examples\gears.fk`) and cop
 (the ones that import cells take them from `cells.fk` beside them; `docs\examples\cells.fk` is the
 library as the toolkit ships it, and in `game\` yours is used). The output quoted here is a paper
 build: the template's build script through `report_checks`, no terrain, the plot size the chapter
-names. Two lines appear in almost every chapter and are explained once:
+names (chapter 3's ore examples build on their terrain fixture, `patch.terrain.json`, through
+`place`). Two lines appear in almost every chapter and are explained once:
 
 - `NO_POWER nauvis NAME: its grid reaches no generator (bridge it: floorplan --bridge-power)`: on
   paper the file has no generator. In your base the `floorplan --bridge-power` step joins the
@@ -192,6 +193,78 @@ rows need ore under them: put the plot on the patch.
 ore_`)`: two single-item nets into the same machines on two belts, a lane each; chapter 4 pairs
 them. `short-feed smelting net ore_: iron-ore: its drivers make 120.0/min at most, its consumers
 would take 150.0/min, so they run at about 80% for it`: four drills for eight furnaces.
+
+**On the ore: ore-patch.fk and mixed-patch.fk.** `@patch(iron-ore)` pins a miner row to its ore
+instead of a position, and the terrain file the surface names says where the ore is.
+`docs\examples\patch.terrain.json` holds two 30x7 iron strips, a copper streak under the west end
+of the first and copper under the whole south edge of the second; `ore-patch.fk` takes plot
+60x40 at 0,0 and `mixed-patch.fk` plot 60x40 at 0,40. `docs\examples\patch.build.fkb` is the
+build through `place` (`read_surface`, `read_terrain patch`, `elaborate`, `size`, `place`: the
+template's own steps, with the terrain named `patch`).
+
+```
+ore = MinerRow<n=auto 4..30, resource=iron-ore> @patch(iron-ore)
+box = Chest<provider, limit=4>                  @(50, 30)
+
+net ore_: ore -> box
+```
+
+```
+terrain patch
+place ore-patch   = ore-patch   plot 0,0  60x40
+place mixed-patch = mixed-patch plot 0,40 60x40
+```
+
+```
+fk build --to place
+```
+
+`out\size.txt`:
+
+```
+sized: ore n=14 (auto 4..30)
+  1 n=auto row, 14 machines; every target and assert holds, and every net of an n=auto row carries what its consumers ask; 2 model solves, 0 growth steps after the seed
+
+  row                  kind           n seed   bounds  serves
+  ore                  MinerRow      14   14    4..30  its patch: what the ore holds (below)
+                       @patch(iron-ore): the iron-ore in the plot spans 30x7, long axis E-W; 14 drills stand on it with their mining areas off other resources, the row E-W at 7,10 rot 0, 161 ore tiles in reach (80.5k)
+
+  on their ore by place (@patch): ore n=14 (what the patch holds); place says when that many drills don't fit
+```
+
+`out\place.txt`:
+
+```
+  placed ore: @patch(iron-ore) at 7,10 rot 0, the row runs E-W (the iron-ore in the plot spans 30x7, long axis E-W): 14/14 drills on iron-ore, 126 ore tiles under them (63.0k), 161 in their mining areas (80.5k)
+```
+
+`mixed-patch.fk` is the same row written `n=8`, on the strip with copper under its whole south
+edge. `out\place.txt` and the check line:
+
+```
+  placed ore: @patch(iron-ore) at 1,10 rot 0, the row runs E-W (the iron-ore in the plot spans 30x7, long axis E-W): 8/8 drills on iron-ore, 72 ore tiles under them (36.0k), 98 in their mining areas (49.0k); 4 left out (mixed-patch)
+```
+
+```
+mixed-patch mixed-patch ore: 4 of 8 drills' mining areas reach copper-ore (m4, m5, m6, m7) at 1,10 rot 0, the spot where the fewest do; electric-mining-drill has no resource filter slots in facts.json, so they are left out: 4 of 8 drills placed
+```
+
+**The idea.** A drill mines every resource under its 5x5 mining area, so a drill over iron and
+copper puts both on the belt. The placer keeps every drill's body on the row's resource and
+every mining area off any other, and `n=auto` takes from the patch the most drills that stand
+that way, laid along its long axis: 14 here, the six the copper streak costs are the west end.
+Where no spot is clean (`mixed-patch.fk`) the row goes where the fewest drills reach the other
+ore, `n` stays as written, and those drills are left out, since no drill of the game has a
+resource filter (measured on 2.1.24: `filter_count` 0 on every drill); the check line names
+them. The terrain is one file the design names (`terrain patch`, read once with
+`fk read-terrain`): `fk build` and `fk layout` read that file, and nothing reads the world on
+the way.
+
+**What goes wrong here.** The four left-out drills are still the net's drivers, so the build's
+next step says `no-route mixed-patch net ore_: its route does not connect 4 driver->consumer
+pairs` and `report_checks` names them, `not in the layout: ore/m4, ore/m5, ore/m6, ore/m7`; the
+net stays unrouted. Write the row for what the patch holds: `n=auto 4..30` on that strip gives
+`sized: ore n=4 (auto 4..30)`, the row turned N-S (`4/4 drills on iron-ore`), and the net routes.
 
 **Aside: smelter-array.fk.** `SmelterArray<n=24, recipe=iron-plate>` is the older stack row,
 furnaces on both sides of each plate belt; the library's `SmelterPair` replaces it. On paper

@@ -111,8 +111,10 @@ class MixedPatchTest(unittest.TestCase):
         self.assertIn("electric-mining-drill has 1 resource filter slot: theirs is set to "
                       "iron-ore, so they mine nothing else", check[2])
         self.assertTrue(log[0].endswith("; 4 filtered to iron-ore (mixed-patch)"), log[0])
-        # the field the codec writes for it: the blueprint entity's ``filter``
-        # (BlueprintMiningDrillFilter), and the .fkp keeps the attr through a round trip
+        # the field the codec writes for it stays a guess (43-mines, measured on a 2.1.24 laptop
+        # server: no drill of the game has filter slots, so no blueprint ever carries one and the
+        # shape cannot be read back; docs/notes-43-mines.md); the .fkp keeps the attr through a
+        # round trip
         self.assertEqual(codec.control_behavior(lay.entities["ore/m4"].attrs),
                          {"filter": {"filters": [{"index": 1, "name": "iron-ore"}],
                                      "mode": "whitelist"}})
@@ -141,7 +143,13 @@ class MixedPatchTest(unittest.TestCase):
                "stone": {(2, 2): 7}}
         got = placer.others("electric-mining-drill", "iron-ore", ore)
         self.assertEqual(got, {(2, 2): "copper-ore+stone"})      # crude oil is not mined by it
-        self.assertEqual(placer.filter_slots("electric-mining-drill"), 0)
+        # 43-mines: measured on a 2.1.24 laptop server, prototypes.entity[d].filter_count is 0 for
+        # every drill (electric, burner, big, pumpjack) and set_filter says "Callable only on
+        # entities that have filters": the game's drills have no resource filter, so the row's
+        # touching drills are left out, never filtered
+        for drill in ("electric-mining-drill", "burner-mining-drill", "big-mining-drill",
+                      "pumpjack"):
+            self.assertEqual(placer.filter_slots(drill), 0, drill)
 
     def test_the_place_step_prints_the_check_line(self):
         checks = []

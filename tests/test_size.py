@@ -305,6 +305,37 @@ class FitTest(unittest.TestCase):
         self.assertIn("n=32 (auto) makes it 64x7 at @(0, 10): it runs past plot t (60x40 in the "
                       "factory's frame), x to 64", [c.msg for c in size.fit(wide, self.PLACES, CAT)])
 
+    ELL = ("module Ell shape (0,0) (20,0) (20,8) (10,8) (10,16) (0,16) {\n"
+           "  port fe_in : in iron-plate @w\n  port g_out : out iron-gear-wheel @n12\n"
+           "  a = Assembler<recipe=iron-gear-wheel> @(4, 6)\n  net fe: fe_in -> a\n"
+           "  net g: a -> g_out\n}\n"
+           "ell   = Ell @(0, 0)\n"
+           "src   = Chest<requester, item=iron-plate, rate=1>   @(0, 20)\n"
+           "gbox  = Chest<provider>                             @(58, 2)\n"
+           "ore   = MinerRow<n=auto, resource=iron-ore>         @(12, 30)\n"
+           "coal  = MinerRow<n=1, resource=coal>                @(45, 30)\n"
+           "smelt = SmelterRow<n=auto, recipe=iron-plate>       @(12, 9)\n"
+           "box   = Chest<provider, rate=6/s>                   @(55, 20)\n"
+           "net feed: src -> ell.fe_in\nnet gears: ell.g_out -> gbox\n"
+           "net ore_: ore -> smelt\nnet fuel: coal -> smelt\nnet plates: smelt -> box\n")
+
+    def test_a_polygon_module_is_judged_by_its_tiles(self):
+        # 43-mines: Ell is a 20x16 box less its south-east 10x8. The 40x7 smelter row at (12, 9)
+        # lies in that notch: inside the box, on none of the tiles, so it fits
+        sz = sized(self.ELL)
+        self.assertEqual(counts(sz), {"ore": 12, "smelt": 20})
+        self.assertEqual(size.fit(sz, self.PLACES, CAT), [])
+        # at (8, 9) it takes two columns of the L's foot: a box of shared tiles
+        sz = sized(self.ELL.replace("@(12, 9)", "@(8, 9)"))
+        self.assertEqual([(c.where, c.msg) for c in size.fit(sz, self.PLACES, CAT)], [
+            ("t smelt", "n=20 (auto) makes it 40x7 at @(8, 9): its frame overlaps ell's (240 tiles of "
+                        "20x16 at @(0, 0)) on 2x7 tiles")])
+        # at (8, 6) it takes the foot's two columns and two rows of the L's top: not a box
+        sz = sized(self.ELL.replace("@(12, 9)", "@(8, 6)"))
+        self.assertEqual([c.msg for c in size.fit(sz, self.PLACES, CAT)], [
+            "n=20 (auto) makes it 40x7 at @(8, 6): its frame overlaps ell's (240 tiles of 20x16 at "
+            "@(0, 0)) on 34 tiles in 12x7"])
+
 
 class FlowTest(unittest.TestCase):
     """The step in a build: out/size.txt, the counts placed, a rebuild that keeps them, does-not-fit, the
