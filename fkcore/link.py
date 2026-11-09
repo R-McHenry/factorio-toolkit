@@ -43,6 +43,7 @@ import os
 import re
 import socket
 import struct
+import time
 
 from . import pack as _pack
 
@@ -74,6 +75,9 @@ OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT") or _GAME.get("script_output") \
 #: seconds a reply may take; FK_RCON_TIMEOUT raises it for a big lab build (11-07: megahub's
 #: 45k-entity snapshot took longer than 5 s)
 TIMEOUT = float(os.environ.get("FK_RCON_TIMEOUT", "5.0"))
+#: how long read_output waits for the game's answer file (written after the reply, on the game's
+#: own thread; the T6 flower's 10 MB paste answer took 30 s to land on the WSL share)
+FILE_WAIT = float(os.environ.get("FK_FILE_WAIT", "180.0"))
 
 _FORBIDDEN = re.compile(r"\b(script\s*\.\s*on_\w+|commands\s*\.\s*add_command|remote\s*\.\s*add_interface"
                         r"|script\s*\.\s*register_\w+)")
@@ -1314,8 +1318,20 @@ def read_output(rcon, lua, tag, what, keep=True):
     if not n.strip().isdigit():
         raise LinkError(f"{what} failed: {n.strip()[:300]}")
     path = os.path.join(OUT_DIR, "fk5", f"{tag}.json")
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh)
+    # 46-pairbox: the game writes the file on its own thread after the reply, and a big one over
+    # a network share (the T6 flower's paste answer, 8.8 MB, 48000 ghosts) lands a second or two
+    # later: wait for it, and for its JSON to be whole, up to FILE_WAIT seconds
+    deadline = time.monotonic() + FILE_WAIT
+    while True:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            break
+        except (OSError, ValueError) as e:
+            if time.monotonic() >= deadline:
+                raise LinkError(f"{what}: the game's answer {path} is not there or not whole "
+                                f"after {FILE_WAIT:.0f} s ({e})")
+            time.sleep(0.2)
     if not keep:
         try:
             os.remove(path)

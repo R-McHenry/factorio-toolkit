@@ -632,15 +632,22 @@ def _ground(cat, ents, frames, js, net, terrain=(), box=None):
             if other != net:
                 blocked |= set(job.ends())
     else:
-        index = _ends_index(js)
+        index, over, gone = _ends_index(js)
         x0, y0, x1, y1 = box
         if (x1 - x0) * (y1 - y0) < len(index):
             got = ((x, y) for x in range(x0, x1) for y in range(y0, y1) if (x, y) in index)
         else:
             got = (t for t in index if x0 <= t[0] < x1 and y0 <= t[1] < y1)
+        skip = {net} | set(over) | set(gone)  # an overridden net's ends are its new job's, below
         for t in got:
-            if index[t] - {net}:
+            if index[t] - skip:
                 blocked.add(t)
+        for other, job in over.items():
+            if other != net:
+                for t in job.ends():
+                    t = tuple(t)
+                    if x0 <= t[0] < x1 and y0 <= t[1] < y1:
+                        blocked.add(t)
     return blocked - set(js[net].ends())
 
 
@@ -648,14 +655,28 @@ _ENDS = [None, None]
 
 
 def _ends_index(js):
-    """{tile: the nets that end there} for ``js``, built once per jobs dict (2.1.33)."""
-    if _ENDS[0] is not js:
-        index = {}
-        for name, job in js.items():
-            for t in job.ends():
-                index.setdefault(tuple(t), set()).add(name)
-        _ENDS[0], _ENDS[1] = js, index
-    return _ENDS[1]
+    """({tile: the nets that end there}, {net: job}) for ``js``: the index of the jobs dict first
+    seen, built once (2.1.33), and the jobs of ``js`` that differ from it. 46-pairbox: the pair
+    router routes a trunk and each part with a copy of the dict and one or two jobs swapped in
+    (``pairs._laid_lanes``, ``_side_part``), and every copy rebuilt the index over every net of
+    the layout: a part route in a 6500-net flower cost ten times what it cost alone, and the group
+    pass that lays a tight column's pairs in another order ran out of its budget. A copy with the
+    same nets and a few other jobs reads the one index with those jobs laid over it."""
+    base, index = _ENDS
+    if base is js:
+        return index, {}, ()
+    if base is not None and abs(len(js) - len(base)) <= 6:
+        over = {k: v for k, v in js.items() if base.get(k) is not v}    # changed or added
+        if len(over) <= 6:
+            gone = [k for k in base if k not in js]                      # dropped
+            if len(over) + len(gone) <= 6:
+                return index, over, gone
+    index = {}
+    for name, job in js.items():
+        for t in job.ends():
+            index.setdefault(tuple(t), set()).add(name)
+    _ENDS[0], _ENDS[1] = js, index
+    return index, {}, ()
 
 
 #: 2.1.33 (lab FRICTION 35): how far past a net's search box an entity can still matter (its
@@ -2239,6 +2260,16 @@ def _serving_only(flat, cat, job, ents, laid):
     committed route by (``_patch_net``), so the next build keeps this one as it stands. A lane
     pair is served by its two members' ends, as ``_standing`` judges it (43-hierarchy: ridge's
     ``rx/steelE|rx/bka`` lost 9 of 298 carriers to the judge on its first rebuild, once)."""
+    # 46-pairbox: the graph of what stands near the laid carriers, not of the whole layout (the
+    # judge walks from the net's own ends, machines the carriers touch): on the T6 flower's 48000
+    # entities each call took 1.8 s, and a tight column's group retry, which trims every pair it
+    # re-lays, ran out of its 3 s budget where the core alone took 0.8
+    if laid:
+        xs = [e.x for e in laid]
+        ys = [e.y for e in laid]
+        box = (int(min(xs)) - _CLIP, int(min(ys)) - _CLIP, int(max(xs)) + _CLIP + 1,
+               int(max(ys)) + _CLIP + 1)
+        ents = _clipped(list(ents), (), box)[0]
     g = connectmod.graph(list(ents) + list(laid), cat, _ports(flat))
     table = connectmod.endpoints(flat)
     keys = {e.key for e in laid}
