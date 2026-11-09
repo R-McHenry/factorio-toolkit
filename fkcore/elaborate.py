@@ -639,7 +639,7 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _both_port_checks(flat)
     _literal_cut_checks(flat, [f.body] + list(modules.values()))
     _recorded_ports(flat, layout)
-    _port_checks(flat)
+    _port_checks(flat, cat)
     _endpoint_checks(flat, cat)
     _auto_gates(flat, cat)
     # 3.0.1: the turned pieces whose frames needed the nets
@@ -3080,10 +3080,13 @@ def _lane_checks(flat, cat):
             "Two half-empty belts otherwise", flat.nets[first[0]].line))
 
 
-def _port_checks(flat):
+def _port_checks(flat, cat=None):
     """``port`` (2.0.28, lane-level in 2.0.29; PLAN-MODULES), warn and never gate: a port no net
     uses on a side, a use against its direction, a declared item nothing carries, an item on one
-    side only, a tile off its module's frame, and two ports on one lane of one tile.
+    side only, a tile off its module's frame, and two ports on one lane of one tile. 43-hierarchy
+    (PLAN-ORGANIC D3): ``port-not-in-line``, a pinned pair port whose straight run inside the
+    frame (``lanephys.STEM`` tiles) something of the module stands in (``cat`` reads the
+    children's footprints; without it the check is skipped).
 
     A port's nets are the one written inside its module (scope = the instance path) and the one
     written outside that names it; an ``in`` port is fed from outside and feeds inside, an ``out``
@@ -3193,6 +3196,93 @@ def _port_checks(flat):
                 "port", f"port {key}",
                 "the committed .fkp records its tile, but this design declares no such port: "
                 "drop the port line"))
+    if cat is not None:
+        from . import lanephys
+        cache = {}
+        for key in sorted(flat.ports):
+            port = flat.ports[key]
+            if port.right is None or port.both or port.pos is None:
+                continue
+            stand = _stem_blockers(flat, cat, port, cache)
+            if stand:
+                shown = ", ".join(f"{x},{y} ({what})" for x, y, what in stand)
+                flat.checks.append(Check(
+                    "port-not-in-line", f"port {key}",
+                    f"@{port.side}{port.pos} ({' | '.join(_port_items(port).split(', ', 1))}): "
+                    f"a pair's belt runs straight for {lanephys.STEM} tiles inside the frame "
+                    f"from its port, and {shown} stand{'s' if len(stand) == 1 else ''} in that "
+                    "line; put the port in line with the column it feeds", port.line))
+
+
+def _stem_blockers(flat, cat, port, cache):
+    """43-hierarchy (PLAN-ORGANIC D3, the lab's rule "ports in line"): what stands in the
+    straight run of ``lanephys.STEM`` tiles inward from a pinned pair port (``a | b``), in the
+    module's own frame: [(x, y, child name)]. The run ends at the frame's edge or at a child's
+    pinned port tile (the column the pair feeds stands in line); a child's other tile in it is
+    what blocks the stem. The number is lane physics (``lanephys.STEM``), read here and nowhere
+    else in the elaborator."""
+    from . import expand, lanephys
+    frame = expand.own_frame(port)
+    if frame is None or port.scope not in flat.scopes:
+        return []
+    try:
+        px, py, _out = expand._port_tile(port, frame)
+    except expand.FragmentError:
+        return []
+    dx, dy = {"n": (0, 1), "s": (0, -1), "e": (-1, 0), "w": (1, 0)}[port.side]
+    tiles, ports = _child_tiles(flat, cat, port.scope, cache)
+    out = []
+    for step in range(lanephys.STEM + 1):
+        t = (px + step * dx, py + step * dy)
+        if t not in frame or t in ports:
+            break
+        if t in tiles:
+            out.append((t[0], t[1], tiles[t]))
+    return out
+
+
+def _child_tiles(flat, cat, path, cache):
+    """({tile: child name}, {tile: port key}) of module instance ``path``'s placed children in
+    its own frame: each child's own frame turned by its hint's rot and moved to its hint
+    (``expand._module_frame``'s arithmetic), and every pinned port tile of the children and
+    their children (a Stack's cells) the same way. ``cache``: per path, across ports."""
+    from . import expand
+    if path in cache:
+        return cache[path]
+    tiles, ports = {}, {}
+    frames = {}
+    for child in flat.scopes.get(path, {}).values():
+        hint = child.hints.get("at") if child.hints else None
+        if hint is None:
+            continue
+        own = expand._own_frame(flat, child.path, cat, frames)
+        if own is None:
+            continue
+        hx, hy = int(hint[0]), int(hint[1])
+        rot = int(hint[2]) % 4 if len(hint) > 2 else 0
+        name = child.path.rsplit("/", 1)[-1]
+        box = expand._turn_box(own, rot, own)
+        for x in range(box[0], box[2]):
+            for y in range(box[1], box[3]):
+                tiles[(x + hx, y + hy)] = name
+        sub = {}
+        for key, p in flat.ports.items():
+            if p.scope == child.path and p.pos is not None:
+                f = expand.own_frame(p)
+                if f is None:
+                    continue
+                try:
+                    qx, qy, _o = expand._port_tile(p, f)
+                except expand.FragmentError:
+                    continue
+                sub[(qx, qy)] = key
+        if child.module is not None:
+            sub.update(_child_tiles(flat, cat, child.path, cache)[1])
+        for (qx, qy), key in sub.items():
+            tb = expand._turn_box((qx, qy, qx + 1, qy + 1), rot, own)
+            ports[(tb[0] + hx, tb[1] + hy)] = key
+    cache[path] = (tiles, ports)
+    return cache[path]
 
 
 def _endpoint_checks(flat, cat):

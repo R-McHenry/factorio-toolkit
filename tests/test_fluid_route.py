@@ -22,6 +22,30 @@ def build(text):
     return flat, lay
 
 
+class DirectJoinTest(unittest.TestCase):
+    def test_boxes_that_join_directly_are_a_pass_through(self):
+        # 43-hierarchy (PLAN-ORGANIC D2): a fluid net whose boxes join as they stand lays
+        # nothing, so it is counted a pass-through (fen's rx/f5_gas3 was "routed" every build:
+        # 0 pipes, 1 direct join, and nothing pinned it)
+        flat, lay = build("""
+gas  = InfinityPipe<fluid=petroleum-gas, rate=30/s> @(5, 2)
+plas = ChemPlant<recipe=plastic-bar> @(5, 3)
+cq   = Chest<requester, item=coal, request=20> @(2, 4)
+pbx  = Chest<storage> @(9, 4)
+net g: gas -> plas
+net c: cq -> plas
+net p: plas -> pbx
+""")
+        from fkcore import fluid_route
+        self.assertTrue(fluid_route._direct(flat, lay, CAT, "g"))
+        r = route.route_layout(flat, lay, CAT)
+        self.assertEqual((r.failed, r.passthrough), ({}, ["g"]))
+        self.assertIn("routed    g: 1 -> 1, nothing to lay (its boxes join directly)", r.lines)
+        self.assertEqual([k for k in r.layout.entities if k.startswith("~g/")], [])
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        self.assertEqual(rep.nets["g"].status, "connected")
+
+
 class FluidRouteTest(unittest.TestCase):
     def route(self, name):
         flat = elaborate_file(os.path.join(GAME, f"{name}.fk"), CAT)
