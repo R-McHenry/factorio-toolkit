@@ -40,7 +40,10 @@ SIZES = {"gears": "16x16", "smelting": "26x26", "shared-belt": "26x23", "smelter
          "early-mall": "49x24", "compact-mall": "50x16", "bus4": "54x25", "busbase": "172x82",
          "furnace-column": "31x41", "robot-feed": "12x8", "steam": "16x26", "bus4ribs": "100x40",
          "blue6": "60x40", "beacon-cells": "44x40", "red-chain": "92x76", "belt-switch": "64x70",
-         "mate": "40x40"}
+         "mate": "40x40", "layout": "34x44"}
+#: 40-layout: the examples with no `@(x, y)` hints, laid out with `fk layout --write` (as the
+#: chapter does) before the paper build
+LAID_OUT = {"layout"}
 #: the fk wrapper's own commands (agent/fk.py) besides fkcore's subcommands
 WRAPPER = {"build", "look", "wait", "stage", "lab", "alone", "sim", "map", "capture", "catalog",
            "route", "place", "report", "compile", "lua", "stats"}
@@ -81,6 +84,12 @@ def paper_build(name):
     with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
         fh.write(f"surface nauvis\nterrain none\nplace {name} = {name} plot 0,0 "
                  f"{SIZES.get(name, '200x200')}\n")
+    if name in LAID_OUT:
+        from fkcore import layout as layoutmod
+        from fkcore.elaborate import elaborate_file
+        src = os.path.join(d, name + ".fk")
+        w, h = SIZES[name].split("x")
+        layoutmod.layout_file(src, elaborate_file(src, CAT), CAT, write=True, plot=(int(w), int(h)))
     code, ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
     summary = ""
     path = os.path.join(d, "out", "report_checks.txt")

@@ -52,7 +52,7 @@ impl NativeGrid {
         self.occ.contains(&t)
     }
 
-    fn dense(&self) -> &Vec<bool> {
+    pub(crate) fn dense(&self) -> &Vec<bool> {
         self.dense.get_or_init(|| {
             let (x0, y0, x1, y1) = self.bbox.unwrap();
             let (w, h) = ((x1 - x0).max(0), (y1 - y0).max(0));
