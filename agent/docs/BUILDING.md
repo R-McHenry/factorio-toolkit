@@ -63,6 +63,15 @@ with the starter base still running beside it until the new one carries the load
 
 ## Hierarchy
 
+> **WARNING: every router issue is a hierarchy issue, and the hierarchy is yours.** The router is
+> handed one sealed module at a time, and then the trunks between modules. It is never handed a
+> base. So a net that fails, a route step that runs for minutes, or a module that reroutes when you
+> changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
+> where it happened. The fix is always the same and always the designer's: seal the sub-unit
+> (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
+> inside one module can never touch another. Router options and effort levels do not fix a design.
+> The checks name the module and the cause; the rules below are how to build it right.
+
 - **A module is a frame with ports.** Its belts stay inside; a change inside it never moves its
   neighbours. Ports go where the trunks come from, on the edge facing them.
 - **Regions nest.** A region (the iron smelting, the red-green block) is a sealed module of sealed
@@ -81,6 +90,20 @@ with the starter base still running beside it until the new one carries the load
   seals (only belts cross it).
 - **A new consumer gets its own branch.** Adding a far consumer to a main net re-lays the main
   (the coal belt by the boilers, once): give it a tap, a hub requester, or a net of its own.
+- **One belt per column, one net per belt.** A beaconed column puts its product on one lane; every
+  column hands on its own belt and takes its own. One net feeding several columns' lanes from a
+  shared belt puts everything on one lane (the megabelt's grove made 23 of its 87 circuits/s that
+  way): use `net each`, or one net per column.
+- **A paired-lanes port runs straight into its column.** A port `a | b` needs a straight stem of
+  belt before the side-load (`lanephys`'s stem, four tiles): nothing may stand in that line, and
+  the port goes in line with the belt it feeds.
+- **A sealed cell powers only its own frame.** A beacon or machine on a cell's edge that no free
+  tile inside the cell can reach is unpowered there; move it into the parent, or leave the pole's
+  tile free. Fluids too: a chemical plant and a refinery take their fluids on their short sides,
+  so a stacked fluid cell runs its pipe straight through, past the plant.
+- **A column of fluid cells is a sealed unit like any other** (3.1.4): the megabelt's oil river
+  compiled nothing until its refinery, cracking and lubricant columns were restacked as sealed
+  modules; then each column routed once and every twin took the first one's pipes.
 - A sealed module's inside routes once: the build (or `fk compile MODULE`) stores it in the one
   compile store, and every later build, copy or move lays the stored inside, a lab build's
   included (TOOLKIT.md, "Sealed modules compile once").

@@ -936,6 +936,14 @@ domain's. `NO_POWER` (every chapter): the factory's poles reach no grid with gen
 
 ## 11. red-chain.fk: a sealed module, compiled once
 
+> **WARNING: every router issue is a hierarchy issue, and the hierarchy is yours.** The router is
+> handed one sealed module at a time, and then the trunks between modules. It is never handed a
+> base. So a net that fails, a route step that runs for minutes, or a module that reroutes when you
+> changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
+> where it happened. The fix is always the same and always the designer's: seal the sub-unit
+> (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
+> inside one module can never touch another. This chapter is that fix, shown once.
+
 `docs\examples\red-chain.fk`, plot 92x76, is the lab's red-circuit chain: copper and iron smelted
 on beaconed furnaces, green circuits, plastic from gas and coal, red circuits, all inside one
 sealed module with its ports on the edges. The head of the file:
