@@ -190,6 +190,54 @@ class CoverTest(unittest.TestCase):
         self.assertEqual((k, spot.rot % 2), (20, 1))
 
 
+class PatchesTest(unittest.TestCase):
+    """M3 (43-mines): ``placer.patches`` reads the terrain the design names; the world placer's
+    pins on ore (part T) call it and never read the world."""
+
+    def setUp(self):
+        # two iron patches (the strip, and a 4x4 block east of it) and the copper streak
+        block = strip(40, 44, 10, 14, amount=100)
+        self.t = terrain.Terrain("nauvis", (-10, -10, 110, 90), 1,
+                                 {"iron-ore": {**IRON, **block}, "copper-ore": COPPER_WEST},
+                                 frozenset(), frozenset(), [], {})
+
+    def test_every_patch_of_a_resource_largest_first_with_its_centroid(self):
+        got = placer.patches(self.t, "iron-ore")
+        self.assertEqual([(p.name, len(p), p.amount, p.box) for p in got],
+                         [("iron-ore#1", 210, 105000, (0, 10, 30, 17)),
+                          ("iron-ore#2", 16, 1600, (40, 10, 44, 14))])
+        self.assertEqual(got[0].centroid, (15.0, 13.5))
+        self.assertEqual(got[1].centroid, (42.0, 12.0))
+        self.assertEqual((got[0].size, got[0].resource, got[0].n), ((30, 7), "iron-ore", 1))
+        self.assertEqual(got[1].tiles, frozenset(strip(40, 44, 10, 14)))
+        # every resource when none is named, sorted by resource then size
+        self.assertEqual([p.name for p in placer.patches(self.t)],
+                         ["copper-ore#1", "iron-ore#1", "iron-ore#2"])
+        self.assertEqual(placer.patches(self.t, "stone"), [])
+
+    def test_the_named_one_the_nearest_one_and_the_terrain_in_any_form(self):
+        self.assertEqual(placer.patch(self.t, "iron-ore#2").box, (40, 10, 44, 14))
+        self.assertEqual(placer.patch(self.t, "iron-ore").n, 1)
+        self.assertIsNone(placer.patch(self.t, "iron-ore#3"))
+        self.assertIsNone(placer.patch(self.t, "stone#1"))
+        near = placer.nearest_patch(self.t, "iron-ore", (45, 12))
+        self.assertEqual(near.name, "iron-ore#2")
+        self.assertEqual(placer.nearest_patch(self.t, "iron-ore", (45, 12), need=20).name,
+                         "iron-ore#1")
+        self.assertIsNone(placer.nearest_patch(self.t, "iron-ore", (0, 0), need=1000))
+        # the same from the file the design names, its dict, and a plot's FrameGround
+        d = tempfile.mkdtemp(prefix="fkpatch-")
+        self.addCleanup(shutil.rmtree, d, True)
+        path = os.path.join(d, "map.terrain.json")
+        terrain.save(self.t, path)
+        self.assertEqual([p.name for p in placer.patches(path, "iron-ore")],
+                         ["iron-ore#1", "iron-ore#2"])
+        self.assertEqual(placer.patch(self.t.to_dict(), "iron-ore#2").centroid, (42.0, 12.0))
+        g = ground({"iron-ore": IRON, "copper-ore": COPPER_WEST})
+        self.assertEqual([(p.name, len(p)) for p in placer.patches(g)],
+                         [("copper-ore#1", 6), ("iron-ore#1", 210)])
+
+
 SURFACE = """\
 surface  nauvis
 mode     play
