@@ -82,6 +82,19 @@ test_route_promote (4, 0.5 s), test_port_pairs (4, 3.6 s), test_route_units (3),
 (1), test_route_ground (2), test_m2m (23, 36.9 s: its hub takes the Python path, its grows the
 native A* with the LeftTap callback), test_bob_inserters (25, 2.7 s).
 
+## The real workload (the integrating session, after the merge as 55655de)
+
+The four megabelt modules built alone offline (`tools/buildbench.py` on a copy of each
+`lab-session\fk-run2\lab\<module>` with `out/` and the .fkp removed, `--script lab.build.fkb`,
+`--to report_checks`), the route step's time, 0.2.0 then 0.3.0:
+
+| module | nets | route step 0.2.0 | route step 0.3.0 |
+|---|---|---|---|
+| grove (4 GreenB stacks, pairs) | 76 | 2.8 s (one pair net 1.0 s) | 1.2 s |
+| spring | | 0.9 s | 0.7 s |
+| plasticcol | | 0.3 s | 0.2 s |
+| redcol | | 0.7 s | 0.4 s |
+
 ## Open
 
 - K4 (m2m's sinks) and K5 (entities out) are wave 2. The kernel's physics table has no reader
