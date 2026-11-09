@@ -67,7 +67,7 @@ from . import pack as packmod
 from . import surface as surfacemod
 from . import terrain as terrainmod
 from .catalog import Catalog
-from .elaborate import Check, ElabError, elaborate_file
+from .elaborate import LEVEL_NETS, Check, ElabError, elaborate_file
 from .lang import FkSyntaxError
 
 __all__ = ["FlowError", "Ctx", "Line", "parse", "run", "STEPS", "layout_source_changes"]
@@ -1140,15 +1140,15 @@ def s_route(ctx, args):
         # R2: what the negotiation fought over (FK_NEGOTIATE=1), for `fk layout --from`
         design.write_pressure(ctx.out, factory, r.pressure, routed=bool(r.routed))
         # 3.1: what the compile store did for each sealed unit (route.Routed.compiled)
+        through = set(r.passthrough)
         comp = {n for c in r.compiled.values() if c["from"] == "store"
-                for n in c.get("laid", c["nets"])}
+                for n in c.get("laid", c["nets"])} - through
         lines += _compiled_lines(factory, r)
         _write_units(ctx, factory, r)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
-        through = set(r.passthrough)
         lines.append(f"{factory}: {len(set(r.routed) - through)} routed, {len(r.kept)} kept"
                      + (f", {len(r.patched)} patched" if r.patched else "")
                      # 3.1.5: pass-through nets apart (an agent read "584 routed" on a no-op)
@@ -1159,6 +1159,11 @@ def s_route(ctx, args):
                      f"{r.passes} pass{'es' if r.passes != 1 else ''}"
                      + (f"; {len(blocked)} terrain tiles kept clear" if ctx.ground is not None
                         else ""))
+        # PLAN-ORGANIC D5: each level that searched, its nets, seconds and frame; one past the
+        # limits is `flat`, a check the report carries and `stop_on flat` holds the paste on
+        level_lines, level_checks = _level_lines(factory, flat, lay, r, ctx.cat)
+        lines += level_lines
+        checks += level_checks
         lines += [f"  stale     {n}: routed again: {why}" for n, why in sorted(again.items())]
         if dnp:
             lines.append(f"  dnp       {dnp} entities laid but not built (DNP: "
@@ -1241,6 +1246,58 @@ def _write_units(ctx, factory, r):
                        for u, c in sorted(r.compiled.items())}, fh, indent=1)
     except OSError:
         pass
+
+
+#: the `level` lines a route step prints at most (the slowest; the rest are counted)
+_LEVELS_SHOWN = 12
+
+
+def _level_lines(factory, flat, lay, r, cat):
+    """The route step's `level` lines (PLAN-ORGANIC D5): one per level that searched this build
+    (the top level, or one sealed unit; a twin or a stored unit searched nothing), slowest first,
+    with the nets it searched (pass-through nets apart), how many failed, the seconds and the
+    frame. A level past ``route.LEVEL_SECONDS`` or ``elaborate.LEVEL_NETS`` is a `flat` check:
+    the hierarchy is missing there (the megabelt flower's eight levels of 67 to 118 nets took 35
+    minutes a build, and nothing said which level). -> (lines, [Check])"""
+    through = set(r.passthrough)
+    rows = []
+    for u, lv in r.levels.items():
+        searched = [n for n in lv["nets"] if n not in through]
+        if not searched:
+            continue
+        bad = sum(1 for n in searched if n in r.failed)
+        if u:
+            inst = flat.insts.get(u)
+            name = (inst.module or inst.kind) if inst is not None else u
+            try:
+                x0, y0, x1, y1 = expand.frame_shape_of(flat, lay, u, cat).box
+                frame = f"{x1 - x0}x{y1 - y0}"
+            except Exception:            # noqa: BLE001 - a frame the layout lost says so
+                frame = "?"
+            where = f"{u} ({name})"
+        else:
+            w, h = lay.size or (0, 0)
+            name, frame, where = factory, f"{w}x{h}", "the top level"
+        rows.append((float(lv["took"]), len(searched), bad, where, frame, u, name))
+    rows.sort(key=lambda t: (-t[0], -t[1], t[3]))
+    lines, checks = [], []
+    for took, n, bad, where, frame, u, name in rows[:_LEVELS_SHOWN]:
+        over = n > LEVEL_NETS or took > route.LEVEL_SECONDS
+        lines.append(f"  level     {where}: {n} nets searched, {bad} failed, {took:.1f} s, frame "
+                     f"{frame}" + (f"; flat: over {LEVEL_NETS} nets or {route.LEVEL_SECONDS:.0f} s"
+                                   if over else ""))
+        if over:
+            checks.append(Check(
+                "flat", f"{factory} {u or 'top level'}",
+                f"{name} routes {n} nets at one level in {took:.0f} s ({frame} frame; the limit is "
+                f"{LEVEL_NETS} nets or {route.LEVEL_SECONDS:.0f} s a level): seal a sub-unit "
+                "(`module NAME size WxH { port ... }`) so each level routes a handful, build it "
+                "alone, then compose (BUILDING.md \"Hierarchy\")"))
+    if len(rows) > _LEVELS_SHOWN:
+        rest = rows[_LEVELS_SHOWN:]
+        lines.append(f"  level     ... {len(rest)} more levels, {sum(r_[1] for r_ in rest)} nets, "
+                     f"none over {max(r_[0] for r_ in rest):.1f} s")
+    return lines, checks
 
 
 def _compiled_lines(factory, r):

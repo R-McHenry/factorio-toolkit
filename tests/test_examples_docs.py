@@ -49,6 +49,10 @@ LAID_OUT = {"layout": None, "territory": None, "shape": "Mod"}
 #: line (the first build records the sealed modules' hulls), then whole; the summary line quoted
 #: is the second build's
 STEPS = {"shape": "# -- step 2"}
+#: 43-mines (chapter 3): the examples that build on the terrain fixture `patch.terrain.json` with
+#: its own script `patch.build.fkb` (the template's steps through `place`): their plot on it. They
+#: are judged by the size, place and check lines the chapter quotes, not by a summary line
+TERRAIN = {"ore-patch": "0,0 60x40", "mixed-patch": "0,40 60x40"}
 #: the fk wrapper's own commands (agent/fk.py) besides fkcore's subcommands
 WRAPPER = {"build", "look", "wait", "stage", "lab", "alone", "sim", "map", "capture", "catalog",
            "route", "place", "report", "compile", "lua", "stats"}
@@ -84,11 +88,13 @@ def paper_build(name):
             shutil.copytree(p, os.path.join(d, f))
         else:
             shutil.copy(p, d)
+    script, terrain, plot = SCRIPT, "none", f"0,0 {SIZES.get(name, '200x200')}"
+    if name in TERRAIN:
+        script, terrain, plot = read(EX, "patch.build.fkb"), "patch", TERRAIN[name]
     with open(os.path.join(d, "nauvis.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(SCRIPT)
+        fh.write(script)
     with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(f"surface nauvis\nterrain none\nplace {name} = {name} plot 0,0 "
-                 f"{SIZES.get(name, '200x200')}\n")
+        fh.write(f"surface nauvis\nterrain {terrain}\nplace {name} = {name} plot {plot}\n")
     if name in LAID_OUT:
         from fkcore import layout as layoutmod
         from fkcore.elaborate import elaborate_file
@@ -127,6 +133,8 @@ class ExamplesBuildTest(unittest.TestCase):
         docs = squash(read(DOCS, "EXAMPLES.md"))
         start = squash(read(DOCS, "START.md"))
         for name in examples():
+            if name in TERRAIN:
+                continue
             with self.subTest(example=name):
                 code, summary, checks, d = paper_build(name)
                 self.addCleanup(shutil.rmtree, d, True)
@@ -140,6 +148,39 @@ class ExamplesBuildTest(unittest.TestCase):
                               f"  {summary}")
                 if name == "gears":
                     self.assertIn(squash(summary), start)
+
+    def test_the_patch_examples_build_on_their_terrain(self):
+        """43-mines (chapter 3): ore-patch.fk and mixed-patch.fk build to `place` on
+        patch.terrain.json with patch.build.fkb, and the size, place and check lines the chapter
+        quotes are the build's."""
+        docs = squash(read(DOCS, "EXAMPLES.md"))
+        for name in TERRAIN:
+            with self.subTest(example=name):
+                code, _summary, checks, d = paper_build(name)
+                self.addCleanup(shutil.rmtree, d, True)
+                self.assertEqual(code, 0, f"{name}: the build stopped")
+                place = read(d, "out", "place.txt")
+                placed = [l.strip() for l in place.splitlines() if l.strip().startswith("placed ")]
+                self.assertEqual(len(placed), 1, place)
+                self.assertIn(squash(placed[0]), docs, f"{name}: not quoted: {placed[0]}")
+                mixed = [c for c in checks if c[0] == "mixed-patch"]
+                if name == "ore-patch":
+                    sized = read(d, "out", "size.txt")
+                    self.assertIn("sized: ore n=14 (auto 4..30)", sized)
+                    quoted = [l.strip() for l in sized.splitlines()
+                              if l.startswith("sized:") or "@patch(iron-ore):" in l
+                              or "on their ore by place" in l]
+                    self.assertEqual(len(quoted), 3, sized)
+                    for line in quoted:
+                        self.assertIn(squash(line), docs, f"{name}: not quoted: {line}")
+                    self.assertEqual(mixed, [])
+                    self.assertIn("14/14 drills on iron-ore", placed[0])
+                else:
+                    self.assertEqual(len(mixed), 1, checks)
+                    code_, where, msg = mixed[0]
+                    self.assertIn(squash(f"{code_} {where}: {msg}"), docs, f"not quoted: {msg}")
+                    self.assertIn("4 of 8 drills placed", msg)
+                    self.assertTrue(placed[0].endswith("; 4 left out (mixed-patch)"), placed[0])
 
     def test_what_the_chapters_quote(self):
         """A few lines the chapters quote beyond the summary: the gates' amounts, the ribbon, the
@@ -171,6 +212,89 @@ class ExamplesBuildTest(unittest.TestCase):
         self.assertIn("gated net bay/out_: 1 carrier if=steel-plate>0 on bay/sw", docs)
         self.assertEqual(sorted(c[0] for c in checks if c[0] in ("gate-open",)),
                          ["gate-open", "gate-open"])
+
+
+class TwoRoundsTest(unittest.TestCase):
+    """43-hierarchy (PLAN-ORGANIC D4, R3): the two-round stories are real builds, quoted exactly.
+    Chapter 11: red-chain.fk built, `p1` moved a tile inside `PlasPair`, built again: PlasPair
+    misses the store and says why, p1's nets come from the store, the rest stands. Chapter 9:
+    layout.fk's round 2, `fk layout --from out`, reads the real carriers and moves nothing."""
+
+    def test_a_change_inside_a_module_reroutes_only_itself(self):
+        docs = squash(read(DOCS, "EXAMPLES.md"))
+        code, summary1, _c, d = paper_build("red-chain")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertEqual(code, 0)
+        route1 = read(d, "out", "route.txt")
+        self.assertIn(squash("red-chain: 85 routed, 0 kept, 33 pass-through (0 pinned from the "
+                             "committed .fkp), 0 failed, 1 pass"), squash(route1))
+        self.assertIn(squash("red-chain: 85 routed, 0 kept, 33 pass-through"), docs)
+        src = os.path.join(d, "red-chain.fk")
+        text = read(src)
+        self.assertIn("  p1 = Plas2 @(0, 0)\n", text)
+        with open(src, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text.replace("  p1 = Plas2 @(0, 0)\n", "  p1 = Plas2 @(0, 1)\n"))
+        code, _ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        route2 = read(d, "out", "route.txt")
+        for line in (
+                "red-chain: compiled  chain/pl: not in the store; PlasPair's last entry (faca6bf7) "
+                "differs in instances, net coal_/goals, net gas/reserved, net plastic_a_/starts, "
+                "standing",
+                "red-chain: compiled  chain/pl/p1: 3 nets laid from the store (Plas2 "
+                "2e368b5a3e23fea7f27b)",
+                "red-chain: compiled  stored chain, chain/pl (out/compiled): laid from there "
+                "wherever each stands next",
+                "red-chain: 6 routed, 79 kept, 33 pass-through (83 pinned from the committed .fkp, "
+                "3 laid from the compiled store), 0 failed, 1 pass"):
+            self.assertIn(squash(line), squash(route2), line)
+            self.assertIn(squash(line), docs, line)
+        summary2 = next(l for l in read(d, "out", "report_checks.txt").splitlines()
+                        if l.startswith("red-chain: "))
+        self.assertIn(" 0 unrouted", summary2)
+        self.assertIn(squash(summary2), docs, summary2)
+
+    def test_the_layout_loop_reads_the_real_carriers(self):
+        from fkcore import layout as layoutmod
+        from fkcore.elaborate import elaborate_file
+        from tests.test_layout import net_carriers, stripped_mall
+        docs = squash(read(DOCS, "EXAMPLES.md"))
+        d = tempfile.mkdtemp(prefix="fkdocs-loop-")
+        self.addCleanup(shutil.rmtree, d, True)
+        path = stripped_mall(d)
+        with open(os.path.join(d, "nauvis.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(SCRIPT)
+        with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("surface nauvis\nterrain none\nplace layout = layout plot 0,0 34x44\n")
+        lines1, code = layoutmod.layout_file(path, elaborate_file(path, CAT), CAT, write=True,
+                                             plot=(34, 44))
+        self.assertEqual(code, 0)
+        self.assertIn("estimated belts 62 -> 4 over 8 nets", "\n".join(lines1))
+        code, _ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        self.assertEqual(net_carriers(d, "layout"), 40)
+        lines2, code = layoutmod.layout_file(path, elaborate_file(path, CAT), CAT, write=True,
+                                             plot=(34, 44), from_out=os.path.join(d, "out"))
+        self.assertEqual(code, 0)
+        text2 = squash("\n".join(lines2))
+        for line in ("layout layout: 11 instances, 0 placed now, 11 kept, 0 fixed; 8 nets; "
+                     "frame 34x44 (--plot)",
+                     "per net, real -> estimated: belts 15 -> 0, cab 0 -> 0, circs 10 -> 0, "
+                     "cu 0 -> 0, fe 11 -> 3, gears 2 -> 0, inss 0 -> 0, pipes 2 -> 1",
+                     "real belts 40 -> estimated 4 over 8 nets; every net reaches its consumers; "
+                     "0 hot tiles; 4 sweeps"):
+            self.assertIn(squash(line), text2, line)
+            self.assertIn(squash(line), docs, line)
+        code, _ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        self.assertEqual(net_carriers(d, "layout"), 39)
+        route2 = squash(read(d, "out", "route.txt"))
+        line = "layout: 0 routed, 7 kept, 1 patched (8 pinned from the committed .fkp), 0 failed, 1 pass"
+        self.assertIn(line, route2)
+        self.assertIn(line, docs)
+        summary2 = next(l for l in read(d, "out", "report_checks.txt").splitlines()
+                        if l.startswith("layout: "))
+        self.assertIn(squash(summary2), docs, summary2)
 
 
 class LibraryTableTest(unittest.TestCase):

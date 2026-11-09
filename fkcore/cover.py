@@ -626,7 +626,10 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
-            reason = _why_not(ground, rect, s, pole, lay.size)
+            # a sealed unit's pass (cover_power_units) has no layout size, only its frame: the
+            # 3.1.3 crash on plasticcol's edge beacon (fk-run2 FRICTION.md, PLAN-ORGANIC D3)
+            reason = _why_not(ground, rect, s, pole, lay.size, frame,
+                              sealed=lay.size is None and frame is not None)
             uncovered.append((key, reason))
             checks.append(Check("domain-overlap" if "another power domain" in reason
                                 else "NO_POWER", key, reason))
@@ -719,6 +722,7 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     for e in own:
         mine.setdefault(unit_of(e.key), set()).add(e.key)
     placed, twins, laid, reused = [], {}, 0, 0
+    nospot = []                  # (unit, box, entity key, why): no spot inside the unit's frame
     for i, (path, box, twin) in enumerate(units):
         own_keys = mine.get(path, set())
         rows = near(box, placed)
@@ -735,21 +739,30 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
                                  e.key in own_keys or e.key in kid_keys) for e in rows)),
                    tuple(sorted((t[0] - x0, t[1] - y0) for t in ko)))
         if key is not None and key in twins:
-            src_x, src_y, src_poles = twins[key]
+            src_x, src_y, src_poles, src_dark = twins[key]
             got = [Entity(f"{owner}~{i}/p{k}", p.name, p.x - src_x + x0, p.y - src_y + y0,
                           None, dict(p.attrs)) for k, p in enumerate(src_poles)]
             reused += 1
+            at = {(e.x - x0, e.y - y0): e.key for e in rows if e.key in own_keys}
+            dark = [(at[rel], why) for rel, why in src_dark if rel in at]
         else:
             sub = SimpleNamespace(name=lay.name, size=None, insts={}, covers={},
                                   entities={e.key: e for e in rows})
             only = own_keys | {p.key for p in kids}
-            poles, _rep = cover_power(sub, cat, pole=pole, owner=f"pw{i}", keep_out=ko,
+            poles, urep = cover_power(sub, cat, pole=pole, owner=f"pw{i}", keep_out=ko,
                                       only=only, attrs=attrs, frame=box)
             got = [Entity(f"{owner}~{i}/p{k}", p.name, p.x, p.y, None, dict(p.attrs))
                    for k, p in enumerate(poles)]
             laid += 1
+            # 43-hierarchy (PLAN-ORGANIC D3): an entity of the unit no spot inside its frame
+            # powers (the lab's beacon on a cell's edge) is a check line, not a crash; the last
+            # pass may still power it from outside, and the line says the cell does not
+            dark = [(k, why) for k, why in urep.uncovered if k in own_keys]
             if key is not None:
-                twins[key] = (x0, y0, got)
+                twins[key] = (x0, y0, got,
+                              [((sub.entities[k].x - x0, sub.entities[k].y - y0), why)
+                               for k, why in dark])
+        nospot += [(path, box, k, why) for k, why in dark]
         placed += got
         for p in got:
             tiles_of[p.key] = fkp.tiles_of(cat, p)
@@ -757,6 +770,13 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     whole = SimpleNamespace(name=lay.name, size=lay.size, insts=lay.insts, covers=lay.covers,
                             entities={**{e.key: e for e in own}, **{p.key: p for p in placed}})
     last, rep = cover_power(whole, cat, pole=pole, owner=owner, keep_out=keep_out, attrs=attrs)
+    for path, box, k, why in nospot:
+        x0, y0, x1, y1 = box
+        rep.checks.append(Check(
+            "no-pole-spot", k,
+            f"no free tile inside {path}'s {x1 - x0}x{y1 - y0} frame at {x0},{y0} holds a {pole} "
+            f"that powers it ({why.split(': ', 1)[-1]}); a sealed module powers its own frame: "
+            "move it into the parent, or leave a tile free beside it"))
     allp = sorted(placed + last, key=lambda p: (p.y, p.x))
     poles = [Entity(f"{owner}/p{k}", p.name, p.x, p.y, None, dict(p.attrs))
              for k, p in enumerate(allp)]
@@ -766,8 +786,12 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     return poles, rep
 
 
-def _why_not(ground, rect, s, pole, size):
-    """Why no pole powers an entity: what takes each spot that could."""
+def _why_not(ground, rect, s, pole, size, frame=None, sealed=False):
+    """Why no pole powers an entity: what takes each spot that could. ``frame``: the box the
+    poles stand in when it is not the layout's (a sealed unit's, ``cover_power_units``; 43-
+    hierarchy: a cell's cover has ``size`` None, and the beacon on fen's cell edge that no spot
+    inside the cell could power crashed here, FRICTION 11-08). ``sealed``: the pass is one
+    sealed unit's, whose poles stand only inside its frame (44-levels): the line says the rule."""
     spots = ground.spots_powering(rect, s)
     count, owners = {}, []
     for spot in spots:
@@ -791,7 +815,16 @@ def _why_not(ground, rect, s, pole, size):
     if count.get("pole"):
         parts.append(f"{count['pole']} under other poles")
     if count.get("frame"):
-        parts.append(f"{count['frame']} outside the {size[0]}x{size[1]} frame")
+        if frame is not None:
+            x0, y0, x1, y1 = frame
+            where = f"the {x1 - x0}x{y1 - y0} frame at {x0},{y0}"
+        elif size is not None:
+            where = f"the {size[0]}x{size[1]} frame"
+        else:
+            where = "the frame"
+        parts.append(f"{count['frame']} outside {where}"
+                     + ("; a sealed cell powers only its own frame: free a tile inside it for a "
+                        "pole, or move the entity into the parent module" if sealed else ""))
     if count.get("domain"):
         parts.append(f"{count['domain']} would power another power domain's machines too")
     return f"all {len(spots)} spots a {pole} could power it from are taken: " + "; ".join(parts)

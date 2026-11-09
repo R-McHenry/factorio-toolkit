@@ -236,6 +236,9 @@ class NetReport:
     fluid: bool = False            # a fluid net: judged over the fluid boxes
     leaks: list = field(default_factory=list)
     ug_sideloads: list = field(default_factory=list)    # [(belt, underground)]: lane-dependent
+    #: endpoints the place step left out of an instance that stands (43-mines: a mixed row's
+    #: drills with no filter slot): not ends of the net, named apart from ``missing``
+    left_out: list = field(default_factory=list)
 
     @property
     def connected(self):
@@ -318,10 +321,22 @@ def _port_joints(g, ports):
     for key in sorted(ports, key=natural_key):
         pe = ports[key]
         by_edge.setdefault((tuple(pe.src), tuple(pe.dst)), []).append(key)
+    index = None
+    if any(getattr(pe, "fluid", None) for pe in ports.values()):
+        # 43-hierarchy: one index of the boxes' connections and one set of the joins made, for
+        # every fluid port's edge (each edge scanned every box and hashed every join again:
+        # 6 of fen's 20 s no-op route step, in three graphs of its 592 ports)
+        by_conn = {}
+        for nid, b in g.boxes.items():
+            for c in b.conns:
+                if c.type == "normal":
+                    by_conn.setdefault((tuple(c.tile), tuple(c.target)), []).append((nid, c.flow))
+        done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
+        index = (by_conn, done)
     for (src, dst), keys in by_edge.items():
         keys.sort(key=lambda k: (tuple(ports[k].src) != tuple(ports[k].inside), natural_key(k)))
         if any(getattr(ports[k], "fluid", None) for k in keys):
-            _fluid_port_joints(g, ports, src, dst, keys)
+            _fluid_port_joints(g, ports, src, dst, keys, index)
             continue
         a, b = g.at.get(src), g.at.get(dst)
         if a is not None and b is not None:
@@ -348,28 +363,33 @@ def port_box(pe, which):
     return FluidBox(which, pe.fluid, "output" if gives else "input", ())
 
 
-def _fluid_port_joints(g, ports, src, dst, keys):
+def _fluid_port_joints(g, ports, src, dst, keys, index=None):
     """A fluid port's edge (2.1, fluid ports): the pipe (or machine box) on each side of the
     frame's edge joins the other there; that join becomes box -> port -> box, the port a node of
     its own with two boxes, one per net it ends (``port_box``), each joined only to its own side.
     So the port is the outside net's consumer and the inside net's driver (an in port), never a
     join between two nets. Two ports on one edge (stacked cells) chain, the out port first: the
     net between them joins their two outside boxes and lays nothing."""
-    def facing(tile, other):
-        out = []
+    if index is None:
+        by_conn = {}
         for nid, b in g.boxes.items():
-            if nid[0] in keys:
-                continue
             for c in b.conns:
-                if c.type == "normal" and c.tile == tile and c.target == other:
-                    out.append((nid, c.flow))
-        return out
+                if c.type == "normal":
+                    by_conn.setdefault((tuple(c.tile), tuple(c.target)), []).append((nid, c.flow))
+        done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
+    else:
+        by_conn, done = index
+
+    def facing(tile, other):
+        return [(nid, f) for nid, f in by_conn.get((tuple(tile), tuple(other)), ())
+                if nid[0] not in keys]
     a_side, b_side = facing(src, dst), facing(dst, src)
     a_ids, b_ids = {nid for nid, _f in a_side}, {nid for nid, _f in b_side}
     gone = [(x, y, v) for x, y, v in g.joins if v == "pipe" and
             ((x in a_ids and y in b_ids) or (x in b_ids and y in a_ids))]
     for x, y, v in gone:
         g.joins.remove((x, y, v))
+        done.discard((min(x, y, key=_box_key), max(x, y, key=_box_key), v))
         for u, w in ((x, y), (y, x)):
             if u in g.fluid:
                 g.fluid[u] = [kv for kv in g.fluid[u] if kv[0] != w]
@@ -382,7 +402,6 @@ def _fluid_port_joints(g, ports, src, dst, keys):
         for which in (PORT_OUTSIDE, PORT_INSIDE):
             g.boxes[(key, which)] = port_box(pe, which)
         chain.append(((key, first), (key, last)))
-    done = {(min(x, y, key=_box_key), max(x, y, key=_box_key), v) for x, y, v in g.joins}
     for nid, flow in a_side:
         head = chain[0][0]
         _fluid_join(g, (nid, flow), (head, g.boxes[head].production), "pipe", done)
@@ -912,6 +931,8 @@ def _status_line(r):
         msg += f"; unpaired {', '.join(r.unpaired)}"
     if r.missing:
         msg += f"; not in the layout: {', '.join(r.missing)}"
+    if r.left_out:
+        msg += f"; left out at place: {', '.join(r.left_out)}"
     if not r.drivers and not r.consumers and not r.carriers:
         # 2.0.12: a declared net that nothing uses has nothing to route; as UNROUTED it would
         # hold every paste now that the build script stops on UNROUTED by default
@@ -1063,10 +1084,21 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
     leaks += _fluid_leaks(g, owners, None if nets is None else table)
     ug_sides = [(a, b) for a, b, via in g.edges() if via == "ug_sideload"]
     mine_boxes = _boxes_by_key(g)
+    standing = {k.rsplit("/", 1)[0] for k in g.nodes}        # the instances with an entity here
     reports, checks = {}, []
     for name in sorted(table, key=natural_key):
         drivers, consumers = table[name]
         missing = [k for k in _keys(drivers + consumers) if k not in g.nodes]
+        # 43-mines (PLAN-ORGANIC M1): a machine of an instance that stands in the layout but
+        # has no entity itself was left out at place (a mixed row's drill whose mining area
+        # reaches another resource; `mixed-patch` names it). It is not an end of the net: the
+        # four standing drills route, the net is connected, and the line says who was left out
+        # ("not in the layout" stays for an instance that is not placed at all).
+        left_out = [k for k in missing if k.rsplit("/", 1)[0] in standing]
+        if left_out:
+            drivers = [k for k in drivers if k not in left_out]
+            consumers = [k for k in consumers if k not in left_out]
+            missing = [k for k in missing if k not in left_out]
         reached, unreached, reach_of = 0, [], {}
         contact = bool(items.get(name)) and all(
             i in CONTACT for _k, i in items[name][0] + items[name][1] if i is not None)
@@ -1102,7 +1134,7 @@ def connect(ents, cat, nets=None, ports=None) -> Report:
                        or (g.nodes[k].kind == "pipe-to-ground" and k not in g.fluid_pairs)],
                       name in fluid,
                       [lk for lk in leaks if lk.net == name],
-                      [(a, b) for a, b in ug_sides if name in g.nodes[a].nets])
+                      [(a, b) for a, b in ug_sides if name in g.nodes[a].nets], left_out)
         reports[name] = r
         if not r.connected:
             checks.append(_status_line(r))
