@@ -809,42 +809,45 @@ fk layout layout.fk --plot 34x44
 
 ```
 layout layout: 11 instances, 11 placed now, 0 kept, 0 fixed; 8 nets; frame 34x44 (--plot)
-  fein  = Chest<requester, item=iron-plate, rate=2/s> @(14, 16)
+  fein  = Chest<requester, item=iron-plate, rate=2/s> @(11, 12)
   cuin  = Chest<requester, item=copper-plate, rate=1/s> @(17, 21)
-  gear  = Assembler<recipe=iron-gear-wheel> @(11, 17)
-  belt  = Assembler<recipe=transport-belt> @(12, 13)
-  ins   = Assembler<recipe=inserter> @(14, 9)
-  cable = Assembler<recipe=copper-cable> @(17, 17)
-  circ  = Assembler<recipe=electronic-circuit> @(15, 13)
-  pipe  = AsmRow<n=2, recipe=pipe> @(10, 18, rot 2)
-  bbox  = Chest<provider, limit=4> @(11, 13)
-  ibox  = Chest<provider, limit=4> @(13, 8)
-  pbox  = Chest<provider, limit=4> @(10, 10)
-  estimated belts 52 -> 13 over 8 nets; every net reaches its consumers; 3 hot tiles: 13,16 x3, 15,12 x2, 15,16 x2; 22 sweeps
-  took 1.5 s (fkroute)
+  gear  = Assembler<recipe=iron-gear-wheel> @(12, 13)
+  belt  = Assembler<recipe=transport-belt> @(8, 9)
+  ins   = Assembler<recipe=inserter> @(11, 7)
+  cable = Assembler<recipe=copper-cable> @(17, 15)
+  circ  = Assembler<recipe=electronic-circuit> @(15, 11)
+  pipe  = AsmRow<n=2, recipe=pipe> @(10, 8, rot 2)
+  bbox  = Chest<provider, limit=4> @(10, 5)
+  ibox  = Chest<provider, limit=4> @(13, 3)
+  pbox  = Chest<provider, limit=4> @(8, 0)
+  estimated belts 62 -> 4 over 8 nets; every net reaches its consumers; 0 hot tiles; 13 sweeps
+  took 1.0 s (fkroute)
 ```
 
 One source line per instance it placed, in the file's own syntax, ready to paste; `--write` puts
 them into the file by each instance's line (an existing hint is replaced, a trailing comment kept),
 and prints `wrote 11 hints into layout.fk`. Then the file builds like any other: `fk build --to
-report_checks` gives `layout: 8 nets: 8 connected, 0 open, 0 unrouted; 0 SPILL; 135 entities,
-131 edges, 5 underground pairs`, 96 belt pieces where the hand layout of mall.fk takes 132. The
+report_checks` gives `layout: 8 nets: 8 connected, 0 open, 0 unrouted; 0 SPILL; 91 entities,
+87 edges, 2 underground pairs`, 52 belt pieces where the hand layout of mall.fk takes 132. The
 `--plot` is the frame the instances stay inside (the surface file's plot when one is beside the
-file); `--all` moves the placed instances too; `--sweeps N` caps the search (default 40).
+file); `--all` moves the placed instances too; `--sweeps N` caps the search (default 150; this
+file stops on its own after 13).
 
 **The idea.** The router's own cost model, relaxed to a field: for every net, the belt distance
-from its drivers to its consumers over the ground the instances leave free (tunnels count as the
+from its drivers' belt tiles to its consumers' (two tiles out from a machine, the inserter's tile
+between free; a row's belt end) over the ground the instances leave free (tunnels count as the
 router counts them), weighted by the net's belts from the rate model; a price on every tile that
 more than one of those relaxed routes crosses. A sweep offers each instance its neighbours'
 positions (one and two tiles along each axis, the four rotations; overlaps and the frame's edge
 are hard) and takes the move that lowers the total most; after a sweep the price rises where
 routes crowd (`hot tiles`) and decays elsewhere, so crowded corridors become dear and what sits on
-them moves apart. `estimated belts 52 -> 13` is that relaxed distance before and after, in tiles:
+them moves apart. `estimated belts 62 -> 4` is that relaxed distance before and after, in tiles:
 a number to compare layouts by, not the route (the router lays it; a chest beside its machine is
 an inserter and no belt). It is a check, never a gate: an instance that fits nowhere is a
 `no-fit` line, a consumer no driver can reach is named, and nothing is written without `--write`.
-The kernel runs it in a second (`took 1.5 s (fkroute)`); without the native kernel the same loop
-runs in Python, about 50 s for this file.
+The kernel runs it in a second (`took 1.0 s (fkroute)`); without the native kernel the same loop
+runs in Python, about a minute for this file. A sealed module is laid out inside its own frame
+with its ports fixed: `fk layout grove.fk Grove`; a Stack inside it moves as one body.
 
 ## 10. power-shed.fk and steam.fk: power
 

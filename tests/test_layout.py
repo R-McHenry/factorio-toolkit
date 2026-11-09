@@ -24,7 +24,8 @@ DOCS = os.path.join(ROOT, "agent", "docs")
 
 
 def square(w, h, groups=1):
-    """A w x h instance with ``groups`` ring attach groups (an inserter anywhere round it)."""
+    """A w x h instance with ``groups`` ring attach groups (a belt two tiles out, anywhere round
+    it, its inserter's tile between)."""
     shapes = []
     for rot in range(4):
         ww, hh = (w, h) if rot % 2 == 0 else (h, w)
@@ -74,10 +75,10 @@ class PlaceTest(unittest.TestCase):
         res = _place_py(spec)
         no_overlap(self, spec, res)
         self.assertEqual(res.unreached, [])
-        self.assertLessEqual(res.after[0], layout.MILLI, "the two machines should share an inserter tile")
+        self.assertLessEqual(res.after[0], layout.MILLI, "the two machines should share a belt tile")
         fa, fb = footprint(spec, res, 0), footprint(spec, res, 1)
         gap = min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for p in fa for q in fb)
-        self.assertLessEqual(gap, 2)
+        self.assertLessEqual(gap, 4, "inserter, belt, inserter between them at most")
 
     def test_crowded_fan_out_spreads(self):
         """One driver, five consumers in a row east of it: every relaxed route runs the same row.
@@ -100,10 +101,10 @@ class PlaceTest(unittest.TestCase):
 
     def test_ports_stay_and_are_never_covered(self):
         port = SpecInst("m/in", [([], [[(0, 5)]])] * 4, (0, 0, 0), False)
-        port2 = SpecInst("m/out", [([], [[(11, 5)]])] * 4, (0, 0, 0), False)
+        port2 = SpecInst("m/out", [([], [[(15, 5)]])] * 4, (0, 0, 0), False)
         a = SpecInst("a", square(3, 3), None, True)
         b = SpecInst("b", square(3, 3), None, True)
-        spec = Spec((0, 0, 12, 12), [], [port, port2, a, b],
+        spec = Spec((0, 0, 16, 12), [], [port, port2, a, b],
                     [SpecNet("fe", 1, [(0, 0, True), (2, 0, False)]),
                      SpecNet("x", 1, [(2, 0, True), (3, 0, False)]),
                      SpecNet("out", 1, [(3, 0, True), (1, 0, False)])], Params(sweeps=8))
@@ -113,7 +114,7 @@ class PlaceTest(unittest.TestCase):
         self.assertEqual(res.at[1], (0, 0, 0))
         for i in (2, 3):
             self.assertNotIn((0, 5), footprint(spec, res, i))
-            self.assertNotIn((11, 5), footprint(spec, res, i))
+            self.assertNotIn((15, 5), footprint(spec, res, i))
         self.assertEqual(res.unreached, [])
 
     def test_no_fit_is_none_not_an_error(self):

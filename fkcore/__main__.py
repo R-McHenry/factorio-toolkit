@@ -1995,7 +1995,7 @@ def main(argv=None):
                     help="a sealed module's name: lay out its instances inside its frame")
     ly.add_argument("--all", action="store_true", help="move the placed instances too")
     ly.add_argument("--write", action="store_true", help="write the hints into the file")
-    ly.add_argument("--sweeps", type=int, default=None, help="the cap on sweeps (default 40)")
+    ly.add_argument("--sweeps", type=int, default=None, help="the cap on sweeps (default 150)")
     ly.add_argument("--plot", default=None, metavar="WxH",
                     help="the top level's frame (default: the surface file's plot, else room)")
     ct = sub.add_parser("contract", description="every sealed module's contract: each port's "

@@ -4,7 +4,7 @@
 # this file; then `fk build --to report_checks` routes it like any other.
 # Run:  fk layout layout.fk --plot 34x44       fk layout layout.fk --plot 34x44 --write
 # Expect: `layout layout: 11 instances, 11 placed now, 0 kept, 0 fixed; 8 nets; frame 34x44 (--plot)`,
-# one source line per instance with its new `@(x, y)`, then `estimated belts 52 -> 13 over 8 nets`.
+# one source line per instance with its new `@(x, y)`, then `estimated belts 62 -> 4 over 8 nets`.
 fein  = Chest<requester, item=iron-plate, rate=2/s>
 cuin  = Chest<requester, item=copper-plate, rate=1/s>
 gear  = Assembler<recipe=iron-gear-wheel>

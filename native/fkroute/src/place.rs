@@ -4,7 +4,7 @@
 //! predecessors; `place` is `fkcore.layout._place_py`: the same integer arithmetic (milli-tiles),
 //! the same instance order and tie-breaks, so both return the same positions.
 use pyo3::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -121,7 +121,7 @@ struct State<'a> {
     owner: Vec<i64>,
     price: Vec<i64>,
     at: Vec<Option<At>>,
-    pinned: FxHashSet<T>,
+    pinned: FxHashMap<T, usize>, // tile -> the instance whose one-tile attach it is
 }
 
 impl<'a> State<'a> {
@@ -140,7 +140,7 @@ impl<'a> State<'a> {
             owner: vec![-1; n],
             price: vec![0; n],
             at: vec![None; insts.len()],
-            pinned: FxHashSet::default(),
+            pinned: FxHashMap::default(),
         };
         for &t in blocked {
             if let Some(k) = st.idx(t) {
@@ -172,20 +172,71 @@ impl<'a> State<'a> {
             .collect()
     }
 
+    /// layout._State.inward: the tile one step nearer instance `i`'s footprint box than ring
+    /// tile `t` (the belt's tile): where its inserter stands. None when `t` is not beside the box.
+    fn inward(&self, i: usize, at: At, t: T, step: i64) -> Option<T> {
+        let tiles = &self.insts[i].1[at.2 as usize].0;
+        if tiles.is_empty() {
+            return None;
+        }
+        let x0 = at.0 + tiles.iter().map(|p| p.0).min().unwrap();
+        let x1 = at.0 + tiles.iter().map(|p| p.0).max().unwrap() + 1;
+        let y0 = at.1 + tiles.iter().map(|p| p.1).min().unwrap();
+        let y1 = at.1 + tiles.iter().map(|p| p.1).max().unwrap() + 1;
+        let (tx, ty) = t;
+        if tx < x0 {
+            Some((tx + step, ty))
+        } else if tx >= x1 {
+            Some((tx - step, ty))
+        } else if ty < y0 {
+            Some((tx, ty + step))
+        } else if ty >= y1 {
+            Some((tx, ty - step))
+        } else {
+            None
+        }
+    }
+
+    /// layout._State.usable: free, and (a ring) its inward neighbour free too; `moving` counts
+    /// the instance's own tiles as free.
+    fn usable(&self, i: usize, at: At, glen: usize, t: T, moving: bool) -> bool {
+        let ok = |v: i64| v == -1 || (moving && v == i as i64);
+        match self.idx(t) {
+            Some(k) if ok(self.owner[k]) => {}
+            _ => return false,
+        }
+        let o = if glen == 1 {
+            // a belt end on another's belt end or a port's tile: a zero-length belt; and the
+            // tile beyond it, where its belt arrives or goes on, free and inside the box
+            if !self.pinned.get(&t).map_or(true, |&o| o == i) {
+                return false;
+            }
+            self.inward(i, at, t, -1)
+        } else {
+            self.inward(i, at, t, 1)
+        };
+        if let Some(o) = o {
+            match self.idx(o) {
+                Some(ko) if ok(self.owner[ko]) => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+
     fn fits(&self, i: usize, at: At) -> bool {
         let tiles = self.tiles(i, at);
         for &t in &tiles {
             match self.idx(t) {
-                Some(k) if (self.owner[k] == -1 || self.owner[k] == i as i64) && !self.pinned.contains(&t) => {}
+                Some(k)
+                    if (self.owner[k] == -1 || self.owner[k] == i as i64)
+                        && self.pinned.get(&t).map_or(true, |&o| o == i) => {}
                 _ => return false,
             }
         }
         let own: FxHashSet<T> = tiles.iter().copied().collect();
         for g in self.groups(i, at) {
-            if !g.iter().any(|&t| match self.idx(t) {
-                Some(k) => self.owner[k] == -1 && !own.contains(&t),
-                None => false,
-            }) {
+            if !g.iter().any(|&t| !own.contains(&t) && self.usable(i, at, g.len(), t, true)) {
                 return false;
             }
         }
@@ -200,7 +251,7 @@ impl<'a> State<'a> {
                 }
             }
             for g in self.groups(i, old) {
-                if g.len() == 1 {
+                if g.len() == 1 && self.pinned.get(&g[0]) == Some(&i) {
                     self.pinned.remove(&g[0]);
                 }
             }
@@ -214,7 +265,7 @@ impl<'a> State<'a> {
             }
             for g in self.groups(i, at) {
                 if g.len() == 1 {
-                    self.pinned.insert(g[0]);
+                    self.pinned.insert(g[0], i);
                 }
             }
         }
@@ -225,11 +276,8 @@ impl<'a> State<'a> {
             Some(a) => a,
             None => return Vec::new(),
         };
-        let mut out: Vec<T> = self.groups(i, at)[g]
-            .iter()
-            .copied()
-            .filter(|&t| matches!(self.idx(t), Some(k) if self.owner[k] == -1))
-            .collect();
+        let group = &self.groups(i, at)[g];
+        let mut out: Vec<T> = group.iter().copied().filter(|&t| self.usable(i, at, group.len(), t, false)).collect();
         out.sort();
         out
     }

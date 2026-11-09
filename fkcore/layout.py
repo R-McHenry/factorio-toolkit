@@ -78,7 +78,7 @@ class SpecNet:
 
 @dataclass
 class Params:
-    sweeps: int = 40
+    sweeps: int = 150       # the cap; a module stops on its own when no move helps
     alpha: int = 500        # milli-tiles of price added per belt of overuse, per sweep
     decay: int = 800        # per mille of a tile's price kept where no route crowds it
     reach: int = 5          # an underground's reach, as the router's walk takes it
@@ -121,7 +121,8 @@ class _State:
             i = self.idx(t)
             if i is not None:
                 self.owner[i] = -2
-        self.pinned = set()        # tiles of one-tile groups of placed instances: no footprint there
+        self.pinned = {}           # tile -> instance whose one-tile attach (a belt end, a port) it is:
+                                   # no footprint there, and no other one-tile attach on it
 
     def idx(self, t):
         x, y = t[0] - self.x0, t[1] - self.y0
@@ -137,17 +138,61 @@ class _State:
         x, y, rot = at
         return [[(x + dx, y + dy) for dx, dy in g] for g in self.spec.insts[i].shapes[rot][1]]
 
+    def inward(self, i, at, t, step=1):
+        """The tile ``step`` nearer instance ``i``'s footprint box than ring tile ``t`` (the
+        belt's tile): where its inserter stands. ``step`` -1: the tile beyond ``t``, away from the
+        box, where a belt end's belt comes from or goes on to. None when ``t`` is not beside the
+        box."""
+        tiles = self.spec.insts[i].shapes[at[2]][0]
+        if not tiles:
+            return None
+        x0, x1 = at[0] + min(dx for dx, _dy in tiles), at[0] + max(dx for dx, _dy in tiles) + 1
+        y0, y1 = at[1] + min(dy for _dx, dy in tiles), at[1] + max(dy for _dx, dy in tiles) + 1
+        tx, ty = t
+        if tx < x0:
+            return (tx + step, ty)
+        if tx >= x1:
+            return (tx - step, ty)
+        if ty < y0:
+            return (tx, ty + step)
+        if ty >= y1:
+            return (tx, ty - step)
+        return None
+
+    def usable(self, i, at, g, t, moving=False):
+        """Ring tile ``t`` of group ``g`` (its tiles) of instance ``i`` at ``at`` can take an
+        attach: free, and (a ring, not a one-tile belt end) its inward neighbour free too, so an
+        inserter can stand between the belt and the machine. ``moving``: the instance's own tiles
+        count as free (it is leaving them)."""
+        ok = (-1, i) if moving else (-1,)
+        k = self.idx(t)
+        if k is None or self.owner[k] not in ok:
+            return False
+        if len(g) == 1:
+            # a belt end on another instance's belt end or a port's tile is a zero-length belt the
+            # router cannot lay (a pair needs a trunk): leave a tile between; and the tile beyond
+            # it, where its belt arrives or goes on, is free and inside the box
+            if self.pinned.get(t, i) != i:
+                return False
+            o = self.inward(i, at, t, -1)
+        else:
+            o = self.inward(i, at, t)
+        if o is not None:
+            ko = self.idx(o)
+            if ko is None or self.owner[ko] not in ok:
+                return False
+        return True
+
     def fits(self, i, at):
         """Inside the box, over free tiles only (its own footprint counts as free), covering no
-        other instance's one-tile attach, and every attach group with a free tile."""
+        other instance's one-tile attach, and every attach group with a usable tile."""
         for t in self.tiles(i, at):
             k = self.idx(t)
-            if k is None or self.owner[k] not in (-1, i) or t in self.pinned:
+            if k is None or self.owner[k] not in (-1, i) or self.pinned.get(t, i) != i:
                 return False
         own = set(self.tiles(i, at))
         for g in self.groups(i, at):
-            if not any(self.idx(t) is not None and self.owner[self.idx(t)] == -1
-                       and t not in own for t in g):
+            if not any(t not in own and self.usable(i, at, g, t, True) for t in g):
                 return False
         return True
 
@@ -160,8 +205,8 @@ class _State:
                 if k is not None:
                     self.owner[k] = -1
             for g in self.groups(i, self.at[i]):
-                if len(g) == 1:
-                    self.pinned.discard(g[0])
+                if len(g) == 1 and self.pinned.get(g[0]) == i:
+                    del self.pinned[g[0]]
         self.at[i] = at
         if at is not None:
             for t in self.tiles(i, at):
@@ -170,17 +215,15 @@ class _State:
                     self.owner[k] = i
             for g in self.groups(i, at):
                 if len(g) == 1:
-                    self.pinned.add(g[0])
+                    self.pinned[g[0]] = i
 
     def free_tiles(self, i, g):
         """The free tiles of group ``g`` of instance ``i`` as placed, sorted."""
         if self.at[i] is None:
             return []
-        out = []
-        for t in self.groups(i, self.at[i])[g]:
-            k = self.idx(t)
-            if k is not None and self.owner[k] == -1:
-                out.append(t)
+        at = self.at[i]
+        group = self.groups(i, at)[g]
+        out = [t for t in group if self.usable(i, at, group, t)]
         out.sort()
         return out
 
@@ -469,9 +512,12 @@ def which():
 
 # -- the spec from a design ----------------------------------------------------------------------
 def _ring(w, h):
-    """The tiles round a w x h frame at (0, 0), where an inserter could stand."""
-    return [(x, -1) for x in range(w)] + [(x, h) for x in range(w)] \
-        + [(-1, y) for y in range(h)] + [(w, y) for y in range(h)]
+    """The tiles two steps out from a w x h frame at (0, 0), where a belt stands behind the
+    inserter that feeds or empties the machine (the inserter's tile, one step in, must be free
+    too: ``_State.usable``). The relaxed route runs belt tile to belt tile over the same free
+    ground the router's hub needs."""
+    return [(x, -2) for x in range(w)] + [(x, h + 1) for x in range(w)] \
+        + [(-2, y) for y in range(h)] + [(w + 1, y) for y in range(h)]
 
 
 def _shapes(frag):
@@ -496,6 +542,69 @@ def _shapes(frag):
         shapes.append((tiles, groups))
         meta = m
     return shapes, meta
+
+
+def _child_attaches(flat, path, cat, scope):
+    """[(x, y, d, side, net)]: the directed attach points of module instance ``path``'s placed
+    descendants in its own unturned frame (a Stack's cells' belt ends, each at its hint inside the
+    stack), on the nets of ``scope`` only (a cell-to-cell net stays inside the body). A turned
+    module inside is left out (its frame turns with it; rare in a stack)."""
+    from .expand import fragment_of
+    from .fragments import FragmentError
+    out = []
+    for child in flat.scopes.get(path, {}).values():
+        hint = child.hints.get("at")
+        if hint is None:
+            continue
+        cx, cy, crot = int(hint[0]), int(hint[1]), int(hint[2]) % 4
+        if child.module is not None and child.size is None:
+            if crot:
+                continue
+            out.extend((x + cx, y + cy, d, side, net)
+                       for x, y, d, side, net in _child_attaches(flat, child.path, cat, scope))
+            continue
+        try:
+            frag, binding = fragment_of(flat, child.path, cat)
+        except FragmentError:
+            continue
+        for name in sorted(frag.roles):
+            role = frag.roles[name]
+            net = binding.get(name)
+            if net is None or not any(getattr(flat.nets.get(p), "scope", None) == scope
+                                      for p in net.split("|")):
+                continue
+            for ax, ay, ad in role.attach:
+                if ad is None:
+                    continue
+                x, y, d = turn(float(ax), float(ay), ad, crot, frag.size)
+                out.append((x + cx, y + cy, d, role.side, net))
+    return out
+
+
+def _rigid_shapes(flat, path, cat, scope):
+    """``shapes`` and meta of a module instance without a declared size (a Stack): its frame as
+    one footprint, its children's belt ends as one-tile groups. None when its frame is unknown or
+    does not start at its origin."""
+    from .expand import _own_frame
+    frame = _own_frame(flat, path, cat, {})
+    if frame is None or frame[0] != 0 or frame[1] != 0 or frame[2] <= 0 or frame[3] <= 0:
+        return None, None
+    size = (int(frame[2]), int(frame[3]))
+    attaches = _child_attaches(flat, path, cat, scope)
+    shapes, meta = [], []
+    for rot in range(4):
+        w, h = size if rot % 2 == 0 else size[::-1]
+        tiles = [(x, y) for y in range(h) for x in range(w)]
+        groups, m = [], []
+        for ax, ay, ad, side, net in attaches:
+            x, y, d = turn(float(ax), float(ay), ad, rot, size)
+            k = _H[int(d) % 16]
+            sign = 1 if side == "out" else -1
+            groups.append([(math.floor(x) + sign * _DX[k], math.floor(y) + sign * _DY[k])])
+            m.append((net, 0, side))
+        shapes.append((tiles, groups))
+        meta = m
+    return shapes, (meta, size)
 
 
 def _weights(flat, cat):
@@ -542,6 +651,7 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
         box, box_from = (0, 0, int(w), int(h)), f"the frame of {module}"
     children = flat.scopes.get(scope, {})
     terms = {}                                   # net -> [(inst index, group, driver)]
+    lane_of = getattr(flat, "lane_of", {}) or {}
     area = 0
     for name, inst in children.items():
         path = inst.path
@@ -559,14 +669,22 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
             paths.append(path)
             continue
         if inst.module is not None and inst.size is None:
-            notes.append(f"skip {path}: a module without a size has no frame to move")
-            continue
-        try:
-            frag, binding = fragment_of(flat, path, cat)
-        except FragmentError as exc:
-            notes.append(f"skip {path}: {exc}")
-            continue
-        shapes, meta = _shapes(frag)
+            # a Stack, or a module whose frame is its children's: one rigid body, its children's
+            # belt ends its attach points
+            shapes, got = _rigid_shapes(flat, path, cat, scope)
+            if shapes is None:
+                notes.append(f"skip {path}: a module without a size whose frame is not known")
+                continue
+            meta, size = got
+            binding = {net: net for net, _g, _side in meta}
+        else:
+            try:
+                frag, binding = fragment_of(flat, path, cat)
+            except FragmentError as exc:
+                notes.append(f"skip {path}: {exc}")
+                continue
+            shapes, meta = _shapes(frag)
+            size = frag.size
         at = inst.hints.get("at")
         at = None if at is None else tuple(int(v) for v in at)
         movable = at is None or all_
@@ -575,13 +693,18 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
         idx = len(insts)
         insts.append(SpecInst(path, shapes, at, movable))
         paths.append(path)
-        area += frag.size[0] * frag.size[1]
+        area += size[0] * size[1]
         for g, (role, _ai, side) in enumerate(meta):
             net = binding.get(role)
             if net is None:
                 continue
             for part in net.split("|"):
-                terms.setdefault(part, []).append((idx, g, side == "out"))
+                fn = flat.nets.get(part)
+                if fn is not None and getattr(fn, "scope", scope) != scope:
+                    continue                     # a net inside the body, not the scope's
+                # a `lanes A | B` pair rides one belt: one net in the spec (its parts' ends
+                # together, so their shared tiles are no crowding)
+                terms.setdefault(lane_of.get(part, part), []).append((idx, g, side == "out"))
     if module:
         w, h = flat.insts[scope].size
         for key in ports_of(flat, scope):
@@ -595,10 +718,11 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
             insts.append(SpecInst(key, [([], [[(x, y)]])] * 4, (0, 0, 0), False))
             paths.append(None)
             for net in flat.nets.values():
+                name = lane_of.get(net.name, net.name)
                 if any(k == key for k, _i in net.drivers):
-                    terms.setdefault(net.name, []).append((idx, 0, True))
+                    terms.setdefault(name, []).append((idx, 0, True))
                 elif any(k == key for k, _i in net.consumers):
-                    terms.setdefault(net.name, []).append((idx, 0, False))
+                    terms.setdefault(name, []).append((idx, 0, False))
     if not module:
         if plot is not None:
             box, box_from = (0, 0, int(plot[0]), int(plot[1])), "--plot"
@@ -612,6 +736,8 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
             side = int(math.ceil(math.sqrt(3 * area))) + 2
             box, box_from = (0, 0, max(x1, side), max(y1, side)), "room for the instances"
     weights = _weights(flat, cat)
+    for pair in set(lane_of.values()):
+        weights[pair] = max(weights.get(p, 1) for p in pair.split("|"))
     nets = [SpecNet(n, weights.get(n, 1), ts) for n, ts in sorted(terms.items())
             if any(d for _i, _g, d in ts) and any(not d for _i, _g, d in ts)]
     spec = Spec(box, [], insts, nets, params or Params())
