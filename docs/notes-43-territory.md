@@ -210,6 +210,38 @@ command are described, not written:
    through `report_checks`. Copy the flower's `.fk` files beside it; `out/territories.json` is
    written beside the design.
 
+## The paper comparison, measured after step 1 (integrating session, 2026-11-09 06:27-06:43)
+
+The open flower laid out by `fk layout` from step 1's sha `23aaf45` (its kernel built from that
+tree; the layout 25 s, 51 sweeps; `scratchpad\paper_flower_tree.py`), then the docs template
+through `report_checks`, `terrain none`, plot 900x1024, beside the two wave-1 builds:
+
+| flower | nets | unrouted | carriers | on the flower-level nets |
+|---|---|---|---|---|
+| laid out, wave 1 (main `c2596ef`) | 6461 | 50 | 32759 | 4909 |
+| **laid out, step 1 (`23aaf45`)** | 6461 | **49** | 31034 | **3176** |
+| the corridor `flower.fk` | 6559 | 48 | 30899 | 2919 (1182 + 1737 inside the corridors) |
+
+The build took 946 s. The inter-module belt is within 9 % of the corridor layout (wave 1 was
+68 % over); one net more than the corridor flower stays unrouted. At the flower level the
+step-1 build fails five single nets: two of circuit's eight rim ore feeds (`circuit_cu_ore5_`,
+`circuit_fe_ore2_`: every unpinned edge port takes the edge tile nearest its partner, so
+circuit's feeds bunch 24 belts on one tile, the hot-tile line above), `fen_acid_out`,
+`fen_plastic_mesa` and `fen_lube_mall` (fen's cell touches circuit's corner-wise and mesa's not
+at all: three of the six nets "apart"); wave 1 failed two more rim feeds (`cu_ore1_`,
+`cu_ore3_`) and the corridor flower fails only its `fen_fecu_` pair. The 48 others are the
+rivers' own in every build. **The bar (every inter-module net routed with no more carriers
+than the corridor layout) is close and not met:** the rim feeds are what T4's pins replace on
+real ground (the rim ports stand for mines that are not in the design), and fen's three nets
+want the walk to reach round the core's cell.
+
+Merged on main as `1c747e2` with the hull branch (`2ef0ba1`) before it. Together the two broke
+the territory.fk example (`2 unrouted`): the hull's resolver read a declared module's cell as
+its frame, and since step 1 the cell is the frame plus room, so the two cells held the belt's
+ground. Fixed on main after the merge: a declared module's frame is its declaration (the cell
+is the ground its belts may cross), a module without a declaration would take its cell
+(`hull.Resolver.claim`).
+
 ## Open
 
 - The time bar: 34.6 s alone against well under 14 s (above).

@@ -249,8 +249,14 @@ class TerritoryFrameTest(unittest.TestCase):
         self.assertEqual(code, 0, "\n".join(lines))
         flat = elaborate_file(src, CAT)
         for p in ("a", "b"):
-            self.assertEqual(hull.source(flat, p), "territory", p)
-            self.assertEqual(hull.assigned(flat, p), Frame.from_box(8, 8))    # wave 1: the cell is the frame
+            # 43-territory: the cell is the declared frame plus room (the ground the module's
+            # belts may cross), so a declared module's frame stays its declaration and the cell
+            # holds it; a module without a declaration would take its cell as its frame
+            self.assertEqual(hull.source(flat, p), "declared", p)
+            cell = hull.assigned(flat, p)
+            self.assertIsNotNone(cell, p)
+            self.assertTrue(Frame.from_box(8, 8).tiles() <= cell.tiles(), p)
+            self.assertGreaterEqual(cell.area, 64, p)
         game(d, "territory", "40x40")
         code, route, summary, _c = build(d, "territory")
         self.assertEqual(code, 0, summary)
@@ -258,7 +264,7 @@ class TerritoryFrameTest(unittest.TestCase):
         got = frames(d)
         self.assertEqual(sorted(got), ["a", "b"])
         for p in ("a", "b"):
-            self.assertEqual(got[p]["frame"]["source"], "territory", p)
+            self.assertEqual(got[p]["frame"]["source"], "declared", p)
             self.assertEqual(got[p]["frame"]["area"], 64)
             self.assertLessEqual(got[p]["area"], 64)
             self.assertTrue(Frame.from_runs(tuple(r) for r in got[p]["runs"]).tiles()

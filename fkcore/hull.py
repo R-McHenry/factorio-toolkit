@@ -17,7 +17,9 @@ beside the design, one entry per module instance path, in the module's own untur
         "build": {"factory": "shape", "key": "<unit key>", "when": "2026-11-09T..."}}}}
 
 The readers (``expand.own_frame``, ``frame_shape_of``, ``planned_shape``) resolve a module
-instance's frame **hull, then territory, then declaration**, through a ``Resolver`` bound to the
+instance's frame **hull, then its claim** (the declaration when the module has one, else the
+territory: since 43-territory a cell is the claim plus room, the ground the module's belts may
+cross, so a declared module's frame stays its declaration), through a ``Resolver`` bound to the
 design's ``Flat`` (``bind``: every module ``Inst`` and ``PortInst`` gets a ``_hull`` attribute;
 ``own_frame(inst)`` needs no other handle). Three rules keep it honest:
 
@@ -221,14 +223,26 @@ class Resolver:
         self._cell[path] = got
         return got
 
+    def claim(self, path):
+        """The frame module instance ``path`` claims before any hull: its declaration when it has
+        one, else its assigned territory. Since 43-territory a territory's cell is the claim plus
+        room (``TParams.room``), the ground the module's belts may cross, and two neighbours'
+        cells touch: a declared module's frame is still its declaration (with the hull plus
+        territory merged as one, the territory.fk pair read each cell as a frame and the belt
+        between the two had no ground: `2 unrouted`)."""
+        inst = self.flat.insts.get(path)
+        if inst is not None and declared(inst) is not None:
+            return declared(inst)
+        return self.assigned(path)
+
     def source(self, path, hull=True):
         """Which source ``path``'s frame comes from: "hull", "territory", "declared" or None."""
         if hull and path != self.laying and self.achieved(path) is not None:
             return "hull"
-        if self.assigned(path) is not None:
-            return "territory"
         inst = self.flat.insts.get(path)
-        return "declared" if inst is not None and declared(inst) is not None else None
+        if inst is not None and declared(inst) is not None:
+            return "declared"
+        return "territory" if self.assigned(path) is not None else None
 
     def frame_for(self, path, hull=True):
         """The resolved frame of module instance ``path`` in its own coordinates (hull, territory,
@@ -237,11 +251,7 @@ class Resolver:
             f = self.achieved(path)
             if f is not None:
                 return f
-        f = self.assigned(path)
-        if f is not None:
-            return f
-        inst = self.flat.insts.get(path)
-        return None if inst is None else declared(inst)
+        return self.claim(path)
 
     def frame_of(self, obj):
         """``expand.own_frame``'s question for a bound object: a module Inst (its path; the hull
@@ -256,6 +266,9 @@ class Resolver:
             f = self.achieved(path)
             if f is not None:
                 return f
+        inst = self.flat.insts.get(path)
+        if inst is not None and declared(inst) is not None:
+            return None                      # the declaration: the caller's own answer
         return self.assigned(path)
 
 
