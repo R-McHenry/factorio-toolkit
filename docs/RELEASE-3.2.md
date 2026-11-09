@@ -144,6 +144,23 @@ lab's stand-in ground; `docs\notes-46-pairbox.md`):
 
 No ROUTER bump.
 
+## 3.2.2: a paste on a free surface lands clean (2026-11-09, early afternoon; 47-cleanpaste)
+
+Rory, watching the T6 flower on the lab: "make sure you can clear out an area consistently and
+have the base paste in cleanly" (`docs\notes-47-cleanpaste.md`):
+
+- **An apply on a free surface keeps the record of the toolkit's own entities** and destroys the
+  ones the design dropped where they stand (a re-routed net's old belts stood on beside the new
+  ones, `kept in the plot until its owner decides`: the free path never set `rep.own`, so
+  `out\own\<surface>.json` stayed the seed).
+- **`Chest<infinity, item=, rate=>`**: the god-mode source a design declares itself where things
+  are free, pasted and diffed like any chest (the flower's stand-in mines were requesters swapped
+  by Lua after every apply, and every apply put a requester ghost back).
+- **`fk clear GAME AREA [--surface S]`**: an area of a free surface emptied (everything but
+  characters and resources), what `fk alone` does to its slot, for a surface-level design.
+
+No ROUTER bump.
+
 ## Not in this release
 
 - The flower on the lab ground beside the corridor flower (T6's paste), `fk look` drawing the

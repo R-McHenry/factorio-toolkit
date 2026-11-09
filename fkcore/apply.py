@@ -504,6 +504,19 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
             else:
                 rep.written.append((d.key, "set back from a hand edit"))
         rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
+    elif free:
+        # 47-cleanpaste: where things are free the toolkit's own entities that the design dropped
+        # are destroyed where they stand (no robots to order), and the record is kept up to
+        # date. Before this the free path never set ``rep.own``: a lab surface's record stayed
+        # the seed, and a re-routed column's old belts stood on, "kept in the plot until its
+        # owner decides" (the T6 flower, 2026-11-09)
+        gone = [row for row in ownmod.dropped(own, s)
+                if ownmod.in_scope(row, cat, None if given is None else area, keys)]
+        if gone:
+            rep.dropped = _destroy(r, s.name, [(row.name, row.x, row.y) for row in gone])
+            rep.notes.append(f"free: {rep.dropped} of the toolkit's own that the design dropped "
+                             f"destroyed where they stood ({len(gone)} in the record)")
+        rep.own = ownmod.update(own, s, cat, None if given is None else area, keys)
     if not rows:
         rep.notes.append("nothing designed in this scope" if not rep.refused else
                          "nothing pasted: every designed tile in this scope is a mismatch")
@@ -787,6 +800,14 @@ def _decon(r, surface, force, things):
     n = 0
     for i in range(0, len(things), DECON_BATCH):
         n += _int(r.lua(link.lua_decon_list(surface, force, things[i:i + DECON_BATCH])))
+    return n
+
+
+def _destroy(r, surface, things):
+    """Where things are free: destroy ``things`` [(name, x, y)] in batches; -> how many."""
+    n = 0
+    for i in range(0, len(things), DECON_BATCH):
+        n += _int(r.lua(link.lua_destroy_list(surface, things[i:i + DECON_BATCH])))
     return n
 
 

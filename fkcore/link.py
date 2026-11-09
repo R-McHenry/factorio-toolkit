@@ -558,6 +558,25 @@ rcon.print(n .. ' ' .. failed)
 """
 
 
+def lua_destroy_list(surface, things):
+    """Where things are free (47-cleanpaste): destroy ``things`` [(name, x, y)] where they stand,
+    a ghost of the name on that position too; -> how many. The free path's answer to
+    ``lua_decon_list``: nothing orders robots there."""
+    rows = ",".join(f"{{{_q(n)},{float(x)},{float(y)}}}" for n, x, y in things)
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for _, t in pairs({{{rows}}}) do
+  for _, e in pairs(s.find_entities_filtered{{position = {{t[2], t[3]}}}}) do
+    if e.valid and (e.name == t[1] or (e.name == 'entity-ghost' and e.ghost_name == t[1])) then
+      e.destroy() n = n + 1
+    end
+  end
+end
+rcon.print(n)
+"""
+
+
 def lua_decon(surface, force, area):
     return f"""
 local s = game.get_surface({_q(surface)})

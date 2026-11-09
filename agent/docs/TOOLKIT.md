@@ -286,7 +286,11 @@ A blueprint goes on the lab as a Literal in a file of its own, then `fk lab try`
 builds a module alone on any surface (`--surface nauvis`: robots build it, nothing is destroyed).
 Power, stock and infinity feeds are god-mode stand-ins you ask for by name, only where things are
 free: `fk standin NAME supply | feed | ore` (`ore --copy-ore AREA --to X,Y`, `ore --ore iron-ore
---area A [--amount N]`, `--clear-ore`). `fk lab NAME --from stages\4` builds from a stage's folder.
+--area A [--amount N]`, `--clear-ore`). `fk lab NAME --from stages\4` builds from a stage's folder. `fk clear GAME AREA [--surface S]`
+empties an area of a free surface (everything but characters and resources), so a surface-level
+design pastes on clean ground; an apply on a free surface destroys the toolkit's own entities the
+design has dropped (a re-routed net's old belts) where they stand. `Chest<infinity, item=, rate=>`
+is the stand-in source a design declares itself (LANGUAGE.md), pasted and diffed like any chest.
 
 ## Bounds and obstacles
 

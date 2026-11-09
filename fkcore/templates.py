@@ -561,7 +561,8 @@ def lab(params, cat):
 
 
 _CHEST = {"provider": "passive-provider-chest", "storage": "storage-chest",
-          "requester": "requester-chest", "buffer": "buffer-chest", "plain": "iron-chest"}
+          "requester": "requester-chest", "buffer": "buffer-chest", "plain": "iron-chest",
+          "infinity": "infinity-chest"}
 
 
 def chest(params, cat):
@@ -606,7 +607,10 @@ def chest(params, cat):
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
     limit = _int(params, "limit") if params.get("limit") is not None else None
-    if role == "requester":
+    if role in ("requester", "infinity"):
+        # infinity (47-cleanpaste, 3.2.2): a god-mode source where things are free (the lab): the
+        # stand-in mine or feed the design itself declares, so a paste lays it and a diff knows
+        # it (the T6 flower's stands were requesters swapped by Lua after every apply)
         items = [i.strip() for i in str(params.get("item", "")).split(",") if i.strip()]
         if not items:
             items = [_word(params, "item")]
