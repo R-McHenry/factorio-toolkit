@@ -1128,12 +1128,16 @@ def s_route(ctx, args):
         comp = {n for c in r.compiled.values() if c["from"] == "store"
                 for n in c.get("laid", c["nets"])}
         lines += _compiled_lines(factory, r)
+        _write_units(ctx, factory, r)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
         again.update(r.again)
         ctx.layouts[factory] = r.layout
-        lines.append(f"{factory}: {len(r.routed)} routed, {len(r.kept)} kept"
+        through = set(r.passthrough)
+        lines.append(f"{factory}: {len(set(r.routed) - through)} routed, {len(r.kept)} kept"
                      + (f", {len(r.patched)} patched" if r.patched else "")
+                     # 3.1.5: pass-through nets apart (an agent read "584 routed" on a no-op)
+                     + (f", {len(through)} pass-through" if through else "")
                      + f" ({len(pinned)} pinned from the committed .fkp"
                      + (f", {len(comp)} laid from the compiled store" if comp else "")
                      + f"), {len(r.failed)} failed, "
@@ -1208,6 +1212,22 @@ def _route_compile(ctx, module, hand_word):
     return lines, []
 
 
+def _write_units(ctx, factory, r):
+    """3.1.5: ``out/design/<factory>/units.json``, each sealed unit as the route step keyed it
+    (module, key, the key's parts as shas, what it was laid from): the record a build-to-build
+    diff of the keys reads (``tools/unit_keys.py``)."""
+    try:
+        folder = design.folder(ctx.out, factory)
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "units.json"), "w", encoding="utf-8", newline="\n") as fh:
+            json.dump({u: {"module": c["module"], "key": c["key"], "from": c["from"],
+                           "nets": c["nets"], "laid": c.get("laid", []),
+                           "parts": c.get("parts") or {}, "differs": c.get("differs")}
+                       for u, c in sorted(r.compiled.items())}, fh, indent=1)
+    except OSError:
+        pass
+
+
 def _compiled_lines(factory, r):
     """The route step's lines on the compile store: what each sealed unit was laid from, the
     entries written, the entries refused (an entity the force can't build)."""
@@ -1222,6 +1242,12 @@ def _compiled_lines(factory, r):
         elif c["refused"]:
             lines.append(f"{factory}: compiled  {path}: its stored entry ({c['module']}) holds "
                          f"{', '.join(c['refused'])}, not researched here: routed again")
+        elif c.get("differs"):
+            # 3.1.5: a unit routed again says which part of its key changed since the module's
+            # last entry, so the player can tell a real change from one that should not count
+            cur, names = c["differs"]
+            lines.append(f"{factory}: compiled  {path}: not in the store; {c['module']}'s last "
+                         f"entry ({cur[:8]}) differs in {', '.join(names) or 'nothing named'}")
     stored = sorted(p for p, c in r.compiled.items() if c["stored"])
     if stored:
         lines.append(f"{factory}: compiled  stored {', '.join(stored)} (out/compiled): laid from "

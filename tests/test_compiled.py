@@ -101,6 +101,39 @@ class CompiledTest(unittest.TestCase):
         ys = sorted({float(e.y) for e in lay.entities.values() if e.owner == "~b/g"})
         self.assertTrue(ys and min(ys) >= 30, ys)
 
+    def test_a_store_miss_says_which_part_of_the_key_changed(self):
+        """3.1.5: a unit routed again says which part of its key differs from the module's last
+        entry (``route.part_shas``, kept in the entry's inputs), and ``out/design/<factory>/
+        units.json`` records every unit's key and parts."""
+        first, _ = self.build()
+        self.assertNotIn("differs in", first)
+        key = next(iter(self.entries()))
+        parts = self.entries()[key]["inputs"]["parts"]
+        self.assertIn("instances", parts)
+        self.assertIn("standing", parts)
+        self.assertIn("net g/goals", parts)
+        units = json.loads(self.read("out/design/t/units.json"))
+        self.assertEqual(units["a"]["key"], key)
+        self.assertEqual(units["a"]["parts"], parts)
+        self.assertEqual(units["b"]["from"], "twin a")
+        # a machine inside moves a tile and a's nets are asked again: a misses the store, and the
+        # line names the parts that changed, not the ones that did not
+        self.write("t.fk", WORLD.replace("gb = Assembler<recipe=iron-gear-wheel> @(9, 3)",
+                                         "gb = Assembler<recipe=iron-gear-wheel> @(10, 3)"))
+        second, _ = self.build(["route --only stale --again a/fe,a/g"])
+        line = next(ln for ln in second.splitlines() if "differs in" in ln)
+        self.assertIn(f"compiled  a: not in the store; Gears's last entry ({key[:8]}) differs in",
+                      line)
+        self.assertIn("instances", line)
+        self.assertIn("standing", line)          # the assembler stands elsewhere in the frame
+        self.assertIn("net g/sources", line)     # it drives g from there
+        self.assertNotIn("net fe/items", line)   # what did not change is not named
+        self.assertNotIn("children", line)
+        self.assertEqual(len(self.entries()), 2)
+        # the unchanged build after: nothing missed, nothing said
+        third, _ = self.build()
+        self.assertNotIn("differs in", third)
+
     def test_the_key_is_the_inside_not_the_place(self):
         path = os.path.join(self.dir, "t.fk")
         flat = elaborate_file(path, CAT)

@@ -274,6 +274,10 @@ class Routed:
     #: ("routed", "twin <unit>", "store", or None: not keyed), stored (1 when this run wrote it),
     #: refused (names the force can't build in the stored entry, which was not taken)}
     compiled: dict = field(default_factory=dict)
+    #: 3.1.5: the nets of ``routed`` that lay nothing (two ports that meet on one edge, a drill
+    #: dropping straight into its consumer): counted apart from the nets searched, so a build's
+    #: summary says what it searched (a stack base's 584 pass-through nets read as "584 routed")
+    passthrough: list = field(default_factory=list)
 
 
 class _Bounded(Grid):
@@ -2795,7 +2799,8 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
     rep = connectmod.connect(g, cat, table)
     faulty = {}
     for net in sorted(patch):
-        keys = {e.key for e in patch[net]}
+        by_key = {e.key: e for e in patch[net]}
+        keys = set(by_key)
         leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
         # a lane pair (``A|B``, merged with route patching 2026-10-22) is judged by its two nets:
         # the ends and the connect report are theirs, its own name has none
@@ -2808,7 +2813,12 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
             if not js[net].fluid:
                 served |= _serving(g, m, *_ends_of(flat, table, js[net], g, routed=False, net=m),
                                    keys)
-        idle = [] if js[net].fluid else sorted(keys - served, key=fkpmod.natural_key)
+        # 3.1.5: a lane pin's stub (``_is_stub``) serves no end by design, and ``_patch_net``
+        # keeps it; counting it idle judged every standing pair faulty, and every build patched
+        # them with "nothing new" (core: 16 pairs a build, circuit 10)
+        idle = [] if js[net].fluid else sorted((k for k in keys - served
+                                                if not _is_stub(by_key[k])),
+                                               key=fkpmod.natural_key)
         if leak is not None:
             faulty[net] = f"its committed route would SPILL: {leak.text}"
         elif apart:
@@ -2959,6 +2969,44 @@ class _UnitTurn:
 
 def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=(), seeds=None,
              settings=()):
+    """The compile key of sealed unit ``u``: ``unit_parts`` as one sha (20 hex), or None when a
+    net's name is not the unit's own."""
+    parts = unit_parts(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys, seeds,
+                       settings)
+    return None if parts is None else key_of_parts(parts)
+
+
+def key_of_parts(parts):
+    """The key of ``unit_parts``' list: the sha of its values in order."""
+    return hashlib.sha1(repr([v for _n, v in parts]).encode("utf-8")).hexdigest()[:20]
+
+
+def part_shas(parts):
+    """{part name: a short sha of its value} for ``unit_parts``' list: the store keeps them with
+    an entry, so the next build can say which part of a unit changed (``parts_differ``). A net's
+    part is split into what it holds (``net x/items``, ``net x/starts``, ...)."""
+    out = {}
+    for name, v in parts:
+        if name.startswith("net ") and isinstance(v, tuple) and len(v) == len(_NET_PART_NAMES):
+            for sub, w in zip(_NET_PART_NAMES, v):
+                out[f"{name}/{sub}"] = hashlib.sha1(repr(w).encode("utf-8")).hexdigest()[:12]
+        else:
+            out[name] = hashlib.sha1(repr(v).encode("utf-8")).hexdigest()[:12]
+    return out
+
+
+def parts_differ(mine, theirs):
+    """The part names whose shas differ between two ``part_shas`` (a name only one has counts)."""
+    return sorted(n for n in set(mine) | set(theirs) if mine.get(n) != theirs.get(n))
+
+
+#: what a net's part of ``unit_parts`` holds, in order (``part_shas`` names them)
+_NET_PART_NAMES = ("name", "items", "starts", "goals", "taps", "sources", "reserved", "lanes",
+                   "skip", "fluid", "straight", "wide", "pin", "m2m", "parts", "seed")
+
+
+def unit_parts(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=(), seeds=None,
+               settings=()):
     """The compile key of sealed unit ``u`` (3.1, the one key of the compile store,
     ``fkcore.compiled``): a sha over everything its own nets ``mine`` are laid to, relative to
     its frame -- ``compiled.ROUTER``, the frame's size, the instances placed in it (the module's
@@ -2967,7 +3015,9 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
     (``child_keys``: [(relative path, key)]), the catalog's version and the footprint of every entity name in
     the frame, the terrain in it, the router's ``settings`` (hand, ribbon tiers, pipe), and each
     net's ends, items, lanes and seed (``seeds``: {net: carriers}). Two units with one key are
-    laid the same. -> the key (20 hex), or None when a net's name is not the unit's own."""
+    laid the same. -> [(part name, value)], the key's parts in order (``key_of_parts`` hashes
+    them; ``part_shas`` names each for the reader), or None when a net's name is not the unit's
+    own."""
     x0, y0, x1, y1, _tiles = sealed[u]
     rec = lay.insts.get(u)
     rel = {n: _renamed(n, u, "") for n in mine}
@@ -2982,8 +3032,9 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
 
     # 2.1.32: a unit turned 180 degrees is keyed in its unturned frame (a `>` bay's chains are
     # its unturned twin's, turned): its routes are stored unturned (``_store_save``)
-    parts = [compiledmod.ROUTER, x1 - x0, y1 - y0, rec.kind, 0 if tf.half else rec.rot,
-             sorted(child_keys, key=repr), repr(settings)]
+    parts = [("router", compiledmod.ROUTER), ("width", x1 - x0), ("height", y1 - y0),
+             ("kind", rec.kind), ("rot", 0 if tf.half else rec.rot),
+             ("children", sorted(child_keys, key=repr)), ("settings", repr(settings))]
     kids = []
     for p, r in lay.insts.items():
         if not p.startswith(u + "/"):
@@ -3006,7 +3057,7 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
         else:
             kids.append((p[len(u) + 1:], r.kind, sorted(r.params.items()), r.x - x0, r.y - y0,
                          r.rot))
-    parts.append(sorted(kids))
+    parts.append(("instances", sorted(kids)))
     # 2.1.35: a rail or signal another module owns (a shared lane's ramp, the planned signals)
     # is left out of the key: it differs from twin to twin at the frame's edge, and ``_fits``
     # still rejects a moved route that would stand on it
@@ -3019,7 +3070,7 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
                       if x0 <= e.x < x1 and y0 <= e.y < y1
                       and not ("rail" in e.name and not e.key.startswith(u + "/"))
                       and not _own_carrier(e, own))
-    parts.append(standing)
+    parts.append(("standing", standing))
     # 3.1: the catalog facts the routes are laid against: its version and each name's footprint
     facts = [getattr(cat, "version", None)]
     for name in sorted({s[0] for s in standing}):
@@ -3027,14 +3078,14 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
             facts.append((name, cat.size(name)))
         except Exception:                 # noqa: BLE001 (a name the catalog has no row for)
             facts.append((name, None))
-    parts.append(facts)
+    parts.append(("catalog", facts))
     if terrain:
-        parts.append(sorted(tile((x, y)) for x in range(x0, x1) for y in range(y0, y1)
-                            if (x, y) in terrain))
+        parts.append(("terrain", sorted(tile((x, y)) for x in range(x0, x1)
+                                        for y in range(y0, y1) if (x, y) in terrain)))
     for n in sorted(mine, key=lambda m: rel[m]):
         j = js[n]
         items = sorted(i for m in fkpmod.net_names(n) if m in flat.nets for i in flat.nets[m].items)
-        parts.append((rel[n], items,
+        parts.append((f"net {rel[n]}", (rel[n], items,
                       sorted((tile(t), tf.h4(h)) for t, h in j.starts),
                       sorted((tile(t), tf.h4(h)) for t, h in j.goals),
                       sorted((key_of(k), rect(r)) for k, r in j.taps),
@@ -3050,8 +3101,8 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
                       sorted((key_of(e.key), e.name) + tf.point(e.x, e.y) + (tf.d16(e.dir)
                                                                               if e.dir is not None
                                                                               else -1,)
-                             for e in (seeds or {}).get(n, ()))))
-    return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:20]
+                             for e in (seeds or {}).get(n, ())))))
+    return parts
 
 
 def _twin_routes(lay, sealed, own_all, routes_of, src, dst):
@@ -3197,6 +3248,20 @@ def _unit_abs(nets, u, frame, rot=0):
             got.append(fkpmod.Entity(f"~{net}{tag}", name, ax, ay, tf.d16(d), attrs))
         out[net] = got
     return out
+
+
+def _store_differs(store, module, ckey, parts):
+    """How unit ``module``'s key ``ckey`` (its ``part_shas``) differs from the store's last
+    entry of the module (``current``): -> (that entry's key, [part names]), or None when the
+    module has no entry with parts, or the current one is this key."""
+    out = getattr(store, "out", None)
+    cur = compiledmod.current(out, module) if out else None
+    if not cur or cur == ckey:
+        return None
+    theirs = (store.inputs(module, cur) or {}).get("parts") if hasattr(store, "inputs") else None
+    if not theirs:
+        return None
+    return cur, parts_differ(parts or {}, theirs)
 
 
 def _store_save(store, ckey, module, u, frame, routes, rot=0, inputs=None):
@@ -3602,10 +3667,18 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     # keyed and stored by no unit, so a module of pipes never compiled and the pass took the
     # build's minutes); the fluid nets outside every sealed module still go to the pass after
     fluid_units = {}
+    fluid_abut = _fluid_plugin()
     for n in sorted(js, key=fkpmod.natural_key):
         if js[n].fluid and n not in have and n not in kept and js[n].skip is None:
             if _named(n, skip):
                 manual.append(n)              # the build script leaves it (route --skip)
+                continue
+            # 3.1.5: two fluid ports that meet on one edge (a Stack's cells) lay nothing, as two
+            # belt ports do (``_abuts``): a pass-through, not a net of its unit to lay. Until now
+            # each such net put its unit through the store and the fluid judge every build
+            # (fen: 151 nets "laid from the store" on a no-op, the judge 60 s of a 76 s route)
+            if fluid_abut is not None and fluid_abut._abut(flat, lay, cat, n):
+                abut.add(n)
                 continue
             u = _unit(n, sealed)
             if u:
@@ -4056,11 +4129,14 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         if u:
             child_keys = [(c[len(u) + 1:], k) for c, k in keys_of.items()
                           if c.startswith(u + "/")]
-            ckey = unit_key(flat, lay, cat, js, u, sealed, allmine, gidx, terrain, child_keys,
-                            seeds, settings)
+            kparts = unit_parts(flat, lay, cat, js, u, sealed, allmine, gidx, terrain,
+                                child_keys, seeds, settings)
+            ckey = None if kparts is None else key_of_parts(kparts)
             keys_of[u] = ckey
             cinfo[u] = {"module": _module_of(flat, lay, u), "key": ckey, "nets": list(allmine),
-                        "laid": list(lay_now), "from": None, "stored": 0, "refused": []}
+                        "laid": list(lay_now), "from": None, "stored": 0, "refused": [],
+                        "parts": part_shas(kparts) if kparts is not None else {},
+                        "differs": None}
         if ckey is not None and lay_now:
             got, src = None, None
             twin_u = twins.get(ckey)
@@ -4076,6 +4152,11 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                                   lay.insts[u].rot)
                 src = "the compiled store" if got is not None else None
                 cinfo[u]["refused"] = store.refused.get((cinfo[u]["module"], ckey), [])
+                if got is None:
+                    # 3.1.5: a miss says which part of the key differs from the module's last
+                    # entry (``current``), so a build that routes a unit again says why
+                    cinfo[u]["differs"] = _store_differs(store, cinfo[u]["module"], ckey,
+                                                         cinfo[u]["parts"])
             if got is None and twin_u is not None and not twin_first:
                 got, src = _twin_routes(lay, sealed, own_all, routes_of, twin_u, u), twin_u
                 locked = getattr(store, "locked", None) if store else None
@@ -4178,7 +4259,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     failed.update(held)
     # the fluid nets outside every sealed unit (3.1.4: a unit's own are laid with the unit)
     fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and n not in kept
-                        and js[n].skip is None and n not in manual
+                        and js[n].skip is None and n not in manual and n not in abut
                         and n not in added and n not in failed)
 
     # a fluid net is searched in the whole box: its key is the ground as the fluid router finds it
@@ -4219,7 +4300,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                              f"{len({c for _d, c in job.direct})}, nothing to lay "
                              "(dropped straight in)")
             else:
-                lines.append(f"routed    {net}: {job.drivers()} -> {job.consumers()}, nothing "
+                n_d, n_c = ((len(flat.nets[net].drivers), len(flat.nets[net].consumers))
+                            if job.fluid and net in flat.nets
+                            else (job.drivers(), job.consumers()))
+                lines.append(f"routed    {net}: {n_d} -> {n_c}, nothing "
                              "to lay (its ports meet on one edge)")
         elif net in kept:
             lines.append(f"kept      {net}: its carriers are already laid (pinned)")
@@ -4258,6 +4342,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             if routes is not None and not any(n in failed for n in own_all[u]):
                 x0, y0, x1, y1, _t = sealed[u]
                 inputs = {"frame": [x1 - x0, y1 - y0],
+                          "parts": cinfo[u].get("parts") or {},
                           "nets": [_renamed(n, u, "") for n in own_all[u]],
                           "children": sorted((c[len(u) + 1:], k) for c, k in keys_of.items()
                                              if c.startswith(u + "/")),
@@ -4291,7 +4376,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     lines += port_checks(flat, new, cat)
     lines += _filter_loads(flat, new, cat)
     return Routed(new, lines, sorted(set(added) | abut), failed, kept, passes, patched, again,
-                  short, known, cinfo)
+                  short, known, cinfo, sorted(abut))
 
 
 def seal_checks(flat, lay, cat):

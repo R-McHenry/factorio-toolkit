@@ -114,13 +114,8 @@ class Store:
                 return entry_path(store, module, key)
         return None
 
-    def load(self, module, key):
-        """The stored ``nets`` of ``module`` under ``key`` (the unit's unturned frame terms), or
-        None: not stored, laid by another ROUTER, or holding an entity the force can't build
-        (``refused``)."""
-        path = self.find(module, key)
-        if path is None:
-            return None
+    def _read(self, path):
+        """An entry's JSON, read once; None when it can't be read."""
         data = self._data.get(path)
         if data is None:
             try:
@@ -128,6 +123,25 @@ class Store:
                     data = self._data[path] = json.load(fh)
             except (OSError, ValueError):
                 return None
+        return data
+
+    def inputs(self, module, key):
+        """The stored ``inputs`` of ``module`` under ``key`` ({} when none), whatever ROUTER laid
+        it: what the key covered, for the reader (``route._store_differs``)."""
+        path = self.find(module, key)
+        if path is None:
+            return {}
+        data = self._read(path)
+        return (data or {}).get("inputs") or {}
+
+    def load(self, module, key):
+        """The stored ``nets`` of ``module`` under ``key`` (the unit's unturned frame terms), or
+        None: not stored, laid by another ROUTER, or holding an entity the force can't build
+        (``refused``)."""
+        path = self.find(module, key)
+        if path is None:
+            return None
+        data = self._read(path)
         if not isinstance(data, dict) or data.get("router") != ROUTER:
             return None
         nets = data.get("nets") or {}
