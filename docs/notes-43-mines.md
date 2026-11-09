@@ -134,7 +134,7 @@ leaves only (a module's demand reaches the rows through the rate model's grow st
 |---|---|
 | `tests.test_placer_mixed` (12 -> 14: `PatchesTest`) | 14 OK, 0.8 s |
 | `tests.test_placer_mixed tests.test_size` | 46 OK, 13.2 s (before the polygon test) |
-| `tests.test_size tests.test_stack_auto tests.test_placer_mixed tests.test_choices tests.test_dnp` (after the polygon test and the seed fix) | see the final report |
+| `tests.test_size tests.test_stack_auto tests.test_placer_mixed tests.test_choices tests.test_dnp` (after the polygon test and the seed fix) | 73 run, 13.6 s, 72 OK; the one failure, `test_dnp.DnpBuildTest.test_a_scaling_row_grows_where_it_stands` (`'kept ('` not in route.txt: the summary reads `12 kept, 6 pass-through (12 pinned ...)` since 42-reroute), fails the same way on main 90e20a0 (run there read-only, 0.4 s): not this branch's |
 | `tests.test_examples_docs` (5 -> 6: the patch examples) | 6 OK, 28.5 s |
 | `tests.test_design tests.test_placer tests.test_terrain tests.test_terrain_flow tests.test_smelter_array` | 54 OK, 31.3 s |
 
