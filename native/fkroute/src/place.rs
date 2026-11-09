@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::NativeGrid;
+use crate::grid::NativeGrid;
 
 type T = (i64, i64);
 type At = (i64, i64, i64);

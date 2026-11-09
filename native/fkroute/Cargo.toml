@@ -1,6 +1,6 @@
 [package]
 name = "fkroute"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Native kernels for fkcore's router (steiner._astar); fkcore falls back to pure Python without it."
 
