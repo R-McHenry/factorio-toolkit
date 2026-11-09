@@ -43,12 +43,14 @@ from . import fkp as fkpmod
 from . import placer
 from .codec import config_text
 from .compose import turn
+from .frame import Frame
 from .fragments import E, N, S, W, FEnt, Fragment, FragmentError, Role, _finish, fragment
 from .templates import CONTACT, SINGLE
 from .terrain import fmt_amount
 
 __all__ = ["belts", "fragment_of", "expand_factory", "explain", "explain_net", "unfold",
-           "attach_points", "frame_of", "planned_frame", "frame_overlaps"]
+           "attach_points", "frame_of", "frame_shape_of", "planned_frame", "planned_shape",
+           "frame_overlaps", "own_frame"]
 
 #: 2.1: the core kinds that are one machine each (``templates.SINGLE``); an instance is single when
 #: its kind resolves to one of them (``Assembler`` is a ``Machine``)
@@ -62,6 +64,31 @@ _DY = (-1, 0, 1, 0)
 def _core(inst):
     """The core kind an instance is built as (2.1, ``elaborate.core_of``)."""
     return getattr(inst, "core", None) or inst.kind
+
+
+_POLYGONS = {}          # shape vertices -> Frame (a polygon rasterises once per process)
+
+
+def own_frame(obj):
+    """The declared frame of a sealed module instance or of a port's module (41-hull, PLAN-ORGANIC
+    H1-H4), in the module's own coordinates: its ``shape`` polygon as a Frame, else its ``size``
+    box; None when it declares neither. ``obj`` is an ``elaborate.Inst``, a ``PortInst`` or a
+    (w, h) pair. The box is the fast path: every rectangle reads as before."""
+    if obj is None:
+        return None
+    if isinstance(obj, tuple):
+        return Frame.from_box(int(obj[0]), int(obj[1]))
+    shape = getattr(obj, "shape", None)
+    if shape:
+        key = tuple((int(x), int(y)) for x, y in shape)
+        f = _POLYGONS.get(key)
+        if f is None:
+            f = _POLYGONS[key] = Frame.from_polygon(key)
+        return f
+    size = getattr(obj, "size", None)
+    if size is None:
+        return None
+    return Frame.from_box(int(size[0]), int(size[1]))
 
 
 def _params(inst):
@@ -120,21 +147,36 @@ def _unturn(x, y, size, rot):
     return x, y
 
 
-def _port_tile(port, w, h, choice=None):
+def _port_tile(port, frame, choice=None):
     """(x, y, the outward direction) of a port's tile, in the module's own frame: the recorded or
     chosen tile (``choice``), else ``pos`` along the side (0-based, as the ``port`` check and
     2.0.29's ``@n0L`` count) when the declaration pinned it, else the middle of that side.
     2.0.41: the build chooses an unpinned port's tile facing its partner
-    (``_choose_port_tiles``) and records it; this reads the record back."""
+    (``_choose_port_tiles``) and records it; this reads the record back.
+
+    41-hull (H3): ``frame`` is the module's Frame (``own_frame``; a (w, h) pair is its box).
+    On a box, ``@n12`` is tile 12 of the north edge as always; on a polygon it is the frame's
+    outermost tile in column 12 (``Frame.boundary``), and a column the frame does not reach
+    moves the port to the nearest boundary tile of that side (the elaborator's
+    ``port-off-frame`` line says so). The unpinned default is the boundary tile nearest the
+    middle of the side."""
     if choice is not None:
         return choice[0], choice[1], choice[2]
+    if isinstance(frame, tuple):
+        frame = Frame.from_box(int(frame[0]), int(frame[1]))
     side = port.side
+    w, h = frame.box[2], frame.box[3]
     along = h if side in ("e", "w") else w
     k = port.pos if port.pos is not None else along // 2
-    if not 0 <= k < along:
-        raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame (its {side} edge "
-                            f"runs 0..{along - 1})")
-    return _edge_tile(side, k, w, h) + (_PORT_OUT[side],)
+    if frame.is_box and frame.box[0] == 0 and frame.box[1] == 0:
+        if not 0 <= k < along:
+            raise FragmentError(f"port {port.name}: @{side}{port.pos} is off the frame (its {side} "
+                                f"edge runs 0..{along - 1})")
+        return _edge_tile(side, k, w, h) + (_PORT_OUT[side],)
+    tile = frame.boundary_near(side, k)
+    if tile is None:
+        raise FragmentError(f"port {port.name}: the module's frame is empty")
+    return tile[0], tile[1], _PORT_OUT[side]
 
 
 def _edge_tile(side, k, w, h):
@@ -144,22 +186,34 @@ def _edge_tile(side, k, w, h):
     return (k, 0 if side == "n" else h - 1)
 
 
-def record_misfit(port, rec):
+def record_misfit(port, rec, frame=None):
     """Why a committed port record no longer fits its port's declaration, or None (2.0.42). A pin
     wins over a record, and a record must stand on the declared side's edge of the module's frame
-    as it is now: a port moved to another side, or a frame that shrank under it, is chosen again."""
-    if port.size is None:
+    as it is now: a port moved to another side, or a frame that shrank under it, is chosen again.
+    41-hull: ``frame`` is the module's Frame (default: the port's own ``shape`` or ``size``); on a
+    polygon the edge is the side's boundary (``Frame.boundary``)."""
+    if frame is None:
+        frame = own_frame(port)
+    if frame is None:
         return None
-    w, h = port.size
+    w, h = frame.box[2], frame.box[3]
     if port.pos is not None:
-        pin = _edge_tile(port.side, port.pos, w, h)
-        if (rec.x, rec.y) != pin:
-            return f"the pin @{port.side}{port.pos} moves it to {pin[0]},{pin[1]}"
+        try:
+            px, py, _out = _port_tile(port, frame)
+        except FragmentError:
+            return None
+        if (rec.x, rec.y) != (px, py):
+            return f"the pin @{port.side}{port.pos} moves it to {px},{py}"
         return None
-    along = h if port.side in ("e", "w") else w
-    k = rec.y if port.side in ("e", "w") else rec.x
-    if not 0 <= k < along or (rec.x, rec.y) != _edge_tile(port.side, k, w, h):
-        return f"it is not on the {port.side} edge of the {w}x{h} frame: the port is chosen again"
+    if frame.is_box and frame.box[0] == 0 and frame.box[1] == 0:
+        along = h if port.side in ("e", "w") else w
+        k = rec.y if port.side in ("e", "w") else rec.x
+        if not 0 <= k < along or (rec.x, rec.y) != _edge_tile(port.side, k, w, h):
+            return f"it is not on the {port.side} edge of the {w}x{h} frame: the port is chosen again"
+        return None
+    if (int(rec.x), int(rec.y)) not in frame.boundary(port.side):
+        return (f"it is not on the {port.side} boundary of the shape ({frame.area} tiles in "
+                f"{w}x{h}): the port is chosen again")
     return None
 
 
@@ -243,13 +297,13 @@ def _partner_points(flat, lay, key, cat=None):
     return outside or inside
 
 
-def _side_tiles(port, w, h, taken):
-    """The free tiles along a port's side, in a fixed order: what the build may choose from."""
-    if port.side in ("e", "w"):
-        x = w - 1 if port.side == "e" else 0
-        return [(x, y) for y in range(h) if (x, y) not in taken]
-    y = 0 if port.side == "n" else h - 1
-    return [(x, y) for x in range(w) if (x, y) not in taken]
+def _side_tiles(port, frame, taken):
+    """The free tiles along a port's side, in a fixed order: what the build may choose from.
+    41-hull: the side's boundary of the module's Frame (a box's edge, a polygon's outermost
+    tiles per column or row)."""
+    if isinstance(frame, tuple):
+        frame = Frame.from_box(int(frame[0]), int(frame[1]))
+    return [t for t in frame.boundary(port.side) if t not in taken]
 
 
 def _lane_facing(belt, center, targets):
@@ -286,6 +340,7 @@ def _choose_port_tiles(flat, lay, cat=None):
         if inst is None or inst.module is None or inst.size is None or path not in lay.insts:
             continue
         w, h = inst.size
+        frame = own_frame(inst)
         rec = lay.insts[path]
         at = (rec.x, rec.y, rec.rot)
         mine = ports_of(flat, path)
@@ -299,11 +354,11 @@ def _choose_port_tiles(flat, lay, cat=None):
             if key in tiles:                    # recorded, or chosen above
                 continue
             port = flat.ports[key]
-            x, y, out = _port_tile(port, w, h)
+            x, y, out = _port_tile(port, frame)
             own = [_unturn(tx - at[0], ty - at[1], (w, h), at[2])
                    for tx, ty in _partner_points(flat, lay, key, cat)]
             if port.pos is None:
-                cands = _side_tiles(port, w, h, used) or _side_tiles(port, w, h, set())
+                cands = _side_tiles(port, frame, used) or _side_tiles(port, frame, set())
                 if own:
                     x, y = min(cands, key=lambda t: (round(_dist(t, own), 6), t[1], t[0]))
                 elif (x, y) in used:            # the middle is another port's: step aside
@@ -335,11 +390,11 @@ def _port_records(flat, lay):
         inst = flat.insts.get(path)
         if inst is None or inst.module is None or inst.size is None:
             continue
-        w, h = inst.size
+        frame = own_frame(inst)
         for key in ports_of(flat, path):
             port = flat.ports[key]
             try:
-                x, y, out = _port_tile(port, w, h, _port_choice(flat, key))
+                x, y, out = _port_tile(port, frame, _port_choice(flat, key))
             except FragmentError:
                 continue
             belt = _port_belt(port, out)
@@ -418,18 +473,19 @@ def _module_fragment(flat, path, cat):
     a carrier belt on the edge tile itself: a port took a tile of the module and one each side."""
     inst = flat.insts[path]
     w, h = inst.size
+    frame = own_frame(inst)
     ents, roles, binding, seen = [], {}, {}, {}
     for key in ports_of(flat, path):
         port = flat.ports[key]
         item = port.items[0] if port.items else None
         choice = _port_choice(flat, key)
-        x, y, out = _port_tile(port, w, h, choice)
+        x, y, out = _port_tile(port, frame, choice)
         if (x, y) in seen and choice is None and port.pos is None:
             # 2.1.19 (the live run's LabArea, ~4480k): three `@e` ports all took the middle of
             # the side here and the module was left unplaced. An unpinned port's tile is chosen
             # after placing (_choose_port_tiles); until then it takes the free tile nearest the
             # middle
-            free = _side_tiles(port, w, h, set(seen))
+            free = _side_tiles(port, frame, set(seen))
             if free:
                 mid = (w if port.side in ("n", "s") else h) // 2
                 x, y = min(free, key=lambda t: (abs((t[0] if port.side in ("n", "s") else t[1])
@@ -1076,8 +1132,7 @@ def _taken(flat, lay, cat):
     for path, rec in lay.insts.items():
         if rec.kind == "Literal" or path not in flat.insts:
             continue
-        x0, y0, x1, y1 = frame_of(flat, lay, path, cat)
-        taken |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+        taken |= frame_shape_of(flat, lay, path, cat).tiles()
         for _role, side, _net, (x, y, d) in attach_points(flat, lay, path, cat):
             if d is None:
                 continue
@@ -1156,10 +1211,10 @@ def attach_points(flat, lay, path, cat):
     return out
 
 
-def planned_frame(flat, path, cat, frames=None):
-    """(x0, y0, x1, y1): where instance ``path``'s turned frame lands in the factory frame by its
-    ``@(x, y)`` hint, before anything is placed (the size step's does-not-fit); None without a hint (an
-    ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
+def planned_shape(flat, path, cat, frames=None):
+    """The Frame instance ``path``'s turned frame lands on in the factory frame by its ``@(x, y)``
+    hint, before anything is placed (41-hull; ``planned_frame`` is its box). None without a hint
+    (an ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
     fails. ``frames`` caches the module frames, as for ``_origin``."""
     inst = flat.insts[path]
     if inst.module is not None or "at" not in inst.hints:
@@ -1169,38 +1224,63 @@ def planned_frame(flat, path, cat, frames=None):
         return None
     size = (own[2] - own[0], own[3] - own[1])
     x0, y0, rot = _origin(flat, path, cat, size, frames)
-    w, h = size if rot % 2 == 0 else size[::-1]
-    return x0, y0, x0 + w, y0 + h
+    return Frame.from_box(int(size[0]), int(size[1])).turn(rot).moved(int(x0), int(y0))
+
+
+def planned_frame(flat, path, cat, frames=None):
+    """(x0, y0, x1, y1): where instance ``path``'s turned frame lands in the factory frame by its
+    ``@(x, y)`` hint, before anything is placed (the size step's does-not-fit); None without a hint (an
+    ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
+    fails. ``frames`` caches the module frames, as for ``_origin``."""
+    f = planned_shape(flat, path, cat, frames)
+    return None if f is None else f.box
+
+
+def frame_shape_of(flat, lay, path, cat):
+    """The Frame of a placed instance in the factory frame (41-hull, PLAN-ORGANIC H4): its own
+    frame (a sealed module's ``shape`` or ``size``, a row's fragment box, a Literal's box) turned
+    about its origin as ``compose.turn`` turns it, then moved to where the layout put it. A box
+    costs no tiles; every reader (the router's keep-out, ``crosses-frame`` and ``FRAME``, the
+    overlap line, the placer's taken tiles, ``fk explain``) reads this."""
+    rec = lay.insts[path]
+    inst = flat.insts[path]
+    own = own_frame(inst) if inst.module is not None else None
+    if own is None:
+        frag, _binding = fragment_of(flat, path, cat)
+        own = Frame.from_box(int(frag.size[0]), int(frag.size[1]))
+    return own.turn(rec.rot).moved(int(rec.x), int(rec.y))
 
 
 def frame_of(flat, lay, path, cat):
-    """(x0, y0, x1, y1): the tiles of a placed instance's turned frame."""
-    rec = lay.insts[path]
-    frag, _binding = fragment_of(flat, path, cat)
-    w, h = frag.size if rec.rot % 2 == 0 else frag.size[::-1]
-    return (int(rec.x), int(rec.y), int(rec.x) + w, int(rec.y) + h)
+    """(x0, y0, x1, y1): the box of a placed instance's turned frame (``frame_shape_of``'s
+    bounding box; the frame itself when it is a box)."""
+    return frame_shape_of(flat, lay, path, cat).box
 
 
 def frame_overlaps(flat, lay, cat):
-    """[(a, b, (x0, y0, x1, y1))]: every two placed sealed modules whose frames overlap, neither
-    inside the other, with the box they share (2.0.75: a warning, never a stop; the router lets
-    either module's nets use the shared tiles, each in the way of the other's)."""
-    boxes = {}
+    """[(a, b, (x0, y0, x1, y1), n)]: every two placed sealed modules whose frames share tiles,
+    neither inside the other, with the box of the shared tiles and their count ``n`` (2.0.75: a
+    warning, never a stop; the router lets either module's nets use the shared tiles, each in the
+    way of the other's). 41-hull: two polygons whose boxes meet but whose tiles do not are no
+    overlap; ``n`` is the box's area when both are boxes."""
+    shapes = {}
     for path in sorted(lay.insts, key=fkpmod.natural_key):
         if path in flat.insts and path in flat.sealed:
             try:
-                boxes[path] = frame_of(flat, lay, path, cat)
+                shapes[path] = frame_shape_of(flat, lay, path, cat)
             except FragmentError:
                 continue
-    names, out = list(boxes), []
+    names, out = list(shapes), []
     for i, a in enumerate(names):
         for b in names[i + 1:]:
             if b.startswith(a + "/") or a.startswith(b + "/"):
                 continue
-            p, q = boxes[a], boxes[b]
-            x0, y0, x1, y1 = max(p[0], q[0]), max(p[1], q[1]), min(p[2], q[2]), min(p[3], q[3])
-            if x0 < x1 and y0 < y1:
-                out.append((a, b, (x0, y0, x1, y1)))
+            p, q = shapes[a], shapes[b]
+            if p.box is None or q.box is None or not p.overlaps_box(q.box):
+                continue
+            shared = p.overlap(q)
+            if shared:
+                out.append((a, b, shared.box, shared.area))
     return out
 
 
@@ -1246,7 +1326,7 @@ def explain(flat, lay, path, cat) -> str:
     if inst.kind == "Bus":
         return "\n".join(lines[:1] + _explain_bus(flat, lay, path, frag, binding))
     for name, role in frag.roles.items():
-        net = binding.get(name, "?")
+        net = binding.get(name) or "?"
         carriers = [k for k in mine if lay.entities[k].net == net
                     and k.rsplit("/", 1)[1] in {e.local for e in frag.entities if e.role == name}]
         (ax, ay, ad), = role.attach[:1] or [(0, 0, None)]
@@ -1257,6 +1337,13 @@ def explain(flat, lay, path, cat) -> str:
         lines.append(f"  {role.side:<4} {name:<4} net {net:<14} items {', '.join(role.items):<30} "
                      f"attach {where:<11} carriers {_span(carriers)}")
     lines.append(f"  size      {frag.size[0]}x{frag.size[1]} (its own frame)")
+    own = own_frame(inst) if inst.module is not None else None
+    if own is not None and not own.is_box:
+        # 41-hull (H4): a polygon frame printed as rows of `#` (the frame) and `.` (the parent's
+        # ground inside the box), in the module's own frame; a box prints no rows
+        lines.append(f"  frame     {own.area} tiles of the {frag.size[0]}x{frag.size[1]} box "
+                     f"(shape, its own frame):")
+        lines += ["            " + row for row in own.rows_text()]
     return "\n".join(lines + _limited_lines(flat, inst))
 
 
