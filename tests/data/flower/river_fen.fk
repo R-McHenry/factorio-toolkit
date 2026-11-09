@@ -1,0 +1,83 @@
+# river_fen.fk: RiverFen, the megabelt's oil river (200x200, rim north, mouth south).
+# Crude and water to 15 refineries (advanced oil processing), the heavy oil cracked to light and the
+# light to petroleum, petroleum to plastic, sulfur, acid and lubricant, batteries from acid and a
+# little smelted iron and copper. The machines are in fluid Stacks (fencells.fk): a cell holds one
+# beaconed machine with every fluid it uses or makes running straight through it, so a column's
+# pipes join by touching. This module places the columns and joins their ports.
+import RefCol5, HeavyCol6, LightCol10, LubeCol2, SulfurCol2 from "fencells.fk"
+import PlasticCol3, PlasticCol2, PlasticCol1, BatCol6, AcidBlock1, FurnColX3, MixLane from "fencells.fk"
+
+module RiverFen size 200x200 {
+  port crude1 : in crude-oil @n5
+  port crude2 : in crude-oil @n8
+  port water  : in water @n2
+  port coal   : in coal | coal @n196
+  port fecu   : in iron-ore | copper-ore @n184
+  port plastic_out1 : out plastic-bar | plastic-bar @s24
+  port plastic_out2 : out plastic-bar | plastic-bar @s60
+  port acid_out     : out sulfuric-acid @s86
+  port plastic_mesa : out plastic-bar | plastic-bar @s114
+  port tap          : out plastic-bar | sulfur @s142
+  port lube_mall    : out lubricant @s160
+  port lube_works   : out lubricant @s168
+  port sb_works     : out sulfur | battery @s184
+
+  r1 = RefCol5 @(6, 12)
+  r2 = RefCol5 @(32, 12)
+  r3 = RefCol5 @(58, 12)
+  hc = HeavyCol6 @(6, 80)
+  l1 = LightCol10 @(44, 80)
+  l2 = LightCol10 @(66, 80)
+  uc = LubeCol2 @(26, 80)
+  sc1 = SulfurCol2 @(100, 80)
+  sc2 = SulfurCol2 @(120, 80)
+  ab0 = AcidBlock1 @(142, 100)
+  pc0 = PlasticCol3 @(6, 145)
+  pc1 = PlasticCol3 @(24, 145)
+  pc2 = PlasticCol3 @(42, 145)
+  pc3 = PlasticCol3 @(60, 145)
+  pc4 = PlasticCol3 @(96, 145)
+  pc5 = PlasticCol2 @(114, 145)
+  pc6 = PlasticCol1 @(132, 145)
+  fx = FurnColX3 @(180, 8)
+  bc0 = BatCol6 @(176, 122)
+  tm = MixLane<a=plastic-bar, b=sulfur> @(140, 185)
+  sm = MixLane<a=sulfur, b=battery> @(182, 185)
+  net f5_gas1 items petroleum-gas: r1.gas_out, r2.gas_out, r3.gas_out -> l1.gas_in, sc1.gas_in, sc2.gas_in
+  net f5_gas2 items petroleum-gas: l1.gas_out -> l2.gas_in
+  gp = Pump<fluid=petroleum-gas> @(76, 127, rot 2)     # Rory placed it in the lab (11-09): a new start for the long line
+  net f5_gas3 items petroleum-gas: l2.gas_out -> gp
+  net f5_gas4 items petroleum-gas: gp -> pc0.gas_in, pc1.gas_in, pc2.gas_in, pc3.gas_in, pc4.gas_in, pc5.gas_in, pc6.gas_in
+  net f4_light items light-oil: r1.light_out, r2.light_out, r3.light_out, hc.light_out -> l1.light_in, l2.light_in
+  net f3_heavy items heavy-oil: r1.heavy_out, r2.heavy_out, r3.heavy_out -> hc.heavy_in, uc.heavy_in
+  net f2_crude items crude-oil: crude1, crude2 -> r1.crude_in, r2.crude_in, r3.crude_in
+  net f1_w0 items water: water -> r1.water_in, r2.water_in, r3.water_in
+  net f1_w1 items water: r1.water_out -> hc.water_in
+  net f1_w2 items water: r2.water_out -> l1.water_in
+  net f1_w3 items water: r3.water_out -> l2.water_in
+  net f1_w4 items water: l1.water_out -> sc1.water_in
+  net f1_w5 items water: sc1.water_out -> sc2.water_in
+  net f1_w6 items water: l2.water_out -> ab0.water_in
+  net f6_acid items sulfuric-acid: ab0.acid_out -> bc0.acid_in, acid_out
+  net f7_lube items lubricant: uc.lube_out -> lube_mall, lube_works
+  net z_coal items coal: coal -> pc0.coal_in, pc1.coal_in, pc2.coal_in, pc3.coal_in, pc4.coal_in, pc5.coal_in, pc6.coal_in
+  net z_plastic_out1 items plastic-bar: pc0.plastic_out, pc1.plastic_out -> plastic_out1
+  net z_plastic_out2 items plastic-bar: pc2.plastic_out, pc3.plastic_out -> plastic_out2
+  net z_plastic_mesa items plastic-bar: pc4.plastic_out, pc5.plastic_out -> plastic_mesa
+  net z_tap_p items plastic-bar: pc6.plastic_out -> tm.a_in
+  net z_tap_a items plastic-bar: tm.mix_out -> tap
+  net z_tap_b items sulfur: tm.mix_out -> tap
+  lanes z_tap_a | z_tap_b
+  net z_sulf_acid items sulfur: sc1.sulfur_out -> ab0.sulfur_in
+  net z_sulf_sb items sulfur: sc2.sulfur_out -> sm.a_in, tm.b_in
+  net z_batt items battery: bc0.battery_out -> sm.b_in
+  net z_sb_a items sulfur: sm.mix_out -> sb_works
+  net z_sb_b items battery: sm.mix_out -> sb_works
+  lanes z_sb_a | z_sb_b
+  net z_ore_fe items iron-ore: fecu -> fx.ore_in
+  net z_ore_cu items copper-ore: fecu -> fx.ore_in
+  lanes z_ore_fe | z_ore_cu
+  net z_fe items iron-plate: fx.fe_out -> ab0.iron_in, bc0.plates_in
+  net z_cu_bat items copper-plate: fx.cu_out -> bc0.plates_in
+  lanes z_fe | z_cu_bat
+}

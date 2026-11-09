@@ -1,0 +1,123 @@
+# core.fk: the megabelt core, 300x424 (megabelt RIVERS.md "Core"). North faces Circuit, east Fen
+# (upper) and Works (lower), south Mesa, west Ridge (upper) and Meadow (lower).
+#   labs:   8 columns of 10 labs (80), prod2 + speed2 beacons, five pack belts across their foot,
+#           all running west to east: red, green and purple come in at the west end, blue and
+#           yellow reach it along the south.
+#   yellow: 14 assemblers (YellowB), pu from the north, frames from the east, LDS from the south.
+#   hub:    at the centre (x 118..183, y 155..218). Every tap ends in a TapArm: two passive
+#           provider chests, one per lane. Four roboports cover it and four storage chests stand
+#           free (nothing requests before space science).
+#   mall:   MallArea, x 190..290, y 35..155, kept empty for the belt mall. The lube pipe ends at
+#           a Pump on its east edge.
+import LabCol5, YellowB, TapArm, MallArea from "corecells.fk"
+import Beacon1 from "flowercells.fk"
+
+module Core size 300x424 {
+  port pu     : in processing-unit @n100
+  port c_tap1 : in electronic-circuit | advanced-circuit @n136
+  port c_tap2 : in processing-unit | copper-plate @n150
+  port f_tap  : in plastic-bar | sulfur @e28
+  port lube   : in lubricant @e100
+  port blue   : in chemical-science-pack @e240
+  port rf     : in flying-robot-frame @e262
+  port w_tap1 : in steel-plate | iron-gear-wheel @e284
+  port w_tap2 : in engine-unit | electric-engine-unit @e306
+  port s_tap  : in low-density-structure | copper-plate @s158
+  port lds    : in low-density-structure @s193
+  port r_tap3 : in electric-furnace | stone @w70
+  port r_tap2 : in stone-brick | rail @w90
+  port r_tap1 : in steel-plate | iron-plate @w110
+  port purple : in production-science-pack @w200
+  port m_tap  : in iron-plate | iron-gear-wheel @w215
+  port green  : in logistic-science-pack @w314
+  port red    : in automation-science-pack @w316
+
+  # -- the lab field, x 60..148, and its closing beacons --
+  field = Stack<cell=LabCol5, n=8> @(60, 280)
+  fc0 = Beacon1 @(148, 280)
+  fc1 = Beacon1 @(148, 283)
+  fc2 = Beacon1 @(148, 286)
+  fc3 = Beacon1 @(148, 289)
+  fc4 = Beacon1 @(148, 292)
+  fc5 = Beacon1 @(148, 295)
+  fc6 = Beacon1 @(148, 298)
+  fc7 = Beacon1 @(148, 301)
+  fc8 = Beacon1 @(148, 304)
+  fc9 = Beacon1 @(148, 307)
+  ft0 = Beacon1 @(60, 277)
+  ft1 = Beacon1 @(71, 277)
+  ft2 = Beacon1 @(82, 277)
+  ft3 = Beacon1 @(93, 277)
+  ft4 = Beacon1 @(104, 277)
+  ft5 = Beacon1 @(115, 277)
+  ft6 = Beacon1 @(126, 277)
+  ft7 = Beacon1 @(137, 277)
+  ft8 = Beacon1 @(148, 277)
+
+  # -- yellow science, x 190..201 --
+  ys = Stack<cell=YellowB, n=14> @(190, 300)
+
+  yc0 = Beacon1 @(201, 300)
+  yc1 = Beacon1 @(201, 303)
+  yc2 = Beacon1 @(201, 306)
+  yc3 = Beacon1 @(201, 309)
+  yc4 = Beacon1 @(201, 312)
+  yc5 = Beacon1 @(201, 315)
+  yc6 = Beacon1 @(201, 318)
+  yc7 = Beacon1 @(201, 321)
+  yc8 = Beacon1 @(201, 324)
+  yc9 = Beacon1 @(201, 327)
+  yc10 = Beacon1 @(201, 330)
+  yc11 = Beacon1 @(201, 333)
+  yc12 = Beacon1 @(201, 336)
+  yc13 = Beacon1 @(201, 339)
+  yt0 = Beacon1 @(190, 297)
+  yt1 = Beacon1 @(201, 297)
+  yb0 = Beacon1 @(190, 342)
+  yb1 = Beacon1 @(201, 342)
+
+  net upu: pu -> ys.pr_in
+  net urf: rf -> ys.pr_in
+  lanes upu | urf
+  net ulds: lds -> ys.l_in
+  net yp: ys.y_out -> field.y_in
+  net pr: red -> field.r_in
+  net pg: green -> field.g_in
+  net pp: purple -> field.p_in
+  net pb: blue -> field.b_in
+
+  # -- the hub: ten tap arms, four roboports, four storage chests --
+  h_c_tap1 = TapArm<a=electronic-circuit, b=advanced-circuit> @(133, 155)
+  h_c_tap2 = TapArm<a=processing-unit, b=copper-plate> @(147, 155)
+  h_f_tap = TapArm<a=plastic-bar, b=sulfur> @(163, 155)
+  h_w_tap1 = TapArm<a=steel-plate, b=iron-gear-wheel> @(183, 166, rot 1)
+  h_w_tap2 = TapArm<a=engine-unit, b=electric-engine-unit> @(183, 175, rot 1)
+  h_s_tap = TapArm<a=low-density-structure, b=copper-plate> @(162, 218, rot 2)
+  h_m_tap = TapArm<a=iron-plate, b=iron-gear-wheel> @(118, 200, rot 3)
+  h_r_tap1 = TapArm<a=steel-plate, b=iron-plate> @(118, 191, rot 3)
+  h_r_tap2 = TapArm<a=stone-brick, b=rail> @(118, 182, rot 3)
+  h_r_tap3 = TapArm<a=electric-furnace, b=stone> @(118, 173, rot 3)
+  net n_c_tap1 limited "the arm chests fill and back the tap up": c_tap1 -> h_c_tap1.t
+  net n_c_tap2 limited "the arm chests fill and back the tap up": c_tap2 -> h_c_tap2.t
+  net n_f_tap limited "the arm chests fill and back the tap up": f_tap -> h_f_tap.t
+  net n_w_tap1 limited "the arm chests fill and back the tap up": w_tap1 -> h_w_tap1.t
+  net n_w_tap2 limited "the arm chests fill and back the tap up": w_tap2 -> h_w_tap2.t
+  net n_s_tap limited "the arm chests fill and back the tap up": s_tap -> h_s_tap.t
+  net n_m_tap limited "the arm chests fill and back the tap up": m_tap -> h_m_tap.t
+  net n_r_tap1 limited "the arm chests fill and back the tap up": r_tap1 -> h_r_tap1.t
+  net n_r_tap2 limited "the arm chests fill and back the tap up": r_tap2 -> h_r_tap2.t
+  net n_r_tap3 limited "the arm chests fill and back the tap up": r_tap3 -> h_r_tap3.t
+  rp0 = Roboport @(130, 166)
+  rp1 = Roboport @(168, 168)
+  rp2 = Roboport @(130, 196)
+  rp3 = Roboport @(168, 196)
+  st0 = Chest<storage> @(146, 186)
+  st1 = Chest<storage> @(150, 186)
+  st2 = Chest<storage> @(146, 190)
+  st3 = Chest<storage> @(150, 190)
+
+  # -- the belt mall's ground (empty) and its lube pump --
+  mall = MallArea @(190, 35)
+  lpump = Pump<fluid=lubricant> @(292, 100, rot 3)
+  net lub: lube -> lpump
+}

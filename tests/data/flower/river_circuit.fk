@@ -1,0 +1,197 @@
+# river_circuit.fk: RiverCircuit (megabelt RIVERS.md): green circuits, red circuits, processing
+# units and productivity modules. 200x260, ore in at the north, everything else at the south.
+# Four strips of 44 tiles run north to south: rim (springs) -> groves -> red circuit groups ->
+# blocks. All columns flow north to south (circuitcells.fk), so nothing wraps round a column.
+import RimStrip, GroveGroup, RedGroup, PUBank, ModBank from "circuitcells.fk"
+import Split from "routing.fk"
+
+module RiverCircuit size 200x260 {
+  port cu_ore1 : in copper-ore | copper-ore @n6
+  port fe_ore1 : in iron-ore | iron-ore @n26
+  port cu_ore2 : in copper-ore | copper-ore @n54
+  port fe_ore2 : in iron-ore | iron-ore @n74
+  port cu_ore3 : in copper-ore | copper-ore @n102
+  port fe_ore3 : in iron-ore | iron-ore @n122
+  port cu_ore4 : in copper-ore | copper-ore @n150
+  port cu_ore5 : in copper-ore | copper-ore @n170
+  port g_meadow : out electronic-circuit @s10
+  port rp_ridge : out advanced-circuit | productivity-module @s30
+  port rg_works : out advanced-circuit | electronic-circuit @s55
+  port pu : out processing-unit @s80
+  port tap1 : out electronic-circuit | advanced-circuit @s105
+  port tap2 : out processing-unit | copper-plate @s125
+  port plastic_in1 : in plastic-bar | plastic-bar @s170
+  port plastic_in2 : in plastic-bar | plastic-bar @s180
+  port acid_in : in sulfuric-acid @s190
+  rimA = RimStrip<p1=copper-plate, o1=copper-ore, p2=iron-plate, o2=iron-ore> @(2, 0)
+  grvA = GroveGroup @(13, 62)
+  redA = RedGroup @(2, 127)
+  rimB = RimStrip<p1=copper-plate, o1=copper-ore, p2=iron-plate, o2=iron-ore> @(50, 0)
+  grvB = GroveGroup @(61, 62)
+  redB = RedGroup @(50, 127)
+  rimC = RimStrip<p1=copper-plate, o1=copper-ore, p2=iron-plate, o2=iron-ore> @(98, 0)
+  grvC = GroveGroup @(109, 62)
+  redC = RedGroup @(98, 127)
+  rimD = RimStrip<p1=copper-plate, o1=copper-ore, p2=copper-plate, o2=copper-ore> @(146, 0)
+  grvD = GroveGroup @(157, 62)
+  redD = RedGroup @(146, 127)
+  sp_feCa0 = Split<item=iron-plate> @(128, 43)
+  sp_feCb0 = Split<item=iron-plate> @(138, 43)
+  sp_cuDa0 = Split<item=copper-plate> @(156, 43)
+  sp_cuH10 = Split<item=copper-plate> @(166, 43)
+  sp_cuH11 = Split<item=copper-plate> @(167, 48)
+  sp_cuH20 = Split<item=copper-plate> @(176, 43)
+  sp_cuH21 = Split<item=copper-plate> @(177, 48)
+  sp_cuH30 = Split<item=copper-plate> @(186, 43)
+  sp_cuH31 = Split<item=copper-plate> @(187, 48)
+  sGA0 = Split<item=electronic-circuit> @(23, 100)
+  sGA1 = Split<item=electronic-circuit> @(33, 100)
+  sGB0 = Split<item=electronic-circuit> @(71, 100)
+  sGB1 = Split<item=electronic-circuit> @(81, 100)
+  sGC0 = Split<item=electronic-circuit> @(119, 100)
+  sGC1 = Split<item=electronic-circuit> @(129, 100)
+  sGD0 = Split<item=electronic-circuit> @(167, 100)
+  sGD1 = Split<item=electronic-circuit> @(177, 100)
+  sp_pl10 = Split<item=plastic-bar> @(150, 112)
+  sp_pl11 = Split<item=plastic-bar> @(151, 117)
+  sp_pl12 = Split<item=plastic-bar> @(152, 122)
+  sp_pl20 = Split<item=plastic-bar> @(160, 112)
+  sp_pl21 = Split<item=plastic-bar> @(161, 117)
+  sp_pl22 = Split<item=plastic-bar> @(162, 122)
+  pub = PUBank @(4, 192)
+  mob = ModBank @(60, 192)
+  sp_bgA0 = Split<item=electronic-circuit> @(40, 180)
+  sp_bgA1 = Split<item=electronic-circuit> @(41, 185)
+  sp_bgB0 = Split<item=electronic-circuit> @(84, 180)
+  sp_bgB1 = Split<item=electronic-circuit> @(85, 185)
+  sp_rr10 = Split<item=advanced-circuit> @(24, 180)
+  sp_rr20 = Split<item=advanced-circuit> @(34, 180)
+  sp_bgD0 = Split<item=electronic-circuit> @(170, 180)
+  sp_rrD = Split<item=advanced-circuit> @(175, 180)
+  sp_puo0 = Split<item=processing-unit> @(100, 215)
+  net oreA1: cu_ore1 -> rimA.ore1
+  net oreA2: fe_ore1 -> rimA.ore2
+  net oreB1: cu_ore2 -> rimB.ore1
+  net oreB2: fe_ore2 -> rimB.ore2
+  net oreC1: cu_ore3 -> rimC.ore1
+  net oreC2: fe_ore3 -> rimC.ore2
+  net oreD1: cu_ore4 -> rimD.ore1
+  net oreD2: cu_ore5 -> rimD.ore2
+  net cuAa items copper-plate: rimA.q0 -> grvA.cu_a
+  net cuAb items copper-plate: rimA.q1 -> grvA.cu_b
+  net feAa items iron-plate: rimA.q2 -> grvA.fe_a
+  net feAb items iron-plate: rimA.q3 -> grvA.fe_b
+  net cuBa items copper-plate: rimB.q0 -> grvB.cu_a
+  net cuBb items copper-plate: rimB.q1 -> grvB.cu_b
+  net feBa items iron-plate: rimB.q2 -> grvB.fe_a
+  net feBb items iron-plate: rimB.q3 -> grvB.fe_b
+  net cuCa items copper-plate: rimC.q0 -> grvC.cu_a
+  net cuCb items copper-plate: rimC.q1 -> grvC.cu_b
+  net feCa_i: rimC.q2 -> sp_feCa0.i
+  net feCa_0: sp_feCa0.a -> grvC.fe_a
+  net feCa_1: sp_feCa0.b -> grvD.fe_a
+  net feCb_i: rimC.q3 -> sp_feCb0.i
+  net feCb_0: sp_feCb0.a -> grvC.fe_b
+  net feCb_1: sp_feCb0.b -> grvD.fe_b
+  net cuDa_i: rimD.q0 -> sp_cuDa0.i
+  net cuDa_0: sp_cuDa0.a -> grvD.cu_a
+  net cuDa_1: sp_cuDa0.b -> grvD.cu_b
+  net cuH1_i: rimD.q1 -> sp_cuH10.i
+  net cuH1_0: sp_cuH10.a -> redA.cu0
+  net cuH1_b0: sp_cuH10.b -> sp_cuH11.i
+  net cuH1_1: sp_cuH11.a -> redA.cu1
+  net cuH1_2: sp_cuH11.b -> redB.cu0
+  net cuH2_i: rimD.q2 -> sp_cuH20.i
+  net cuH2_0: sp_cuH20.a -> redB.cu1
+  net cuH2_b0: sp_cuH20.b -> sp_cuH21.i
+  net cuH2_1: sp_cuH21.a -> redC.cu0
+  net cuH2_2: sp_cuH21.b -> redC.cu1
+  net cuH3_i: rimD.q3 -> sp_cuH30.i
+  net cuH3_0: sp_cuH30.a -> redD.cu0
+  net cuH3_b0: sp_cuH30.b -> sp_cuH31.i
+  net cuH3_1: sp_cuH31.a -> redD.cu1
+  net cuH3_2: sp_cuH31.b -> tap2
+  net giA0: grvA.g_a -> sGA0.i
+  net gA0: sGA0.a -> redA.gp0
+  net giA1: grvA.g_b -> sGA1.i
+  net gA1: sGA1.a -> redA.gp1
+  net bpA: sGA0.b, sGA1.b -> redA.bp_in
+  net giB0: grvB.g_a -> sGB0.i
+  net gB0: sGB0.a -> redB.gp0
+  net giB1: grvB.g_b -> sGB1.i
+  net gB1: sGB1.a -> redB.gp1
+  net bpB: sGB0.b, sGB1.b -> redB.bp_in
+  net giC0: grvC.g_a -> sGC0.i
+  net gC0: sGC0.a -> redC.gp0
+  net giC1: grvC.g_b -> sGC1.i
+  net gC1: sGC1.a -> redC.gp1
+  net bpC: sGC0.b, sGC1.b -> redC.bp_in
+  net giD0: grvD.g_a -> sGD0.i
+  net gD0: sGD0.a -> redD.gp0
+  net giD1: grvD.g_b -> sGD1.i
+  net gD1: sGD1.a -> redD.gp1
+  net bpD: sGD0.b, sGD1.b -> redD.bp_in
+  net pl1_i: plastic_in1 -> sp_pl10.i
+  net pl1_0: sp_pl10.a -> redA.gp0
+  net pl1_b0: sp_pl10.b -> sp_pl11.i
+  net pl1_1: sp_pl11.a -> redA.gp1
+  net pl1_b1: sp_pl11.b -> sp_pl12.i
+  net pl1_2: sp_pl12.a -> redB.gp0
+  net pl1_3: sp_pl12.b -> redB.gp1
+  net pl2_i: plastic_in2 -> sp_pl20.i
+  net pl2_0: sp_pl20.a -> redC.gp0
+  net pl2_b0: sp_pl20.b -> sp_pl21.i
+  net pl2_1: sp_pl21.a -> redC.gp1
+  net pl2_b1: sp_pl21.b -> sp_pl22.i
+  net pl2_2: sp_pl22.a -> redD.gp0
+  net pl2_3: sp_pl22.b -> redD.gp1
+  net acid: acid_in -> pub.ac0, pub.ac1, pub.ac2, pub.ac3
+  net bgA_i: redA.bp_out -> sp_bgA0.i
+  net bgA_0: sp_bgA0.a -> pub.gr0
+  net bgA_b0: sp_bgA0.b -> sp_bgA1.i
+  net bgA_1: sp_bgA1.a -> pub.gr1
+  net bgA_2: sp_bgA1.b -> mob.gr0
+  net bgB_i: redB.bp_out -> sp_bgB0.i
+  net bgB_0: sp_bgB0.a -> pub.gr2
+  net bgB_b0: sp_bgB0.b -> sp_bgB1.i
+  net bgB_1: sp_bgB1.a -> pub.gr3
+  net bgB_2: sp_bgB1.b -> mob.gr1
+  net rr1_i: redA.r0 -> sp_rr10.i
+  net rr1_0: sp_rr10.a -> pub.gr0
+  net rr1_1: sp_rr10.b -> pub.gr1
+  net rr2_i: redA.r1 -> sp_rr20.i
+  net rr2_0: sp_rr20.a -> pub.gr2
+  net rr2_1: sp_rr20.b -> pub.gr3
+  net rr3: redB.r0 -> mob.gr0
+  net rr4: redB.r1 -> mob.gr1
+  net gmeadow: redC.bp_out -> g_meadow
+  net bgD_i: redD.bp_out -> sp_bgD0.i
+  net bgD_0: sp_bgD0.a -> rg_works
+  net bgD_1: sp_bgD0.b -> tap1
+  net ridge_adv items advanced-circuit: redC.r0, redC.r1 -> rp_ridge
+  net ridge_mod items productivity-module: mob.m0, mob.m1 -> rp_ridge
+  net rrD_i: redD.r1 -> sp_rrD.i
+  net rgw_adv items advanced-circuit: redD.r0, sp_rrD.a -> rg_works
+  net rrD_t: sp_rrD.b -> tap1
+  net puo_i: pub.u0, pub.u1, pub.u2, pub.u3 -> sp_puo0.i
+  net puo_0: sp_puo0.a -> pu
+  net puo_1: sp_puo0.b -> tap2
+  lanes gA0 | pl1_0
+  lanes gA1 | pl1_1
+  lanes gB0 | pl1_2
+  lanes gB1 | pl1_3
+  lanes gC0 | pl2_0
+  lanes gC1 | pl2_1
+  lanes gD0 | pl2_2
+  lanes gD1 | pl2_3
+  lanes bgA_0 | rr1_0
+  lanes bgA_1 | rr1_1
+  lanes bgA_2 | rr3
+  lanes bgB_0 | rr2_0
+  lanes bgB_1 | rr2_1
+  lanes bgB_2 | rr4
+  lanes ridge_adv | ridge_mod
+  lanes rgw_adv | bgD_0
+  lanes bgD_1 | rrD_t
+  lanes puo_1 | cuH3_2
+}

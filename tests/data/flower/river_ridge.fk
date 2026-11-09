@@ -1,0 +1,114 @@
+# river_ridge.fk: the Ridge river (megabelt RIVERS.md, RiverRidge, 200x200).
+# Rim: 5 iron springs, a stone spring; below each iron spring a steel spring on its two plate lanes;
+# mouth: sticks, rails, electric furnaces and purple science.
+import Spring24, Spring28, PurpCol, EFCol, RailF, StickU from "ridgecells.fk"
+import Split from "routing.fk"
+
+module RiverRidge size 200x200 {
+  port fe_ore1 : in iron-ore | iron-ore @n2
+  port fe_ore2 : in iron-ore | iron-ore @n34
+  port fe_ore3 : in iron-ore | iron-ore @n66
+  port fe_ore4 : in iron-ore | iron-ore @n98
+  port fe_ore5 : in iron-ore | iron-ore @n130
+  port stone1  : in stone | stone @n162
+  port stone2  : in stone | stone @n196
+  port purple  : out production-science-pack @s6
+  port tap1    : out steel-plate | iron-plate @s40
+  port tap2    : out stone-brick | rail @s70
+  port tap3    : out electric-furnace | stone @s100
+  port rp_in   : in  advanced-circuit | productivity-module @s187
+
+  i0 = Spring24 @(5, 0)
+  i1 = Spring24 @(37, 0)
+  i2 = Spring24 @(69, 0)
+  i3 = Spring24 @(101, 0)
+  i4 = Spring24 @(133, 0)
+  z  = Spring24<plate=stone-brick, ore=stone> @(165, 0)
+  s0 = Spring28<plate=steel-plate, ore=iron-plate> @(5, 62)
+  s1 = Spring28<plate=steel-plate, ore=iron-plate> @(37, 62)
+  s2 = Spring28<plate=steel-plate, ore=iron-plate> @(69, 62)
+  s3 = Spring28<plate=steel-plate, ore=iron-plate> @(101, 62)
+  s4 = Spring28<plate=steel-plate, ore=iron-plate> @(133, 62)
+
+  stk0 = StickU @(150, 122)
+  stk1 = StickU @(170, 122)
+  r0 = RailF @(8, 122)
+  r1 = RailF @(40, 122)
+  r2 = RailF @(72, 122)
+  r3 = RailF @(104, 122)
+  r4 = RailF @(136, 146)
+  pa = PurpCol @(20, 150)
+  pb = PurpCol @(60, 150)
+  ea = EFCol @(184, 177)
+
+  sp5 = Split<item=iron-plate> @(160, 56)
+  spb = Split<item=stone-brick> @(180, 56)
+  spm = Split<item=productivity-module> @(130, 168)
+  spe = Split<item=electric-furnace> @(160, 168)
+  spf = Split<item=electric-furnace> @(110, 168)
+  sps = Split<item=stone> @(190, 56)
+
+  # ore
+  net o0: fe_ore1 -> i0.ore
+  net o1: fe_ore2 -> i1.ore
+  net o2: fe_ore3 -> i2.ore
+  net o3: fe_ore4 -> i3.ore
+  net o4: fe_ore5 -> i4.ore
+  net oz: stone1 -> z.ore
+  # iron plates into the steel springs, a lane each
+  net a0 items iron-plate: i0.pa -> s0.ore
+  net b0 items iron-plate: i0.pb -> s0.ore
+  lanes a0 | b0
+  net a1 items iron-plate: i1.pa -> s1.ore
+  net b1 items iron-plate: i1.pb -> s1.ore
+  lanes a1 | b1
+  net a2 items iron-plate: i2.pa -> s2.ore
+  net b2 items iron-plate: i2.pb -> s2.ore
+  lanes a2 | b2
+  net a3 items iron-plate: i3.pa -> s3.ore
+  net b3 items iron-plate: i3.pb -> s3.ore
+  lanes a3 | b3
+  net a4 items iron-plate: i4.pa -> s4.ore
+  # the last iron lane: sticks and the tap
+  net fe5: i4.pb -> sp5.i
+  net fe5a: sp5.a -> stk0.i_in, stk1.i_in
+  net t1i: sp5.b -> tap1
+  # sticks to the rails
+  net sticks: stk0.s_out, stk1.s_out -> r0.k_in, r1.k_in, r2.k_in, r3.k_in, r4.k_in
+  # stone and steel to the rails, one belt: stone | steel
+  net st2: stone2 -> sps.i
+  net st2a: sps.a -> r0.ss_in, r1.ss_in, r2.ss_in, r3.ss_in, r4.ss_in
+  net st2b: sps.b -> tap3
+  net steelR items steel-plate: s0.pa, s0.pb, s1.pa, s1.pb, s2.pa -> r0.ss_in, r1.ss_in, r2.ss_in, r3.ss_in, r4.ss_in
+  lanes st2a | steelR
+  # steel and bricks to the furnaces
+  net steelE items steel-plate: s2.pb, s3.pa, s3.pb, s4.pa -> ea.sb_in
+  net bk: z.pa, z.pb -> spb.i
+  net bka: spb.a -> ea.sb_in
+  net bkb: spb.b -> tap2
+  lanes steelE | bka
+  net t1s items steel-plate: s4.pb -> tap1
+  lanes t1s | t1i
+  # red circuits and modules
+  net red items advanced-circuit: rp_in -> ea.r_in
+  net mod items productivity-module: rp_in -> ea.r_in
+  lanes red | mod
+  net modx: ea.m_out -> spm.i
+  net ma: spm.a -> pa.f_in
+  net mb: spm.b -> pb.f_in
+  # furnaces to the purple columns and the tap
+  net efa: ea.e_out -> spe.i
+  net efb: spe.a -> spf.i
+  net t3e: spe.b -> tap3
+  lanes t3e | st2b
+  net efc: spf.a -> pa.f_in
+  net efd: spf.b -> pb.f_in
+  lanes efc | ma
+  lanes efd | mb
+  # rails
+  net rla width 2: r0.r_out, r1.r_out -> pa.r_in
+  net rlb width 2: r2.r_out, r3.r_out -> pb.r_in
+  net t2r: r4.r_out -> tap2
+  lanes bkb | t2r
+  net pk: pa.p_out, pb.p_out -> purple
+}

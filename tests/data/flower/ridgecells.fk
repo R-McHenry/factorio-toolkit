@@ -1,0 +1,210 @@
+# ridgecells.fk: the Ridge river's own cells (megabelt RIVERS.md, RiverRidge). Built like
+# flowercells.fk's RedB: beacon x 0..2, far belt x 3, near belt x 4, machine x 6..8, out belt x 10.
+import FurnB, Beacon1, Asm3P from "flowercells.fk"
+
+kind AsmP = Machine<entity=assembling-machine-3>
+
+# Purple science: electric furnace | productivity module on the far belt, rails | rails on the near
+# belt, packs back down the east belt. 0.62 packs/s a machine (prod2, 6 beacons): 5 rails/s.
+module PurpB size 11x3 {
+  port f_in  : in  electric-furnace | productivity-module @s3
+  port f_out : out electric-furnace | productivity-module @n3
+  port r_in  : in  rail | rail @s4
+  port r_out : out rail | rail @n4
+  port p_in  : in  production-science-pack @n10
+  port p_out : out production-science-pack @s10
+  stack f_in -> f_out, r_in -> r_out, p_out -> p_in
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=production-science-pack> @(6, 0)
+  net e items electric-furnace:      f_in -> a, f_out
+  net m items productivity-module:   f_in -> a, f_out
+  lanes e | m
+  net r items rail: r_in -> a, r_out
+  net p: p_in, a -> p_out
+}
+
+# Electric furnaces: steel | bricks on the near belt, red circuits | modules on the far belt (the
+# modules pass on). A plain assembler 3 (the recipe refuses productivity): 0.70 furnaces/s with
+# 6 beacons.
+module EFB size 11x3 {
+  port r_in  : in  advanced-circuit | productivity-module @s3
+  port r_out : out advanced-circuit | productivity-module @n3
+  port sb_in : in  steel-plate | stone-brick @s4
+  port sb_out: out steel-plate | stone-brick @n4
+  port e_in  : in  electric-furnace @n10
+  port e_out : out electric-furnace @s10
+  stack r_in -> r_out, sb_in -> sb_out, e_out -> e_in
+  b = Beacon1 @(0, 0)
+  a = AsmP<recipe=electric-furnace> @(6, 0)
+  net r items advanced-circuit: r_in -> a, r_out
+  net m items productivity-module: r_in -> r_out
+  lanes r | m
+  net s items steel-plate:  sb_in -> a, sb_out
+  net k items stone-brick:  sb_in -> a, sb_out
+  lanes s | k
+  net e: e_in, a -> e_out
+}
+
+# Iron sticks: iron plates up the west belt, sticks back down the east one.
+module StickB size 10x3 {
+  port i_in  : in  iron-plate @s3
+  port i_out : out iron-plate @n3
+  port s_in  : in  iron-stick @n9
+  port s_out : out iron-stick @s9
+  stack i_in -> i_out, s_out -> s_in
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=iron-stick> @(5, 0)
+  net i: i_in -> a, i_out
+  net s: s_in, a -> s_out
+}
+
+# Columns: a stack with its end beacons and east caps. Cells grow north from the south edge.
+# Purple column: 9 cells.
+module PurpCol size 16x33 {
+  port f_in : in  electric-furnace | productivity-module @s3
+  port r_in : in  rail | rail @s4
+  port p_out: out production-science-pack @s10
+  c = Stack<cell=PurpB, n=9> @(0, 3)
+  bt = Beacon1 @(0, 0)
+  bb = Beacon1 @(0, 30)
+  e0 = Beacon1 @(11, 0)
+  e1 = Beacon1 @(11, 3)
+  e2 = Beacon1 @(11, 6)
+  e3 = Beacon1 @(11, 9)
+  e4 = Beacon1 @(11, 12)
+  e5 = Beacon1 @(11, 15)
+  e6 = Beacon1 @(11, 18)
+  e7 = Beacon1 @(11, 21)
+  e8 = Beacon1 @(11, 24)
+  e9 = Beacon1 @(11, 27)
+  e10 = Beacon1 @(11, 30)
+  net em items electric-furnace:    f_in -> c.f_in
+  net mm items productivity-module: f_in -> c.f_in
+  lanes em | mm
+  net rr: r_in -> c.r_in
+  net pp: c.p_out -> p_out
+}
+
+# Electric furnace column: 5 cells; the modules come out at the far end.
+module EFCol size 16x21 {
+  port r_in  : in  advanced-circuit | productivity-module @s3
+  port sb_in : in  steel-plate | stone-brick @s4
+  port e_out : out electric-furnace @s10
+  port m_out : out productivity-module @n3
+  c = Stack<cell=EFB, n=5> @(0, 3)
+  bt = Beacon1 @(0, 0)
+  bb = Beacon1 @(0, 18)
+  e0 = Beacon1 @(11, 0)
+  e1 = Beacon1 @(11, 3)
+  e2 = Beacon1 @(11, 6)
+  e3 = Beacon1 @(11, 9)
+  e4 = Beacon1 @(11, 12)
+  e5 = Beacon1 @(11, 15)
+  e6 = Beacon1 @(11, 18)
+  net rr items advanced-circuit:    r_in -> c.r_in
+  net mm items productivity-module: r_in -> c.r_in
+  lanes rr | mm
+  net ss items steel-plate: sb_in -> c.sb_in
+  net kk items stone-brick: sb_in -> c.sb_in
+  lanes ss | kk
+  net ee: c.e_out -> e_out
+  net mo items productivity-module: c.r_out -> m_out
+}
+
+# One rail machine laid by hand: six beacons round it, none nearer than the two tiles a belt and
+# its hand need, so the machine sees all six (a stack cell with two belts on one side sees three).
+# Stone | steel up the west side, sticks up the east side, rails out at the south. ~17 rails/s.
+module RailF size 17x17 {
+  port ss_in : in  stone | steel-plate @s5
+  port ss_out: out stone | steel-plate @n5
+  port r_out : out rail @s8
+  port k_in  : in  iron-stick @s11
+  m = Asm3P<recipe=rail> @(7, 7)
+  bw0 = Beacon1 @(2, 4)
+  bw1 = Beacon1 @(2, 7)
+  bw2 = Beacon1 @(2, 10)
+  be0 = Beacon1 @(12, 4)
+  be1 = Beacon1 @(12, 7)
+  be2 = Beacon1 @(12, 10)
+  net st items stone:       ss_in -> m, ss_out
+  net sl items steel-plate: ss_in -> m, ss_out
+  lanes st | sl
+  net k items iron-stick: k_in -> m
+  net r items rail: m -> r_out
+}
+
+# One stick machine with its six beacons.
+module StickU size 15x9 {
+  port i_in  : in  iron-plate @s3
+  port s_out : out iron-stick @s9
+  c = Stack<cell=StickB, n=1> @(0, 3)
+  bt = Beacon1 @(0, 0)
+  bb = Beacon1 @(0, 6)
+  e0 = Beacon1 @(10, 0)
+  e1 = Beacon1 @(10, 3)
+  e2 = Beacon1 @(10, 6)
+  net ii: i_in -> c.i_in
+  net ss: c.s_out -> s_out
+}
+
+# spring.fk's brick with 2 more cells a column: 24 furnaces, ~45 plates/s on two lanes of ~22.5, the most a lane carries; 45 ore/s in, one express belt.
+module Spring24<plate=iron-plate, ore=iron-ore> size 27x50 {
+  port ore : in  $ore | $ore @s6
+  port pa  : out $plate @s10
+  port pb  : out $plate @s20
+  a  = Stack<cell=FurnB, n=12, plate=$plate, ore=$ore> @(1, 5)
+  b  = Stack<cell=FurnB, n=12, plate=$plate, ore=$ore> @(11, 5)
+  cap0 = Beacon1 @(21, 5)
+  cap1 = Beacon1 @(21, 8)
+  cap2 = Beacon1 @(21, 11)
+  cap3 = Beacon1 @(21, 14)
+  cap4 = Beacon1 @(21, 17)
+  cap5 = Beacon1 @(21, 20)
+  cap6 = Beacon1 @(21, 23)
+  cap7 = Beacon1 @(21, 26)
+  cap8 = Beacon1 @(21, 29)
+  cap9 = Beacon1 @(21, 32)
+  cap10 = Beacon1 @(21, 35)
+  cap11 = Beacon1 @(21, 38)
+  top0 = Beacon1 @(1, 2)
+  bot0 = Beacon1 @(1, 41)
+  top1 = Beacon1 @(11, 2)
+  bot1 = Beacon1 @(11, 41)
+  top2 = Beacon1 @(21, 2)
+  bot2 = Beacon1 @(21, 41)
+  net o: ore -> a.ore_in, b.ore_in
+  net pa_: a.pl_out -> pa
+  net pb_: b.pl_out -> pb
+}
+
+# spring.fk's brick with 4 more cells a column: 28 furnaces, for a steel spring that takes a full belt of iron plates (45/s) and makes ~10 steel/s on two lanes.
+module Spring28<plate=iron-plate, ore=iron-ore> size 27x56 {
+  port ore : in  $ore | $ore @s6
+  port pa  : out $plate @s10
+  port pb  : out $plate @s20
+  a  = Stack<cell=FurnB, n=14, plate=$plate, ore=$ore> @(1, 5)
+  b  = Stack<cell=FurnB, n=14, plate=$plate, ore=$ore> @(11, 5)
+  cap0 = Beacon1 @(21, 5)
+  cap1 = Beacon1 @(21, 8)
+  cap2 = Beacon1 @(21, 11)
+  cap3 = Beacon1 @(21, 14)
+  cap4 = Beacon1 @(21, 17)
+  cap5 = Beacon1 @(21, 20)
+  cap6 = Beacon1 @(21, 23)
+  cap7 = Beacon1 @(21, 26)
+  cap8 = Beacon1 @(21, 29)
+  cap9 = Beacon1 @(21, 32)
+  cap10 = Beacon1 @(21, 35)
+  cap11 = Beacon1 @(21, 38)
+  cap12 = Beacon1 @(21, 41)
+  cap13 = Beacon1 @(21, 44)
+  top0 = Beacon1 @(1, 2)
+  bot0 = Beacon1 @(1, 47)
+  top1 = Beacon1 @(11, 2)
+  bot1 = Beacon1 @(11, 47)
+  top2 = Beacon1 @(21, 2)
+  bot2 = Beacon1 @(21, 47)
+  net o: ore -> a.ore_in, b.ore_in
+  net pa_: a.pl_out -> pa
+  net pb_: b.pl_out -> pb
+}

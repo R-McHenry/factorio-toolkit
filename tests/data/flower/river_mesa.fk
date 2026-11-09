@@ -1,0 +1,65 @@
+# river_mesa.fk: the Mesa river (megabelt RIVERS.md): 6.7 LDS/s from 97 copper ore/s, 43 iron
+# ore/s and 27 plastic/s. Canonical orientation: rim (ore in) north, mouth (all else) south.
+# Rim: three copper springs (6 lanes of copper), one iron spring and one steel spring.
+# Middle: six columns of 5 LDS assemblers, a copper lane each; steel | plastic on two trunks.
+import Spring from "spring.fk"
+import LdsB, SpringN from "mesacells.fk"
+import Beacon1 from "flowercells.fk"
+import Split from "routing.fk"
+
+module RiverMesa size 200x260 {
+  port cu_ore1 : in copper-ore | copper-ore @n34
+  port cu_ore2 : in copper-ore | copper-ore @n74
+  port cu_ore3 : in copper-ore | copper-ore @n114
+  port fe_ore1 : in iron-ore | iron-ore @n154
+  port plastic_in : in plastic-bar | plastic-bar @s40
+  port lds : out low-density-structure @s100
+  port tap : out low-density-structure | copper-plate @s120
+  cs0 = Spring<plate=copper-plate, ore=copper-ore> @(40, 50, rot 2)
+  cs1 = Spring<plate=copper-plate, ore=copper-ore> @(80, 50, rot 2)
+  cs2 = Spring<plate=copper-plate, ore=copper-ore> @(120, 50, rot 2)
+  fs  = SpringN<plate=iron-plate, ore=iron-ore> @(160, 56, rot 2)
+  sp  = Split<item=plastic-bar> @(38, 215)
+  ss  = SpringN<plate=steel-plate, ore=iron-plate> @(196, 56, rot 2)
+  c0 = Stack<cell=LdsB, n=5> @(30, 150)
+  t0 = Beacon1 @(30, 147)
+  b0 = Beacon1 @(30, 165)
+  c1 = Stack<cell=LdsB, n=5> @(45, 150)
+  t1 = Beacon1 @(45, 147)
+  b1 = Beacon1 @(45, 165)
+  c2 = Stack<cell=LdsB, n=5> @(60, 150)
+  t2 = Beacon1 @(60, 147)
+  b2 = Beacon1 @(60, 165)
+  c3 = Stack<cell=LdsB, n=5> @(75, 150)
+  t3 = Beacon1 @(75, 147)
+  b3 = Beacon1 @(75, 165)
+  c4 = Stack<cell=LdsB, n=5> @(90, 150)
+  t4 = Beacon1 @(90, 147)
+  b4 = Beacon1 @(90, 165)
+  c5 = Stack<cell=LdsB, n=5> @(105, 150)
+  t5 = Beacon1 @(105, 147)
+  b5 = Beacon1 @(105, 165)
+  net feo: fe_ore1 -> fs.ore
+  net fea items iron-plate: fs.pa -> ss.ore
+  net feb items iron-plate: fs.pb -> ss.ore
+  lanes fea | feb
+  net cuo0: cu_ore1 -> cs0.ore
+  net cuo1: cu_ore2 -> cs1.ore
+  net cuo2: cu_ore3 -> cs2.ore
+  net cu0: cs0.pa -> c0.cu_in
+  net cu1: cs0.pb -> c1.cu_in
+  net cu2: cs1.pa -> c2.cu_in
+  net cu3: cs1.pb -> c3.cu_in
+  net cu4: cs2.pa -> c4.cu_in
+  net cu5: cs2.pb -> c5.cu_in
+  net sta items steel-plate: ss.pa -> c0.sp_in, c1.sp_in, c2.sp_in
+  net pli items plastic-bar width 2: plastic_in -> sp.i
+  net pla items plastic-bar: sp.a -> c0.sp_in, c1.sp_in, c2.sp_in
+  lanes sta | pla
+  net stb items steel-plate: ss.pb -> c3.sp_in, c4.sp_in, c5.sp_in
+  net plb items plastic-bar: sp.b -> c3.sp_in, c4.sp_in, c5.sp_in
+  lanes stb | plb
+  net l: c0.l_out, c1.l_out, c2.l_out, c3.l_out, c4.l_out, c5.l_out -> lds, tap
+  net tcu items copper-plate: c5.cu_out -> tap
+  lanes l | tcu
+}

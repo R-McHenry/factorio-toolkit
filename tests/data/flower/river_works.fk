@@ -1,0 +1,75 @@
+# river_works.fk: the Works river (megabelt RIVERS.md): 8.2 engines/s, 1.8 electric engines/s,
+# 2.2 robot frames/s and 8.3 blue packs/s from 52 iron ore/s, with red and green circuits,
+# sulfur, batteries and lubricant brought in. Canonical orientation: ore at the north edge, the
+# mouth at the south.
+#
+#  - rim: two iron springs and a steel spring (a belt of plates for each steel column, which also
+#    feeds the gear or the pipe assemblers: equal ore on the two ports is right), gears and pipes;
+#  - the engine column hangs from the rim and flows south (28 cells, 9.4 engines/s);
+#  - four columns flow north from heads at the mouth: electric engines (7), robot frames (16),
+#    blue science (2 x 18). The two paired belts (red | green, sulfur | battery) are one net
+#    each (a sushi net: the toolkit splits it for the columns, a splitter keeps the lanes).
+import Spring from "spring.fk"
+import PlainCol, SteelSpring, PairM, PairU, EngCol, BlueCol, FrCol, EeCol from "workscells.fk"
+
+module RiverWorks size 200x200 {
+  port fe_ore1 : in  iron-ore | iron-ore @n33
+  port fe_ore2 : in  iron-ore | iron-ore @n63
+  port lube_in : in  lubricant @s18
+  port sb_in   : in  sulfur | battery @s86
+  port rg_in   : in  advanced-circuit | electronic-circuit @s90
+  port blue    : out chemical-science-pack @s120
+  port rf      : out flying-robot-frame @s140
+  port tap1    : out steel-plate | iron-gear-wheel @s163
+  port tap2    : out engine-unit | electric-engine-unit @s185
+
+  # the rim
+  spA = Spring @(36, 0)
+  spB = Spring @(66, 0)
+  spS = SteelSpring @(96, 0)
+  gears = PlainCol<recipe=iron-gear-wheel, ins=iron-plate, outp=iron-gear-wheel> @(128, 4)
+  pipes = PlainCol<recipe=pipe, ins=iron-plate, outp=pipe> @(148, 4)
+
+  # the columns
+  ec = EngCol @(118, 56)
+  ee = EeCol @(6, 122)
+  fr = FrCol @(34, 68)
+  b1 = BlueCol @(62, 56)
+  b2 = BlueCol @(90, 56)
+
+  # pairs of single belts
+  pt1 = PairM<a=steel-plate, b=iron-gear-wheel> @(160, 176)
+  pt2 = PairM<a=engine-unit, b=electric-engine-unit> @(182, 176)
+  pf  = PairU<a=electric-engine-unit, b=steel-plate> @(44, 173)
+
+  # iron
+  net ore1: fe_ore1 -> spA.ore
+  net ore2: fe_ore2 -> spB.ore
+  net fe_a: spA.pa, spA.pb -> spS.ora, gears.i
+  net fe_b: spB.pa, spB.pb -> spS.orb, pipes.i
+  net gr: gears.o -> ec.gr, pt1.b_in
+  net pp: pipes.o -> ec.pp
+  net st: spS.pa, spS.pb -> ec.st, pt1.a_in, pf.b_in
+
+  # engines, electric engines, frames, blue
+  net en: ec.r -> ee.en, b1.en, b2.en, pt2.a_in
+  net eeo: ee.o -> pf.a_in, pt2.b_in
+  net frames: fr.o -> rf
+  net blues: b1.o, b2.o -> blue
+  net lu: lube_in -> ee.lu
+
+  # taps and the frame column's pair
+  net t1s items steel-plate: pt1.p -> tap1
+  net t1g items iron-gear-wheel: pt1.p -> tap1
+  lanes t1s | t1g
+  net t2e items engine-unit: pt2.p -> tap2
+  net t2x items electric-engine-unit: pt2.p -> tap2
+  lanes t2e | t2x
+  net fe_ items electric-engine-unit: pf.p -> fr.e
+  net fs_ items steel-plate: pf.p -> fr.e
+  lanes fe_ | fs_
+
+  # red | green and sulfur | battery: one sushi net each, a pair of lanes that stays a pair
+  net rgs items advanced-circuit, electronic-circuit: rg_in -> b1.p1, b2.p1, fr.p1, ee.p1
+  net sbs items sulfur, battery: sb_in -> b1.p2, b2.p2, fr.p2
+}

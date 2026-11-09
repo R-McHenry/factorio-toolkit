@@ -1,0 +1,87 @@
+# corecells.fk: the core's cells (megabelt RIVERS.md "Core"): a five-pack lab cell and column, a
+# yellow science cell. Prod2 labs and assemblers, speed2 beacons (flowercells.fk's kinds).
+import Asm3P, Beacon1 from "flowercells.fk"
+
+kind LabP = Lab<modules=productivity-module-2>
+
+# One lab with all five packs: beacon x0..2, red|green belt x3, blue|purple belt x4, hands x5,
+# lab x6..8, hand x9, yellow belt x10. Stacked east, a lab sees its own column's 3 beacons and
+# the next column's 3, like RedB.
+module LabCell5 size 11x3 {
+  port pa_in  : in  automation-science-pack | logistic-science-pack @s3
+  port pa_out : out automation-science-pack | logistic-science-pack @n3
+  port pb_in  : in  chemical-science-pack | production-science-pack @s4
+  port pb_out : out chemical-science-pack | production-science-pack @n4
+  port py_in  : in  utility-science-pack @s10
+  port py_out : out utility-science-pack @n10
+  stack pa_in -> pa_out, pb_in -> pb_out, py_in -> py_out
+  be = Beacon1 @(0, 0)
+  lab = LabP @(6, 0)
+  net ra items automation-science-pack: pa_in -> lab, pa_out
+  net rg items logistic-science-pack:   pa_in -> lab, pa_out
+  lanes ra | rg
+  net rb items chemical-science-pack:   pb_in -> lab, pb_out
+  net rp items production-science-pack: pb_in -> lab, pb_out
+  lanes rb | rp
+  net ry: py_in -> lab, py_out
+}
+
+# A column of ten LabCell5 with the five pack belts running west to east across its foot (the
+# way LabColumn does), each splitting into the column; stacked east the columns make the field.
+module LabCol5 size 11x44 {
+  port p_in  : in  production-science-pack @w32
+  port p_out : out production-science-pack @e32
+  port g_in  : in  logistic-science-pack @w34
+  port g_out : out logistic-science-pack @e34
+  port r_in  : in  automation-science-pack @w36
+  port r_out : out automation-science-pack @e36
+  port b_in  : in  chemical-science-pack @w38
+  port b_out : out chemical-science-pack @e38
+  port y_in  : in  utility-science-pack @w40
+  port y_out : out utility-science-pack @e40
+  stack p_in -> p_out, g_in -> g_out, r_in -> r_out, b_in -> b_out, y_in -> y_out
+  labs = Stack<cell=LabCell5, n=10> @(0, 0)
+  net r: r_in -> labs.pa_in, r_out
+  net g: g_in -> labs.pa_in, g_out
+  net b: b_in -> labs.pb_in, b_out
+  net p: p_in -> labs.pb_in, p_out
+  net y: y_in -> labs.py_in, y_out
+}
+
+# The end of a tap in the hub: a belt of two items, a lane each, comes in at the north edge and
+# runs straight on past two passive provider chests, one per item, each fed by a hand, to the
+# south edge (a paired belt needs its straight run to an end port; the end is left unconnected).
+# Place it turned so the north port faces the tap. 7x7: chests x1 and x5, hands x2 and x4, belt x3.
+module TapArm<a, b> size 7x7 {
+  port t     : in  $a | $b @n3
+  port t_out : out $a | $b @s3
+  ca = Chest<provider, limit=4> @(1, 3)
+  cb = Chest<provider, limit=4> @(5, 3)
+  net na items $a: t -> ca, t_out
+  net nb items $b: t -> cb, t_out
+  lanes na | nb
+}
+
+# The belt mall's reserved ground, kept empty: nothing else is placed or routed through it.
+module MallArea size 100x120 {
+}
+
+# Yellow science: the geometry of RedB. LDS up the far belt (x3), processing units | robot frames
+# up the near one (x4), packs back down the east belt (x10); beacon x0..2, machine x6..8.
+# 2 pu + 1 frame + 3 LDS -> 3 packs in 21 s; 14 machines make ~8.7/s with 6 beacons (13 make 8.07).
+module YellowB size 11x3 {
+  port l_in   : in  low-density-structure @s3
+  port l_out  : out low-density-structure @n3
+  port pr_in  : in  processing-unit | flying-robot-frame @s4
+  port pr_out : out processing-unit | flying-robot-frame @n4
+  port y_in   : in  utility-science-pack @n10
+  port y_out  : out utility-science-pack @s10
+  stack l_in -> l_out, pr_in -> pr_out, y_out -> y_in
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=utility-science-pack, beacons=6> @(6, 0)
+  net l: l_in -> a, l_out
+  net u items processing-unit:     pr_in -> a, pr_out
+  net f items flying-robot-frame:  pr_in -> a, pr_out
+  lanes u | f
+  net y: y_in, a -> y_out
+}

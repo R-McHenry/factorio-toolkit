@@ -40,10 +40,10 @@ SIZES = {"gears": "16x16", "smelting": "26x26", "shared-belt": "26x23", "smelter
          "early-mall": "49x24", "compact-mall": "50x16", "bus4": "54x25", "busbase": "172x82",
          "furnace-column": "31x41", "robot-feed": "12x8", "steam": "16x26", "bus4ribs": "100x40",
          "blue6": "60x40", "beacon-cells": "44x40", "red-chain": "92x76", "belt-switch": "64x70",
-         "mate": "40x40", "layout": "34x44"}
+         "mate": "40x40", "layout": "34x44", "territory": "40x40"}
 #: 40-layout: the examples with no `@(x, y)` hints, laid out with `fk layout --write` (as the
 #: chapter does) before the paper build
-LAID_OUT = {"layout"}
+LAID_OUT = {"layout", "territory"}
 #: the fk wrapper's own commands (agent/fk.py) besides fkcore's subcommands
 WRAPPER = {"build", "look", "wait", "stage", "lab", "alone", "sim", "map", "capture", "catalog",
            "route", "place", "report", "compile", "lua", "stats"}

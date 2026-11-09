@@ -1,0 +1,280 @@
+# workscells.fk: the Works river's cells (megabelt RIVERS.md). Tall cells: an assembler and a
+# beacon one above the other (a cell 6 tall), so four belts fit round the assembler (two a
+# side, a long hand reaching the far one). Each machine sees the beacon of its own cell and the
+# one of the cell beyond (2 beacons, ~2.34 speed); a cap beacon closes the head end.
+import Asm3P, Beacon1, FurnB from "flowercells.fk"
+
+# Blue science: advanced circuits | green on the far west belt (green only passes), sulfur |
+# battery on the near west belt (battery only passes), engines down the near east belt, packs
+# out on the far one. Belts x0 x1, hand x2, assembler x3..5, hand x6, belts x7 x8.
+module BlueV size 9x6 {
+  port p1_in  : in  advanced-circuit | electronic-circuit @s0
+  port p1_out : out advanced-circuit | electronic-circuit @n0
+  port p2_in  : in  sulfur | battery @s1
+  port p2_out : out sulfur | battery @n1
+  port o_out  : out chemical-science-pack @s7
+  port o_in   : in  chemical-science-pack @n7
+  port e_in   : in  engine-unit | engine-unit @s8
+  port e_out  : out engine-unit | engine-unit @n8
+  stack p1_in -> p1_out, p2_in -> p2_out, o_out -> o_in, e_in -> e_out
+  bc = Beacon1 @(3, 0)
+  a  = Asm3P<recipe=chemical-science-pack> @(3, 3)
+  net ad items advanced-circuit: p1_in -> a, p1_out
+  net gr items electronic-circuit: p1_in -> p1_out
+  lanes ad | gr
+  net su items sulfur: p2_in -> a, p2_out
+  net ba items battery: p2_in -> p2_out
+  lanes su | ba
+  net en items engine-unit: e_in -> a, e_out
+  net o: o_in, a -> o_out
+}
+
+# Robot frames: green circuits on the far west belt (the advanced circuits pass), batteries on the
+# near one (the sulfur passes), steel | electric engines down the far east belt, frames out on the
+# near one.
+module FrV size 9x6 {
+  port p1_in  : in  advanced-circuit | electronic-circuit @s0
+  port p1_out : out advanced-circuit | electronic-circuit @n0
+  port p2_in  : in  sulfur | battery @s1
+  port p2_out : out sulfur | battery @n1
+  port o_out  : out flying-robot-frame @s7
+  port o_in   : in  flying-robot-frame @n7
+  port e_in   : in  electric-engine-unit | steel-plate @s8
+  port e_out  : out electric-engine-unit | steel-plate @n8
+  stack p1_in -> p1_out, p2_in -> p2_out, o_out -> o_in, e_in -> e_out
+  bc = Beacon1 @(3, 0)
+  a  = Asm3P<recipe=flying-robot-frame> @(3, 3)
+  net ad items advanced-circuit: p1_in -> p1_out
+  net gr items electronic-circuit: p1_in -> a, p1_out
+  lanes ad | gr
+  net su items sulfur: p2_in -> p2_out
+  net ba items battery: p2_in -> a, p2_out
+  lanes su | ba
+  net ee items electric-engine-unit: e_in -> a, e_out
+  net st items steel-plate: e_in -> a, e_out
+  lanes ee | st
+  net o: o_in, a -> o_out
+}
+
+# Electric engines: green circuits on the far west belt (the advanced circuits pass), engines on
+# the near one, lubricant up a pipe on the east (the assembler turned so its pipe inputs face east),
+# electric engines down the far east belt. Hand x2, assembler x3..5, pipe stub x6, pipe x7, belt x8.
+module EeV size 9x6 {
+  port p1_in  : in  advanced-circuit | electronic-circuit @s0
+  port p1_out : out advanced-circuit | electronic-circuit @n0
+  port n_in   : in  engine-unit | engine-unit @s1
+  port n_out  : out engine-unit | engine-unit @n1
+  port l_in   : in  lubricant @s7
+  port l_out  : out lubricant @n7
+  port o_out  : out electric-engine-unit @s8
+  port o_in   : in  electric-engine-unit @n8
+  stack p1_in -> p1_out, n_in -> n_out, o_out -> o_in, l_in -> l_out
+  bc = Beacon1 @(3, 0)
+  a  = Asm3P<recipe=electric-engine-unit> @(3, 3, rot 1)
+  net ad items advanced-circuit: p1_in -> p1_out
+  net gr items electronic-circuit: p1_in -> a, p1_out
+  lanes ad | gr
+  net en items engine-unit: n_in -> a, n_out
+  net lu: l_in -> a, l_out
+  net o: o_in, a -> o_out
+}
+
+# Engines, flowing south: pipes down the far west belt, steel | gears down the near one, engines
+# collected on the east belt that ends at the column's south end. RedB's shape: the east column's
+# beacons (3 a machine) are the ones in reach. Belts x0 x1, hand x2, assembler x3..5, hand x6,
+# belt x7; the beacon column closes the east at x8.
+module EngD size 8x3 {
+  port k_in   : in  pipe | pipe @n0
+  port k_out  : out pipe | pipe @s0
+  port sg_in  : in  steel-plate | iron-gear-wheel @n1
+  port sg_out : out steel-plate | iron-gear-wheel @s1
+  port r_in   : in  engine-unit @n7
+  port r_out  : out engine-unit @s7
+  stack k_in -> k_out, sg_in -> sg_out, r_in -> r_out
+  a = Asm3P<recipe=engine-unit> @(3, 0)
+  net k items pipe: k_in -> a, k_out
+  net st items steel-plate: sg_in -> a, sg_out
+  net gr items iron-gear-wheel: sg_in -> a, sg_out
+  lanes st | gr
+  net r: r_in, a -> r_out
+}
+
+# A plain beaconed assembler cell (FurnB's shape): plates in up the west belt, the product down the
+# east one, 6 beacons a machine. Gears and pipes.
+module PlainB<recipe, ins, outp> size 10x3 {
+  port i_in  : in  $ins | $ins @s3
+  port i_out : out $ins | $ins @n3
+  port o_in  : in  $outp @n9
+  port o_out : out $outp @s9
+  stack i_in -> i_out, o_out -> o_in
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=$recipe> @(5, 0)
+  net i items $ins: i_in -> a, i_out
+  net o items $outp: o_in, a -> o_out
+}
+
+# Two plain cells: one lane of plates in, one lane of product out (~8.7 a machine).
+module PlainCol<recipe, ins, outp> size 16x16 {
+  port i : in  $ins | $ins @s4
+  port o : out $outp @s10
+  c = Stack<cell=PlainB, n=2, recipe=$recipe, ins=$ins, outp=$outp> @(1, 5)
+  cap0 = Beacon1 @(11, 5)
+  cap1 = Beacon1 @(11, 8)
+  top0 = Beacon1 @(1, 2)
+  bot0 = Beacon1 @(1, 11)
+  top1 = Beacon1 @(11, 2)
+  bot1 = Beacon1 @(11, 11)
+  net a items $ins: i -> c.i_in
+  net b items $outp: c.o_out -> o
+}
+
+# Two single-lane belts onto the two lanes of one: a pair for a port or a column.
+module PairM<a, b> size 8x6 {
+  port a_in : in  $a @n1
+  port b_in : in  $b @n5
+  port p    : out $a | $b @s3
+  net x items $a: a_in -> p
+  net y items $b: b_in -> p
+  lanes x | y
+}
+
+# The same turned over: the singles come in at the south, the pair leaves at the north.
+module PairU<a, b> size 8x6 {
+  port a_in : in  $a @s1
+  port b_in : in  $b @s5
+  port p    : out $a | $b @n3
+  net x items $a: a_in -> p
+  net y items $b: b_in -> p
+  lanes x | y
+}
+
+# Engines: a column of 28 EngD cells, head at the north, ~0.335 engines/s each at 2.7 speed
+# (3 beacons: the east column's), 9.4/s in all. Steel, gears and pipes in at the north, engines
+# out at the south.
+module EngCol size 16x92 {
+  port pp : in  pipe @n2
+  port st : in  steel-plate @n3
+  port gr : in  iron-gear-wheel @n5
+  port r  : out engine-unit @s9
+  c = Stack<cell=EngD, n=28> @(2, 4)
+  net k items pipe: pp -> c.k_in
+  net s items steel-plate: st -> c.sg_in
+  net g items iron-gear-wheel: gr -> c.sg_in
+  lanes s | g
+  net r_: c.r_out -> r
+  e00 = Beacon1 @(10, 1)
+  e01 = Beacon1 @(10, 4)
+  e02 = Beacon1 @(10, 7)
+  e03 = Beacon1 @(10, 10)
+  e04 = Beacon1 @(10, 13)
+  e05 = Beacon1 @(10, 16)
+  e06 = Beacon1 @(10, 19)
+  e07 = Beacon1 @(10, 22)
+  e08 = Beacon1 @(10, 25)
+  e09 = Beacon1 @(10, 28)
+  e10 = Beacon1 @(10, 31)
+  e11 = Beacon1 @(10, 34)
+  e12 = Beacon1 @(10, 37)
+  e13 = Beacon1 @(10, 40)
+  e14 = Beacon1 @(10, 43)
+  e15 = Beacon1 @(10, 46)
+  e16 = Beacon1 @(10, 49)
+  e17 = Beacon1 @(10, 52)
+  e18 = Beacon1 @(10, 55)
+  e19 = Beacon1 @(10, 58)
+  e20 = Beacon1 @(10, 61)
+  e21 = Beacon1 @(10, 64)
+  e22 = Beacon1 @(10, 67)
+  e23 = Beacon1 @(10, 70)
+  e24 = Beacon1 @(10, 73)
+  e25 = Beacon1 @(10, 76)
+  e26 = Beacon1 @(10, 79)
+  e27 = Beacon1 @(10, 82)
+  e28 = Beacon1 @(10, 85)
+  e29 = Beacon1 @(10, 88)
+}
+
+# Blue science: a column of 18 BlueV cells (~0.242 packs/s each, 2 beacons), 4.35/s.
+module BlueCol size 20x116 {
+  port p1 : in  advanced-circuit | electronic-circuit @s5
+  port p2 : in  sulfur | battery @s6
+  port en : in  engine-unit | engine-unit @s13
+  port o  : out chemical-science-pack @s12
+  c = Stack<cell=BlueV, n=18> @(5, 4)
+  cap = Beacon1 @(8, 112)
+  net ad items advanced-circuit: p1 -> c.p1_in
+  net gr items electronic-circuit: p1 -> c.p1_in
+  lanes ad | gr
+  net su items sulfur: p2 -> c.p2_in
+  net ba items battery: p2 -> c.p2_in
+  lanes su | ba
+  net en_ items engine-unit: en -> c.e_in
+  net o_: c.o_out -> o
+}
+
+# Robot frames: a column of 16 FrV cells (~0.145 frames/s each), 2.3/s.
+module FrCol size 20x104 {
+  port p1 : in  advanced-circuit | electronic-circuit @s5
+  port p2 : in  sulfur | battery @s6
+  port e  : in  electric-engine-unit | steel-plate @s13
+  port o  : out flying-robot-frame @s12
+  c = Stack<cell=FrV, n=16> @(5, 4)
+  cap = Beacon1 @(8, 100)
+  net ad items advanced-circuit: p1 -> c.p1_in
+  net gr items electronic-circuit: p1 -> c.p1_in
+  lanes ad | gr
+  net su items sulfur: p2 -> c.p2_in
+  net ba items battery: p2 -> c.p2_in
+  lanes su | ba
+  net ee items electric-engine-unit: e -> c.e_in
+  net st items steel-plate: e -> c.e_in
+  lanes ee | st
+  net o_: c.o_out -> o
+}
+
+# Electric engines: a column of 7 EeV cells (~0.29/s each), 2.0/s (lubricant caps it at 1.8).
+module EeCol size 20x50 {
+  port p1 : in  advanced-circuit | electronic-circuit @s5
+  port en : in  engine-unit @s6
+  port lu : in  lubricant @s12
+  port o  : out electric-engine-unit @s13
+  c = Stack<cell=EeV, n=7> @(5, 4)
+  cap = Beacon1 @(8, 46)
+  net ad items advanced-circuit: p1 -> c.p1_in
+  net gr items electronic-circuit: p1 -> c.p1_in
+  lanes ad | gr
+  net en_ items engine-unit: en -> c.n_in
+  net lu_: lu -> c.l_in
+  net o_: c.o_out -> o
+}
+
+# The steel spring (spring.fk's brick, steel on iron plates, ~8.4 steel/s) with an ore belt of its
+# own for each column, so each can be fed from its own belt of plates (the lane rule).
+module SteelSpring size 27x44 {
+  port ora : in  iron-plate | iron-plate @s4
+  port orb : in  iron-plate | iron-plate @s14
+  port pa  : out steel-plate @s10
+  port pb  : out steel-plate @s20
+  a  = Stack<cell=FurnB, n=10, plate=steel-plate, ore=iron-plate> @(1, 5)
+  b  = Stack<cell=FurnB, n=10, plate=steel-plate, ore=iron-plate> @(11, 5)
+  cap0 = Beacon1 @(21, 5)
+  cap1 = Beacon1 @(21, 8)
+  cap2 = Beacon1 @(21, 11)
+  cap3 = Beacon1 @(21, 14)
+  cap4 = Beacon1 @(21, 17)
+  cap5 = Beacon1 @(21, 20)
+  cap6 = Beacon1 @(21, 23)
+  cap7 = Beacon1 @(21, 26)
+  cap8 = Beacon1 @(21, 29)
+  cap9 = Beacon1 @(21, 32)
+  top0 = Beacon1 @(1, 2)
+  bot0 = Beacon1 @(1, 35)
+  top1 = Beacon1 @(11, 2)
+  bot1 = Beacon1 @(11, 35)
+  top2 = Beacon1 @(21, 2)
+  bot2 = Beacon1 @(21, 35)
+  net oa: ora -> a.ore_in
+  net ob: orb -> b.ore_in
+  net pa_: a.pl_out -> pa
+  net pb_: b.pl_out -> pb
+}

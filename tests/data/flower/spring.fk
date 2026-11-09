@@ -1,0 +1,35 @@
+# spring.fk: the rim's smelting brick (megabelt PLAN.md, "Springs"). One express belt of ore in
+# (both lanes, ~37.5 ore/s), two beaconed columns of 10 furnaces (prod2, 6 speed2 beacons each,
+# ~2.1 plates/s a furnace), two plate belts out, one a column (~21/s each, one lane: a column feeds a lane downstream). Steel is the
+# same brick on iron plates (~8.4 steel/s).
+import FurnB, Beacon1 from "flowercells.fk"
+
+module Spring<plate=iron-plate, ore=iron-ore> size 27x44 {
+  port ore : in  $ore | $ore @s6
+  port pa  : out $plate @s10
+  port pb  : out $plate @s20
+  a  = Stack<cell=FurnB, n=10, plate=$plate, ore=$ore> @(1, 5)
+  b  = Stack<cell=FurnB, n=10, plate=$plate, ore=$ore> @(11, 5)
+  cap0 = Beacon1 @(21, 5)
+  cap1 = Beacon1 @(21, 8)
+  cap2 = Beacon1 @(21, 11)
+  cap3 = Beacon1 @(21, 14)
+  cap4 = Beacon1 @(21, 17)
+  cap5 = Beacon1 @(21, 20)
+  cap6 = Beacon1 @(21, 23)
+  cap7 = Beacon1 @(21, 26)
+  cap8 = Beacon1 @(21, 29)
+  cap9 = Beacon1 @(21, 32)
+  # end rows: the first and last furnace of each column see 6 beacons too (11-08: 1.8 vs 2.1/s)
+  top0 = Beacon1 @(1, 2)
+  bot0 = Beacon1 @(1, 35)
+  top1 = Beacon1 @(11, 2)
+  bot1 = Beacon1 @(11, 35)
+  top2 = Beacon1 @(21, 2)
+  bot2 = Beacon1 @(21, 35)
+  net o: ore -> a.ore_in, b.ore_in
+  net pa_: a.pl_out -> pa
+  net pb_: b.pl_out -> pb
+}
+
+s = Spring @(0, 0)

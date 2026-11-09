@@ -989,6 +989,13 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
     (``all_``)."""
     if plot is None and not module:
         plot = _plot_of(path, flat)
+    # PLAN-ORGANIC part T: a scope that holds sealed modules without a hint is the world placer's
+    # (fkcore.territory: seeds with an area need, their territories a power diagram); the
+    # instance placer below keeps everything else
+    from . import territory
+    scope = territory.world_scope(flat, module)
+    if scope is not None:
+        return territory.layout_world(path, flat, cat, scope, all_, write, sweeps, plot)
     params = Params() if sweeps is None else Params(sweeps=int(sweeps))
     if from_out is not None:
         all_ = True              # a round of the loop moves what the last round placed
