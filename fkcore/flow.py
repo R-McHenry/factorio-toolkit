@@ -670,16 +670,19 @@ def _overlap_checks(factory, flat, lay, cat):
         edges = expand.port_edges(flat, lay, cat)
     except Exception:                           # the router reports a port it can't place
         edges = {}
-    for a, b, (x0, y0, x1, y1) in pairs:
+    for a, b, (x0, y0, x1, y1), n in pairs:
+        # 41-hull: the shared tiles' count and box; a box overlap reads as before
+        what = f"{x1 - x0}x{y1 - y0} tiles" if n == (x1 - x0) * (y1 - y0) else \
+            f"{n} tiles in {x1 - x0}x{y1 - y0}"
         out.append(Check("overlap", f"{factory} {a}",
-                         f"its frame and {b}'s share {x1 - x0}x{y1 - y0} tiles at "
+                         f"its frame and {b}'s share {what} at "
                          f"{x0},{y0}..{x1 - 1},{y1 - 1}: both modules' routes may use them, and "
                          "each is in the way of the other's"))
         for mine, other in ((a, b), (b, a)):
-            ob = expand.frame_of(flat, lay, other, cat)
+            ob = expand.frame_shape_of(flat, lay, other, cat)
             for key, pe in sorted(edges.items()):
                 tx, ty = pe.outside
-                if key.rsplit("/", 1)[0] == mine and ob[0] <= tx < ob[2] and ob[1] <= ty < ob[3]:
+                if key.rsplit("/", 1)[0] == mine and (tx, ty) in ob:
                     out.append(Check("overlap", f"{factory} {mine}",
                                      f"port {key.rsplit('/', 1)[-1]} opens at {tx},{ty}, inside "
                                      f"{other}'s frame: a net from outside both can't reach it"))
@@ -905,7 +908,7 @@ def _empty_slots(ctx, factory, lay):
     flat = ctx.flats.get(factory)
     if flat is None or not getattr(flat, "sealed", None):
         return frozenset()
-    from .expand import frame_of
+    from .expand import frame_shape_of
     full = {e.key.split("/")[:-1] and "/".join(e.key.split("/")[:-1]) for e in lay.entities.values()}
     tiles = set()
     for path in flat.sealed:
@@ -914,10 +917,9 @@ def _empty_slots(ctx, factory, lay):
         if any(o == path or o.startswith(path + "/") for o in full if o):
             continue
         try:
-            x0, y0, x1, y1 = frame_of(flat, lay, path, ctx.cat)
+            tiles |= frame_shape_of(flat, lay, path, ctx.cat).tiles()     # 41-hull: its tiles
         except Exception:            # a frame the fragment can't size: leave it to the poles
             continue
-        tiles |= {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
     return frozenset(tiles)
 
 

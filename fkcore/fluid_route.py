@@ -709,7 +709,7 @@ class Pass:
 
     def __init__(self, flat, lay, cat, blocked=(), box=None, limit=60000, jobs=None):
         from . import route as routemod                 # the belt jobs: their attach tiles stay free
-        from .expand import frame_of
+        from .expand import frame_shape_of
         self.flat, self.layout, self.cat, self.limit = flat, lay, cat, limit
         w0, h0 = lay.size or (0, 0)
         self.box = box or (0, 0, w0, h0)
@@ -722,13 +722,13 @@ class Pass:
         # inside a module. Now, as for belts (route.net_frames), a net inside a sealed module
         # routes in that module's frame and keeps off every other frame. 2.0.75: two sealed
         # frames that overlap share the tiles they both cover, as for belts
-        self.frames = {}
+        self.frames, self.tiles_of = {}, {}
         for path, rec in lay.insts.items():
             if rec.kind != "Literal" and path in flat.insts:
-                self.frames[path] = frame_of(flat, lay, path, cat)
+                shape = frame_shape_of(flat, lay, path, cat)      # 41-hull: a polygon's tiles
+                self.frames[path] = shape.box
+                self.tiles_of[path] = shape.tiles()
         self.sealed = set(getattr(flat, "sealed", ()) or ())
-        self.tiles_of = {p: {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
-                         for p, (x0, y0, x1, y1) in self.frames.items()}
         fluid_all = sorted(routemod.fluid_nets(flat, cat))
         self.edges = port_edges(flat, lay, cat)
         self.reach = int(cat.entity(_LAY[1]).get("max_distance") or 10)

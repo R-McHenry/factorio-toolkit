@@ -67,10 +67,16 @@ class Record:
     source: str = "build"              # build | alone | paste | register
     file: str | None = None            # fk paste: the file pasted (relative to the game folder)
     count: int = 0                     # entities in the paste
+    #: 41-hull (PLAN-ORGANIC H4): the placement's frame as row runs ``[[y, x0, x1], ...]`` in
+    #: map coordinates when it is not its ``area`` box (a shaped module); None for a box
+    frame: list | None = None
 
     def contains(self, x, y):
-        """True when tile (x, y) (a position works too) is inside the record's area."""
+        """True when tile (x, y) (a position works too) is inside the record's area: its frame's
+        tiles when it has one, else its box."""
         tx, ty = math.floor(float(x)), math.floor(float(y))
+        if self.frame:
+            return any(ry == ty and a <= tx < b for ry, a, b in self.frame)
         x0, y0, x1, y1 = self.area
         return x0 <= tx < x1 and y0 <= ty < y1
 

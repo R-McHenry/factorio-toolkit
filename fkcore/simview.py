@@ -248,7 +248,8 @@ def graph(sim, live=True):
 
 
 # -- the build ----------------------------------------------------------------------------------------
-_MODULE = re.compile(r"^\s*module\s+(\w+)(<[^>]*>)?\s*((?!size\b)\w+\s+)?(?:size\s+(\d+)x(\d+))?")
+_MODULE = re.compile(r"^\s*module\s+(\w+)(<[^>]*>)?\s*((?!size\b)(?!shape\b)\w+\s+)?"
+                     r"(?:size\s+(\d+)x(\d+)|shape\s+((?:\(\s*-?\d+\s*,\s*-?\d+\s*\)\s*)+))?")
 
 
 def _catalog(game):
@@ -285,8 +286,14 @@ def module_defs(game):
                 if seen and depth <= 0:
                     break
                 j += 1
-            out[m.group(1)] = {"file": f, "line": i + 1, "w": int(m.group(4) or 0),
-                               "h": int(m.group(5) or 0), "text": "\n".join(lines[i:j + 1])}
+            d = {"file": f, "line": i + 1, "w": int(m.group(4) or 0),
+                 "h": int(m.group(5) or 0), "text": "\n".join(lines[i:j + 1]), "shape": None}
+            if m.group(6):
+                # 41-hull: a `shape` module's box is its polygon's, and its frame is drawn as rows
+                verts = [(int(a), int(b)) for a, b in re.findall(r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)", m.group(6))]
+                d["w"], d["h"] = max(v[0] for v in verts), max(v[1] for v in verts)
+                d["shape"] = verts
+            out[m.group(1)] = d
     return out
 
 
@@ -329,14 +336,22 @@ def build_view(game, surface="nauvis", cat=None):
                 continue
             d = defs.get(i.kind)
             x0, y0 = i.x + p.x, i.y + p.y
+            rows = None
             if d and d["w"] and i.rot == 0:
                 box = [x0, y0, x0 + d["w"], y0 + d["h"]]
+                if d.get("shape"):
+                    try:
+                        from .frame import Frame
+                        rows = [[y, a, b] for y, a, b in
+                                Frame.from_polygon(d["shape"]).moved(x0, y0).runs()]
+                    except ValueError:          # a bad shape: drawn as its box
+                        rows = None
             elif i.path in boxes:
                 box = [round(v, 1) for v in boxes[i.path]]
             else:
                 continue
             frames.append({"name": i.path, "kind": i.kind, "plot": p.factory, "at": [x0, y0], "rot": i.rot,
-                           "box": box, "module": bool(d),
+                           "box": box, "rows": rows, "module": bool(d),
                            "params": {k: v for k, v in i.params.items()},
                            "n": sum(1 for e in lay.entities if e.split("/", 1)[0] == i.path),
                            "ports": [[n, x0 + px + .5, y0 + py + .5, pd, it] for n, px, py, pd, it in ports.get(i.path, [])]
@@ -460,6 +475,7 @@ function paint(){var c=document.getElementById('map'),W=c.clientWidth,H=c.client
  g.globalAlpha=1;
  if(FRAMES&&BUILD){g.font='11px system-ui';BUILD.frames.forEach(function(f){var on=f.name===SELMOD;if(!f.module&&!on)return;var x=ox+f.box[0]*S,y=oy+f.box[1]*S,w=(f.box[2]-f.box[0])*S,h=(f.box[3]-f.box[1])*S;
   g.strokeStyle=on?'#ffffff':'rgba(240,170,110,.75)';g.lineWidth=on?2.5:1.3;g.setLineDash(on?[]:[5,3]);g.strokeRect(x,y,w,h);g.setLineDash([]);
+  if(f.rows){g.fillStyle=on?'rgba(255,255,255,.14)':'rgba(240,170,110,.14)';f.rows.forEach(function(r){g.fillRect(ox+r[1]*S,oy+r[0]*S,(r[2]-r[1])*S,S)})}
   if(w>24){g.fillStyle=on?'#fff':'#f0aa6e';g.fillText(f.name+(f.kind!==f.name?' : '+f.kind:''),x+3,y-4)}
   f.ports.forEach(function(p){g.fillStyle='#9ece6a';g.beginPath();g.arc(ox+p[1]*S,oy+p[2]*S,Math.max(2.5,S*.3),0,7);g.fill();if(on&&S>=6){g.fillStyle='#9ece6a';g.fillText(p[0],ox+p[1]*S+S*.4,oy+p[2]*S+4)}})})}
  document.getElementById('minfo').textContent='Wheel to zoom, drag to pan, click a frame to see its module. '+(MODE==='build'?'The build is what fk last compiled (game\\world.fkp): the next paste puts it down.':v.e.filter(function(e){return e[7]}).length+' ghosts drawn faint.')}

@@ -44,7 +44,8 @@ def placed(text):
 class OverlapTest(unittest.TestCase):
     def test_the_shared_box_is_found(self):
         flat, lay = placed(TWO)
-        self.assertEqual(expand.frame_overlaps(flat, lay, CAT), [("pa", "pb", (26, 10, 30, 20))])
+        # 41-hull: the shared tiles' box and their count (a box overlap's count is its area)
+        self.assertEqual(expand.frame_overlaps(flat, lay, CAT), [("pa", "pb", (26, 10, 30, 20), 40)])
 
     def test_it_is_a_warning_at_place(self):
         flat, lay = placed(TWO)
