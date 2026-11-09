@@ -10,6 +10,8 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::OnceLock;
 
+mod place;
+
 type St = (i64, i64, i64, i64); // x, y, heading 0..3 = N E S W, just exited an underground
 type T = (i64, i64);
 
@@ -1165,6 +1167,8 @@ fn fkroute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(walk, m)?)?;
     m.add_function(wrap_pyfunction!(hubs, m)?)?;
     m.add_function(wrap_pyfunction!(grow, m)?)?;
+    m.add_function(wrap_pyfunction!(place::field, m)?)?;
+    m.add_function(wrap_pyfunction!(place::place, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
