@@ -1282,7 +1282,9 @@ def _level_lines(factory, flat, lay, r, cat):
     rows.sort(key=lambda t: (-t[0], -t[1], t[3]))
     lines, checks = [], []
     for took, n, bad, where, frame, u, name in rows[:_LEVELS_SHOWN]:
-        over = n > LEVEL_NETS or took > route.LEVEL_SECONDS
+        # ``>=`` so a level at the limit is flat too; with the kernel a two-net level can take
+        # exactly 0.0 s on Windows' clock, and test_levels' LEVEL_SECONDS = 0 then held nothing
+        over = n > LEVEL_NETS or took >= route.LEVEL_SECONDS
         lines.append(f"  level     {where}: {n} nets searched, {bad} failed, {took:.1f} s, frame "
                      f"{frame}" + (f"; flat: over {LEVEL_NETS} nets or {route.LEVEL_SECONDS:.0f} s"
                                    if over else ""))
