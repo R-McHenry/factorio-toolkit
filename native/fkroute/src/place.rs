@@ -705,8 +705,8 @@ use std::collections::BTreeMap;
 type SSeed = (String, (i64, i64), i64, i64, Option<At>, bool, Vec<(String, String, Option<i64>)>);
 /// One world net: name, weight in belts, terms (seed or -1 for an edge, port or edge index, driver).
 type WNet = (String, i64, Vec<(i64, i64, bool)>);
-/// sweeps, alpha, decay, reach, steps, cells, final_cell, trespass, iters, tol.
-type WParams = (i64, i64, i64, i64, Vec<i64>, Vec<i64>, i64, i64, i64, i64);
+/// sweeps, alpha, decay, reach, steps, cells, final_cell, trespass, iters, tol, plateau.
+type WParams = (i64, i64, i64, i64, Vec<i64>, Vec<i64>, i64, i64, i64, i64, i64);
 
 fn side_idx(s: &str) -> usize {
     match s {
@@ -1014,6 +1014,9 @@ impl<'a> World<'a> {
             let ks: Vec<usize> = ks.into_iter().filter(|&k| !self.dia.wall[k]).collect();
             return (self.nearest(&ks, partner), false);
         }
+        // 43-territory: the port stands where its belt leaves the frame (the tile outside a
+        // pinned port; unpinned, outside the frame's side nearest the partner), as
+        // fkcore.territory._World.term_cell
         let who_u = who as usize;
         let at = match self.at[who_u] {
             Some(a) => a,
@@ -1022,9 +1025,9 @@ impl<'a> World<'a> {
         let sd = &self.seeds[who_u];
         let (side, pos) = sd.ports[idx as usize];
         let rot = at.2.rem_euclid(4);
-        let tside = (side + rot as usize) % 4;
+        let d = (side + rot as usize) % 4;
+        let (w, h) = sd.size;
         if let Some(pos) = pos {
-            let (w, h) = sd.size;
             let (px, py) = match side {
                 0 => (pos, 0),
                 2 => (pos, h - 1),
@@ -1032,38 +1035,20 @@ impl<'a> World<'a> {
                 _ => (w - 1, pos),
             };
             let (tx, ty) = turn_tile(px, py, rot, (w, h));
-            let (tx, ty) = (at.0 + tx, at.1 + ty);
-            let k = match grid.cell_of(tx, ty) {
-                Some(k) => k,
-                None => return (None, true),
-            };
-            let (ci, cj) = (k as i64 % grid.gw, k as i64 / grid.gw);
-            if tside == 0 || tside == 2 {
-                let mine: Vec<usize> =
-                    (0..grid.gh).map(|cj2| (cj2 * grid.gw + ci) as usize).filter(|&k2| self.dia.owner[k2] == who).collect();
-                if !mine.is_empty() {
-                    let k2 = if tside == 0 { *mine.iter().min().unwrap() } else { *mine.iter().max().unwrap() };
-                    return (Some(k2), false);
-                }
-            } else {
-                let mine: Vec<usize> =
-                    (0..grid.gw).map(|ci2| (cj * grid.gw + ci2) as usize).filter(|&k2| self.dia.owner[k2] == who).collect();
-                if !mine.is_empty() {
-                    let k2 = if tside == 3 { *mine.iter().min().unwrap() } else { *mine.iter().max().unwrap() };
-                    return (Some(k2), false);
-                }
-            }
-            let mut b = self.dia.boundary(grid, who_u, tside);
-            if b.is_empty() {
-                b = self.owned(who);
-            }
-            return (self.nearest(&b, Some(grid.centre(k))), true);
+            let k = grid.cell_of(at.0 + tx + DX[d], at.1 + ty + DY[d]);
+            return (k, k.is_none());
         }
-        let mut b = self.dia.boundary(grid, who_u, tside);
-        if b.is_empty() {
-            b = self.owned(who);
-        }
-        (self.nearest(&b, partner), false)
+        let (x0, y0, x1, y1) = turned_box(at, sd.size);
+        let tiles: Vec<T> = match d {
+            0 => (x0..x1).map(|x| (x, y0 - 1)).collect(),
+            2 => (x0..x1).map(|x| (x, y1)).collect(),
+            3 => (y0..y1).map(|y| (x0 - 1, y)).collect(),
+            _ => (y0..y1).map(|y| (x1, y)).collect(),
+        };
+        let mut ks: Vec<usize> = tiles.iter().filter_map(|&(x, y)| grid.cell_of(x, y)).collect();
+        ks.sort();
+        ks.dedup();
+        (self.nearest(&ks, partner), false)
     }
 
     /// Where edge terminal `idx` stands for a seed at `point`: its pinned tile's centre, else the
@@ -1147,8 +1132,9 @@ impl<'a> World<'a> {
     }
 
     /// Dijkstra over the grid's cells inside `win`, as the Python heap orders (d, x, y); a cell
-    /// inside a placed seed's frame is closed unless it is one of the `goals`.
-    fn field(&self, seeds: &[usize], win: (i64, i64, i64, i64), priced: bool, goals: &[usize]) -> WField {
+    /// inside a placed seed's frame is closed unless it is one of the `goals`; a cell a seed not
+    /// in `own` holds costs `trespass`.
+    fn field(&self, seeds: &[usize], win: (i64, i64, i64, i64), priced: bool, goals: &[usize], own: &[i64]) -> WField {
         let grid = &self.grid;
         let (i0, j0, i1, j1) = win;
         let gw = grid.gw;
@@ -1195,7 +1181,8 @@ impl<'a> World<'a> {
                     if open(u) {
                         let mut nd = d + j * step;
                         if priced {
-                            nd += self.price[u] + if self.dia.owner[u] >= 0 { self.trespass * grid.c } else { 0 };
+                            let o = self.dia.owner[u];
+                            nd += self.price[u] + if o >= 0 && !own.contains(&o) { self.trespass * grid.c } else { 0 };
                         }
                         let lu = f.local(u).unwrap();
                         if f.dist[lu] < 0 || nd < f.dist[lu] {
@@ -1247,7 +1234,8 @@ impl<'a> World<'a> {
         let mut routes = Vec::new();
         let mut unreached = lost;
         let seeds: Vec<usize> = drivers.iter().map(|&(_ti, k)| k).collect();
-        let f = self.field(&seeds, win, priced, &all);
+        let own: Vec<i64> = terms.iter().filter(|t| t.0 >= 0).map(|t| t.0).collect();
+        let f = self.field(&seeds, win, priced, &all, &own);
         for &(ti, k) in &consumers {
             match f.get(k) {
                 Some(d) => {
@@ -1261,7 +1249,7 @@ impl<'a> World<'a> {
             }
         }
         if drivers.len() > 1 {
-            let fields: Vec<WField> = drivers.iter().map(|&(_ti, k)| self.field(&[k], win, priced, &all)).collect();
+            let fields: Vec<WField> = drivers.iter().map(|&(_ti, k)| self.field(&[k], win, priced, &all, &own)).collect();
             let mut in_tree: Vec<usize> = vec![0];
             while in_tree.len() < drivers.len() {
                 let mut best: Option<(i64, usize, usize)> = None;
@@ -1444,7 +1432,7 @@ pub fn place_seeds(
     i64,
     Vec<(i64, i64)>,
 )> {
-    let (sweeps_cap, alpha, decay, reach, steps, cells, final_cell, trespass, iters, tol) = params;
+    let (sweeps_cap, alpha, decay, reach, steps, cells, final_cell, trespass, iters, tol, plateau) = params;
     let steps = if steps.is_empty() { vec![1] } else { steps };
     let cells = if cells.is_empty() { vec![1] } else { cells };
     let needs: Vec<i64> = seeds.iter().map(|s| s.2).collect();
@@ -1472,6 +1460,10 @@ pub fn place_seeds(
     let mut cur = st.full(true);
     let mut sweeps = 0i64;
     let mut step_i = 0usize;
+    // the plateau rule (43-territory): per step; on the finest step it ends the loop
+    let mut best_lagr: Option<i64> = None;
+    let mut stale = 0i64;
+    let trace = std::env::var_os("FK_TRACE_SEEDS").is_some();
     while sweeps < sweeps_cap {
         let s = steps[step_i];
         let c = cells[step_i.min(cells.len() - 1)];
@@ -1514,7 +1506,9 @@ pub fn place_seeds(
             let owner0 = st.dia.owner.clone();
             let areas0 = st.dia.areas.clone();
             let own_cells: Vec<usize> = (0..st.grid.n).filter(|&k| owner0[k] == i as i64).collect();
-            for rot in 0..4i64 {
+            // 43-territory: the four rotations on the coarse steps (8 and up) only
+            let rots: Vec<i64> = if s >= 8 { vec![0, 1, 2, 3] } else { vec![cur_at.2.rem_euclid(4)] };
+            for &rot in &rots {
                 for &(dx, dy) in &deltas {
                     let at = (cur_at.0 + dx, cur_at.1 + dy, rot);
                     if at == cur_at || !st.fits(i, at) {
@@ -1561,7 +1555,24 @@ pub fn place_seeds(
                 if bk.0 < cur.lagr {
                     st.mv(i, Some(at));
                     st.dia.recompute(&st.grid, None);
-                    cur = st.full(true);
+                    // 43-territory: only the moved seed's nets are routed again, as the Python
+                    let mut lagr = base;
+                    for &n in mine {
+                        let wgt = nets[n].1;
+                        let (cst, rs, _un, _of) = st.eval_net(n, true);
+                        cur.costs[n] = cst;
+                        lagr += wgt * cst;
+                        for r in &rs {
+                            for &k in r {
+                                let old = u_base[k];
+                                u_base[k] = old + wgt;
+                                lagr += st.price[k] * ((old + wgt - 1).max(0) - (old - 1).max(0));
+                            }
+                        }
+                        cur.routes[n] = rs;
+                    }
+                    cur.u = u_base;
+                    cur.lagr = lagr;
                     moved = true;
                 }
             }
@@ -1577,9 +1588,20 @@ pub fn place_seeds(
             }
         }
         cur = st.full(true);
-        if !moved {
+        if trace {
+            eprintln!("sweep {} step {} cell {} moved {} lagr {} unpriced {}", sweeps, s, st.grid.c, moved, cur.lagr, (0..nn).map(|n| nets[n].1 * cur.costs[n]).sum::<i64>());
+        }
+        if best_lagr.map_or(true, |b| cur.lagr < b) {
+            best_lagr = Some(cur.lagr);
+            stale = 0;
+        } else {
+            stale += 1;
+        }
+        if !moved || (plateau > 0 && stale >= plateau) {
             if step_i + 1 < steps.len() {
                 step_i += 1;
+                best_lagr = None;
+                stale = 0;
             } else {
                 break;
             }

@@ -325,12 +325,15 @@ impl Diagram {
     }
 
     /// Capacity-constrained weights: rounds of recompute and step until every movable cell is
-    /// within `tol` per cent of its need or the cap. -> the rounds run.
+    /// within `tol` per cent of its need or the cap. -> the rounds run. A step that moved the
+    /// area the wrong way halves the rate, one that moved it not at all doubles it (43-territory:
+    /// a framed seed's dead zone below the weight that wins the ring outside its frame).
     pub fn adapt(&mut self, grid: &Grid, needs: &[i64], iters: i64, tol: i64) -> i64 {
         let n = self.n_seeds;
         let mut rate = vec![64i64; n];
         let mut last_dw = vec![0i64; n];
         let mut last_area = vec![0i64; n];
+        let mut over_w: Vec<Option<(i64, i64)>> = vec![None; n]; // (area, weight): the least cell at or over its need
         let side = (grid.x1 - grid.x0).max(grid.y1 - grid.y0);
         let cap = (2 * side) * (2 * side);
         let mut rounds = 0i64;
@@ -340,9 +343,24 @@ impl Diagram {
             for i in 0..n {
                 if last_dw[i] != 0 {
                     let seen = floordiv((self.areas[i] - last_area[i]) * 256, last_dw[i]);
-                    rate[i] = if seen > 0 { ((rate[i] + seen).div_euclid(2)).max(8).min(4096) } else { (rate[i] * 2).min(4096) };
+                    rate[i] = if seen > 0 {
+                        ((rate[i] + seen).div_euclid(2)).max(8).min(4096)
+                    } else if seen < 0 {
+                        (rate[i] * 2).min(4096)
+                    } else {
+                        (rate[i].div_euclid(2)).max(8)
+                    };
                 }
                 last_dw[i] = 0;
+            }
+            for i in 0..n {
+                if self.fixed[i].is_none()
+                    && self.points[i].is_some()
+                    && self.areas[i] >= needs[i]
+                    && over_w[i].map_or(true, |(a, _w)| self.areas[i] < a)
+                {
+                    over_w[i] = Some((self.areas[i], self.weights[i]));
+                }
             }
             let off: Vec<usize> = (0..n)
                 .filter(|&i| {
@@ -352,6 +370,19 @@ impl Diagram {
                 })
                 .collect();
             if off.is_empty() || rounds > iters {
+                // a cell left under its need takes the last weight that gave it its need
+                let mut raised = false;
+                for &i in &off {
+                    if let Some((_a, w)) = over_w[i] {
+                        if self.areas[i] < needs[i] && self.weights[i] < w {
+                            self.weights[i] = w;
+                            raised = true;
+                        }
+                    }
+                }
+                if raised {
+                    self.recompute(grid, None);
+                }
                 return rounds;
             }
             for i in off {
@@ -368,7 +399,8 @@ impl Diagram {
 
     /// No movable seed without a frame loses the cell under its point: there its power distance
     /// stays below the wall's and every other movable seed's (the weight raised to just above that
-    /// floor). A seed with a frame holds it outright and may shrink to it.
+    /// floor). A seed with a frame holds it outright; its need (the room factor) keeps its cell
+    /// larger than the frame, no floor (43-territory).
     fn keep_homes(&mut self, grid: &Grid, cap: i64) {
         let live: Vec<usize> = (0..self.n_seeds).filter(|&i| self.fixed[i].is_none() && self.points[i].is_some()).collect();
         for &i in &live {

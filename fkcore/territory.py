@@ -1,6 +1,8 @@
-"""fkcore.territory: the world placer (PLAN-ORGANIC part T, wave 1: T1 to T3).
+"""fkcore.territory: the world placer (PLAN-ORGANIC part T; wave 1 T1 to T3, wave 2 the fixes,
+pins and the command: docs/notes-41-territory.md, notes-43-territory.md).
 
-Where sealed modules are placed, each movable instance is a **seed** with an **area need**; its
+Where sealed modules are placed, each movable instance is a **seed** with an **area need** (its
+declared frame with ``TParams.room`` per cent round it, so neighbouring cells meet); its
 territory is its cell in a power diagram (an additively weighted Voronoi tessellation) over the
 plot, clipped by the blocked ground, rasterised on a coarse grid of ``cell`` tiles. The weights
 adapt in the same call until every cell holds its need (a cell under its need grows its weight,
@@ -10,15 +12,17 @@ seed. A fixed instance (one with an ``@`` hint) is a seed that does not move and
 exactly its frame.
 
 The forces are PLAN-4.0's Lagrangian over seeds (``fkcore.layout``): a sweep offers each movable
-seed +-s and +-2s on each axis and the four rotations (its declared frame must fit: inside the
-box, off the blocked ground and the other frames); a net's cost is the walk between the two
-modules' ports, each port on **its cell's boundary facing its partner** (the 2.0.41 rule applied
-to cells: a declared ``@side[pos]`` projected onto the cell, the outermost cell tile in that
-column or row; an unpinned port the boundary tile of its side nearest the partner's seed); the
-walk runs on the coarse grid inside the terminals' window, a tile inside any cell priced
-``trespass`` (the real router keeps out of a sealed frame), a tile several routes cross priced by
-lambda as the instance loop does. The step schedule is geometric (32 down to 1) and the grid
-follows it (8 tiles a cell for the two coarse steps, 4 after; the territories are cut at 1).
+seed +-s and +-2s on each axis and, on the coarse steps, the four rotations (its declared frame
+must fit: inside the box, off the blocked ground and the other frames); a net's cost is the walk
+between the two modules' ports, each port **where its belt leaves the frame** (the tile outside a
+declared ``@side[pos]``; an unpinned port outside the frame's side at the tile nearest its
+partner, the 2.0.41 rule); the walk runs on the coarse grid inside the terminals' window, free
+inside the net's own cells, a tile inside a third cell priced ``trespass`` (the real router keeps
+out of a sealed frame), a tile several routes cross priced by lambda as the instance loop does.
+The step schedule is geometric (32 down to 1) and the grid follows it (8 tiles a cell for the two
+coarse steps, 4 after; the territories are cut at 1); a step is done when nothing moves or the
+Lagrangian has not fallen for ``TParams.plateau`` sweeps. Every net weighs what the modules
+declare behind their ports (``net_weights``), no rate model.
 
 Every quantity is an integer (half-tiles for the seed points, quarter-tile^2 for the weights,
 milli-tiles for the costs), so the Rust kernel (``fkroute.voronoi``, ``fkroute.place_seeds``:
@@ -42,7 +46,7 @@ except ImportError:          # stdlib only: the native kernel is a speed-up, nev
     _native = None
 
 __all__ = ["Seed", "TNet", "TParams", "TSpec", "TResult", "voronoi", "runs_of", "place_seeds",
-           "need_of", "build_tspec", "layout_world", "world_scope"]
+           "need_of", "net_weights", "build_tspec", "layout_world", "world_scope"]
 
 MILLI = 1000
 ROOM = 3                     # the room factor build_spec gives an unbuilt module's instances
@@ -87,6 +91,13 @@ class TParams:
     trespass: int = MILLI     # milli-tiles added per tile inside any cell: a belt keeps outside
     iters: int = 40           # weight adaptation rounds per voronoi call
     tol: int = 5              # per cent of its need a cell may miss
+    #: 43-territory: a declared frame is the claim, its need is ``room`` per cent of it, so the
+    #: cells of neighbouring modules meet and their ports stand on a shared boundary (at 100 a
+    #: cell is its frame and no two cells touch)
+    room: int = 150
+    #: 43-territory: stop at the finest step once the Lagrangian has not improved for this many
+    #: sweeps (the cap ``sweeps`` stays the last resort)
+    plateau: int = 5
 
 
 @dataclass
@@ -347,12 +358,18 @@ class Diagram:
         """Capacity-constrained weights: ``iters`` rounds of recompute and step (a cell under its
         need grows its weight, over it shrinks, by the shortfall over the seed's **rate**, the
         tiles its cell gains per unit of weight as observed on the last step, in 1/256: it starts
-        at 1/4, a step that moved the area the wrong way or not at all halves it) until every
-        movable cell is within ``tol`` per cent of its need or the cap. -> the rounds run."""
+        at 1/4, a step that moved the area the wrong way halves it, a step that moved it not at
+        all doubles it) until every movable cell is within ``tol`` per cent of its need or the
+        cap. -> the rounds run. The no-change doubling (43-territory): a framed seed's cell is
+        exactly its frame for every weight below a threshold (the ring outside the frame is won
+        only past it), and a step too small to cross that dead zone used to be halved again and
+        again, so a cell once sunk to its frame never grew back (the wave-1 probe needed the
+        keep-home floor on framed seeds for that; the floor over-sized small cells)."""
         n = self.n_seeds
         rate = [64] * n
         last_dw = [0] * n
         last_area = [0] * n
+        over_w = [None] * n            # (area, weight): the least cell at or over its need seen
         cap = (2 * max(self.grid.x1 - self.grid.x0, self.grid.y1 - self.grid.y0)) ** 2
         rounds = 0
         while True:
@@ -361,12 +378,30 @@ class Diagram:
             for i in range(n):
                 if last_dw[i]:
                     seen = (self.areas[i] - last_area[i]) * 256 // last_dw[i]
-                    rate[i] = max(8, min(4096, (rate[i] + seen) // 2)) if seen > 0 \
-                        else min(4096, rate[i] * 2)
+                    if seen > 0:
+                        rate[i] = max(8, min(4096, (rate[i] + seen) // 2))
+                    elif seen < 0:
+                        rate[i] = min(4096, rate[i] * 2)
+                    else:
+                        rate[i] = max(8, rate[i] // 2)
                 last_dw[i] = 0
+            for i in range(n):
+                if self.fixed[i] is None and self.points[i] is not None and self.areas[i] >= needs[i] \
+                        and (over_w[i] is None or self.areas[i] < over_w[i][0]):
+                    over_w[i] = (self.areas[i], self.weights[i])
             off = [i for i in range(n) if self.fixed[i] is None and self.points[i] is not None
                    and abs(self.areas[i] - needs[i]) * 100 > tol * needs[i]]
             if not off or rounds > iters:
+                # 43-territory: a cell the rounds leave under its need takes the weight that gave
+                # it the least cell at or over its need (a small frame's ring comes whole: 64 or
+                # 116 tiles, never 96); over its need is the side the frame and its room ask for
+                raised = False
+                for i in off:
+                    if self.areas[i] < needs[i] and over_w[i] is not None and self.weights[i] < over_w[i][1]:
+                        self.weights[i] = over_w[i][1]
+                        raised = True
+                if raised:
+                    self.recompute()
                 return rounds
             for i in off:
                 diff = needs[i] - self.areas[i]
@@ -380,7 +415,10 @@ class Diagram:
     def keep_homes(self, cap):
         """No movable seed without a frame loses the cell under its point: there its power
         distance stays below the wall's and every other movable seed's (the weight raised to just
-        above that floor). A seed with a frame holds it outright and may shrink to it."""
+        above that floor). A seed with a frame holds it outright and needs no floor: what keeps
+        its cell larger than the frame is its need (``TParams.room``, 43-territory; the floor
+        tried on framed seeds gave a small module in a small plot a cell 50-70 % over its need,
+        the least cell the walls allow)."""
         grid, n = self.grid, self.n_seeds
         live = [i for i in range(n) if self.fixed[i] is None and self.points[i] is not None]
         for i in live:
@@ -593,7 +631,16 @@ class _World:
     # -- terminals
     def term_cell(self, term, partner):
         """The grid cell of a terminal: (seed, port) or (-1, edge). ``partner`` the other end's
-        seed point (half-tiles) or None. -> (cell index, off-frame) or (None, False)."""
+        point (half-tiles) or None. -> (cell index, off-box) or (None, False).
+
+        A module's port stands where its belt leaves the frame: the tile outside the frame at a
+        pinned ``@side[pos]`` (the tile ``fits`` keeps free), or, unpinned, outside the frame's
+        side at the tile nearest the partner (the 2.0.41 rule). 43-territory: wave 1 projected
+        the port onto its **cell's** boundary and walked between the boundaries, so the ground
+        between a frame and its cell's edge (up to 22 tiles a side with the room factor) cost
+        nothing and two frames anywhere inside two touching cells read as one belt apart; the
+        real router lays the belt from the frame, and so does the estimate now. The cells are
+        the ground a belt crosses for free (its own two) or at ``trespass`` (a third's)."""
         grid, dia = self.grid, self.dia
         who, idx, _drv = term
         if who < 0:
@@ -617,35 +664,27 @@ class _World:
         sd = self.spec.seeds[who]
         _name, side, pos = sd.ports[idx]
         rot = at[2] % 4
-        tside = _SIDES[(_SIDES.index(side) + rot) % 4]
+        d = (_SIDES.index(side) + rot) % 4
+        w, h = sd.size
         if pos is not None:
-            w, h = sd.size
             if side in "ns":
                 px, py = pos, (0 if side == "n" else h - 1)
             else:
                 px, py = (0 if side == "w" else w - 1), pos
             tx, ty = turn_tile(px, py, rot, (w, h))
-            tx, ty = at[0] + tx, at[1] + ty
-            k = grid.cell_of(tx, ty)
-            if k is None:
-                return None, True
-            ci, cj = k % grid.gw, k // grid.gw
-            mine = []
-            if tside in "ns":
-                mine = [cj2 * grid.gw + ci for cj2 in range(grid.gh) if dia.owner[cj2 * grid.gw + ci] == who]
-                if mine:
-                    return (min(mine) if tside == "n" else max(mine)), False
-            else:
-                mine = [cj * grid.gw + ci2 for ci2 in range(grid.gw) if dia.owner[cj * grid.gw + ci2] == who]
-                if mine:
-                    return (min(mine) if tside == "w" else max(mine)), False
-            # the column or row is not the cell's: the nearest boundary tile of that side
-            b = dia.boundary(who, tside) or [k2 for k2 in range(grid.n) if dia.owner[k2] == who]
-            return self._nearest(b, grid.centre(k)), True
-        b = dia.boundary(who, tside)
-        if not b:
-            b = [k2 for k2 in range(grid.n) if dia.owner[k2] == who]
-        return self._nearest(b, partner), False
+            k = grid.cell_of(at[0] + tx + _DX[d], at[1] + ty + _DY[d])
+            return k, k is None
+        x0, y0, x1, y1 = turned_box(at, sd.size)
+        if d == 0:
+            tiles = [(x, y0 - 1) for x in range(x0, x1)]
+        elif d == 2:
+            tiles = [(x, y1) for x in range(x0, x1)]
+        elif d == 3:
+            tiles = [(x0 - 1, y) for y in range(y0, y1)]
+        else:
+            tiles = [(x1, y) for y in range(y0, y1)]
+        ks = [grid.cell_of(x, y) for x, y in tiles]
+        return self._nearest(sorted({k for k in ks if k is not None}), partner), False
 
     def _nearest(self, ks, point):
         """The cell of ``ks`` nearest ``point`` (half-tiles; None: the first), ties (y, x)."""
@@ -724,12 +763,12 @@ class _World:
         return out
 
     # -- the walk
-    def field(self, seeds, window, priced=True, goals=()):
+    def field(self, seeds, window, priced=True, goals=(), own=()):
         """Dijkstra over the grid's cells inside ``window`` (i0, j0, i1, j1 inclusive), a step
         to the first cell within ``reach`` cells along a heading that is neither a wall nor inside
         a placed seed's frame (sealed: the router keeps out; a ``goals`` cell, a terminal, may be
         entered), at ``c`` milli-tiles a tile plus the cell's price and ``trespass`` when a seed
-        owns it. -> ({cell: dist}, {cell: pred})."""
+        not in ``own`` (the net's own modules) owns it. -> ({cell: dist}, {cell: pred})."""
         grid, dia, p = self.grid, self.dia, self.p
         i0, j0, i1, j1 = window
         gw = grid.gw
@@ -737,6 +776,7 @@ class _World:
         step = grid.c * MILLI
         frames = self.claims()
         goals = set(goals)
+        own = set(own)
 
         def open_(u):
             if dia.owner[u] == -2:
@@ -767,7 +807,8 @@ class _World:
                     if open_(u):
                         nd = d + j * step
                         if priced:
-                            nd += self.price[u] + (p.trespass * grid.c if dia.owner[u] >= 0 else 0)
+                            nd += self.price[u] + (p.trespass * grid.c if dia.owner[u] >= 0
+                                                   and dia.owner[u] not in own else 0)
                         if u not in dist or nd < dist[u]:
                             dist[u] = nd
                             pred[u] = k
@@ -810,7 +851,8 @@ class _World:
         win = self.window([k for _ti, k in drivers + consumers])
         routes, unreached = [], []
         goals = [k for _ti, k in drivers + consumers]
-        dist, pred = self.field([k for _ti, k in drivers], win, priced, goals)
+        own = [who for who, _i, _d in net.terms if who >= 0]
+        dist, pred = self.field([k for _ti, k in drivers], win, priced, goals, own)
         unreached.extend(lost)
         for ti, k in consumers:
             if k in dist:
@@ -820,7 +862,7 @@ class _World:
                 unreached.append(ti)
                 cost += self.penalty
         if len(drivers) > 1:
-            fields = [self.field([k], win, priced, goals) for _ti, k in drivers]
+            fields = [self.field([k], win, priced, goals, own) for _ti, k in drivers]
             in_tree = {0}
             while len(in_tree) < len(drivers):
                 best = None
@@ -940,6 +982,8 @@ def _place_seeds_py(spec):
                 for i in movable}
     costs, routes, u, lagr, _un, _of = full()
     sweeps, step_i = 0, 0
+    best_lagr, stale = None, 0           # the plateau rule: per step, the finest one stops
+    trace = os.environ.get("FK_TRACE_SEEDS") is not None
     while sweeps < p.sweeps:
         s = steps[step_i]
         c = cells[min(step_i, len(cells) - 1)]
@@ -965,7 +1009,10 @@ def _place_seeds_py(spec):
             owner0 = list(st.dia.owner)
             areas0 = list(st.dia.areas)
             own_cells = [k for k in range(st.grid.n) if owner0[k] == i]
-            for rot in range(4):
+            # 43-territory: a turn is a coarse move (a 200-tile module's ports swap sides), so
+            # the four rotations are offered on the coarse steps (8 and up) only; the fine steps
+            # slide the module, at a quarter of the evaluations
+            for rot in (range(4) if s >= 8 else (cur[2] % 4,)):
                 for dx, dy in deltas:
                     at = (cur[0] + dx, cur[1] + dy, rot)
                     if at == cur or not st.fits(i, at):
@@ -1002,7 +1049,21 @@ def _place_seeds_py(spec):
             if best is not None and best[0][0] < lagr:
                 st.move(i, best[1])
                 st.dia.recompute()
-                costs, routes, u, lagr, _un, _of = full()
+                # 43-territory: only the moved seed's nets are routed again (the others'
+                # terminals stand on their own frames and did not move; what a moved frame does
+                # to their paths the candidate step ignored too, and the sweep's end re-routes
+                # every net); half a sweep's cost at the fine grid
+                lagr = base
+                for n in mine:
+                    wgt = spec.nets[n].weight
+                    costs[n], routes[n], _un, _of = st.eval_net(n)
+                    lagr += wgt * costs[n]
+                    for r in routes[n]:
+                        for k in r:
+                            old = u_base.get(k, 0)
+                            u_base[k] = old + wgt
+                            lagr += st.price[k] * (max(0, old + wgt - 1) - max(0, old - 1))
+                u = u_base
                 moved = True
         sweeps += 1
         st.dia.adapt(st.needs, p.iters, p.tol)
@@ -1014,9 +1075,21 @@ def _place_seeds_py(spec):
             else:
                 st.price[k] = st.price[k] * p.decay // MILLI
         costs, routes, u, lagr, _un, _of = full()
-        if not moved:
+        if trace:
+            import sys
+            print(f"sweep {sweeps} step {s} cell {st.grid.c} moved {moved} lagr {lagr} unpriced "
+                  f"{sum(spec.nets[n].weight * costs[n] for n in range(nn))}", file=sys.stderr)
+        # with many bodies and nets something always moves (the price shifts a module by a step
+        # and back; the flower never left step 32 in wave 1), so a step is also done when the
+        # Lagrangian has not fallen for `plateau` sweeps on it: the next step, or the end
+        if best_lagr is None or lagr < best_lagr:
+            best_lagr, stale = lagr, 0
+        else:
+            stale += 1
+        if not moved or (p.plateau > 0 and stale >= p.plateau):
             if step_i + 1 < len(steps):
                 step_i += 1
+                best_lagr, stale = None, 0
             else:
                 break
     # the territories at tile resolution
@@ -1050,7 +1123,8 @@ def _flatten(spec):
     return (tuple(int(v) for v in spec.box), [tuple(int(v) for v in r) for r in spec.blocked],
             seeds, nets, edges,
             (int(p.sweeps), int(p.alpha), int(p.decay), int(p.reach), [int(s) for s in p.steps],
-             [int(c) for c in p.cells], int(p.final_cell), int(p.trespass), int(p.iters), int(p.tol)))
+             [int(c) for c in p.cells], int(p.final_cell), int(p.trespass), int(p.iters), int(p.tol),
+             int(p.plateau)))
 
 
 def _place_seeds_native(spec):
@@ -1117,6 +1191,88 @@ def world_scope(flat, module=None):
     return None
 
 
+def _port_rate(flat, key, item, make, seen):
+    """What stands behind port ``key`` for ``item``, from the machines' declared rates alone: the
+    makers' full-speed output (``make``) upstream of it, or the consumers' appetite (not
+    ``make``) downstream of it. ``_in_hold`` lists the nets a key consumes on (upstream of a
+    port: its module's inside for an out port, the parent's net for an in port), ``_out_hold``
+    the nets it drives (downstream); a port met on the way is followed through, so a Stack's
+    pass-through cells and a sub-module's ports add up to the machines at the end. ``seen``
+    collects the machines found ({key: rate}); -> whether any was. A Literal, a chest, a port
+    with nothing behind it declare no rate."""
+    tag = (key, item, make)
+    if tag in seen:
+        return False
+    seen[tag] = None
+    hold = flat._in_hold if make else flat._out_hold
+    known = False
+    for net_name in hold.get((key, item), ()):
+        net = flat.nets.get(net_name)
+        if net is None:
+            continue
+        for k, it in (net.drivers if make else net.consumers):
+            if it != item or k == key:
+                continue
+            if k in flat.ports:
+                known = _port_rate(flat, k, item, make, seen) or known
+                continue
+            m = flat.machines.get(k)
+            if m is None or m.extra.get("port"):
+                continue
+            r = (m.makes if make else m.needs).get(item, 0.0)
+            if 0 < r < math.inf:
+                seen[(k, item, make)] = r
+                known = True
+    return known
+
+
+def port_rate(flat, key, item, make):
+    """The rate in items/s behind port ``key`` for ``item`` (see :func:`_port_rate`), or None."""
+    seen = {}
+    if not _port_rate(flat, key, item, make, seen):
+        return None
+    return sum(r for r in seen.values() if r is not None)
+
+
+def net_weights(flat, cat, spec):
+    """Per net of ``spec``, its weight in belts from what the design declares, without a fed
+    rate model (43-territory): for each of the net's items, what the driving modules' machines
+    make of it at full speed and what the consuming modules' machines ask for (their recipes'
+    rates, summed down through sub-modules' ports), the flow the smaller of the two where both
+    are known, else the one that is; the items' flows summed over the pair's two lanes (a ``lanes
+    A | B`` net is one belt) and divided by a belt's throughput (the yellow belt, as the instance
+    placer's ``_weights`` counts), rounded up, at least 1. A net with no rate behind either end
+    weighs 1 (one lane or two), and so does a fluid net: a pipe is one carrier whatever flows.
+    The scope's own edge ports have nothing behind them at this level: the module's end gives
+    the rate."""
+    per = max(1e-9, cat.belt_throughput("transport-belt"))
+    out = []
+    for tnet in spec.nets:
+        names = flat.pairs.get(tnet.name) or (tnet.name,)
+        keys = {spec.seeds[who].ports[idx][0] for who, idx, _drv in tnet.terms if who >= 0}
+        rate, fluid = 0.0, True
+        for name in names:
+            net = flat.nets.get(name)
+            if net is None:
+                continue
+            for item in net.items:
+                if not cat.is_fluid(item):
+                    fluid = False
+                supply = [port_rate(flat, k, item, True) for k, it in net.drivers
+                          if it == item and k in keys]
+                demand = [port_rate(flat, k, item, False) for k, it in net.consumers
+                          if it == item and k in keys]
+                have = []
+                for side in (supply, demand):
+                    got = [r for r in side if r is not None]
+                    if got:
+                        have.append(sum(got))
+                if have:
+                    rate += min(have)
+        out.append(1 if fluid else max(1, int(math.ceil(rate / per - 1e-9))))
+    return out
+
+
 @dataclass
 class BuiltWorld:
     spec: TSpec
@@ -1131,7 +1287,7 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
     the claim, its ports in its own frame), a placed non-module instance a blocked rectangle, the
     scope's own ports edge terminals; the scope's nets between them, weighted in belts."""
     from .expand import _own_frame, ports_of
-    from .layout import _weights
+    params = params or TParams()
     notes, seeds, paths = [], [], []
     blocked = []
     if scope:
@@ -1169,6 +1325,9 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
         else:
             size = (int(inst.size[0]), int(inst.size[1]))
         need, min_w = need_of(flat, cat, path)
+        # 43-territory: the frame is the claim, the need has room round it (TParams.room), so
+        # neighbouring cells meet and the ports between them stand on a shared boundary
+        need = max(need, size[0] * size[1] * int(params.room) // 100)
         ports = []
         for key in ports_of(flat, path):
             port = flat.ports[key]
@@ -1193,21 +1352,20 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
         for key, _item in net.consumers:
             if key in index:
                 terms.setdefault(name, []).append(index[key] + (False,))
-    weights = _weights(flat, cat)
-    for pair in set(lane_of.values()):
-        weights[pair] = max(weights.get(p, 1) for p in pair.split("|"))
     nets = []
     for name, ts in sorted(terms.items()):
         ts = sorted(set(ts))
         if any(d for _a, _b, d in ts) and any(not d for _a, _b, d in ts):
-            nets.append(TNet(name, weights.get(name, 1), ts))
+            nets.append(TNet(name, 1, ts))
     if box is None:
         area = sum(sd.need for sd in seeds)
         side = int(math.ceil(math.sqrt(2 * area))) + 2
         x1 = max([side] + [turned_box(sd.at, sd.size)[2] for sd in seeds if sd.at is not None])
         y1 = max([side] + [turned_box(sd.at, sd.size)[3] for sd in seeds if sd.at is not None])
         box = (0, 0, x1, y1)
-    spec = TSpec(box, blocked, seeds, nets, edges, params or TParams())
+    spec = TSpec(box, blocked, seeds, nets, edges, params)
+    for net, w in zip(nets, net_weights(flat, cat, spec)):
+        net.weight = w
     return BuiltWorld(spec, paths, notes, scope, box_from)
 
 
@@ -1332,8 +1490,9 @@ def layout_world(path, flat, cat, scope, all_=False, write=False, sweeps=None, p
         if res.at[i] is None:
             continue
         pct = (res.areas[i] * 100 // sd.need) if sd.need else 0
-        flag = "  (off its need)" if sd.movable and \
-            abs(res.areas[i] - sd.need) * 100 > spec.params.tol * sd.need else ""
+        flag = ""
+        if sd.movable and abs(res.areas[i] - sd.need) * 100 > spec.params.tol * sd.need:
+            flag = "  (under its need)" if res.areas[i] < sd.need else "  (over its need)"
         out.append(f"  cell {built.paths[i]}: {res.areas[i]} tiles of {sd.need} needed ({pct} %)"
                    f"{flag}")
     before = sum(c for c in res.before if c >= 0)

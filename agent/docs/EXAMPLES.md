@@ -850,11 +850,15 @@ runs in Python, about a minute for this file. A sealed module is laid out inside
 with its ports fixed: `fk layout grove.fk Grove`; a Stack inside it moves as one body.
 
 **territory.fk** (plot 40x40) is two sealed modules with no positions. Sealed modules without an
-`@` are placed as **territories**: each is a seed with an area need (its declared frame's area; a
-module without a `size` needs three times its instances' footprints), its territory is its cell in
-a weighted Voronoi diagram over the plot (the weights adapted until every cell holds its need; a
-tile nearer the plot's edge or a blocked region than any seed belongs to no one), and the same
-sweep moves the seeds until the belts between the modules' ports are short:
+`@` are placed as **territories**: each is a seed with an area need (its declared frame with 50 %
+room round it, so neighbouring cells meet; a module without a `size` needs three times its
+instances' footprints), its territory is its cell in a weighted Voronoi diagram over the plot (the
+weights adapted until every cell holds its need; a tile nearer the plot's edge or a blocked region
+than any seed belongs to no one), and the same sweep moves the seeds until the belts between the
+modules' ports are short. A net weighs what the modules declare behind their ports (the makers'
+full-speed output on one side, the consumers' appetite on the other, the smaller of the two in
+belts): here the gear belt is one belt, in a base a furnace column's ore pulls three or four times
+as hard as a circuit trickle.
 
 ```
 fk layout territory.fk --plot 40x40
@@ -862,26 +866,30 @@ fk layout territory.fk --plot 40x40
 
 ```
 layout territory: 2 modules, 2 placed now, 0 kept, 0 fixed; 1 nets; plot 40x40 (--plot); territories (fkroute)
-  a = Maker @(20, 8, rot 3)
-  b = Taker @(40, 8, rot 2)
-  cell a: 64 tiles of 64 needed (100 %)
-  cell b: 64 tiles of 64 needed (100 %)
-  estimated belts 32 -> 10 over 1 nets; every net reaches its consumers; 0 hot tiles; 9 sweeps
-  shared boundary: 0 of 1 nets between modules have their cells touching; apart: g (a|b)
+  a = Maker @(28, 0)
+  b = Taker @(32, 16, rot 3)
+  cell a: 95 tiles of 96 needed (98 %)
+  cell b: 126 tiles of 96 needed (131 %)  (over its need)
+  estimated belts 32 -> 4 over 1 nets; every net reaches its consumers; 0 hot tiles; 9 sweeps
+  shared boundary: 1 of 1 nets between modules have their cells touching
   territories: out\territories.json
   took 0.0 s (fkroute)
 ```
 
-One `cell` line per module gives its territory's area against its need (`off its need` when it
-misses by more than 5 %: a check, not a gate); `shared boundary` says which nets between modules
-have their cells touching, so their ports stand on a common boundary; `out\territories.json`
-holds every cell as row runs with the module's position, need, area and port tiles. A port on a
-cell's boundary faces its partner: a pinned `@s2` projected onto the cell, an unpinned one at the
-boundary tile nearest the partner. A declared frame is the module's claim inside its cell (the
-cell is the frame itself when the need is the frame's area, as here); the walk between ports
-keeps out of every placed frame, as the router does. `--write` puts the hints in, and `fk build
---to report_checks` gives `territory: 4 nets: 4 connected, 0 open, 0 unrouted; 0 SPILL; 30
-entities, 25 edges, 0 underground pairs`.
+One `cell` line per module gives its territory's area against its need (`under its need` or
+`over its need` when it misses by more than 5 %: a check, not a gate; a small frame's ring of
+tiles comes whole, so `b` is left over its need rather than under it); `shared boundary` says
+which nets between modules have their cells touching, so their ports stand on a common boundary;
+`out\territories.json` holds every cell as row runs with the module's position, need, area and
+port tiles. A port stands where its belt leaves the frame: the tile outside a pinned `@s2`, or,
+unpinned, outside the frame's side at the tile nearest the partner; the walk between ports keeps
+out of every placed frame, as the router does, crosses the two modules' own cells for free and
+pays a tile per tile inside a third's. A declared frame is the module's claim inside its cell;
+the cell is the frame with room round it, so two neighbours' cells meet. The sweep refines its
+step (32 down to 1 tile) when nothing moves or the estimate has not fallen for five sweeps, and
+stops at the finest. `--write` puts the hints in, and `fk build --to report_checks` gives
+`territory: 4 nets: 4 connected, 0 open, 0 unrouted; 0 SPILL; 24 entities, 19 edges, 0
+underground pairs` (30 entities and 25 edges in wave 1, when the two frames stood apart).
 
 ## 10. power-shed.fk and steam.fk: power
 
