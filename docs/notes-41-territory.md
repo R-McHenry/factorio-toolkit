@@ -82,7 +82,18 @@ sweep keeps trying). The Python reference takes 19 s for *one* sweep on the 8-ti
 reference, not the tool.
 
 **The paper build** of the laid-out open flower against the corridor flower (`fk build --to
-report_checks`, the docs template): PAPER
+report_checks`, the docs template, `terrain none`, plot 900x1024): both builds were started at
+02:05 on 2026-11-09 in the session's scratchpad (`flower5\` the open flower with the seven hints
+written, `flowerc\` the corridor `flower.fk`; `paper_open.log` and `paper_corridor.log` get the
+summary line, the check-line counts and the carriers by net depth when each finishes) and were
+still routing their rivers' insides (fen's units, after the core's lab fields at 15 to 30 s each)
+when this note was written: a whole flower on paper routes some 6,500 nets, tens of minutes. The
+comparison that matters is the carriers of the flower-level nets (net depth 1 in the .fkp, 55 of
+them) against the corridor layout's 27 flows through four corridor modules; the rivers' insides
+are the same files in both. To redo it: `python tests/data/flower/open_flower.py`, copy
+`tests/data/flower/*.fk` to a game folder, `fk layout flower_open.fk FlowerOpen --write`, then
+the docs template through `report_checks` with `place flower_open = flower_open plot 0,0
+900x1024` in `nauvis.surface`.
 
 **Synthetic.** `FK_NATIVE=check` parity: 30 random `voronoi` calls (fixed seeds, frames, blocked
 rectangles, cells 1 to 8) and 12 random `place_seeds` specs (4 seeds, some placed, some fixed,
@@ -109,8 +120,12 @@ than the walls). Crowded random seeds with incompatible needs stop at the cap, a
   have nothing behind them on paper, so every net is one belt; the plan's ring order (fen NE for
   the plastic and acid into circuit) is not recovered. A port's declared pair or the contract's
   rates would weigh the nets without a fed design.
-- **The sweep hits its cap (60).** 0.23 s a sweep on the flower; a higher cap is affordable
-  (`--sweeps`), measured below when the paper builds are done.
+- **The sweep hits its cap (60) and does not settle.** 0.23 s a sweep on the flower alone;
+  `--sweeps 150` ends at 10061 estimated belts, 300 at 9475, 150 with alpha 100 at 9485 (60: 9695;
+  all with a paper build running beside, 51 to 109 s), every one at its cap: the price keeps
+  moving the modules by a step and the unpriced estimate wanders within 6 %. PLAN-4.0's loop
+  stops when nothing moves at step 1; with seven bodies and 55 nets of weight 1 something always
+  moves. A plateau rule (stop when the Lagrangian has not improved for k sweeps) is the fix.
 - **Unpinned edge ports collapse onto one tile.** The flower's 8 copper and iron feeds for
   circuit each take the edge tile nearest circuit's pinned rim port (that part is right), but
   nets to the core's pinned ports share the few tiles before them: 2168 hot tiles, which the price
