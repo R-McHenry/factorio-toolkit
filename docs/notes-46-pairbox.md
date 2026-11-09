@@ -43,11 +43,14 @@ routing in the flower against the same column alone:
    `_CLIP` tiles of the laid carriers (the judge walks from the net's own ends, machines the
    carriers touch).
 
-Also `fkcore/link.py` `read_output`: the game writes its answer file after the RCON reply, on
-its own thread, and the flower's paste answer (8.8 MB, 48,560 ghosts) landed a second after the
-toolkit tried to read it, so the apply step died at the read and the ghosts were never revived
-(the diff's snapshot of the same area the same). The read now waits for the file, and for its
-JSON to be whole, up to `FILE_WAIT` (180 s, `FK_FILE_WAIT`; the 10 MB answer took 30 s to land).
+Also `fkcore/link.py` `read_output`: it opened the game's answer file once, the moment the RCON
+reply came. The game writes that file on its own thread after the reply, and the flower's paste
+answer is 10 MB (48,560 ghosts) on the WSL share, so a read at once can meet no file or half of
+one. The read now waits for the file, and for its JSON to be whole, up to `FILE_WAIT` (180 s,
+`FK_FILE_WAIT`). Found while the flower's first applies died at that read; their actual cause
+was this session's shell handing `FK_SCRIPT_OUTPUT` over with one backslash of the UNC path
+eaten (Git Bash; `bin\fk.py` sets the env from run.json in Python and has no such problem), so
+the toolkit looked beside a path that did not exist while the game had written the answer.
 
 No ROUTER bump: the ground is the same set of tiles and the judge the same verdict; only the
 time changes.

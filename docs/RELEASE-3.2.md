@@ -136,9 +136,8 @@ lab's stand-in ground; `docs\notes-46-pairbox.md`):
   out of its 3 s where the core alone took 0.8; they route now, and a column's pair search costs
   in the flower what it costs alone.
 - **`read_output` waits for the game's answer file**: the game writes it after the RCON reply, on
-  its own thread, and the flower's paste answer (8.8 MB, 48,560 ghosts) landed a second after the
-  read, so the apply died there and the ghosts were never revived. Up to `FILE_WAIT` (180 s,
-  `FK_FILE_WAIT`).
+  its own thread, and the flower's paste answer is 10 MB (48,560 ghosts) on a network share; a
+  read at once can meet no file or half of one. Up to `FILE_WAIT` (180 s, `FK_FILE_WAIT`).
 - Measured, not changed: the route step's fixed cost on a 6500-net flower is `seal_checks`
   (278 of 406 s: every entity's tiles against every sealed frame), the design database's reads
   and writes (64 s) and `connect.graph` (44 s); the searching itself was 45 s.
