@@ -127,9 +127,104 @@ ring): the weights are what brings fen beside circuit.
 96 and 122 of 96 (over), 1 of 1 nets touching, 4 estimated belts, 9 sweeps, 0.0 s; the paper
 build routes its 4 nets: `24 entities, 19 edges` (wave 1: 30 and 25, the frames apart).
 
+## Step 2: T4 pins on ore, T5 the command on a surface
+
+### What landed
+
+- **T4, pins.** `Seed.pin` (the cell as row runs) and `Seed.patch` (its name). A module
+  instance with `@patch(RES)` is pinned when the design has ground to read: `placer.patch` for
+  `RES#k`, else `placer.nearest_patch` to the box's centre (there is no position to be near
+  before the layout; the notes say so). Its frame is centred on the patch's centroid at rot 0
+  (clipped into the box; an `@(x, y)` written beside the pin is taken as the position), its
+  cell is `pin_cell`: the patch's tiles and the frame's, grown ring by ring (`grow_to_need`,
+  4-neighbours, inside the box, off the water) to the need, as runs (`runs_from_tiles`). In the
+  diagram (`Diagram(..., pins=)`, Python and Rust) a pinned cell is `fixed_owner` over any wall
+  (the ore under it is a wall for everyone else), the seed is **static** (fixed or pinned:
+  competes for nothing, no weight, no prune), and `fits` keeps every other frame off the pinned
+  cell's rectangles (`rects_of_runs`, both kernels) as off the ore and the water. `fkroute.voronoi`
+  takes `pins=` (eleventh argument); `place_seeds`' seed tuple carries the runs as its eighth
+  element. The report reads `pinned on iron-ore#1` on the cell line and `name = Kind @(x, y)` for
+  the pinned module too; `--write` puts `@(x, y)` beside `@patch(...)` (the grammar takes both;
+  `fk build` then places it there and the pin stays the design's word). `territories.json` gets
+  one key per pinned cell, `"pinned": "iron-ore#1"`, and `"terrain": "<name>"` at the top; the
+  runs and the rest are as wave 1 wrote them (part H's `Frame.from_runs` reads them unchanged).
+- **T5, the command on a surface.** `fk layout nauvis.fk [--write] [--all]` on the top level:
+  `surface_ground(path, flat)` reads the surface file beside the design (`place <factory> =
+  <module> plot x,y WxH`, the module being the design's file name) for the plot, which is the box
+  (`layout_file` found it already through `_plot_of`), and `<terrain>.terrain.json` beside the
+  design for the ground: `terrain.frame_ground` puts water, cliffs and ore into the plot's frame,
+  the blocked tiles become rectangles (`rects_of_runs`) and the ore too, for every seed but the
+  pinned. `world_scope(flat, module, all_)` counts `@patch` modules as the world placer's and,
+  with `--all`, every framed module (so a placed world can be laid out again). The report adds
+  `ground <name>: N blocked tiles (water, cliffs), M ore tiles in K patches` and the notes
+  `no-terrain` (no file: the pins are notes, the modules movable), `no-patch` (no such patch).
+  Water and cliffs are obstacles exactly as `voronoi` took blocked rectangles in wave 1.
+- `fkcore/layout.py`: one argument added to the one call I may touch
+  (`territory.world_scope(flat, module, all_)`).
+
+### Measured
+
+`tests/test_territory.py` `PinsTest` on a synthetic 120x120 terrain (iron-ore#1 20x14 at 70,20,
+iron-ore#2 8x8 at 10,100, copper 12x10 at 40,90, a lake across y 60..66 with a 20-tile gap): the
+two mines pinned on their patches (frames centred within a tile of the centroids, cells 576 of
+576 holding every patch tile), the smelter's cell and frame off every ore and water tile, every
+net reaching its consumers, `--write` writing 3 hints that read back with the pin kept; without
+the terrain file the pins are notes. The report:
+
+```
+layout world: 3 modules, 3 placed now, 0 kept, 0 fixed; 2 nets; plot 120x120 (--plot); territories (fkroute)
+  mine = Mine @(68, 19) @patch(iron-ore)
+  mine2 = Mine @(2, 96) @patch("iron-ore#2")
+  smelt = Smelt @(72, 38, rot 1)
+  ground t: 600 blocked tiles (water, cliffs), 464 ore tiles in 3 patches; ore is blocked ground for every module but a pinned one
+  cell mine: 576 tiles of 576 needed (100 %)  pinned on iron-ore#1
+  cell mine2: 576 tiles of 576 needed (100 %)  pinned on iron-ore#2
+  cell smelt: 600 tiles of 600 needed (100 %)
+  estimated belts 208 -> 133 over 2 nets; every net reaches its consumers; 135 hot tiles ...; 20 sweeps
+  shared boundary: 1 of 2 nets between modules have their cells touching; apart: ore2 (mine2|smelt)
+```
+
+Parity: the random `voronoi` specs pin one seed half the time and the random `place_seeds`
+specs 40 % of the time; `FK_NATIVE=check` agrees. `tests.test_territory`: 21 tests, 50 s with
+the kernel.
+
+### Step 3, toward T6: what to run
+
+The lab's ground is not in any terrain file this tree can read (`lab-session\fk-run2\game` has
+`terrain map` in its surface file and no `map.terrain.json`), so the surface file and the
+command are described, not written:
+
+1. On the lab server: `fk read-terrain map --area 2100,-600,3100,600` into the game folder of the
+   flower copy (the area the flower needs: 900x1024 plus a margin; adjust y to where the water
+   is wanted).
+2. `nauvis.surface` beside the design: `surface lab`, `free`, `force lab`, `terrain map`,
+   `place flower_ground = flower_ground plot 2100,-512 900x1024`.
+3. `flower_ground.fk`, written by `python tests/data/flower/ground_flower.py` (in the tree): the
+   open flower with the rim ports replaced by stand-in modules, one per rim feed: `Stand<res>`
+   (40x40, a 45/s source of the ore, `@patch(RES)`: copper, iron, stone, coal; a `A | B` pair feed
+   gets two stands and a `lanes` line), `Well` on `@patch(crude-oil)` (a pumpjack), `Shore` for
+   the water (an offshore pump, not pinned: water is no patch), their out ports feeding the
+   rivers' in ports. It elaborates to 36 seeds (7 + 28 stands + 1 shore) and 55 nets, weights 1
+   to 5; without a terrain file its 28 pins are notes and the stands move like modules.
+4. `fk layout flower_ground.fk --write` (the plot from the surface file), then the docs template
+   through `report_checks`. Copy the flower's `.fk` files beside it; `out/territories.json` is
+   written beside the design.
+
 ## Open
 
 - The time bar: 34.6 s alone against well under 14 s (above).
+- `fk look` drawing the cells: `vision.design_tags` draws plots and instances from the composed
+  surface and the .fkp files; the territories live in `out/territories.json` beside the design,
+  so drawing them is a new layer reading that file (a `_territories(frame, path)` beside
+  `_tags`), not one call into the outline drawing. Open.
+- A docs example on the terrain fixture (`patch.terrain.json` has iron-ore#1 and #2): the
+  chapter quotes the synthetic test's report; an example file needs `TERRAIN` and `LAID_OUT`
+  entries in `tests/test_examples_docs.py` (not this part's file). Open.
+- The lab's terrain read east of x 2100 and the T6 run itself (the integrating session's;
+  `ground_flower.py` is the generator, above). The stands' sizes (40x40) and rates (45/s) are
+  placeholders for the MinerRows the design will hold.
+- A pinned module's frame may stand on water (the pin does not call `fits`); the cell grows off
+  the water, the frame does not move. A check line would say so.
 - Circuit's rim feeds: an unpinned edge port takes the edge tile nearest its partner's port,
   so a module turned with its ports along the edge bunches every feed on one tile (x24). The
   rim's ports stand for mines that are not in the design; T4's pins replace them on real ground.
@@ -151,4 +246,7 @@ build routes its 4 nets: `24 entities, 19 edges` (wave 1: 30 and 25, the frames 
 
 ## Files touched outside the part
 
-None. `fkcore/layout.py` is untouched in step 1.
+- `fkcore/layout.py`, the one call the brief allows: `territory.world_scope(flat, module,
+  all_)` gains the `all_` argument (step 2). Nothing else; step 1 touched no file outside the
+  part. The merge of main (6b2334f, then 66b8801) brought nothing to `territory.py`,
+  `territory.rs`, `place_seeds` or `layout_file`.

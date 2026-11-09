@@ -6,8 +6,11 @@
 //! a cell pruned to the piece holding its seed, and `adapt` the capacity-constrained weights. The
 //! same integers as the Python (half-tiles for points, quarter-tile^2 for weights), the same ties.
 use pyo3::prelude::*;
+use std::collections::HashSet;
 
 pub(crate) type Rect = (i64, i64, i64, i64);
+/// A row run (y, x0, x1), x1 exclusive: the territory form.
+pub(crate) type Run = (i64, i64, i64);
 
 /// Python's `//`: the quotient rounded toward minus infinity for either sign of the divisor.
 #[inline]
@@ -177,6 +180,8 @@ pub(crate) fn wall_dist2(grid: &Grid, wall: &[bool]) -> Vec<i64> {
 pub(crate) struct Diagram {
     pub n_seeds: usize,
     pub fixed: Vec<Option<Rect>>,
+    /// fixed or pinned: a seed that competes for nothing (its cell is its frame or its pin)
+    pub statik: Vec<bool>,
     pub points: Vec<Option<(i64, i64)>>,
     pub frames: Vec<Option<Rect>>,
     pub weights: Vec<i64>,
@@ -188,7 +193,10 @@ pub(crate) struct Diagram {
 }
 
 impl Diagram {
-    pub fn new(grid: &Grid, blocked: &[Rect], fixed: &[Option<Rect>], weights: &[i64]) -> Self {
+    /// `pins`: per seed its cell as row runs (T4, a pin on ore: exactly its cell, over any wall
+    /// there) or None; the walls are the blocked rectangles and the part-covered cells of a
+    /// fixed frame.
+    pub fn new(grid: &Grid, blocked: &[Rect], fixed: &[Option<Rect>], weights: &[i64], pins: &[Option<Vec<Run>>]) -> Self {
         let n_seeds = fixed.len();
         let mut wall = vec![false; grid.n];
         for &rect in blocked {
@@ -210,11 +218,30 @@ impl Diagram {
                 }
             }
         }
+        for (i, runs) in pins.iter().enumerate() {
+            let runs = match runs {
+                Some(r) if !r.is_empty() => r,
+                _ => continue,
+            };
+            let tiles: HashSet<(i64, i64)> = runs.iter().flat_map(|&(y, x0, x1)| (x0..x1).map(move |x| (x, y))).collect();
+            for &(y, x0, x1) in runs {
+                for k in grid.overlaps((x0, y, x1, y + 1)) {
+                    let (cx, cy) = grid.centre(k);
+                    if tiles.contains(&(cx.div_euclid(2), cy.div_euclid(2))) && fixed_owner[k] != i as i64 {
+                        fixed_owner[k] = i as i64;
+                        wall[k] = false;
+                        areas[i] += grid.tiles[k];
+                    }
+                }
+            }
+        }
+        let statik: Vec<bool> = (0..n_seeds).map(|i| fixed[i].is_some() || pins[i].as_ref().map_or(false, |r| !r.is_empty())).collect();
         let wd2 = wall_dist2(grid, &wall);
         let owner: Vec<i64> = (0..grid.n).map(|k| if wall[k] { -2 } else { fixed_owner[k] }).collect();
         Diagram {
             n_seeds,
             fixed: fixed.to_vec(),
+            statik,
             points: vec![None; n_seeds],
             frames: vec![None; n_seeds],
             weights: weights.to_vec(),
@@ -244,7 +271,7 @@ impl Diagram {
             if who < 0 {
                 let mut best = self.wd2[k];
                 for (i, p) in self.points.iter().enumerate() {
-                    if self.fixed[i].is_some() {
+                    if self.statik[i] {
                         continue;
                     }
                     if let Some((sx, sy)) = p {
@@ -311,7 +338,7 @@ impl Diagram {
             }
         }
         for i in 0..self.n_seeds {
-            if self.fixed[i].is_some() {
+            if self.statik[i] {
                 continue;
             }
             match self.points[i] {
@@ -354,7 +381,7 @@ impl Diagram {
                 last_dw[i] = 0;
             }
             for i in 0..n {
-                if self.fixed[i].is_none()
+                if !self.statik[i]
                     && self.points[i].is_some()
                     && self.areas[i] >= needs[i]
                     && over_w[i].map_or(true, |(a, _w)| self.areas[i] < a)
@@ -364,7 +391,7 @@ impl Diagram {
             }
             let off: Vec<usize> = (0..n)
                 .filter(|&i| {
-                    self.fixed[i].is_none()
+                    !self.statik[i]
                         && self.points[i].is_some()
                         && (self.areas[i] - needs[i]).abs() * 100 > tol * needs[i]
                 })
@@ -402,7 +429,7 @@ impl Diagram {
     /// floor). A seed with a frame holds it outright; its need (the room factor) keeps its cell
     /// larger than the frame, no floor (43-territory).
     fn keep_homes(&mut self, grid: &Grid, cap: i64) {
-        let live: Vec<usize> = (0..self.n_seeds).filter(|&i| self.fixed[i].is_none() && self.points[i].is_some()).collect();
+        let live: Vec<usize> = (0..self.n_seeds).filter(|&i| !self.statik[i] && self.points[i].is_some()).collect();
         for &i in &live {
             if self.frames[i].is_some() {
                 continue;
@@ -478,7 +505,7 @@ pub(crate) fn runs_of(owner: &[i64], grid: &Grid, i: i64) -> Vec<(i64, i64, i64)
 /// fkcore.territory.voronoi_py: the power diagram with adapted weights on a coarse grid.
 /// -> (owner per cell, areas, weights, (gw, gh)).
 #[pyfunction]
-#[pyo3(signature = (seeds, needs, bbox, blocked, cell, weights=None, fixed=None, iters=40, tol=5, frames=None))]
+#[pyo3(signature = (seeds, needs, bbox, blocked, cell, weights=None, fixed=None, iters=40, tol=5, frames=None, pins=None))]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn voronoi(
     seeds: Vec<Option<(i64, i64)>>,
@@ -491,12 +518,14 @@ pub fn voronoi(
     iters: i64,
     tol: i64,
     frames: Option<Vec<Option<Rect>>>,
+    pins: Option<Vec<Option<Vec<Run>>>>,
 ) -> PyResult<(Vec<i64>, Vec<i64>, Vec<i64>, (i64, i64))> {
     let n = seeds.len();
     let grid = Grid::new(bbox, cell.max(1));
     let fixed = fixed.unwrap_or_else(|| vec![None; n]);
     let weights = weights.unwrap_or_else(|| vec![0; n]);
-    let mut dia = Diagram::new(&grid, &blocked, &fixed, &weights);
+    let pins = pins.unwrap_or_else(|| vec![None; n]);
+    let mut dia = Diagram::new(&grid, &blocked, &fixed, &weights, &pins);
     dia.points = seeds;
     if let Some(fr) = frames {
         dia.frames = fr;

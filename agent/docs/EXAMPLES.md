@@ -964,6 +964,31 @@ stops at the finest. `--write` puts the hints in, and `fk build --to report_chec
 `territory: 4 nets: 4 connected, 0 open, 0 unrouted; 0 SPILL; 24 entities, 19 edges, 0
 underground pairs` (30 entities and 25 edges in wave 1, when the two frames stood apart).
 
+**On a surface.** The same command on the top level of a surface's design, `fk layout
+nauvis.fk`, takes the surface file's plot as the box and its terrain (`terrain map`:
+`map.terrain.json` beside the design, what `read_terrain` reads) as the ground: water and
+cliffs are obstacles no cell crosses, and **ore is ground no module takes but one pinned on
+it**. A module instance with `@patch(iron-ore)` is pinned: its seed is the centroid of the
+nearest iron patch (`@patch("iron-ore#2")` names the second largest), its cell the patch's
+tiles grown to its need, and it does not move; the other modules' cells and frames stay off
+every patch. Two mines and a smelter on a 120x120 plot with two iron patches, a copper patch
+and a lake across the middle (`tests/test_territory.py`, `PINS`):
+
+```
+layout world: 3 modules, 3 placed now, 0 kept, 0 fixed; 2 nets; plot 120x120 (--plot); territories (fkroute)
+  mine = Mine @(68, 19) @patch(iron-ore)
+  mine2 = Mine @(2, 96) @patch("iron-ore#2")
+  smelt = Smelt @(72, 38, rot 1)
+  ground t: 600 blocked tiles (water, cliffs), 464 ore tiles in 3 patches; ore is blocked ground for every module but a pinned one
+  cell mine: 576 tiles of 576 needed (100 %)  pinned on iron-ore#1
+  cell mine2: 576 tiles of 576 needed (100 %)  pinned on iron-ore#2
+  cell smelt: 600 tiles of 600 needed (100 %)
+```
+
+`--write` puts `@(x, y)` beside the `@patch` (the build places the module there; the pin stays
+the design's word), and `out\territories.json` marks the cell `"pinned": "iron-ore#1"`. Without
+a terrain file the pin is a note (`no-terrain`) and the module is placed as a movable one.
+
 ## 10. power-shed.fk and steam.fk: power
 
 `docs\examples\power-shed.fk`, plot 200x200:

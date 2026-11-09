@@ -993,7 +993,7 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
     # (fkcore.territory: seeds with an area need, their territories a power diagram); the
     # instance placer below keeps everything else
     from . import territory
-    scope = territory.world_scope(flat, module)
+    scope = territory.world_scope(flat, module, all_)
     if scope is not None:
         return territory.layout_world(path, flat, cat, scope, all_, write, sweeps, plot)
     params = Params() if sweeps is None else Params(sweeps=int(sweeps))

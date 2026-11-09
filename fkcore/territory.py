@@ -68,6 +68,10 @@ class Seed:
     at: tuple | None
     movable: bool
     ports: list = field(default_factory=list)
+    #: T4, a pin on ore: the cell as row runs [(y, x0, x1)] (the patch's tiles grown to the
+    #: need), exactly the seed's territory; it does not move. ``patch`` names it (``iron-ore#2``).
+    pin: list | None = None
+    patch: str | None = None
 
 
 @dataclass
@@ -108,6 +112,7 @@ class TSpec:
     nets: list                # [TNet]
     edges: list = field(default_factory=list)   # [(name, side, pos or None)]: the scope's ports
     params: TParams = field(default_factory=TParams)
+    ground: object = None     # the Ground the spec was built on (T4, T5), for the report; or None
 
 
 @dataclass
@@ -253,11 +258,11 @@ def turn_tile(px, py, rot, size):
 
 
 # -- the power diagram -----------------------------------------------------------------------------
-def _assign(grid, points, weights, frames, fixed, wall, wd2, fixed_owner, owner, ks):
+def _assign(grid, points, weights, frames, static, wall, wd2, fixed_owner, owner, ks):
     """Owner per cell in ``ks``: the seed whose declared frame holds the cell's centre (its
     claim, outright), else the movable seed of the least power distance when it beats the wall,
-    -1 else; a wall or a fixed instance's cell keeps what it has (a fixed seed's cell is its frame
-    and it competes for nothing)."""
+    -1 else; a wall or a static instance's cell keeps what it has (a fixed seed's cell is its
+    frame, a pinned one's its pin, and neither competes for anything)."""
     for k in ks:
         if wall[k] or fixed_owner[k] >= 0:
             continue
@@ -270,7 +275,7 @@ def _assign(grid, points, weights, frames, fixed, wall, wd2, fixed_owner, owner,
         if who < 0:
             best = wd2[k]
             for i, (sx, sy) in enumerate(points):
-                if sx is None or fixed[i] is not None:
+                if sx is None or static[i]:
                     continue
                 d = (cx - sx) ** 2 + (cy - sy) ** 2 - weights[i]
                 if d < best:
@@ -311,12 +316,17 @@ class Diagram:
     """The power diagram of seeds on ``grid``: ``points`` per seed its point in half-tiles or
     None (unplaced), ``frames`` per seed its declared frame as placed (a tile rectangle it owns
     outright) or None, ``fixed`` per seed its frame when it does not move (its cell exactly) or
-    None, ``owner`` per cell (-1 nobody, -2 a wall, i a seed), ``areas`` and ``weights``."""
+    None, ``pins`` per seed its cell as row runs when it is pinned on ore (T4: exactly its cell,
+    over any wall there: the ore is blocked ground for every other seed) or None, ``owner`` per
+    cell (-1 nobody, -2 a wall, i a seed), ``areas`` and ``weights``. ``static`` per seed: fixed
+    or pinned, a seed that competes for nothing."""
 
-    def __init__(self, grid, blocked, fixed, weights):
+    def __init__(self, grid, blocked, fixed, weights, pins=None):
         self.grid = grid
         self.n_seeds = len(fixed)
         self.fixed = list(fixed)
+        self.pins = [None] * self.n_seeds if pins is None else list(pins)
+        self.static = [f is not None or p is not None for f, p in zip(self.fixed, self.pins)]
         self.points = [None] * self.n_seeds
         self.frames = [None] * self.n_seeds
         self.weights = list(weights)
@@ -335,6 +345,17 @@ class Diagram:
                     self.areas[i] += grid.tiles[k]
                 else:
                     self.wall[k] = True
+        for i, runs in enumerate(self.pins):
+            if not runs:
+                continue
+            tiles = {(x, y) for y, x0, x1 in runs for x in range(x0, x1)}
+            for y, x0, x1 in runs:
+                for k in grid.overlaps((x0, y, x1, y + 1)):
+                    cx, cy = grid.centre(k)
+                    if (cx // 2, cy // 2) in tiles and self.fixed_owner[k] != i:
+                        self.fixed_owner[k] = i
+                        self.wall[k] = False
+                        self.areas[i] += grid.tiles[k]
         self.wd2 = wall_dist2(grid, self.wall)
         self.owner = [-2 if self.wall[k] else self.fixed_owner[k] for k in range(grid.n)]
 
@@ -343,10 +364,10 @@ class Diagram:
         holding its point."""
         grid = self.grid
         pts = [(None, None) if p is None else p for p in self.points]
-        _assign(grid, pts, self.weights, self.frames, self.fixed, self.wall, self.wd2,
+        _assign(grid, pts, self.weights, self.frames, self.static, self.wall, self.wd2,
                 self.fixed_owner, self.owner, range(grid.n) if ks is None else ks)
         for i in range(self.n_seeds):
-            if self.fixed[i] is not None:
+            if self.static[i]:
                 continue
             if self.points[i] is None:
                 self.areas[i] = 0
@@ -386,10 +407,10 @@ class Diagram:
                         rate[i] = max(8, rate[i] // 2)
                 last_dw[i] = 0
             for i in range(n):
-                if self.fixed[i] is None and self.points[i] is not None and self.areas[i] >= needs[i] \
+                if not self.static[i] and self.points[i] is not None and self.areas[i] >= needs[i] \
                         and (over_w[i] is None or self.areas[i] < over_w[i][0]):
                     over_w[i] = (self.areas[i], self.weights[i])
-            off = [i for i in range(n) if self.fixed[i] is None and self.points[i] is not None
+            off = [i for i in range(n) if not self.static[i] and self.points[i] is not None
                    and abs(self.areas[i] - needs[i]) * 100 > tol * needs[i]]
             if not off or rounds > iters:
                 # 43-territory: a cell the rounds leave under its need takes the weight that gave
@@ -420,7 +441,7 @@ class Diagram:
         tried on framed seeds gave a small module in a small plot a cell 50-70 % over its need,
         the least cell the walls allow)."""
         grid, n = self.grid, self.n_seeds
-        live = [i for i in range(n) if self.fixed[i] is None and self.points[i] is not None]
+        live = [i for i in range(n) if not self.static[i] and self.points[i] is not None]
         for i in live:
             if self.frames[i] is not None:
                 continue
@@ -453,16 +474,17 @@ class Diagram:
 
 
 def voronoi_py(seeds, needs, box, blocked, cell, weights=None, fixed=None, iters=40, tol=5,
-               frames=None):
+               frames=None, pins=None):
     """The reference: ``seeds`` [(x, y) or None] seed points in **half-tiles**, ``needs`` in
     tiles, ``fixed`` per seed a tile rectangle (its cell exactly, it does not compete) or None,
     ``frames`` per seed a tile rectangle it owns outright (the diagram shares out the rest) or
-    None, ``blocked`` rectangles. -> (owner per cell, areas, weights, (gw, gh)). The grid is
+    None, ``pins`` per seed its cell as row runs (T4: exactly its cell, over the blocked ground)
+    or None, ``blocked`` rectangles. -> (owner per cell, areas, weights, (gw, gh)). The grid is
     ``box`` in ``cell`` tiles, row-major."""
     n = len(seeds)
     grid = Grid(box, cell)
     dia = Diagram(grid, blocked, [None] * n if fixed is None else list(fixed),
-                  [0] * n if weights is None else weights)
+                  [0] * n if weights is None else weights, pins)
     dia.points = [None if p is None else (int(p[0]), int(p[1])) for p in seeds]
     if frames is not None:
         dia.frames = [None if r is None else tuple(r) for r in frames]
@@ -479,8 +501,13 @@ def which():
     return "fkroute" if native_on() else "python"
 
 
+def _runs_arg(pins):
+    return None if pins is None else \
+        [None if p is None else [tuple(int(v) for v in r) for r in p] for p in pins]
+
+
 def voronoi(seeds, needs, box, blocked, cell, weights=None, fixed=None, iters=40, tol=5,
-            frames=None):
+            frames=None, pins=None):
     """The power diagram with adapted weights: in fkroute when it can, else Python; FK_NATIVE=check
     runs both and raises on a difference. See :func:`voronoi_py`."""
     mode = os.environ.get("FK_NATIVE", "1")
@@ -491,14 +518,74 @@ def voronoi(seeds, needs, box, blocked, cell, weights=None, fixed=None, iters=40
                               [int(v) for v in needs], tuple(int(v) for v in box),
                               [tuple(int(v) for v in r) for r in blocked], int(cell),
                               None if weights is None else [int(w) for w in weights],
-                              rects(fixed), int(iters), int(tol), rects(frames))
+                              rects(fixed), int(iters), int(tol), rects(frames), _runs_arg(pins))
         got = (list(got[0]), list(got[1]), list(got[2]), tuple(got[3]))
         if mode == "check":
-            py = voronoi_py(seeds, needs, box, blocked, cell, weights, fixed, iters, tol, frames)
+            py = voronoi_py(seeds, needs, box, blocked, cell, weights, fixed, iters, tol, frames, pins)
             if got != py:
                 raise AssertionError(f"fkroute.voronoi differs from voronoi_py:\n  {got}\n  {py}")
         return got
-    return voronoi_py(seeds, needs, box, blocked, cell, weights, fixed, iters, tol, frames)
+    return voronoi_py(seeds, needs, box, blocked, cell, weights, fixed, iters, tol, frames, pins)
+
+
+def runs_from_tiles(tiles):
+    """A tile set as row runs [(y, x0, x1)], x1 exclusive, rows ascending (the territory form)."""
+    rows = {}
+    for x, y in tiles:
+        rows.setdefault(y, []).append(x)
+    out = []
+    for y in sorted(rows):
+        xs = sorted(rows[y])
+        s = xs[0]
+        for a, b in zip(xs, xs[1:] + [None]):
+            if b != a + 1:
+                out.append((y, s, a + 1))
+                s = b
+    return out
+
+
+def rects_of_runs(runs):
+    """Row runs merged into rectangles (x0, y0, x1, y1): runs of the same span on consecutive
+    rows become one. What ``fits`` and the walls take for a tile set."""
+    out = []
+    open_ = {}                       # (x0, x1) -> [y0, y1) of the rectangle being built
+    for y, x0, x1 in sorted(runs):
+        for span, (y0, y1) in list(open_.items()):
+            if y1 < y:
+                out.append((span[0], y0, span[1], y1))
+                del open_[span]
+        if (x0, x1) in open_ and open_[(x0, x1)][1] == y:
+            open_[(x0, x1)][1] = y + 1
+        else:
+            if (x0, x1) in open_:
+                y0, y1 = open_[(x0, x1)]
+                out.append((x0, y0, x1, y1))
+            open_[(x0, x1)] = [y, y + 1]
+    for span, (y0, y1) in open_.items():
+        out.append((span[0], y0, span[1], y1))
+    return sorted(out)
+
+
+def grow_to_need(tiles, need, box, blocked=frozenset()):
+    """``tiles`` grown ring by ring (4-neighbours, inside ``box``, off ``blocked``) until it
+    holds ``need`` tiles or cannot grow: a pinned seed's cell (T4)."""
+    x0, y0, x1, y1 = box
+    have = {t for t in tiles if x0 <= t[0] < x1 and y0 <= t[1] < y1}
+    ring = set(have)
+    while len(have) < need and ring:
+        nxt = set()
+        for x, y in ring:
+            for d in range(4):
+                t = (x + _DX[d], y + _DY[d])
+                if x0 <= t[0] < x1 and y0 <= t[1] < y1 and t not in have and t not in blocked:
+                    nxt.add(t)
+        if not nxt:
+            break
+        if len(have) + len(nxt) > need:
+            nxt = set(sorted(nxt, key=lambda t: (t[1], t[0]))[:need - len(have)])
+        have |= nxt
+        ring = nxt
+    return have
 
 
 def runs_of(owner, grid, i):
@@ -537,6 +624,9 @@ class _World:
         self.dia = None
         self.price = []
         self.hard = [tuple(r) for r in spec.blocked]
+        for sd in spec.seeds:
+            if sd.pin:                      # a pinned cell is nobody else's ground
+                self.hard.extend(rects_of_runs(sd.pin))
         # a pinned edge port's tile and the tile inside it: no frame may cover them
         self.edge_tiles = []
         bx0, by0, bx1, by1 = spec.box
@@ -564,9 +654,10 @@ class _World:
                 ok = old_grid.cell_of(x, y)
                 if ok is not None:
                     self.price[k] = old_price[ok]
-        fixed = [turned_box(sd.at, sd.size) if not sd.movable and sd.at is not None else None
-                 for sd in self.spec.seeds]
-        self.dia = Diagram(self.grid, self.spec.blocked, fixed, self.weights)
+        fixed = [turned_box(sd.at, sd.size) if not sd.movable and sd.at is not None and not sd.pin
+                 else None for sd in self.spec.seeds]
+        self.dia = Diagram(self.grid, self.spec.blocked, fixed, self.weights,
+                           [sd.pin or None for sd in self.spec.seeds])
         self.dia.points = [None if a is None else seed_point(a, sd.size)
                            for a, sd in zip(self.at, self.spec.seeds)]
         self.dia.frames = [turned_box(a, sd.size) if a is not None and sd.movable else None
@@ -1116,7 +1207,8 @@ def _place_seeds_py(spec):
 def _flatten(spec):
     seeds = [(sd.name, (int(sd.size[0]), int(sd.size[1])), int(sd.need), int(sd.min_width),
               None if sd.at is None else tuple(int(v) for v in sd.at), bool(sd.movable),
-              [(n, s, None if p is None else int(p)) for n, s, p in sd.ports]) for sd in spec.seeds]
+              [(n, s, None if p is None else int(p)) for n, s, p in sd.ports],
+              None if not sd.pin else [tuple(int(v) for v in r) for r in sd.pin]) for sd in spec.seeds]
     nets = [(n.name, int(n.weight), [(int(a), int(b), bool(c)) for a, b, c in n.terms]) for n in spec.nets]
     edges = [(n, s, None if p is None else int(p)) for n, s, p in spec.edges]
     p = spec.params
@@ -1173,11 +1265,13 @@ def need_of(flat, cat, path):
     return area * ROOM, longest
 
 
-def world_scope(flat, module=None):
+def world_scope(flat, module=None, all_=False):
     """The scope ``fk layout`` lays out ('' or the module's first instance) when it holds sealed
-    modules with a declared frame (``size`` or ``shape``) and no ``@`` hint: the world placer's
-    case. None otherwise: a Stack or a module whose frame is its children's (no declared frame)
-    is a rigid body of the instance placer (``layout.build_spec``), never a territory."""
+    modules with a declared frame (``size`` or ``shape``) and no ``@(x, y)`` hint (a module pinned
+    on ore with ``@patch``, T4, is such a module; with ``all_`` every framed module counts): the
+    world placer's case. None otherwise: a Stack or a module whose frame is its children's (no
+    declared frame) is a rigid body of the instance placer (``layout.build_spec``), never a
+    territory."""
     from .expand import own_frame
     scope = ""
     if module:
@@ -1185,10 +1279,66 @@ def world_scope(flat, module=None):
         if scope is None:
             return None
     for inst in flat.scopes.get(scope, {}).values():
-        if (inst.module is not None and "at" not in inst.hints and "patch" not in inst.hints
+        if (inst.module is not None and (all_ or "at" not in inst.hints)
                 and own_frame(inst) is not None):
             return scope
     return None
+
+
+@dataclass
+class Ground:
+    """The terrain as the design's plot sees it (T4, T5): ``blocked`` tiles (water, cliffs,
+    other) in the plot's frame, ``ore`` {resource: {tile: amount}}, ``place`` the surface file's
+    plot, ``terrain`` the file's name, ``notes`` what could not be read."""
+    blocked: frozenset = frozenset()
+    ore: dict = field(default_factory=dict)
+    place: object = None
+    terrain: str | None = None
+    notes: list = field(default_factory=list)
+    loaded: bool = False      # the terrain file was read (else terrain none, or no file)
+
+    @property
+    def ore_tiles(self):
+        return frozenset(t for tiles in self.ore.values() for t in tiles)
+
+
+def surface_ground(path, flat):
+    """The ground of the top-level design at ``path``: the surface file beside it names the
+    plot (``place <factory> = <module> plot x,y WxH``) and the terrain (``terrain <name>``:
+    ``<name>.terrain.json`` beside the design, the file ``read_terrain`` reads; nothing is read
+    from the world). -> ``Ground`` (empty, with a note, when there is no surface file, no plot or
+    no terrain)."""
+    from . import surface as surfacemod
+    from . import terrain as terrainmod
+    folder = os.path.dirname(os.path.abspath(path))
+    module = os.path.splitext(os.path.basename(path))[0]
+    try:
+        sf = surfacemod.load_game(folder)
+    except (surfacemod.SurfaceError, OSError) as exc:
+        return Ground(notes=[f"no surface file beside {module}.fk ({exc}): no plot, no terrain"])
+    place = next((p for p in sf.places.values()
+                  if p.module == module and getattr(p, "lifecycle", None) != "retired"), None)
+    if place is None:
+        return Ground(notes=[f"{sf.name}.surface places no plot of {module}: no terrain"])
+    if sf.terrain in (None, "none"):
+        return Ground(place=place, terrain="none",
+                      notes=["terrain none: no water, cliffs or ore constrain the territories"])
+    tpath = os.path.join(folder, f"{sf.terrain}.terrain.json")
+    if not os.path.exists(tpath):
+        return Ground(place=place, terrain=sf.terrain,
+                      notes=[f"no-terrain: no {sf.terrain}.terrain.json beside the design; the "
+                             "territories are not checked against the ground"])
+    t = terrainmod.load(tpath)
+    fg = terrainmod.frame_ground(t, place, terrainmod.frame_size(place), margin=0)
+    return Ground(fg.blocked, fg.ore, place, sf.terrain, loaded=True)
+
+
+def pin_cell(tiles, frame_box, need, box, blocked):
+    """A pinned seed's cell (T4): the patch's tiles and its frame's, grown to the need inside
+    the box and off the blocked ground, as row runs."""
+    x0, y0, x1, y1 = frame_box
+    have = set(tiles) | {(x, y) for y in range(y0, y1) for x in range(x0, x1)}
+    return runs_from_tiles(grow_to_need(have, need, box, blocked))
 
 
 def _port_rate(flat, key, item, make, seen):
@@ -1282,14 +1432,26 @@ class BuiltWorld:
     box_from: str
 
 
-def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> BuiltWorld:
+def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None, ground=None) -> BuiltWorld:
     """The world spec of ``scope``'s children: every module instance a seed (its declared frame
     the claim, its ports in its own frame), a placed non-module instance a blocked rectangle, the
-    scope's own ports edge terminals; the scope's nets between them, weighted in belts."""
+    scope's own ports edge terminals; the scope's nets between them, weighted in belts.
+    ``ground`` (a :class:`Ground`, T4/T5): its water and cliffs are blocked rectangles, its ore
+    is blocked ground for every seed but a pinned one, and a module instance with ``@patch(RES)``
+    is pinned: its seed the centroid of the named patch (``RES#k``), else the patch of RES nearest
+    its placed partners (the box's centre when none), its cell the patch's tiles grown to its
+    need; it does not move."""
     from .expand import _own_frame, ports_of
+    from . import placer
     params = params or TParams()
     notes, seeds, paths = [], [], []
     blocked = []
+    pinned_tiles = set()
+    ground_blocked = frozenset() if ground is None else frozenset(ground.blocked)
+    if ground is not None:
+        blocked.extend(rects_of_runs(runs_from_tiles(ground.blocked)))
+        blocked.extend(rects_of_runs(runs_from_tiles(ground.ore_tiles)))
+        notes.extend(ground.notes)
     if scope:
         if flat.insts[scope].size is None:
             raise ValueError(f"{flat.insts[scope].module} declares no size: a module is laid out inside its frame")
@@ -1299,6 +1461,8 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
         box, box_from = (0, 0, int(plot[0]), int(plot[1])), "--plot"
     else:
         box, box_from = None, "room for the modules"
+    if ground is not None and ground.ore and box is None:
+        raise ValueError("a design on ground needs its plot (the surface file's place line or --plot)")
     lane_of = getattr(flat, "lane_of", {}) or {}
     index = {}
     for name, inst in flat.scopes.get(scope, {}).items():
@@ -1333,7 +1497,34 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
             port = flat.ports[key]
             index[key] = (len(seeds), len(ports))
             ports.append((key, port.side, None if port.pos is None else int(port.pos)))
-        seeds.append(Seed(path, size, need, min_w, at, at is None or all_, ports))
+        seed = Seed(path, size, need, min_w, at, at is None or all_, ports)
+        res = inst.hints.get("patch")
+        if res is not None and (ground is None or not ground.ore):
+            why = "none in the plot" if ground is not None and ground.loaded else "no terrain read"
+            notes.append(f"{path}: @patch({res}) pins it on ore, but the design has no ore to "
+                         f"read ({why}); placed as a movable module")
+        elif res is not None:
+            res = str(res)
+            if "#" in res:
+                found = placer.patch(ground.ore, res)
+            else:
+                point = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                found = placer.nearest_patch(ground.ore, res, point)
+            if found is None:
+                notes.append(f"no-patch {path}: @patch({res}), but the plot holds no patch of "
+                             f"{res.split('#')[0]}{' numbered ' + res.split('#')[1] if '#' in res else ''}; placed as a movable module")
+            else:
+                w, h = size
+                if at is None:
+                    cx, cy = found.centroid
+                    ax = min(max(box[0], int(round(cx - w / 2))), box[2] - w)
+                    ay = min(max(box[1], int(round(cy - h / 2))), box[3] - h)
+                    at = (ax, ay, 0)
+                frame_box = turned_box(at, size)
+                runs = pin_cell(found.tiles, frame_box, need, box, ground_blocked)
+                seed = Seed(path, size, need, min_w, at, False, ports, runs, found.name)
+                pinned_tiles |= {(x, y) for y, x0, x1 in runs for x in range(x0, x1)}
+        seeds.append(seed)
         paths.append(path)
     edges = []
     if scope:
@@ -1363,7 +1554,7 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
         x1 = max([side] + [turned_box(sd.at, sd.size)[2] for sd in seeds if sd.at is not None])
         y1 = max([side] + [turned_box(sd.at, sd.size)[3] for sd in seeds if sd.at is not None])
         box = (0, 0, x1, y1)
-    spec = TSpec(box, blocked, seeds, nets, edges, params)
+    spec = TSpec(box, blocked, seeds, nets, edges, params, ground)
     for net, w in zip(nets, net_weights(flat, cat, spec)):
         net.weight = w
     return BuiltWorld(spec, paths, notes, scope, box_from)
@@ -1432,6 +1623,10 @@ def write_territories(path, built, res):
             "runs": [list(r) for r in res.cells[i]],
             "ports": {sd.ports[pi][0]: list(res.ports[(i, pi)]) for pi in range(len(sd.ports))
                       if (i, pi) in res.ports}}
+        if sd.patch:
+            data["cells"][built.paths[i]]["pinned"] = sd.patch       # T4: one key added, the rest as wave 1 wrote it
+    if spec.ground is not None and spec.ground.terrain:
+        data["terrain"] = spec.ground.terrain
     out = territories_path(path)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="\n") as fh:
@@ -1446,8 +1641,12 @@ def layout_world(path, flat, cat, scope, all_=False, write=False, sweeps=None, p
     partner reaches, each cell's area against its need. ``--write`` writes the hints."""
     from .layout import _module_file, hint_line, written_hint, hint_text
     params = TParams() if sweeps is None else TParams(sweeps=int(sweeps))
+    # T5: the top level on a surface: the surface file's plot is the box, its terrain the ground
+    ground = surface_ground(path, flat) if not scope else None
+    if ground is not None and ground.place is not None and plot is None:
+        plot = (int(ground.place.w), int(ground.place.h))
     try:
-        built = build_tspec(flat, cat, scope, all_, plot, params)
+        built = build_tspec(flat, cat, scope, all_, plot, params, ground)
     except ValueError as exc:
         return [f"layout {flat.name}: {exc}"], 2
     spec = built.spec
@@ -1465,10 +1664,10 @@ def layout_world(path, flat, cat, scope, all_=False, write=False, sweeps=None, p
         if res.at[k] is None:
             nofit.append(p)
             continue
-        if not sd.movable:
+        if not sd.movable and not sd.pin:
             fixed += 1
             continue
-        if sd.at is not None and tuple(res.at[k]) == tuple(sd.at):
+        if sd.at is not None and tuple(res.at[k]) == tuple(sd.at) and not (sd.pin and "at" not in inst.hints):
             kept += 1
             continue
         line_no = inst.line
@@ -1486,6 +1685,12 @@ def layout_world(path, flat, cat, scope, all_=False, write=False, sweeps=None, p
         out.append(f"  no-fit {p}: fits nowhere in the {x1 - x0}x{y1 - y0} plot with what stands")
     for note in built.notes:
         out.append(f"  {note}")
+    if ground is not None and ground.loaded:
+        from . import terrain as terrainmod
+        pats = sum(len(ps) for ps in terrainmod.patches(ground.ore).values())
+        out.append(f"  ground {ground.terrain}: {len(ground.blocked)} blocked tiles (water, cliffs), "
+                   f"{len(ground.ore_tiles)} ore tiles in {pats} patches; ore is blocked ground for "
+                   f"every module but a pinned one")
     for i, sd in enumerate(spec.seeds):
         if res.at[i] is None:
             continue
@@ -1493,6 +1698,8 @@ def layout_world(path, flat, cat, scope, all_=False, write=False, sweeps=None, p
         flag = ""
         if sd.movable and abs(res.areas[i] - sd.need) * 100 > spec.params.tol * sd.need:
             flag = "  (under its need)" if res.areas[i] < sd.need else "  (over its need)"
+        if sd.patch:
+            flag += f"  pinned on {sd.patch}"
         out.append(f"  cell {built.paths[i]}: {res.areas[i]} tiles of {sd.need} needed ({pct} %)"
                    f"{flag}")
     before = sum(c for c in res.before if c >= 0)

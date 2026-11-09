@@ -1,0 +1,153 @@
+# flower_ground.fk: the open flower on real ground, written by ground_flower.py: the
+# rivers and the core unplaced, no corridors, every rim feed a stand-in mine pinned on
+# its ore (@patch). fk layout flower_ground.fk --write on a surface with a terrain.
+
+import RiverCircuit from "river_circuit.fk"
+import RiverFen from "river_fen.fk"
+import RiverWorks from "river_works.fk"
+import RiverMesa from "river_mesa.fk"
+import RiverMeadow from "river_meadow.fk"
+import RiverRidge from "river_ridge.fk"
+import Core from "core.fk"
+
+# a stand-in mine: what a MinerRow on the patch will be, as a sealed module the territory
+# placer pins on the ore (its seed the patch's centroid, its cell the patch grown to its need)
+module Stand<res> size 40x40 {
+  port o : out $res | $res @s20
+  src = Chest<requester, item=$res, rate=45/s> @(1, 1)
+  net g: src -> o
+}
+# a stand-in well: a pumpjack on a crude patch
+module Well size 20x20 {
+  port o : out crude-oil @s10
+  pj = Pumpjack<n=1, rate=30/s> @(5, 5)
+  net c: pj -> o
+}
+# a stand-in shore: an offshore pump; water is no patch, so it is placed like a module
+module Shore size 12x12 {
+  port o : out water @s6
+  p = OffshorePump<rate=1200/s> @(5, 5)
+  net w: p -> o
+}
+
+circuit = RiverCircuit
+fen = RiverFen
+works = RiverWorks
+mesa = RiverMesa
+meadow = RiverMeadow
+ridge = RiverRidge
+core = Core
+circuit_cu_ore1 = Stand<res=copper-ore> @patch(copper-ore)
+circuit_fe_ore1 = Stand<res=iron-ore> @patch(iron-ore)
+circuit_cu_ore2 = Stand<res=copper-ore> @patch(copper-ore)
+circuit_fe_ore2 = Stand<res=iron-ore> @patch(iron-ore)
+circuit_cu_ore3 = Stand<res=copper-ore> @patch(copper-ore)
+circuit_fe_ore3 = Stand<res=iron-ore> @patch(iron-ore)
+circuit_cu_ore4 = Stand<res=copper-ore> @patch(copper-ore)
+circuit_cu_ore5 = Stand<res=copper-ore> @patch(copper-ore)
+fen_water = Shore
+fen_crude1 = Well @patch(crude-oil)
+fen_crude2 = Well @patch(crude-oil)
+fen_fecu_a = Stand<res=iron-ore> @patch(iron-ore)
+fen_fecu_b = Stand<res=copper-ore> @patch(copper-ore)
+fen_coal = Stand<res=coal> @patch(coal)
+works_fe_ore1 = Stand<res=iron-ore> @patch(iron-ore)
+works_fe_ore2 = Stand<res=iron-ore> @patch(iron-ore)
+mesa_cu_ore1 = Stand<res=copper-ore> @patch(copper-ore)
+mesa_cu_ore2 = Stand<res=copper-ore> @patch(copper-ore)
+mesa_cu_ore3 = Stand<res=copper-ore> @patch(copper-ore)
+mesa_fe_ore1 = Stand<res=iron-ore> @patch(iron-ore)
+meadow_cu_ore1 = Stand<res=copper-ore> @patch(copper-ore)
+meadow_fe_ore1 = Stand<res=iron-ore> @patch(iron-ore)
+ridge_fe_ore1 = Stand<res=iron-ore> @patch(iron-ore)
+ridge_fe_ore2 = Stand<res=iron-ore> @patch(iron-ore)
+ridge_fe_ore3 = Stand<res=iron-ore> @patch(iron-ore)
+ridge_fe_ore4 = Stand<res=iron-ore> @patch(iron-ore)
+ridge_fe_ore5 = Stand<res=iron-ore> @patch(iron-ore)
+ridge_stone1 = Stand<res=stone> @patch(stone)
+ridge_stone2 = Stand<res=stone> @patch(stone)
+
+net circuit_cu_ore1_: circuit_cu_ore1.o -> circuit.cu_ore1
+net circuit_fe_ore1_: circuit_fe_ore1.o -> circuit.fe_ore1
+net circuit_cu_ore2_: circuit_cu_ore2.o -> circuit.cu_ore2
+net circuit_fe_ore2_: circuit_fe_ore2.o -> circuit.fe_ore2
+net circuit_cu_ore3_: circuit_cu_ore3.o -> circuit.cu_ore3
+net circuit_fe_ore3_: circuit_fe_ore3.o -> circuit.fe_ore3
+net circuit_cu_ore4_: circuit_cu_ore4.o -> circuit.cu_ore4
+net circuit_cu_ore5_: circuit_cu_ore5.o -> circuit.cu_ore5
+net fen_water_: fen_water.o -> fen.water
+net fen_crude1_: fen_crude1.o -> fen.crude1
+net fen_crude2_: fen_crude2.o -> fen.crude2
+net fen_fecu__a items iron-ore: fen_fecu_a.o -> fen.fecu
+net fen_fecu__b items copper-ore: fen_fecu_b.o -> fen.fecu
+lanes fen_fecu__a | fen_fecu__b
+net fen_coal_: fen_coal.o -> fen.coal
+net works_fe_ore1_: works_fe_ore1.o -> works.fe_ore1
+net works_fe_ore2_: works_fe_ore2.o -> works.fe_ore2
+net mesa_cu_ore1_: mesa_cu_ore1.o -> mesa.cu_ore1
+net mesa_cu_ore2_: mesa_cu_ore2.o -> mesa.cu_ore2
+net mesa_cu_ore3_: mesa_cu_ore3.o -> mesa.cu_ore3
+net mesa_fe_ore1_: mesa_fe_ore1.o -> mesa.fe_ore1
+net meadow_cu_ore1_: meadow_cu_ore1.o -> meadow.cu_ore1
+net meadow_fe_ore1_: meadow_fe_ore1.o -> meadow.fe_ore1
+net ridge_fe_ore1_: ridge_fe_ore1.o -> ridge.fe_ore1
+net ridge_fe_ore2_: ridge_fe_ore2.o -> ridge.fe_ore2
+net ridge_fe_ore3_: ridge_fe_ore3.o -> ridge.fe_ore3
+net ridge_fe_ore4_: ridge_fe_ore4.o -> ridge.fe_ore4
+net ridge_fe_ore5_: ridge_fe_ore5.o -> ridge.fe_ore5
+net ridge_stone1_: ridge_stone1.o -> ridge.stone1
+net ridge_stone2_: ridge_stone2.o -> ridge.stone2
+
+net circuit_rp_ridge_a items advanced-circuit: circuit.rp_ridge -> ridge.rp_in
+net circuit_rp_ridge_b items productivity-module: circuit.rp_ridge -> ridge.rp_in
+lanes circuit_rp_ridge_a | circuit_rp_ridge_b
+net circuit_g_meadow: circuit.g_meadow -> meadow.g_in
+net circuit_rg_works_a items advanced-circuit: circuit.rg_works -> works.rg_in
+net circuit_rg_works_b items electronic-circuit: circuit.rg_works -> works.rg_in
+lanes circuit_rg_works_a | circuit_rg_works_b
+net fen_plastic_out1: fen.plastic_out1 -> circuit.plastic_in1
+net fen_plastic_out2: fen.plastic_out2 -> circuit.plastic_in2
+net fen_acid_out: fen.acid_out -> circuit.acid_in
+net fen_plastic_mesa: fen.plastic_mesa -> mesa.plastic_in
+net circuit_pu: circuit.pu -> core.pu
+net circuit_tap1_a items electronic-circuit: circuit.tap1 -> core.c_tap1
+net circuit_tap1_b items advanced-circuit: circuit.tap1 -> core.c_tap1
+lanes circuit_tap1_a | circuit_tap1_b
+net circuit_tap2_a items processing-unit: circuit.tap2 -> core.c_tap2
+net circuit_tap2_b items copper-plate: circuit.tap2 -> core.c_tap2
+lanes circuit_tap2_a | circuit_tap2_b
+net fen_tap_a items plastic-bar: fen.tap -> core.f_tap
+net fen_tap_b items sulfur: fen.tap -> core.f_tap
+lanes fen_tap_a | fen_tap_b
+net fen_lube_mall: fen.lube_mall -> core.lube
+net fen_lube_works: fen.lube_works -> works.lube_in
+net fen_sb_works_a items sulfur: fen.sb_works -> works.sb_in
+net fen_sb_works_b items battery: fen.sb_works -> works.sb_in
+lanes fen_sb_works_a | fen_sb_works_b
+net works_blue: works.blue -> core.blue
+net works_rf: works.rf -> core.rf
+net works_tap1_a items steel-plate: works.tap1 -> core.w_tap1
+net works_tap1_b items iron-gear-wheel: works.tap1 -> core.w_tap1
+lanes works_tap1_a | works_tap1_b
+net works_tap2_a items engine-unit: works.tap2 -> core.w_tap2
+net works_tap2_b items electric-engine-unit: works.tap2 -> core.w_tap2
+lanes works_tap2_a | works_tap2_b
+net mesa_lds: mesa.lds -> core.lds
+net mesa_tap_a items low-density-structure: mesa.tap -> core.s_tap
+net mesa_tap_b items copper-plate: mesa.tap -> core.s_tap
+lanes mesa_tap_a | mesa_tap_b
+net meadow_red: meadow.red -> core.red
+net meadow_green: meadow.green -> core.green
+net meadow_tap_a items iron-plate: meadow.tap -> core.m_tap
+net meadow_tap_b items iron-gear-wheel: meadow.tap -> core.m_tap
+lanes meadow_tap_a | meadow_tap_b
+net ridge_purple: ridge.purple -> core.purple
+net ridge_tap1_a items steel-plate: ridge.tap1 -> core.r_tap1
+net ridge_tap1_b items iron-plate: ridge.tap1 -> core.r_tap1
+lanes ridge_tap1_a | ridge_tap1_b
+net ridge_tap2_a items stone-brick: ridge.tap2 -> core.r_tap2
+net ridge_tap2_b items rail: ridge.tap2 -> core.r_tap2
+lanes ridge_tap2_a | ridge_tap2_b
+net ridge_tap3_a items electric-furnace: ridge.tap3 -> core.r_tap3
+net ridge_tap3_b items stone: ridge.tap3 -> core.r_tap3
+lanes ridge_tap3_a | ridge_tap3_b

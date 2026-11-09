@@ -698,11 +698,42 @@ pub fn place(
 // between ports on their cells' boundaries, the Lagrangian price; `place` above stays the
 // instance-level layout.
 
-use crate::territory::{runs_of, Diagram, Grid, Rect};
+use crate::territory::{runs_of, Diagram, Grid, Rect, Run};
 use std::collections::BTreeMap;
 
-/// One seed: name, declared size, need, min width, at, movable, ports (name, side, pos).
-type SSeed = (String, (i64, i64), i64, i64, Option<At>, bool, Vec<(String, String, Option<i64>)>);
+/// One seed: name, declared size, need, min width, at, movable, ports (name, side, pos), the
+/// pinned cell as row runs (T4) or None.
+type SSeed = (String, (i64, i64), i64, i64, Option<At>, bool, Vec<(String, String, Option<i64>)>, Option<Vec<Run>>);
+
+/// fkcore.territory.rects_of_runs: row runs merged into rectangles (the same span on consecutive
+/// rows is one), what `fits` takes for a pinned cell.
+fn rects_of_runs(runs: &[Run]) -> Vec<Rect> {
+    let mut sorted: Vec<Run> = runs.to_vec();
+    sorted.sort();
+    let mut out: Vec<Rect> = Vec::new();
+    let mut open: BTreeMap<(i64, i64), (i64, i64)> = BTreeMap::new();
+    for &(y, x0, x1) in &sorted {
+        let stale: Vec<(i64, i64)> = open.iter().filter(|(_s, &(_y0, y1))| y1 < y).map(|(&s, _)| s).collect();
+        for s in stale {
+            let (y0, y1) = open.remove(&s).unwrap();
+            out.push((s.0, y0, s.1, y1));
+        }
+        match open.get_mut(&(x0, x1)) {
+            Some(r) if r.1 == y => r.1 = y + 1,
+            _ => {
+                if let Some((y0, y1)) = open.remove(&(x0, x1)) {
+                    out.push((x0, y0, x1, y1));
+                }
+                open.insert((x0, x1), (y, y + 1));
+            }
+        }
+    }
+    for (s, (y0, y1)) in open {
+        out.push((s.0, y0, s.1, y1));
+    }
+    out.sort();
+    out
+}
 /// One world net: name, weight in belts, terms (seed or -1 for an edge, port or edge index, driver).
 type WNet = (String, i64, Vec<(i64, i64, bool)>);
 /// sweeps, alpha, decay, reach, steps, cells, final_cell, trespass, iters, tol, plateau.
@@ -745,6 +776,7 @@ struct WSeed {
     size: (i64, i64),
     movable: bool,
     ports: Vec<(usize, Option<i64>)>,
+    pin: Option<Vec<Run>>,
 }
 
 /// A windowed walk field: distances and predecessors over the window's cells, -1 where unreached.
@@ -801,6 +833,8 @@ struct WorldFull {
 struct World<'a> {
     bbox: Rect,
     blocked: Vec<Rect>,
+    /// what `fits` keeps a frame off: the blocked rectangles and the pinned cells' (T4)
+    hard: Vec<Rect>,
     seeds: Vec<WSeed>,
     nets: &'a [WNet],
     edges: Vec<(usize, Option<i64>)>,
@@ -820,12 +854,24 @@ impl<'a> World<'a> {
     fn new(bbox: Rect, blocked: Vec<Rect>, sseeds: &[SSeed], nets: &'a [WNet], edges: &[(String, String, Option<i64>)], reach: i64, trespass: i64, lat: i64, c: i64) -> Self {
         let seeds: Vec<WSeed> = sseeds
             .iter()
-            .map(|s| WSeed { size: s.1, movable: s.5, ports: s.6.iter().map(|p| (side_idx(&p.1), p.2)).collect() })
+            .map(|s| WSeed {
+                size: s.1,
+                movable: s.5,
+                ports: s.6.iter().map(|p| (side_idx(&p.1), p.2)).collect(),
+                pin: s.7.clone().filter(|r| !r.is_empty()),
+            })
             .collect();
         let at: Vec<Option<At>> = sseeds.iter().map(|s| s.4).collect();
         let n = seeds.len();
         let grid = Grid::new(bbox, c);
-        let dia = Diagram::new(&grid, &blocked, &vec![None; n], &vec![0; n]);
+        let dia = Diagram::new(&grid, &blocked, &vec![None; n], &vec![0; n], &vec![None; n]);
+        // a pinned cell is nobody else's ground: its rectangles are hard for `fits`
+        let mut hard = blocked.clone();
+        for sd in &seeds {
+            if let Some(runs) = &sd.pin {
+                hard.extend(rects_of_runs(runs));
+            }
+        }
         let (bx0, by0, bx1, by1) = bbox;
         let mut edge_tiles: Vec<T> = Vec::new();
         for e in edges {
@@ -843,6 +889,7 @@ impl<'a> World<'a> {
         let mut w = World {
             bbox,
             blocked,
+            hard,
             seeds,
             nets,
             edges: edges.iter().map(|e| (side_idx(&e.1), e.2)).collect(),
@@ -878,11 +925,12 @@ impl<'a> World<'a> {
             .iter()
             .zip(&self.at)
             .map(|(sd, a)| match a {
-                Some(a) if !sd.movable => Some(turned_box(*a, sd.size)),
+                Some(a) if !sd.movable && sd.pin.is_none() => Some(turned_box(*a, sd.size)),
                 _ => None,
             })
             .collect();
-        let mut dia = Diagram::new(&grid, &self.blocked, &fixed, &self.weights);
+        let pins: Vec<Option<Vec<Run>>> = self.seeds.iter().map(|sd| sd.pin.clone()).collect();
+        let mut dia = Diagram::new(&grid, &self.blocked, &fixed, &self.weights, &pins);
         dia.points = self.seeds.iter().zip(&self.at).map(|(sd, a)| a.map(|a| seed_point(a, sd.size))).collect();
         dia.frames = self
             .seeds
@@ -906,7 +954,7 @@ impl<'a> World<'a> {
         if b.0 < bx0 || b.1 < by0 || b.2 > bx1 || b.3 > by1 {
             return false;
         }
-        if self.blocked.iter().any(|&r| overlap(b, r)) {
+        if self.hard.iter().any(|&r| overlap(b, r)) {
             return false;
         }
         let mut others: Vec<Rect> = Vec::new();
@@ -945,7 +993,7 @@ impl<'a> World<'a> {
             if !(bx0 <= fx && fx < bx1 && by0 <= fy && fy < by1) {
                 return false;
             }
-            if self.blocked.iter().chain(others.iter()).any(|r| r.0 <= ox && ox < r.2 && r.1 <= oy && oy < r.3) {
+            if self.hard.iter().chain(others.iter()).any(|r| r.0 <= ox && ox < r.2 && r.1 <= oy && oy < r.3) {
                 return false;
             }
         }

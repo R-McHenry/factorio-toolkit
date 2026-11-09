@@ -80,6 +80,42 @@ three = Three @(0, 0)
 """
 
 
+# world.fk on a synthetic terrain (T4, T5): two mines pinned on ore (the nearest iron patch, and
+# iron-ore#2 by name), a smelter free to move; water and ore are ground no other module takes
+PINS = """
+module Mine size 24x16 {
+  port o : out iron-ore @s4
+  d = Chest<requester, item=iron-ore, rate=30/s> @(1, 1)
+  net g: d -> o
+}
+module Smelt size 20x20 {
+  port i  : in iron-ore @n4
+  port i2 : in iron-ore @n14
+  box  = Chest<provider, limit=4> @(3, 3)
+  box2 = Chest<provider, limit=4> @(13, 3)
+  net g: i -> box
+  net h: i2 -> box2
+}
+mine = Mine @patch(iron-ore)
+mine2 = Mine @patch("iron-ore#2")
+smelt = Smelt
+net ore: mine.o -> smelt.i
+net ore2: mine2.o -> smelt.i2
+"""
+
+
+def synthetic_terrain():
+    """A 120x120 terrain: iron-ore#1 (20x14 at 70,20), iron-ore#2 (8x8 at 10,100), copper at
+    40,90, a lake across y 60..66 with a gap at x 50..70."""
+    from fkcore import terrain as terrainmod
+    iron = {(x, y): 1000 for x in range(70, 90) for y in range(20, 34)}
+    iron.update({(x, y): 500 for x in range(10, 18) for y in range(100, 108)})
+    copper = {(x, y): 800 for x in range(40, 52) for y in range(90, 100)}
+    water = frozenset((x, y) for x in range(120) for y in range(60, 66) if not 50 <= x < 70)
+    return terrainmod.Terrain("nauvis", (0, 0, 120, 120), 0, {"iron-ore": iron, "copper-ore": copper},
+                              water)
+
+
 def within(area, need, tol=5):
     return abs(area - need) * 100 <= tol * need
 
@@ -112,6 +148,17 @@ def random_tspec(seed, n=4, box=48, sweeps=3):
     for _ in range(rnd.randint(0, 3)):
         x, y = rnd.randint(0, box - 6), rnd.randint(0, box - 6)
         blocked.append((x, y, x + rnd.randint(1, 6), y + rnd.randint(1, 6)))
+    if rnd.random() < 0.4:
+        # T4: one seed pinned: its frame at a point, its cell a blob round it grown to its need
+        i = rnd.randrange(n)
+        sd = seeds[i]
+        w, h = sd.size
+        ax, ay = rnd.randint(0, box - w), rnd.randint(0, box - h)
+        blob = {(x, y) for x in range(max(0, ax - 2), min(box, ax + w + 2))
+                for y in range(max(0, ay - 2), min(box, ay + h + 2))}
+        runs = territory.runs_from_tiles(territory.grow_to_need(blob, sd.need, (0, 0, box, box)))
+        seeds[i] = Seed(sd.name, sd.size, sd.need, sd.min_width, (ax, ay, 0), False, sd.ports, runs,
+                        "iron-ore#1")
     params = TParams(sweeps=sweeps, steps=(8, 4, 2, 1), cells=(4, 4, 2, 1), final_cell=rnd.choice([1, 2]))
     return TSpec((0, 0, box, box), blocked, seeds, nets, edges, params)
 
@@ -216,6 +263,33 @@ class VoronoiTest(unittest.TestCase):
         self.assertEqual(runs[4], (4, 0, 12))
 
     @unittest.skipUnless(territory.native_on(), "no fkroute with voronoi")
+    def test_pinned_cell_is_exactly_its_runs_over_the_ore_wall(self):
+        # T4: a pinned seed's cell is its runs, over the blocked ground (its ore) that walls
+        # every other seed out; the movable seed's cell stays off both
+        ore = (30, 30, 50, 44)
+        pin = [(y, 26, 54) for y in range(26, 48)]
+        own, areas, _w, (gw, _gh) = voronoi_py([None, (2 * 15, 2 * 70)], [0, 900], (0, 0, 80, 80), [ore], 1,
+                                               pins=[pin, None])
+        self.assertEqual(areas[0], 28 * 22)
+        for k, o in enumerate(own):
+            x, y = k % gw, k // gw
+            inside = 26 <= x < 54 and 26 <= y < 48
+            self.assertEqual(o == 0, inside, (x, y, o))
+        self.assertTrue(within(areas[1], 900))
+
+    def test_runs_and_rects(self):
+        tiles = {(x, y) for x in range(3, 7) for y in range(2, 5)} | {(10, 2), (11, 2), (10, 3)}
+        runs = territory.runs_from_tiles(tiles)
+        self.assertEqual(runs[:2], [(2, 3, 7), (2, 10, 12)])
+        self.assertEqual(sum(b - a for _y, a, b in runs), len(tiles))
+        rects = territory.rects_of_runs(runs)
+        self.assertIn((3, 2, 7, 5), rects)
+        self.assertEqual(sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in rects), len(tiles))
+        grown = territory.grow_to_need({(5, 5)}, 13, (0, 0, 20, 20), {(5, 4)})
+        self.assertEqual(len(grown), 13)
+        self.assertNotIn((5, 4), grown)
+
+    @unittest.skipUnless(territory.native_on(), "no fkroute with voronoi")
     def test_python_and_rust_agree(self):
         for s in range(10):
             rnd = random.Random(1000 + s)
@@ -229,9 +303,13 @@ class VoronoiTest(unittest.TestCase):
             frames = [None] * 5
             if pts[1] is not None and rnd.random() < 0.5:
                 frames[1] = (pts[1][0] // 2, pts[1][1] // 2, pts[1][0] // 2 + 4, pts[1][1] // 2 + 3)
+            pins = [None] * 5
+            if pts[2] is not None and rnd.random() < 0.5:
+                cx, cy = pts[2][0] // 2, pts[2][1] // 2
+                pins[2] = [(y, max(0, cx - 4), min(60, cx + 5)) for y in range(max(0, cy - 3), min(60, cy + 4))]
             cell = rnd.choice([1, 2, 4, 8])
-            py = voronoi_py(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames)
-            rs = territory._native.voronoi(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames)
+            py = voronoi_py(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames, pins)
+            rs = territory._native.voronoi(pts, needs, (0, 0, 60, 60), blocked, cell, None, fixed, 20, 5, frames, pins)
             self.assertEqual((list(rs[0]), list(rs[1]), list(rs[2]), tuple(rs[3])), py, s)
 
 
@@ -413,6 +491,85 @@ class WeightsTest(unittest.TestCase):
         self.assertGreater(want, 0)
         self.assertEqual(territory.port_rate(flat, "three/g/i", "iron-plate", False), want)
         self.assertEqual(by_name["h"].weight, max(1, math.ceil(min(40.0, want) / per)))
+
+
+class PinsTest(unittest.TestCase):
+    """T4 and T5: `fk layout world.fk` on a surface with a terrain: the plot is the box, the
+    water and the ore are ground no free module takes, a module with @patch is pinned on its
+    patch (the named one, else the nearest), its cell the patch grown to its need."""
+
+    def setUp(self):
+        from fkcore import terrain as terrainmod
+        self.d = tempfile.mkdtemp(prefix="fkpins-")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.path = os.path.join(self.d, "world.fk")
+        with open(self.path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(PINS)
+        with open(os.path.join(self.d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("surface nauvis\nterrain t\nplace world = world plot 0,0 120x120\n")
+        terrainmod.save(synthetic_terrain(), os.path.join(self.d, "t.terrain.json"))
+
+    def test_pins_on_ore_and_the_ground(self):
+        flat = elaborate_file(self.path, CAT)
+        self.assertEqual(territory.world_scope(flat), "")
+        lines, code = layout.layout_file(self.path, flat, CAT, sweeps=8)
+        self.assertEqual(code, 0, lines)
+        text = "\n".join(lines)
+        self.assertIn("plot 120x120", lines[0])
+        self.assertIn("pinned on iron-ore#1", text)
+        self.assertIn("pinned on iron-ore#2", text)
+        self.assertTrue(any(l.startswith("  ground t: ") for l in lines), text)
+        self.assertTrue(any(l.strip().startswith("mine = Mine @(") for l in lines), text)
+        with open(os.path.join(self.d, "out", "territories.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data["terrain"], "t")
+        t = synthetic_terrain()
+        iron1 = {(x, y) for x in range(70, 90) for y in range(20, 34)}
+        iron2 = {(x, y) for x in range(10, 18) for y in range(100, 108)}
+        ore = set(iron1) | set(iron2) | {(x, y) for x in range(40, 52) for y in range(90, 100)}
+        cells = {}
+        for name, c in data["cells"].items():
+            cells[name] = {(x, y) for y, x0, x1 in c["runs"] for x in range(x0, x1)}
+        # the pinned mines: the frame centred on the patch, the cell holding the patch and the need
+        for name, patch in (("mine", iron1), ("mine2", iron2)):
+            c = data["cells"][name]
+            self.assertEqual(c["pinned"], "iron-ore#1" if name == "mine" else "iron-ore#2")
+            x, y, _rot = c["at"]
+            cx = sum(t[0] + 0.5 for t in patch) / len(patch)
+            cy = sum(t[1] + 0.5 for t in patch) / len(patch)
+            self.assertLessEqual(abs(x + 12 - cx), 1.0, (name, c["at"]))
+            self.assertLessEqual(abs(y + 8 - cy), 1.0, (name, c["at"]))
+            self.assertTrue(patch <= cells[name], name)
+            self.assertGreaterEqual(c["area"], c["need"])
+            self.assertEqual(c["area"], len(cells[name]))
+        # the free module: its cell and its frame off every ore tile and the water
+        sm = cells["smelt"]
+        self.assertFalse(sm & ore)
+        self.assertFalse(sm & set(t.water))
+        x, y, rot = data["cells"]["smelt"]["at"]
+        frame = {(i, j) for i in range(x, x + 20) for j in range(y, y + 20)}
+        self.assertFalse(frame & ore)
+        self.assertFalse(frame & set(t.water))
+        self.assertFalse(frame & cells["mine"])
+        self.assertTrue(any("every net reaches" in l for l in lines), text)
+        # --write puts @(x, y) beside @patch, and the file reads back with both
+        lines, code = layout.layout_file(self.path, flat, CAT, write=True, sweeps=8)
+        self.assertTrue(any(l.startswith("  wrote 3 hints") for l in lines), lines)
+        flat2 = elaborate_file(self.path, CAT)
+        self.assertEqual(flat2.insts["mine"].hints.get("patch"), "iron-ore")
+        self.assertIn("at", flat2.insts["mine"].hints)
+        self.assertIn("at", flat2.insts["smelt"].hints)
+
+    def test_without_a_terrain_the_pin_is_a_note(self):
+        os.remove(os.path.join(self.d, "t.terrain.json"))
+        flat = elaborate_file(self.path, CAT)
+        lines, code = layout.layout_file(self.path, flat, CAT, sweeps=4)
+        self.assertEqual(code, 0, lines)
+        text = "\n".join(lines)
+        self.assertIn("no-terrain", text)
+        self.assertIn("(no terrain read); placed as a movable module", text)
+        self.assertNotIn("pinned on iron", text)
+        self.assertFalse(any(l.startswith("  ground ") for l in lines), text)
 
 
 @unittest.skipUnless(territory.native_on(), "the flower needs the kernel")
