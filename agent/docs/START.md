@@ -9,6 +9,15 @@ Your folder: `bin\` is on your PATH, so `fk` is the one command. `game\` holds y
 (`.fk`), your base's plot (`world.fk`), the world design (`nauvis.fk`), the surface file and the
 build script. `docs\examples\` holds the files this guide quotes.
 
+> **WARNING: every router issue is a hierarchy issue, and the hierarchy is yours.** The router is
+> handed one sealed module at a time, and then the trunks between modules. It is never handed a
+> base. So a net that fails, a route step that runs for minutes, or a module that reroutes when you
+> changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
+> where it happened. The fix is always the same and always the designer's: seal the sub-unit
+> (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
+> inside one module can never touch another. Router options and effort levels do not fix a design.
+> The checks name the module and the cause; `BUILDING.md` "Hierarchy" says how to build it right.
+
 ## 1. Copy the file
 
 ```

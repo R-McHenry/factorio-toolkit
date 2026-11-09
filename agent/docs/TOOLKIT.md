@@ -131,6 +131,15 @@ run of the other route becomes an underground pair; `promoted` in `out\route.txt
 
 ### How route works, and what you set
 
+> **WARNING: every router issue is a hierarchy issue, and the hierarchy is yours.** The router is
+> handed one sealed module at a time, and then the trunks between modules. It is never handed a
+> base. So a net that fails, a route step that runs for minutes, or a module that reroutes when you
+> changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
+> where it happened. The fix is always the same and always the designer's: seal the sub-unit
+> (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
+> inside one module can never touch another. The options below tune a search inside one module;
+> none of them fixes a design. The checks name the module and the cause.
+
 Each net is routed **once**, in order, and keeps what it laid. A net that fails is tried again with
 the nets laid near its ends (up to `--group-max 8`, for `--group-budget 3` seconds), and if they
 don't all fit the old routes stay and the net gets one last search of its own. On the `route` line
@@ -157,6 +166,11 @@ has a `group` line for each net that got a group try, a `ribbon` line per ribbon
 measured, not the default.
 
 ### Sealed modules compile once
+
+> **The same warning, from the store's side.** A module that routes again when you changed
+> something else was not sealed well: its key took in what you changed (a port that moved, a
+> parent's frame, a net that crosses it). The route step names what changed in a rerouted unit's
+> key; the answer is to seal, frame and port the unit so that nothing outside it is in its key.
 
 Each sealed module is routed alone in its frame, the innermost first, then the nets outside them;
 its pipes are laid with it, on its belts (3.1.4: until then every pipe net went to one pass over
