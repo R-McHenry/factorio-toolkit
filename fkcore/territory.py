@@ -1101,14 +1101,18 @@ def need_of(flat, cat, path):
 
 def world_scope(flat, module=None):
     """The scope ``fk layout`` lays out ('' or the module's first instance) when it holds sealed
-    modules without an ``@`` hint: the world placer's case. None otherwise."""
+    modules with a declared frame (``size`` or ``shape``) and no ``@`` hint: the world placer's
+    case. None otherwise: a Stack or a module whose frame is its children's (no declared frame)
+    is a rigid body of the instance placer (``layout.build_spec``), never a territory."""
+    from .expand import own_frame
     scope = ""
     if module:
         scope = next((p for p, i in flat.insts.items() if i.module == module), None)
         if scope is None:
             return None
     for inst in flat.scopes.get(scope, {}).values():
-        if inst.module is not None and "at" not in inst.hints and "patch" not in inst.hints:
+        if (inst.module is not None and "at" not in inst.hints and "patch" not in inst.hints
+                and own_frame(inst) is not None):
             return scope
     return None
 
