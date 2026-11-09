@@ -626,7 +626,11 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
-            reason = _why_not(ground, rect, s, pole, lay.size)
+            # a sealed unit's pass (cover_power_units) has no layout size, only its frame: the
+            # 3.1.3 crash on plasticcol's edge beacon (fk-run2 FRICTION.md, PLAN-ORGANIC D3)
+            fsize = lay.size or ((frame[2] - frame[0], frame[3] - frame[1]) if frame else None)
+            reason = _why_not(ground, rect, s, pole, fsize,
+                              sealed=lay.size is None and frame is not None)
             uncovered.append((key, reason))
             checks.append(Check("domain-overlap" if "another power domain" in reason
                                 else "NO_POWER", key, reason))
@@ -766,8 +770,9 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     return poles, rep
 
 
-def _why_not(ground, rect, s, pole, size):
-    """Why no pole powers an entity: what takes each spot that could."""
+def _why_not(ground, rect, s, pole, size, sealed=False):
+    """Why no pole powers an entity: what takes each spot that could. ``sealed``: the pass is one
+    sealed unit's, whose poles stand only inside its frame (2.1.35)."""
     spots = ground.spots_powering(rect, s)
     count, owners = {}, []
     for spot in spots:
@@ -791,7 +796,10 @@ def _why_not(ground, rect, s, pole, size):
     if count.get("pole"):
         parts.append(f"{count['pole']} under other poles")
     if count.get("frame"):
-        parts.append(f"{count['frame']} outside the {size[0]}x{size[1]} frame")
+        box = f"{size[0]}x{size[1]} " if size else ""
+        parts.append(f"{count['frame']} outside the {box}frame"
+                     + ("; a sealed cell powers only its own frame: free a tile inside it for a "
+                        "pole, or move the entity into the parent module" if sealed else ""))
     if count.get("domain"):
         parts.append(f"{count['domain']} would power another power domain's machines too")
     return f"all {len(spots)} spots a {pole} could power it from are taken: " + "; ".join(parts)

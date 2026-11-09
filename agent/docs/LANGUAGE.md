@@ -166,7 +166,7 @@ module GearRib size 16x10 {
 
 | | |
 |---|---|
-| sealed | a module with `port` lines or a `size` is sealed: its nets are its own, and the only way in or out is a port; a crossing elsewhere is `crosses-frame`; a machine or belt past the frame is a `FRAME` line. Its inside routes once and is stored (chapter 11) |
+| sealed | a module with `port` lines or a `size` is sealed: its nets are its own, and the only way in or out is a port; a crossing elsewhere is `crosses-frame`; a machine or belt past the frame is a `FRAME` line. Its inside routes once and is stored (chapter 11). A level (the top of a file, or one sealed module) that routes more than 60 nets is `flat`: seal a sub-unit |
 | `port NAME : in\|out\|inout ITEM [\| ITEM2] @side[pos][L\|R]` | a lane of one belt end on the frame's edge (it takes no tile): `item \| item2` the two lanes, the same item twice one item on both lanes; `@s5` tile 5 along the south side (from 0), else the side facing what it connects to; the belt crosses from the tile outside to the tile inside. `inout` is a pass-through for a chain piece. A net names a port only in the module that declares it; from outside it is `inst.port` |
 | fluid port | `port gas_in : in petroleum-gas @s5`: one pipe across the edge, one fluid, `in` or `out`, no lanes (chapter 6) |
 | width | a port is as wide as the belt inside carries its item: both lanes there make it a both-lane port (15/s on yellow) |

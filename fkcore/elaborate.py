@@ -123,6 +123,15 @@ class Check:
         return f"{self.code} {self.where}: {self.msg}"
 
 
+#: PLAN-ORGANIC D5 (2026-11-09): the nets one level may route before `fk check` calls it `flat`.
+#: A level is the top of a file or one sealed module: the router is handed its nets together, in
+#: its frame, so its time grows with the count and the frame, never with the base. The megabelt's
+#: flower routed 67 to 118 nets at each of eight levels and took 35 minutes a build; the docs'
+#: widest clean level (belt-switch's SteelMod, 55 nets) routes in 2 s. The route step measures
+#: the seconds (fkcore.flow's `level` lines, route.LEVEL_SECONDS).
+LEVEL_NETS = 60
+
+
 @dataclass
 class Inst:
     path: str
@@ -640,6 +649,8 @@ def elaborate(f, modules, cat, name="main", layout=None, sizes=None) -> Flat:
     _literal_cut_checks(flat, [f.body] + list(modules.values()))
     _recorded_ports(flat, layout)
     _port_checks(flat)
+    _level_checks(flat)
+    _fluid_port_checks(flat, cat)
     _endpoint_checks(flat, cat)
     _auto_gates(flat, cat)
     # 3.0.1: the turned pieces whose frames needed the nets
@@ -3078,6 +3089,61 @@ def _lane_checks(flat, cat):
             f"both feed {where} on belts of their own, a lane each: one belt carries both "
             f"(`lanes {first[0]} | {second[0]}`), one lane each, and each machine takes from both. "
             "Two half-empty belts otherwise", flat.nets[first[0]].line))
+
+
+def _level_checks(flat):
+    """``flat`` (PLAN-ORGANIC D5): a level that routes more than LEVEL_NETS nets at once. A level
+    is the top of the file or one sealed module (the innermost sealed module a net is written in,
+    as ``route._unit`` reads it): the router is handed a level's nets together, in its frame. A
+    module instanced many times is one level (the first routes, the rest lay its routes); the
+    line names the module once, with its widest instance's count."""
+    per = {}
+    for name in flat.nets:
+        parts = name.split("/")[:-1]
+        unit = ""
+        for i in range(1, len(parts) + 1):
+            pre = "/".join(parts[:i])
+            if pre in flat.sealed:
+                unit = pre
+        per[unit] = per.get(unit, 0) + 1
+    seen = set()
+    for unit, n in sorted(per.items(), key=lambda kv: (-kv[1], kv[0])):
+        if n <= LEVEL_NETS:
+            break
+        inst = flat.insts.get(unit) if unit else None
+        name = (inst.module or inst.kind) if inst is not None else flat.name
+        if name in seen:
+            continue
+        seen.add(name)
+        flat.checks.append(Check(
+            "flat", f"module {name}" if unit else f"the top level of {flat.name}",
+            f"{n} nets route at one level (the limit is {LEVEL_NETS}): the router is handed all of "
+            "them together in this frame, and its time grows with both. Seal a sub-unit (`module NAME "
+            "size WxH { port ... }`) so each level routes a handful, build it alone, then compose "
+            "(BUILDING.md \"Hierarchy\")", inst.line if inst is not None else 0))
+
+
+def _fluid_port_checks(flat, cat):
+    """``ports-touch`` (PLAN-ORGANIC D5, from the megabelt designers): two fluid ports of
+    different fluids on adjacent tiles of one side of a module. Pipes join by touching, so the two
+    pipes crossing the edge there join and the fluids mix. A tile between them is the fix; two
+    ports of one fluid may touch (two stacked cells' ports meeting on one edge are a pass-through
+    on purpose, 3.1.4)."""
+    by_side = {}
+    for key, port in flat.ports.items():
+        if port.pos is None or not port.all_items \
+                or not all(cat.is_fluid(i) for i in port.all_items):
+            continue
+        by_side.setdefault((port.scope, port.side), []).append((port.pos, key, port))
+    for (_scope, side), ports in sorted(by_side.items()):
+        ports.sort(key=lambda t: (t[0], t[1]))
+        for (p1, k1, a), (p2, k2, b) in zip(ports, ports[1:]):
+            if p2 - p1 == 1 and set(a.all_items) != set(b.all_items):
+                flat.checks.append(Check(
+                    "ports-touch", f"port {k1}",
+                    f"@{side}{p1} ({_port_items(a)}) and {k2} @{side}{p2} ({_port_items(b)}) stand on "
+                    f"adjacent tiles of {a.module}'s {side} side: their pipes touch and the fluids "
+                    "mix. Leave a tile between fluid ports of different fluids", a.line))
 
 
 def _port_checks(flat):

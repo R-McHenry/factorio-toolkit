@@ -976,7 +976,9 @@ domain's. `NO_POWER` (every chapter): the factory's poles reach no grid with gen
 > changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
 > where it happened. The fix is always the same and always the designer's: seal the sub-unit
 > (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
-> inside one module can never touch another. This chapter is that fix, shown once.
+> inside one module can never touch another. Each level routes a handful of nets: `fk check` says
+> `flat` for a level past 60, and the build's `level` lines give every level's nets, seconds and
+> frame (a minute at one level is too long). This chapter is that fix, shown once.
 
 `docs\examples\red-chain.fk`, plot 92x76, is the lab's red-circuit chain: copper and iron smelted
 on beaconed furnaces, green circuits, plastic from gas and coal, red circuits, all inside one
@@ -1043,9 +1045,16 @@ one's layout:
 
 ```
 red-chain: compiled  stored chain, chain/cu2/0, chain/fea/0, chain/ga/0, chain/pl, chain/pl/p1, chain/rp, chain/rp/red/0 (out/compiled): laid from there wherever each stands next
-red-chain: 118 routed, 0 kept (0 pinned from the committed .fkp), 0 failed, 1 pass
+red-chain: 85 routed, 0 kept, 33 pass-through (0 pinned from the committed .fkp), 0 failed, 1 pass
+  level     chain (RedMod): 9 nets searched, 0 failed, 2.7 s, frame 74x56
+  level     the top level: 5 nets searched, 0 failed, 0.0 s, frame 87x71
+  level     chain/pl/p1 (Plas2): 3 nets searched, 0 failed, 0.0 s, frame 11x8
   routed    chain/cu2/1/o: 1 -> 2, laid as chain/cu2/0 laid it (compiled once, PLAN-3.0 §4)
 ```
+
+(nine `level` lines in all, one per level that searched: `RedMod` its own nine nets in 2.7 s, the
+top level its five trunks, and each sub-module a handful in no time; the 26 other nets inside
+`RedMod` are its sub-modules' or pass-throughs, two ports meeting on one edge.)
 
 ```
 red-chain: 127 nets: 127 connected, 0 open, 0 unrouted; 0 SPILL; 1003 entities, 904 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs
@@ -1086,6 +1095,16 @@ X: ...` with the reason follows a net that found no way; a net inside a sealed m
 again with that module's nets, never the whole design's. `crosses-frame`: a net crosses a sealed
 frame outside a port. `overlap`: two sealed frames share tiles. A stored entry holding an entity
 the force can't build yet is not taken (`not researched here: routed again`).
+
+**`flat`: the hierarchy measured.** `fk check` says `flat module NAME: N nets route at one level
+(the limit is 60)` for a level that routes more than 60 nets at once, and the route step says the
+same of a level that searched more than 60 nets or took more than 60 s (`level ...; flat: over 60
+nets or 60 s`, and the check `flat` in the report, which `stop_on flat` holds the paste on). The
+megabelt's flower (11-09) had ten levels of 62 to 118 nets and took 35 minutes a build while
+every report read "all connected"; this chapter's `RedMod` routes 35 nets of its own, 9 of them
+searched, in under 3 s. `ports-touch port X: @s3 (water) and Y @s4 (petroleum-gas) stand on
+adjacent tiles ...`: two fluid ports of different fluids side by side on one edge; their pipes
+join, so leave a tile between them (two ports of one fluid may touch).
 
 **Aside: blue6.fk.** `docs\examples\blue6.fk` (plot 60x40) is an older sealed cell written before
 cells had parameters: `BlueCell6`, 18x6, two units of an engine assembler and an advanced circuit
