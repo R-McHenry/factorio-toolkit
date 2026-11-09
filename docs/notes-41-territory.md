@@ -139,3 +139,23 @@ than the walls). Crowded random seeds with incompatible needs stop at the cap, a
   ground east of x 2100.
 - `min_width` (the longest rigid body) is recorded in territories.json and not enforced beyond
   the frame, which is the rigid body in wave 1.
+
+## The paper comparison, measured after the merge (integrating session, 2026-11-09 02:42-03:19)
+
+Both builds on main `c2596ef` (the agent's two died with its worktree), the docs template through
+`report_checks`, `terrain none`, plot 900x1024, one after the other on this laptop:
+
+| flower | nets | unrouted | carriers | on the flower-level nets |
+|---|---|---|---|---|
+| laid out by `fk layout` (the seven hints the agent wrote) | 6461 | 50 | 32759 | 4909 (depth 1) |
+| the corridor `flower.fk` | 6559 (98 corridor pass-throughs) | 48 | 30899 | 1182 (depth 1) + 1737 inside the four corridors (depth 2 beyond the rivers' own) = 2919 |
+
+Both took about 1100 s. 48 of the unrouted nets are the rivers' own and the same in both (the
+designers' open failures); the laid-out flower adds 2 flower-level failures and 68 % more belt
+on the inter-module flows. **The plan's bar (every inter-module net routed with no more carriers
+than the corridor layout) is not met in wave 1.** The causes are the open points above, in
+order: cells equal declared frames, so no two modules share a boundary and every inter-module
+belt crosses open ground (0 of 27 nets touching); every weight is 1 on paper, so the ring order
+is not recovered and the heavy flows do not pull; the sweep never settles. Wave 2 (hulls or a
+room factor as the need, weights from the ports' contract rates, a plateau stop) reruns this
+table before T4 starts.
