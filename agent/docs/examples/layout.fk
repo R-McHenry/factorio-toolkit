@@ -1,0 +1,27 @@
+# layout.fk: mall.fk's machines with no @(x, y) hints, so `fk layout` places them. Plot 34x44.
+# An instance without a hint is unplaced until `fk layout` places it: the instances move under a
+# routability potential (short, uncrowded belts between them), and `--write` puts the hints into
+# this file; then `fk build --to report_checks` routes it like any other.
+# Run:  fk layout layout.fk --plot 34x44       fk layout layout.fk --plot 34x44 --write
+# Expect: `layout layout: 11 instances, 11 placed now, 0 kept, 0 fixed; 8 nets; frame 34x44 (--plot)`,
+# one source line per instance with its new `@(x, y)`, then `estimated belts 62 -> 4 over 8 nets`.
+fein  = Chest<requester, item=iron-plate, rate=2/s>
+cuin  = Chest<requester, item=copper-plate, rate=1/s>
+gear  = Assembler<recipe=iron-gear-wheel>
+belt  = Assembler<recipe=transport-belt>
+ins   = Assembler<recipe=inserter>
+cable = Assembler<recipe=copper-cable>
+circ  = Assembler<recipe=electronic-circuit>
+pipe  = AsmRow<n=2, recipe=pipe>
+bbox  = Chest<provider, limit=4>
+ibox  = Chest<provider, limit=4>
+pbox  = Chest<provider, limit=4>
+
+net fe:    fein -> gear, circ, belt, ins, pipe
+net cu:    cuin -> cable
+net gears: gear -> belt, ins
+net cab:   cable -> circ
+net circs: circ -> ins
+net belts: belt -> bbox
+net inss:  ins -> ibox
+net pipes: pipe -> pbox
