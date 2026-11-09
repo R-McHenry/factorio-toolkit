@@ -199,12 +199,19 @@ _MOVES = {}
 
 
 def _moves_of(table=None):
-    """{(via, src, dst, ug): (edges, blocked)} of the table (the module's own, cached)."""
+    """{(via code, src 0-3, dst 0-3, ug 0 in / 1 out): (((src lane, dst lane), ...), blocked
+    lane or -1)} from ``lanephys.table()`` (the kernel's rows: names, 16-way directions, lanes
+    by letter); the module's own table cached."""
     if table is None:
         if not _MOVES:
             _MOVES.update(_moves_of(phys.table()))
         return _MOVES
-    return {(via, s, d, ug): (edges, blocked) for via, s, d, ug, edges, blocked in table["moves"]}
+    vias = list(table["vias"])
+    out = {}
+    for via, s, d, ug, edges, blocked in table["moves"]:
+        out[(vias.index(via), s // 4, d // 4, 0 if ug == "in" else 1)] = (
+            tuple((_LI[a], _LI[b]) for a, b, _r in edges), -1 if blocked is None else _LI[blocked])
+    return out
 
 
 def _children(mv):
@@ -767,8 +774,7 @@ class _Spec:
             | set(tree.blocked_extra) | self.fronts
         self.tspans = tree.spans()
         self.k = tree.costs
-        self.moves = {(via, s, d, ug): (edges, blocked)
-                      for via, s, d, ug, edges, blocked in table["moves"]}
+        self.moves = tree.moves
         self.host_ok = {t: e[5] for (t, _s), e in entries.items() if e[6] == 1}
 
     def merge(self, via, src, dst, ug, lanes, content):
@@ -974,8 +980,10 @@ def _trace(parent, st):
 
 # -- the native kernel (optional) -------------------------------------------------------------------
 def native_on():
-    """True when the leg runs in fkroute (its ``lane_astar``, and FK_NATIVE is not 0)."""
-    return steiner._native is not None and hasattr(steiner._native, "lane_astar") \
+    """True when the leg runs in fkroute (its ``lane_astar`` with the physics taken, and
+    FK_NATIVE is not 0)."""
+    n = steiner._native
+    return n is not None and hasattr(n, "lane_astar") and n.physics_ready() \
         and os.environ.get("FK_NATIVE", "1") != "0"
 
 
@@ -997,8 +1005,6 @@ def _leg_native(sp, starts, targets, limit):
     hops = [(t, u, via, hn, ug, ex, ln[0], ln[1]) for t, rows in sp.hops.items()
             for u, via, hn, ug, ex, ln in rows]
     leaves = list(sp.leaves.items())
-    table = [(via, s, d, ug, list(edges), blocked)
-             for via, s, d, ug, edges, blocked in sp.table["moves"]]
     k = sp.k
 
     def tap_goal(i, path):
@@ -1006,9 +1012,9 @@ def _leg_native(sp, starts, targets, limit):
     got = steiner._native.lane_astar(
         ng, list(sp.extra), list(sp.tspans[0]), list(sp.tspans[1]), list(starts), entries,
         sorted(sp.hops), hops, leaves, sinks, list(targets), sorted(sp.attach_tiles),
-        sorted(sp.no_turn), sorted(sp.taken), int(sp.me), table, (float(k["belt"]), float(k["turn"]), float(k["ug"]), float(k["ride"]),
-                int(k["max_ug"]), float(sp.hscale)),
-        int(limit), tap_goal)
+        sorted(sp.no_turn), sorted(sp.taken), int(sp.me),
+        (float(k["belt"]), float(k["turn"]), float(k["ug"]), float(k["ride"]), int(k["max_ug"]),
+         float(sp.hscale)), int(limit), tap_goal)
     if got is None:
         return None
     path, i, gs = got

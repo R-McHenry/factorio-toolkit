@@ -293,20 +293,23 @@ class TapTest(unittest.TestCase, JudgeMixin):
 
 class TableTest(unittest.TestCase):
     def test_the_table_as_data_is_the_table(self):
-        """lanephys.table(): every row agrees with the function it enumerates."""
+        """lanephys.table() (the kernel's rows) as the search reads it: every move row agrees
+        with the function it enumerates, and the search's lookup codes them as the kernel does."""
         t = lanephys.table()
         li = {"L": 0, "R": 1}
+        moves = ls._moves_of(t)
+        self.assertEqual(len(moves), len(lanephys.VIAS) * 4 * 4 * 2)
         for via, s, d, ug, edges, blocked in t["moves"]:
-            e, b = lanephys.moves(lanephys.VIAS[via], s * 4, d * 4, "in" if ug == 0 else "out")
-            self.assertEqual(edges, tuple((li[a], li[c]) for a, c, _r in e))
-            self.assertEqual(blocked, -1 if b is None else li[b])
-        for a, b, lane in t["drop"]:
-            self.assertEqual(lane, li[lanephys.drop_lane(a * 4, b * 4)])
-        for a, b, lane in t["mine"]:
-            self.assertEqual(lane, li[lanephys.mine_lane(a * 4, b * 4)])
-        for a, b, side, lane in t["turn_drop"]:
-            self.assertEqual(lane, li[lanephys.turn_drop_lane(a * 4, b * 4, side * 4)])
-        self.assertEqual(len(t["turn_drop"]), 32)
+            e, b = lanephys.moves(via, s, d, ug)
+            self.assertEqual((edges, blocked), (e, b))
+            got = moves[(lanephys.VIAS.index(via), s // 4, d // 4, 0 if ug == "in" else 1)]
+            self.assertEqual(got, (tuple((li[a], li[c]) for a, c, _r in e), -1 if b is None else li[b]))
+        for a, b, lane in t["drop_lane"]:
+            self.assertEqual(lane, lanephys.drop_lane(a, b))
+        for a, b, lane in t["mine_lane"]:
+            self.assertEqual(lane, lanephys.mine_lane(a, b))
+        for a, b, side, lane in t["turn_drop_lane"]:
+            self.assertEqual(lane, lanephys.turn_drop_lane(a, b, side))
 
     def test_entry_is_what_fed_uses(self):
         """``entry`` classifies a feed as ``fed`` does: one side with nothing behind turns."""

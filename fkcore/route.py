@@ -118,6 +118,7 @@ from . import steiner as steinermod
 from .expand import attach_points, frame_of, port_edges, record_misfit
 from .steiner import COSTS, DropSink, FixedSink, Grid, TapSink, Tree, grow
 from .steiner import _astar as _search      # one A* from many start states: grow()'s own step
+from .steiner import _UNSUPPORTED
 
 __all__ = ["NetJob", "Routed", "jobs", "route_layout", "fluid_nets"]
 
@@ -963,13 +964,14 @@ def _tap_counts(flat, cat, need=None, hand=None):
     return out
 
 
-def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None, net=None,
-          cap=TAPS_MAX):
-    """grow() towards ``fixed`` sinks and ``machines`` [(key, rect)] by direct insertion: fast
-    inserters, or long-handed ones where only those reach. ``sources``: the machines are drivers,
-    and one in ``_FILTERED`` is tried with fast inserters alone before a long-handed one may load
-    it (2.0.76). ``tap``: the machines' sink kind (2.1 m2m: ``m2m.LeftTap``). ``drops``: {key:
-    tile} of the driver machines that drop on a tile (drills: ``DropSink``). -> (result, sinks)."""
+def _grow_attempts(fixed, machines, sources=False, tap=TapSink, drops=None, net=None, cap=TAPS_MAX):
+    """The sink lists ``_grow`` tries, in order: ``fixed`` plus the ``machines`` [(key, rect)] by
+    direct insertion, fast inserters first, then long-handed ones where only those reach; then
+    (3.0) one tap fewer per machine, down to one each; then without the drills' hand-emptied drop
+    tiles. ``sources``: the machines are drivers, and one in ``_FILTERED`` is tried with fast
+    inserters alone before a long-handed one may load it (2.0.76). ``tap``: the machines' sink
+    kind (2.1 m2m: ``m2m.LeftTap``). ``drops``: {key: tile} of the driver machines that drop on a
+    tile (drills: ``DropSink``). The native hub (PLAN-4.0 K3) tries the same lists."""
     drops = drops or {}
     passes = list(_HANDS)
     if sources and any(key in _FILTERED for key, _r in machines):
@@ -980,23 +982,36 @@ def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=
         if key in drops:
             first.setdefault(drops[key], key)
     machines = [(k, r) for k, r in machines if k not in drops or first[drops[k]] == k]
+    out = []
     for hands in passes:
-        sinks = fixed + [DropSink(key, drops[key]) if key in drops else
-                         tap(key, rect, min(_TAPS.get((net, key), 1), cap),
-                             _HANDS[0] if hands is None and key in _FILTERED
-                             else hands or _HANDS[-1], arms=_ARMS) for key, rect in machines]
-        res = grow(grid, root, sinks, limit=limit)
-        if not res["problems"] or not machines:
+        out.append(fixed + [DropSink(key, drops[key]) if key in drops else
+                            tap(key, rect, min(_TAPS.get((net, key), 1), cap),
+                                _HANDS[0] if hands is None and key in _FILTERED
+                                else hands or _HANDS[-1], arms=_ARMS) for key, rect in machines])
+        if not machines:
             break
-    if res["problems"] and cap > 1 and any(_TAPS.get((net, k), 1) > 1 for k, _r in machines):
+    if cap > 1 and any(_TAPS.get((net, k), 1) > 1 for k, _r in machines):
         # 3.0: k inserters on a machine don't fit here: one fewer, down to one each as before
         # (too-thin says what that costs)
-        return _grow(grid, root, fixed, machines, limit, sources, tap, drops, net,
-                     min(cap, max(_TAPS.get((net, k), 1) for k, _r in machines)) - 1)
-    if res["problems"] and any(getattr(t, "hand", False) for t in drops.values()):
+        return out + _grow_attempts(fixed, machines, sources, tap, drops, net,
+                                    min(cap, max(_TAPS.get((net, k), 1) for k, _r in machines)) - 1)
+    if any(getattr(t, "hand", False) for t in drops.values()):
         # 3.0: a recycler whose drop tile no belt reaches is emptied by an inserter instead
-        return _grow(grid, root, fixed, machines, limit, sources, tap,
-                     {k: t for k, t in drops.items() if not getattr(t, "hand", False)}, net, cap)
+        return out + _grow_attempts(fixed, machines, sources, tap,
+                                    {k: t for k, t in drops.items() if not getattr(t, "hand", False)},
+                                    net, cap)
+    return out
+
+
+def _grow(grid, root, fixed, machines, limit, sources=False, tap=TapSink, drops=None, net=None,
+          cap=TAPS_MAX):
+    """grow() towards ``fixed`` sinks and ``machines`` over ``_grow_attempts``' sink lists: the
+    first whose tree has no problems, else the last. -> (result, sinks)."""
+    res = sinks = None
+    for sinks in _grow_attempts(fixed, machines, sources, tap, drops, net, cap):
+        res = grow(grid, root, sinks, limit=limit)
+        if not res["problems"]:
+            break
     return res, sinks
 
 
@@ -1098,14 +1113,22 @@ def _beside(grid, rect):
     return [t for t in ring if not grid.blocked(t)]
 
 
-def _hubs(grid, job, most=_HUBS):
-    """[(H, f)] hub candidates, best first: H and F = H + f free, reached from every end; ranked
-    by the summed walking distance from every driver to H and from F to every consumer; a hub
-    within 2 tiles of an end on a side with several ends ranks last; picked 3 tiles apart."""
+def _hub_near(grid, job):
+    """(ends, near_d, near_c) of a hub job: the tiles no hub may take, and per driver / consumer
+    the tiles its walk starts from (a belt end, a drill's drop tile, or the free tiles beside a
+    machine)."""
     ends = set(job.ends())
     near_d = [[t] for t, _h in job.starts] + [[job.drops[k]] if k in job.drops else
                                               _beside(grid, r) for k, r in job.sources]
     near_c = [[t] for t, _h in job.goals] + [_beside(grid, r) for _k, r in job.taps]
+    return ends, near_d, near_c
+
+
+def _hubs(grid, job, most=_HUBS):
+    """[(H, f)] hub candidates, best first: H and F = H + f free, reached from every end; ranked
+    by the summed walking distance from every driver to H and from F to every consumer; a hub
+    within 2 tiles of an end on a side with several ends ranks last; picked 3 tiles apart."""
+    ends, near_d, near_c = _hub_near(grid, job)
     ng = _native_box_grid(grid)
     if ng is not None:
         nd = [_int_tiles(s) for s in near_d]
@@ -1155,27 +1178,39 @@ def _hub_trees(cat, job, blocked, spans, clear, box, limit, hub, f, tap=TapSink)
     net = job.net
     fx, fy = hub[0] + _DX[f], hub[1] + _DY[f]
     rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
-    fixed = [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
-    rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), fixed, job.sources, limit,
-                         sources=True, tap=tap, drops=job.drops, net=job.net)
+    rres, rsinks = _grow(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), _driver_sinks(job), job.sources,
+                         limit, sources=True, tap=tap, drops=job.drops, net=job.net)
     if rres["problems"]:
         return "drivers: " + "; ".join(rres["problems"][:2])
     rtree = rres["tree"]
-    rplan = rtree.entities(rsinks, net=net, reverse=True)
-    laid = _carriers(job, rplan, net)
-    fb = set(blocked) | set(rtree.tiles())
-    for e in laid:
-        fb |= fkpmod.tiles_of(cat, e)
-    fb |= set(_belt_fronts(cat, laid)) - {(fx, fy)}
-    rs = rtree.spans()
-    fgrid = _Bounded(fb, box, {a: set(spans[a]) | rs[a] for a in (0, 1)})
-    fixed = [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
-    fres, fsinks = _grow(fgrid, (fx, fy, f, 0), fixed, job.taps, limit, net=job.net)
+    fgrid = _forward_ground(cat, job, blocked, spans, box, rtree, rsinks, (fx, fy))
+    fres, fsinks = _grow(fgrid, (fx, fy, f, 0), _consumer_sinks(job), job.taps, limit, net=job.net)
     if fres["problems"]:
         return "consumers: " + "; ".join(fres["problems"][:2])
     ftree = fres["tree"]
-    plan = rplan + ftree.entities(fsinks, net=net)
+    plan = rtree.entities(rsinks, net=net, reverse=True) + ftree.entities(fsinks, net=net)
     return rtree.cost() + ftree.cost(), plan, rres["counts"], fres["counts"]
+
+
+def _driver_sinks(job):
+    return [FixedSink(f"driver{i}", t, (h + 2) % 4) for i, (t, h) in enumerate(job.starts)]
+
+
+def _consumer_sinks(job):
+    return [FixedSink(f"consumer{i}", t, h) for i, (t, h) in enumerate(job.goals)]
+
+
+def _forward_ground(cat, job, blocked, spans, box, rtree, rsinks, front):
+    """The forward tree's ground once the reversed tree stands: what stood, the reversed tree's
+    tiles and the tiles its carriers point into (all but the hub's front tile, where the forward
+    tree starts), its tunnels among the spans."""
+    laid = _carriers(job, rtree.entities(rsinks, net=job.net, reverse=True), job.net)
+    fb = set(blocked) | set(rtree.tiles())
+    for e in laid:
+        fb |= fkpmod.tiles_of(cat, e)
+    fb |= set(_belt_fronts(cat, laid)) - {front}
+    rs = rtree.spans()
+    return _Bounded(fb, box, {a: set(spans[a]) | rs[a] for a in (0, 1)})
 
 
 def _arm_plan(name, q, arm, role="ins"):
@@ -1350,8 +1385,32 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
 
 def _hub_search(cat, job, blocked, spans, clear, box, limit, tap=TapSink):
     """The hub search proper: a trunk from every driver, split to every consumer. ``tap``: the
-    driver machines' sink kind (2.1 m2m: on the left lane)."""
+    driver machines' sink kind (2.1 m2m: on the left lane). Runs in fkroute when it can (plain
+    sinks, int tiles; PLAN-4.0 K3), else in Python (``_hub_search_py``); FK_NATIVE=check runs both
+    and raises if the plans differ."""
     grid = _Bounded(blocked, box, spans)
+    if tap is TapSink:
+        got = _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit)
+        if got is not _UNSUPPORTED:
+            if os.environ.get("FK_NATIVE") == "check":
+                py = _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap)
+                if py != got:
+                    raise AssertionError(f"fkroute.hub_search differs from _hub_search_py: {got!r} "
+                                         f"!= {py!r}")
+            return got
+    return _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap)
+
+
+def _hub_how(cr, cf, hub, f):
+    taps = cr["taps"] + cf["taps"]
+    return (f"{cr['belts'] + cf['belts']} belts, {cr['undergrounds'] + cf['undergrounds']} "
+            f"underground ends, {cr['splitters']} merges, {cf['splitters']} splitters"
+            + (f", {taps} inserters" if taps else "")
+            + f", hub {hub[0]},{hub[1]} {'NESW'[f]}")
+
+
+def _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap=TapSink):
+    """The Python hub search: _hub_search's original, and its fallback."""
     cands = _hubs(grid, job)
     if not cands:
         return None, "no free tile is reached from every driver and consumer (no hub)"
@@ -1369,12 +1428,72 @@ def _hub_search(cat, job, blocked, spans, clear, box, limit, tap=TapSink):
     if best is None:
         return None, f"none of {len(cands)} hubs routes; first: {why}"
     (_cost, plan, cr, cf), hub, f = best
-    taps = cr["taps"] + cf["taps"]
-    how = (f"{cr['belts'] + cf['belts']} belts, {cr['undergrounds'] + cf['undergrounds']} "
-           f"underground ends, {cr['splitters']} merges, {cf['splitters']} splitters"
-           + (f", {taps} inserters" if taps else "")
-           + f", hub {hub[0]},{hub[1]} {'NESW'[f]}")
-    return plan, how
+    return plan, _hub_how(cr, cf, hub, f)
+
+
+def _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit):
+    """_hub_search in the kernel: the candidates and, per candidate, the reversed and the forward
+    tree over ``_grow_attempts``' sink lists, in one call (``fkroute.hub_search``); the trees come
+    back and the plan is laid here. _UNSUPPORTED where the kernel can't: no kernel, a sink it
+    does not know, a tile that is no int."""
+    if not steinermod.native_on():
+        return _UNSUPPORTED
+    ng = _native_box_grid(grid)
+    if ng is None:
+        return _UNSUPPORTED
+    ends, near_d, near_c = _hub_near(grid, job)
+    nd = [_int_tiles(s) for s in near_d]
+    nc = [_int_tiles(s) for s in near_c]
+    ne, nclear = _int_tiles(ends), _int_tiles(clear)
+    if ne is None or nclear is None or any(s is None for s in nd + nc):
+        return _UNSUPPORTED
+    ratt = _grow_attempts(_driver_sinks(job), job.sources, sources=True, drops=job.drops, net=job.net)
+    fatt = _grow_attempts(_consumer_sinks(job), job.taps, net=job.net)
+    ins = steinermod._Inserters(COSTS)
+    try:
+        rspec = [steinermod._grow_specs(sinks, ins) for sinks in ratt]
+        fspec = [steinermod._grow_specs(sinks, ins) for sinks in fatt]
+        if any(sp is None for sp in rspec + fspec):
+            return _UNSUPPORTED
+        best, fail, n = steinermod._native.hub_search(
+            ng, nd, nc, ne, _HUBS, nclear, [s for s, _n in rspec], [nm for _s, nm in rspec],
+            [s for s, _n in fspec], [nm for _s, nm in fspec], ins.rows,
+            steinermod._native_costs(COSTS), steinermod.IMPROVE, int(limit), _HUB_WINS)
+    except (TypeError, OverflowError):
+        return _UNSUPPORTED
+    if n == 0:
+        return None, "no free tile is reached from every driver and consumer (no hub)"
+
+    def trees(hub, f, ri, rout, fi, fout, ground):
+        """The Python trees of a candidate's two outputs (``ground``: the forward tree's grid is
+        built too, for its problems)."""
+        fx, fy = hub[0] + _DX[f], hub[1] + _DY[f]
+        rgrid = _Bounded(set(blocked) | {(fx, fy)}, box, spans, clear)
+        rsinks = ratt[ri]
+        rtree, _log = steinermod._tree_from_native(rgrid, (hub[0], hub[1], (f + 2) % 4, 0), rsinks, None, rout)
+        if fout is None:
+            return rtree, rsinks, None, None
+        fgrid = _forward_ground(cat, job, blocked, spans, box, rtree, rsinks, (fx, fy)) if ground else grid
+        fsinks = fatt[fi]
+        ftree, _log = steinermod._tree_from_native(fgrid, (fx, fy, f, 0), fsinks, None, fout)
+        return rtree, rsinks, ftree, fsinks
+
+    if best is None:
+        hub, f, side, ai, tout, rpair = fail
+        hub = tuple(hub)
+        if side == 0:
+            tree, sinks, _f, _s = trees(hub, f, ai, tout, None, None, False)
+            why = "drivers: " + "; ".join(tree.problems(sinks)[:2])
+        else:
+            ri, rout = rpair
+            _r, _rs, tree, sinks = trees(hub, f, ri, rout, ai, tout, True)
+            why = "consumers: " + "; ".join(tree.problems(sinks)[:2])
+        return None, f"none of {n} hubs routes; first: hub {hub[0]},{hub[1]}: {why}"
+    hub, f, ri, rout, fi, fout = best
+    hub = tuple(hub)
+    rtree, rsinks, ftree, fsinks = trees(hub, f, ri, rout, fi, fout, False)
+    plan = rtree.entities(rsinks, net=job.net, reverse=True) + ftree.entities(fsinks, net=job.net)
+    return plan, _hub_how(rtree.counts(), ftree.counts(), hub, f)
 
 
 # -- one net --------------------------------------------------------------------------------------

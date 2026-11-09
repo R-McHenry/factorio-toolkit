@@ -1,16 +1,18 @@
 //! The lane-state search: fkcore.lanesearch._leg_py, step for step (PLAN-4.0 N1).
 //!
 //! A state is (x, y, h, ex, L, R): steiner's belt state and what the belt's two lanes hold, as
-//! small ids. No lane rule lives here: the table (`fkcore.lanephys.table()["moves"]`) comes in
-//! with every call, and every entry into a tree's or a host's belt comes precomputed from Python
-//! with the move kind the table gives it. The heap orders entries as Python's `(f, -g, state)`
+//! small ids. No lane rule lives here: the moves are `physics::table()`'s (the lane physics
+//! taken once at import), and every entry into a tree's or a host's belt comes precomputed from
+//! Python with the move kind the table gives it. The heap orders entries as Python's `(f, -g, state)`
 //! tuple does and costs are summed in the same order, so the kernel returns the same path.
 use pyo3::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::{NativeGrid, DX, DY};
+use crate::grid::NativeGrid;
+use crate::physics::{self, Physics};
+use crate::{DX, DY};
 
 type T = (i64, i64);
 type St = (i64, i64, i64, i64, i64, i64); // x, y, heading, exited an underground, L, R
@@ -131,7 +133,7 @@ struct Lane<'a> {
     no_turn: FxHashSet<St>,
     taken: FxHashSet<T>, // tiles the net rides already: a forward leg does not ride into them
     me: i64,
-    moves: FxHashMap<(i64, i64, i64, i64), Vec<(i64, i64)>>,
+    phys: &'static Physics,
     belt: f64,
     turn: f64,
     ug: f64,
@@ -144,10 +146,10 @@ impl Lane<'_> {
     /// _Spec.merge: (L, R) after a feed holding `lanes` enters a carrier holding `content` by
     /// move `via`; None where a lane would hold two ids or the net's own items land nowhere.
     fn merge(&self, via: i64, src: i64, dst: i64, ug: i64, lanes: (i64, i64), content: (i64, i64)) -> Option<(i64, i64)> {
-        let edges = self.moves.get(&(via, src, dst, ug))?;
+        let mv = self.phys.moves(via as usize, src as u8, dst as u8, ug == 1)?;
         let mut out = [content.0, content.1];
         let mut mine = false;
-        for &(a, b) in edges {
+        for &(a, b, _rank) in &mv.edges {
             let v = if a == 0 { lanes.0 } else { lanes.1 };
             if v == EMPTY {
                 continue;
@@ -213,12 +215,12 @@ fn push(
 /// every host's tile (a state there rides); `hops`: (tile, next, via, hn, ug, ex, L, R); `leaves`: (the free tile a host chain ends into, the chain's
 /// end); `goals`: (0, x, y, edir, needL, needR) fixed or (1, x0, y0, x1, y1, 0) tap;
 /// `no_turn`: start states that may not turn on their first step (a drop root: its lane
-/// depends on its heading); `taken`: tiles no hop may ride into; `table`:
-/// lanephys.table()["moves"] rows; `costs`: (belt, turn, ug, ride, max_ug, the heuristic's
-/// price of a tile); `tap_goal(i, path)`: the Python tap goal test.
+/// depends on its heading); `taken`: tiles no hop may ride into; `costs`: (belt, turn, ug,
+/// ride, max_ug, the heuristic's price of a tile); `tap_goal(i, path)`: the Python tap goal
+/// test. The moves are `physics::table()`'s: `fkroute.physics` must have run.
 #[pyfunction]
 #[pyo3(signature = (grid, extra, tspan0, tspan1, starts, entries, host_tiles, hops, leaves, goals,
-                    targets, attach, no_turn, taken, me, table, costs, limit, tap_goal))]
+                    targets, attach, no_turn, taken, me, costs, limit, tap_goal))]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn lane_astar<'py>(
     grid: &Bound<'py, NativeGrid>,
@@ -236,7 +238,6 @@ pub fn lane_astar<'py>(
     no_turn: Vec<St>,
     taken: Vec<T>,
     me: i64,
-    table: Vec<(i64, i64, i64, i64, Vec<(i64, i64)>, i64)>,
     costs: (f64, f64, f64, f64, i64, f64),
     limit: usize,
     tap_goal: &Bound<'py, PyAny>,
@@ -254,6 +255,8 @@ pub fn lane_astar<'py>(
     if targets.iter().any(|&i| i >= goals.len()) {
         return Err(pyo3::exceptions::PyValueError::new_err("targets: out of range"));
     }
+    let phys = physics::table()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("lane_astar: fkroute.physics has not taken the table"))?;
     let mut hop_map: FxHashMap<T, Vec<Hop>> = FxHashMap::default();
     for t in host_tiles {
         hop_map.entry(t).or_default();
@@ -277,7 +280,7 @@ pub fn lane_astar<'py>(
         no_turn: no_turn.into_iter().collect(),
         taken: taken.into_iter().collect(),
         me,
-        moves: table.into_iter().map(|(via, sd, dd, ug, edges, _blocked)| ((via, sd, dd, ug), edges)).collect(),
+        phys,
         belt,
         turn,
         ug,

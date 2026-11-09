@@ -32,11 +32,12 @@ from __future__ import annotations
 
 __all__ = ["LANES", "RULES", "left", "right", "near", "moves", "carry", "drop_lane",
            "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK", "CARRIERS", "fed",
-           "tile_mask", "mask_bit", "entry", "VIAS", "table"]
+           "tile_mask", "mask_bit", "DIRS", "VIAS", "table", "entry"]
 
 LANES = ("L", "R")
 KEEP = ("straight", "turn", "tunnel", "splitter")
-#: Every move kind, in the order ``table`` numbers them (the kernel's via codes).
+DIRS = (0, 4, 8, 12)
+#: every move ``moves`` knows
 VIAS = KEEP + ("side", "ug_side")
 SIDE_RANK = (1, 2)       # side-load: the lane entering further upstream first, then the other
 DROP_RANK = 3            # an inserter's or a drill's drop onto a belt: after every belt feed
@@ -198,29 +199,17 @@ def mine_lane(drill_dir, belt_dir):
 
 
 def table():
-    """The table enumerated as data, for a kernel that must not state a rule (PLAN-4.0 K1/N1):
-    headings 0 N, 1 E, 2 S, 3 W (the router's), lanes 0 L, 1 R, vias ``VIAS.index``, ``ug`` 0
-    for an entrance and 1 for an exit.
-
-    - ``moves``: [(via, src, dst, ug, ((src lane, dst lane), ...), blocked lane or -1)], every
-      via for every heading pair and underground end (a keep move's edges are the identity);
-    - ``drop``: [(drop heading, belt heading, lane)] (``drop_lane``);
-    - ``turn_drop``: [(come, go, side, lane)] for every turn (``turn_drop_lane``);
-    - ``mine``: [(drill heading, belt heading, lane)] (``mine_lane``)."""
-    li = {"L": 0, "R": 1}
-    out = {"moves": [], "drop": [], "turn_drop": [], "mine": []}
-    for vi, via in enumerate(VIAS):
-        for s in range(4):
-            for d in range(4):
-                for ug in (0, 1):
-                    edges, blocked = moves(via, s * 4, d * 4, "in" if ug == 0 else "out")
-                    out["moves"].append((vi, s, d, ug, tuple((li[a], li[b]) for a, b, _r in edges),
-                                         -1 if blocked is None else li[blocked]))
-    for a in range(4):
-        for b in range(4):
-            out["drop"].append((a, b, li[drop_lane(a * 4, b * 4)]))
-            out["mine"].append((a, b, li[mine_lane(a * 4, b * 4)]))
-            if (a - b) % 2 == 1:                    # a turn: come a, go b
-                for side in range(4):
-                    out["turn_drop"].append((a, b, side, li[turn_drop_lane(a * 4, b * 4, side * 4)]))
-    return out
+    """Every rule as data, for a reader that keeps no rule of its own (the native kernel takes it
+    once at import: ``fkroute.physics(table())``, PLAN-4.0 K1): ``moves`` for every via in
+    ``VIAS``, every direction pair and both underground ends, as rows ``(via, src_dir, dst_dir,
+    ug, edges, blocked)``; ``drop_lane``, ``turn_drop_lane`` and ``mine_lane`` for every argument,
+    as rows of their arguments and the lane. Directions as this module's, 0, 4, 8, 12."""
+    return {
+        "vias": list(VIAS),
+        "moves": [(via, s, d, ug) + moves(via, s, d, ug)
+                  for via in VIAS for s in DIRS for d in DIRS for ug in ("in", "out")],
+        "drop_lane": [(a, b, drop_lane(a, b)) for a in DIRS for b in DIRS],
+        "turn_drop_lane": [(c, g, s, turn_drop_lane(c, g, s)) for c in DIRS for g in DIRS
+                           for s in DIRS],
+        "mine_lane": [(a, b, mine_lane(a, b)) for a in DIRS for b in DIRS],
+    }

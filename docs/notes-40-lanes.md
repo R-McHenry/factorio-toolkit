@@ -8,8 +8,9 @@ measurement `tools/lane_measure.py`.
 ## What landed
 
 - `lanephys.entry(carrier, d, src, feeds)`: the move kind of one feed (turn, side, ug_side,
-  straight or none), which `fed` now uses; `lanephys.table()`: the rules enumerated as data
-  (192 move rows, drop 16, turn_drop 32, mine 16) for a kernel that states none.
+  straight or none), which `fed` now uses; the kernel reads main's `lanephys.table()` (K1: the
+  rules as data, taken once at import by `fkroute.physics`; `lanesearch._moves_of` codes the
+  same rows for the Python leg).
 - `lanesearch`: the state `(x, y, h, ex, L, R)`; the moves step/turn/jump/split (kept), stub,
   side-load into the tree or a host, ride, leave, drop (drop_lane, turn_drop_lane), tap; goals in
   lanes (`Fixed` with `need`, `Tap`); hosts as data with entries and hops precomputed from the
@@ -17,8 +18,9 @@ measurement `tools/lane_measure.py`.
   by the move that entered them) after every leg; a job routed in every net order; each tree the
   next nets' host; shared taps; riders' items followed along the hosts past their goals.
 - The leg in Rust, step for step (heap `(f, -g, state)`, the same move order and cost sums);
-  `FK_NATIVE=check` runs both and raises on a difference. The table goes in with each call
-  (main's `fkroute.physics` landed after this branch was cut; see "Open").
+  `FK_NATIVE=check` runs both and raises on a difference. After the merge with main (fkroute
+  0.3.0: grid.rs, search.rs, grow.rs, hub.rs, physics.rs, place.rs) `lane.rs` is one more
+  module with one registration line, and its moves are `physics::table()`'s.
 - `tests/data/line11.fk` and `mall-shared.fk` from the October branch, the future bar.
 
 ## What the synthetic fields showed (and fixed)
@@ -79,7 +81,8 @@ jobs: the modules reroute the same layouts):
 | ore_\|fuel (port_pairs) | pair | ok | 34 | 42.0 | 0.469 | ok | 55 | 59.0 | 0.019 | (1, 2) | 2 |
 
 7 of 7 routed both ways; carriers 483 -> 456, cost 488 -> 423 (cheaper 2, dearer 3, equal 2);
-seconds 9.37 -> 0.44.
+seconds 9.37 -> 0.44 (on the merged tree, fkroute 0.3.0 routing the old way natively too:
+3.89 -> 0.22, the same layouts).
 
 The wider set (test_width2, test_stacks, test_smelter_array, test_stack_auto, test_split_lanes,
 test_lanes_check; 58 tests, 11 distinct jobs):
@@ -147,8 +150,7 @@ labels and the kernel's next step.
   the job still routes 22 of 24 drivers.
 - **The kernel:** the leg is native, the tree bookkeeping (propagate, entries, attach, the
   orders) Python; with one-id trees skipping the trial propagations, a 130-belt wide net
-  routes in 0.16 s. `lane.rs` should read `physics::table()` (main's K1) instead of taking the
-  table in the call.
+  routes in 0.16 s. The next step is the tree bookkeeping in the kernel (K5's entities out).
 - **The October bar:** `line11.fk` (12 nets; the October router: two belts of four materials,
   circuits on the iron belt, copper on the gear belt, 99-111 entities, `best_of` 36-47 s on 8
   processes) and `mall-shared.fk` (9 nets; iron|gears on one belt, green on its own; the old
