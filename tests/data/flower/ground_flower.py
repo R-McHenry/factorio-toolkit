@@ -35,13 +35,13 @@ module Stand<res> size 40x40 {
 # a stand-in well: a pumpjack on a crude patch
 module Well size 20x20 {
   port o : out crude-oil @s10
-  pj = Pumpjack<n=1, rate=30/s> @(5, 5)
+  pj = Pumpjack<n=1, rate=30/s> @(9, 9)      # the frame is centred on the patch: the jack on its middle site
   net c: pj -> o
 }
 # a stand-in shore: an offshore pump; water is no patch, so it is placed like a module
 module Shore size 12x12 {
   port o : out water @s6
-  p = OffshorePump<rate=1200/s> @(5, 5)
+  p = OffshorePump<rate=1200/s> @(5, 0)      # at the frame's north edge: the water is the two rows north of it
   net w: p -> o
 }
 """

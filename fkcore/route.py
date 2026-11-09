@@ -1965,6 +1965,21 @@ def _route_in(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), span
         blocked = _ground(cat, ents, frames, js, net, terrain, box) | \
             (set(avoid) - set(job.ends()))
         plan = _straight(joined, _Bounded(blocked, box))
+        if plan is None and not (joined.sources or joined.taps or joined.drops):
+            # 45-pairports: a pair already on one belt with no machine on the way (a river's tap
+            # from its mouth port to the core's port): nothing hands on or off it, so any belt
+            # keeps both lanes; route it as one plain net from where it comes in
+            seen, goals = set(), []
+            for g in joined.goals:
+                if (tuple(g[0]), g[1]) not in seen:
+                    seen.add((tuple(g[0]), g[1]))
+                    goals.append(g)
+            plain = NetJob(net, starts=list(joined.starts), goals=goals, owners=list(job.owners),
+                           anchors=dict(job.anchors))
+            got, how = _route_in(cat, plain, ents, frames, dict(js, **{net: plain}), box, limit,
+                                 terrain, avoid, spans, allow, promoted, soft)
+            if got is not None:
+                return got, f"{how}; both lanes on one belt from its paired port, no machine on the way"
         if plan is None:
             return None, ("its two lanes come in paired, and no straight belt runs on from there "
                           "past every machine to its end")
