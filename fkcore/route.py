@@ -3010,11 +3010,15 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
     # 2.1.35: a rail or signal another module owns (a shared lane's ramp, the planned signals)
     # is left out of the key: it differs from twin to twin at the frame's edge, and ``_fits``
     # still rejects a moved route that would stand on it
+    # 3.1.4: the unit's own nets' carriers are not in its key: a unit whose routes stand keys
+    # as a fresh twin of it does (the key is what the routes are laid to, not the routes)
+    own = set(mine)
     standing = sorted((e.name,) + tf.point(e.x, e.y) + (tf.d16(e.dir) if e.dir is not None
                                                         else -1,)
                       for e in _near(ground, x0, y0, x1, y1)
                       if x0 <= e.x < x1 and y0 <= e.y < y1
-                      and not ("rail" in e.name and not e.key.startswith(u + "/")))
+                      and not ("rail" in e.name and not e.key.startswith(u + "/"))
+                      and not _own_carrier(e, own))
     parts.append(standing)
     # 3.1: the catalog facts the routes are laid against: its version and each name's footprint
     facts = [getattr(cat, "version", None)]
@@ -3048,6 +3052,28 @@ def unit_key(flat, lay, cat, js, u, sealed, mine, ground, terrain, child_keys=()
                                                                               else -1,)
                              for e in (seeds or {}).get(n, ()))))
     return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:20]
+
+
+def _twin_routes(lay, sealed, own_all, routes_of, src, dst):
+    """Unit ``src``'s routes (``routes_of``) as unit ``dst``'s, moved to its frame (turned when
+    the two stand turned apart, 2.1.32); None when ``src``'s are not all there."""
+    routes = routes_of(src)
+    if routes is None:
+        return None
+    if lay.insts[src].rot % 4 == lay.insts[dst].rot % 4:
+        return _moved_routes(routes, own_all[src], src, sealed[src], dst, sealed[dst])
+    rel = _unit_rel(routes, src, sealed[src], lay.insts[src].rot)
+    return None if rel is None else _unit_abs(rel, dst, sealed[dst], lay.insts[dst].rot)
+
+
+def _own_carrier(e, own):
+    """``e`` is a carrier of one of the nets ``own`` (its owner is ``~net``; a lane pair's
+    ``~a|b`` counts for the pair and for either member)."""
+    o = e.owner
+    if not o.startswith("~"):
+        return False
+    o = o[1:]
+    return o in own or any(m in own for m in fkpmod.net_names(o))
 
 
 def _moved_entity(e, net, new_net, dx, dy, src, dst):
@@ -3571,6 +3597,20 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     # 3.0: the nets the build script leaves to the player (route --skip)
     manual = sorted(n for n in todo if _named(n, skip))
     todo = [n for n in todo if n not in manual]
+    # 3.1.4: a sealed unit's fluid nets are laid with the unit, in its frame, as its belts are
+    # (PLAN-3.0 §4's "not done": every fluid net went to one whole-world pass after the belts,
+    # keyed and stored by no unit, so a module of pipes never compiled and the pass took the
+    # build's minutes); the fluid nets outside every sealed module still go to the pass after
+    fluid_units = {}
+    for n in sorted(js, key=fkpmod.natural_key):
+        if js[n].fluid and n not in have and n not in kept and js[n].skip is None:
+            if _named(n, skip):
+                manual.append(n)              # the build script leaves it (route --skip)
+                continue
+            u = _unit(n, sealed)
+            if u:
+                fluid_units.setdefault(u, []).append(n)
+    manual.sort()
     todo.sort(key=lambda n: (-len(js[n].ends()), n))
     claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
     # 2.1: ribbons (a net each, a bundle, a wide net) are routed as one, first: they need the
@@ -3907,8 +3947,30 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         unit_keys.setdefault(_unit(ribs[key].nets[0] if key in ribs else key, sealed),
                              []).append(key)
     nets_of = {u: [m for k in keys for m in (dict.fromkeys(ribs[k].nets) if k in ribs else [k])]
-               for u, keys in unit_keys.items()}
-    units = sorted(unit_keys, key=lambda u: (-(u.count("/") + 1) if u else 1, u))
+               for u, keys in unit_keys.items()}          # the belt nets laid this run
+    # 3.1.4: every sealed unit with a net of its own is a compile unit, whether its nets are laid
+    # this run or stand (kept, patched): its key covers all of them (its own carriers left out
+    # of the ground, so a unit that stands keys as a fresh twin does), and the store gets the
+    # unit whole. Until now a unit was keyed only when a belt net of it was stale, over those
+    # nets alone: the entries were pieces of a unit (one FurnColX3 under three keys with 3, 2
+    # and 1 nets), a twin rarely matched one, and a unit whose routes stood was never written
+    # again after the store was lost.
+    own_all = {u: [] for u in nets_of if u}
+    for n in sorted(js, key=fkpmod.natural_key):
+        if js[n].skip is not None or n in have or n in manual or n in abut:
+            continue
+        u = _unit(n, sealed)
+        if u:
+            own_all.setdefault(u, []).append(n)
+    for u, keys in nets_of.items():
+        if u:
+            own_all[u] = list(dict.fromkeys(keys + [n for n in own_all[u] if n not in keys]))
+    standing_of = {}                 # net -> its carriers as they stand (kept, patched, held)
+    for e in base.entities.values():
+        if e.owner.startswith("~"):
+            standing_of.setdefault(e.owner[1:], []).append(e)
+    units = sorted(set(unit_keys) | set(own_all),
+                   key=lambda u: (-(u.count("/") + 1) if u else 1, u))
     gidx = _Buckets(ents)            # 2.1.33: the ground by place, for the per-unit reads
     order, passes = [], 1
     claimed = {}
@@ -3922,49 +3984,143 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     settings = (tuple(_HANDS), tuple(getattr(ribmod, "_UG", ()) or ()), tuple(fluidmod._LAY),
                 _M2M)
     twins, compiled, reused, keys_of, cinfo = {}, {}, {}, {}, {}
+    fpass = None                 # 3.1.4: the fluid world, built at the first unit with pipes
+    fluid_done = []              # the fluid nets laid with their units (not in the pass after)
+
+    def routes_of(u):
+        """Unit ``u``'s own routes as they are now ({net: carriers}): laid this run, or standing;
+        None when one is missing (failed, held)."""
+        out = {}
+        for n in own_all[u]:
+            if n in added:
+                out[n] = added[n]
+            elif n in standing_of and n not in failed:
+                out[n] = standing_of[n]
+            else:
+                return None
+        return out
+
+    def near_ground(u):
+        """What stands in and just around unit ``u``'s frame now."""
+        x0, y0, x1, y1, _t = sealed[u]
+        return [e for e in gidx.near(x0 - 3, y0 - 3, x1 + 3, y1 + 3)
+                if x0 - 3 <= e.x < x1 + 3 and y0 - 3 <= e.y < y1 + 3]
+
+    def fluid_pass():
+        nonlocal fpass
+        if fpass is None:
+            fpass = fluidmod.Pass(flat, base, cat, terrain, box, limit, jobs=js)
+        return fpass
+
+    def fluid_key(net, ents):
+        """The ground a unit's fluid net is searched on (its frame), as one hash."""
+        return _ground_key(cat, js[net], ents, net_frames(net)[1], terrain, (), (limit, budget),
+                           whole=True)
+
+    def fluid_unit(u, order):
+        """3.1.4: lay unit ``u``'s fluid nets in its frame, on the ground as it stands (its belts
+        included): once each, a failed one remembered with the ground it failed on."""
+        nonlocal ents
+        todo_f = []
+        for net in order:
+            if memo.get(net) and not _named(net, fresh) and same(net, fluid_key(net, ents)):
+                failed[net] = memo[net]["why"]
+                remembered[net] = memo[net]
+                landed(net, 0.0)
+            else:
+                todo_f.append(net)
+        if not todo_f:
+            return
+        t0 = time.monotonic()
+        f_added, f_how, f_failed = fluid_pass().lay(todo_f, near_ground(u), budget=budget,
+                                                   which=f"fluid, {u}, pass")
+        took = time.monotonic() - t0
+        for net in todo_f:
+            if net in f_added:
+                added[net], how[net] = f_added[net], f_how[net]
+                failed.pop(net, None)
+                ents = ents + f_added[net]
+                gidx.extend(f_added[net])
+                fluid_done.append(net)
+            else:
+                failed[net] = f_failed.get(net, "no pipe route")
+                last_key[net] = fluid_key(net, ents)
+            landed(net, took)
+
     for u in units:
-        mine = nets_of[u]
+        mine = list(nets_of.get(u, ()))              # the belt nets laid this run
+        fl = fluid_units.get(u, [])                  # the fluid nets laid this run
+        lay_now = mine + fl
+        allmine = own_all.get(u, lay_now) if u else lay_now
         ckey = None
         if u:
             child_keys = [(c[len(u) + 1:], k) for c, k in keys_of.items()
                           if c.startswith(u + "/")]
-            ckey = unit_key(flat, lay, cat, js, u, sealed, mine, gidx, terrain, child_keys,
+            ckey = unit_key(flat, lay, cat, js, u, sealed, allmine, gidx, terrain, child_keys,
                             seeds, settings)
             keys_of[u] = ckey
-            cinfo[u] = {"module": _module_of(flat, lay, u), "key": ckey, "nets": list(mine),
-                        "from": None, "stored": 0, "refused": []}
-        if ckey is not None:
+            cinfo[u] = {"module": _module_of(flat, lay, u), "key": ckey, "nets": list(allmine),
+                        "laid": list(lay_now), "from": None, "stored": 0, "refused": []}
+        if ckey is not None and lay_now:
             got, src = None, None
-            if ckey in twins:
-                src = twins[ckey]
-                if lay.insts[src].rot % 4 == lay.insts[u].rot % 4:
-                    got = _moved_routes(added, nets_of[src], src, sealed[src], u, sealed[u])
-                elif all(n in added for n in nets_of[src]):
-                    # a twin turned the other way (2.1.32): through the unturned terms
-                    rel = _unit_rel({n: added[n] for n in nets_of[src]}, src, sealed[src],
-                                    lay.insts[src].rot)
-                    got = None if rel is None else _unit_abs(rel, u, sealed[u], lay.insts[u].rot)
-            elif store:
+            twin_u = twins.get(ckey)
+            # a twin routed this build first (its routes are the store's), then the store, then
+            # a twin that stands (3.1.4: its routes may have been re-handed or patched since,
+            # and the store's entry is the canonical one; one holding an entity the force
+            # can't build is refused as the store refuses it)
+            twin_first = twin_u is not None and cinfo[twin_u]["from"] != "standing"
+            if twin_first:
+                got, src = _twin_routes(lay, sealed, own_all, routes_of, twin_u, u), twin_u
+            if got is None and store:
                 got = _store_load(store, ckey, cinfo[u]["module"], u, sealed[u],
                                   lay.insts[u].rot)
                 src = "the compiled store" if got is not None else None
                 cinfo[u]["refused"] = store.refused.get((cinfo[u]["module"], ckey), [])
-            if got is not None and set(got) == set(mine) \
-                    and _fits(cat, got, gidx, sealed[u], net_frames(mine[0])[0], terrain,
-                              claimed, set(mine)):
-                for net in mine:
-                    added[net] = got[net]
-                    how[net] = f"laid as {src} laid it (compiled once, PLAN-3.0 §4)"
-                    failed.pop(net, None)
-                    ents = ents + got[net]
-                    gidx.extend(got[net])
-                order += mine
-                reused[u] = src
-                cinfo[u]["from"] = "store" if src == "the compiled store" else f"twin {src}"
-                for net in mine:
-                    landed(net, 0.0)
-                continue
-        keys = ranked(unit_keys[u])
+            if got is None and twin_u is not None and not twin_first:
+                got, src = _twin_routes(lay, sealed, own_all, routes_of, twin_u, u), twin_u
+                locked = getattr(store, "locked", None) if store else None
+                if got is not None and locked is not None \
+                        and any(locked(e.name) for ents_ in got.values() for e in ents_):
+                    got, src = None, None
+            # the whole unit is stored; what stands of it stands, the rest is laid from there
+            take = {n: got[n] for n in lay_now} if got is not None and set(got) == set(allmine) \
+                else None
+            if take is not None and _fits(cat, take, gidx, sealed[u], net_frames(lay_now[0])[0],
+                                          terrain, claimed, set(allmine)):
+                ok = True
+                if fl:
+                    # a moved pipe route is judged as any (the belts' judge is _repair, after)
+                    ground = near_ground(u) + [e for n in lay_now for e in take[n]]
+                    for n in fl:
+                        keys_n = {e.key for e in take[n]}
+                        others = [e for e in ground if e.key not in keys_n]
+                        if fluid_pass().judge(n, take[n], others) is not None:
+                            ok = False
+                            break
+                if ok:
+                    for net in lay_now:
+                        added[net] = take[net]
+                        how[net] = f"laid as {src} laid it (compiled once, PLAN-3.0 §4)"
+                        failed.pop(net, None)
+                        ents = ents + take[net]
+                        gidx.extend(take[net])
+                        if net in fl:
+                            fpass.adopt(net, take[net])
+                            fluid_done.append(net)
+                    order += mine
+                    reused[u] = src
+                    cinfo[u]["from"] = "store" if src == "the compiled store" else f"twin {src}"
+                    for net in lay_now:
+                        landed(net, 0.0)
+                    continue
+        if ckey is not None and not lay_now:
+            # 3.1.4: nothing of it is laid this run: its routes stand, and it is compiled as it
+            # stands (a twin takes them; a build after the store was lost writes it again)
+            twins.setdefault(ckey, u)
+            compiled[u] = ckey
+            cinfo[u]["from"] = "standing"
+            continue
+        keys = ranked(unit_keys.get(u, []))
         swaps_before = len(swaps)
         if negotiate_on():
             plain = [n for n in keys if n not in ribs and n not in seeds
@@ -3979,7 +4135,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         gidx = _Buckets(ents)
         order += [m for n in u_order for m in (dict.fromkeys(ribs[n].nets) if n in ribs else [n])]
         passes = max(passes, u_passes)
-        if ckey is not None and not any(n in failed for n in mine) \
+        if fl:
+            fluid_unit(u, fl)            # 3.1.4: the unit's pipes, on its belts
+        if ckey is not None and not any(n in failed for n in lay_now) \
                 and len(swaps) == swaps_before:
             twins.setdefault(ckey, u)
             compiled[u] = ckey
@@ -3996,10 +4154,13 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     for net in todo:
         for e in added.get(net, ()):
             new.add(e)
+    for net in fluid_done:
+        for e in added.get(net, ()):
+            new.add(e)
     _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain, swaps,
             (ribs, rib_of, rib_lines, net_frames, claims, joints))
     for net in sorted(failed):
-        if net in rib_of or net in remembered:
+        if net in rib_of or net in remembered or js[net].fluid:
             continue          # a ribbon's net is never tried alone (it would be a loose belt)
         guard = _guarded(cat, js[net], list(new.entities.values()), frames, js, box, limit,
                          terrain)
@@ -4008,14 +4169,17 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     # 3.0: remembered while the ground of its last search stands as it does now
     final = list(new.entities.values())
     for net, key in last_key.items():
-        if net in failed and key_of(net, final) == key:
+        if net in failed and (fluid_key(net, final) if js[net].fluid
+                              else key_of(net, final)) == key:
             known[net] = {"key": key, "why": failed[net]}
     for net, was in remembered.items():
         known[net] = was
         failed[net] = unsearched(net, was["why"])
     failed.update(held)
+    # the fluid nets outside every sealed unit (3.1.4: a unit's own are laid with the unit)
     fluid_todo = sorted(n for n in js if js[n].fluid and n not in have and n not in kept
-                        and js[n].skip is None)
+                        and js[n].skip is None and n not in manual
+                        and n not in added and n not in failed)
 
     # a fluid net is searched in the whole box: its key is the ground as the fluid router finds it
     # (the fluid nets it lays this run are not in it), one hash for all of them
@@ -4033,7 +4197,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     plugin = _fluid_plugin() if fluid_todo else None
     if plugin is not None:
         f_added, f_how, f_failed = plugin.route(flat, new, cat, fluid_todo, terrain, box, limit,
-                                                budget=budget)
+                                                budget=budget, jobs=js)
         for net in fluid_todo:
             for e in f_added.get(net, ()):
                 new.add(e)
@@ -4089,24 +4253,27 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     if sealed_units:
         stored = 0
         for u, ckey in compiled.items():
-            if store and all(n in added and n not in failed for n in nets_of[u]):
+            # 3.1.4: the unit whole, its routes laid this run and those that stand
+            routes = routes_of(u) if store else None
+            if routes is not None and not any(n in failed for n in own_all[u]):
                 x0, y0, x1, y1, _t = sealed[u]
                 inputs = {"frame": [x1 - x0, y1 - y0],
-                          "nets": [_renamed(n, u, "") for n in nets_of[u]],
+                          "nets": [_renamed(n, u, "") for n in own_all[u]],
                           "children": sorted((c[len(u) + 1:], k) for c, k in keys_of.items()
                                              if c.startswith(u + "/")),
-                          "seeded": sorted(_renamed(n, u, "") for n in nets_of[u]
+                          "seeded": sorted(_renamed(n, u, "") for n in own_all[u]
                                            if seeds.get(n)),
                           "settings": repr(settings)}
                 cinfo[u]["stored"] = _store_save(
                     store, ckey, cinfo[u]["module"], u, sealed[u],
-                    {n: [new.entities.get(e.key, e) for e in added[n]] for n in nets_of[u]},
+                    {n: [new.entities.get(e.key, e) for e in routes[n]] for n in own_all[u]},
                     lay.insts[u].rot, inputs)
                 stored += cinfo[u]["stored"]
         twin = sum(1 for s in reused.values() if s != "the compiled store")
         lines.append(f"compile   {len(sealed_units)} sealed module{'s' if len(sealed_units) != 1 else ''}"
                      f", each routed on its own in its frame "
-                     f"({sum(len(nets_of[u]) for u in sealed_units)} nets): {twin} laid as a twin "
+                     f"({sum(len(own_all.get(u, ())) for u in sealed_units)} nets): "
+                     f"{twin} laid as a twin "
                      "laid this build, "
                      f"{len(reused) - twin} from the compiled store"
                      + (f", {stored} stored" if store else ""))

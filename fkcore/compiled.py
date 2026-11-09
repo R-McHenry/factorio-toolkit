@@ -53,8 +53,9 @@ __all__ = ["ROUTER", "Store", "store_dir", "entry_path", "module_name", "old_mat
            "old_lines", "status_lines"]
 
 #: the router generation a stored unit was laid by: a change to what the router lays for the
-#: same inside raises it, and every stored unit is laid again once (3.1: one store, one version)
-ROUTER = "3.1"
+#: same inside raises it, and every stored unit is laid again once (3.1: one store, one version;
+#: 3.1.4: an entry holds the unit whole, its fluid nets included)
+ROUTER = "3.1.4"
 
 
 def store_dir(out):

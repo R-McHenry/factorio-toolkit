@@ -171,6 +171,49 @@ chapters, with TOOLKIT.md and LANGUAGE.md as references. The runner (`R-McHenry/
 branch `claude/toolkit-3.1.2`, not merged: computah owns that repo) vendors 3.1.2 and the same
 docs beside its `sa-early` pack, and its brief `l0-lab-fk.md` reads the same way.
 
+### 3.1.4: fluid nets are compile units (2026-11-08, night)
+
+The megabelt's designers saw no modular routing on their fluid cells: Fen's store held no
+refinery, cracking or lubricant column, `fk compile RefBlock3` answered "no net of its own to
+route", and every build routed 78 to 131 pipe nets in one world pass (485 to 971 s), nets inside
+single Stack cells among them. Two causes, both in `route._route_layout`:
+
+- **Fluid nets were never compile units.** The router built its units from belt jobs alone and
+  sent every fluid net to one whole-box pass after the belts, keyed and stored by no unit. All
+  three store generations (2.1.31, 3.0, 3.1) carried the exclusion; PLAN-3.0 §4 lists it as "not
+  done". Now a sealed unit's fluid nets are laid with the unit, in its frame, right after its
+  belts (`fluid_route.Pass`: the fluid world is built once per route step, each unit's nets
+  route in it on the ground near the unit, and the judge, `fkcore.connect`, sees that ground
+  instead of the whole world's entities); a twin takes them with the belts, the store holds
+  them, and the pass after the belts gets only the nets outside every sealed module. A moved
+  pipe route is judged as any: one that would join another net's pipe (a cell whose pipe hugs
+  its edge, stacked) is refused, and the unit is routed on its own.
+- **A unit was keyed only when a belt net of it was stale, over those nets alone.** The entries
+  were pieces of a unit (Fen's FurnColX3 stood under three keys with 3, 2 and 1 nets, its
+  children's keys only those routed that build), a fresh twin rarely matched one, and a unit
+  whose routes stood was never written again: Circuit's store, emptied by hand at 20:41, got
+  back only the units a later edit made stale. Now every sealed unit with a net of its own is a
+  compile unit, its key covers all its own nets with its own carriers left out of the ground
+  (a unit that stands keys as a fresh twin does), the entry holds the unit whole (the routes
+  laid this run and those that stand), a half-standing unit takes the rest from the entry, and a
+  unit that stands with no entry is written. The store's `ROUTER` is `3.1.4`: 3.1 entries are
+  not read.
+
+Also: `route --skip` (and so `fk compile`, which skips every net outside the module) now holds
+the fluid nets it names too; `fk compile RefBlock3` no longer routes the whole world's pipes.
+Tests: `tests/test_compile_fluids.py` (a stacked PlasticN's pipe laid with the cell and taken
+by its twins, the store entry whole, a module of pipes alone, a standing unit stored again, a
+half-standing unit from the store); `test_route_policy`'s fake fluid world grew
+`snapshot`/`restore`. Measured on Fen's design as it stood at 23:20 (a copy of lab-session/megabelt/work/fen/game,
+built on paper with `python -m fkcore build nauvis.build.fkb --to route`, no store): 571 nets,
+96 sealed units, the whole route 213 s, 552 routed and 1 failed (`rx/f5_gas3`, the gas trunk
+between two columns, which failed under 3.1.3 too). 74 units laid as twins (every RefCell,
+HeavyCell, LightCell, LubeCell, PlasticN, BatN, FurnX and SulfurCell after the first of each,
+pipes and belts), 60 fluid nets searched, about 300 laid as twins, 21 units stored across all 20
+modules (RefCell, RefCol5, HeavyCol6, LightCol10, LubeCol2 among them). Under 3.1.3 the same
+design's builds routed every fluid net in the world pass (131 to 154 nets, 485 to 971 s for
+the pass alone) and the store held 17 modules, none of them a column of pipes.
+
 ## Wave 3
 
 ### Documentation (31-docs)

@@ -136,6 +136,12 @@ class FluidBudgetTest(unittest.TestCase):
         class W:
             occ, box = set(), None
 
+            def snapshot(self):              # 3.1.4: the pass keeps the world between tries
+                return ({}, {0: set(), 1: set()}, {0: set(), 1: set()})
+
+            def restore(self, snap):
+                pass
+
         def route_net(w, owners, g, flat, cat, net, ends, base, extra, *a):
             calls.append(net)
             clock[0] += pass_s / 2

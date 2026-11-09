@@ -691,109 +691,195 @@ def _route_net(w, owners, g, flat, cat, net, ends, base, extra, reach, limit, ed
 
 
 # -- the plug-in ----------------------------------------------------------------------------------
-def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000, budget=None):
+class Pass:
+    """The world the fluid router routes in, built once from a layout (3.1.4: fluid nets are
+    compile units, so the router lays a sealed unit's fluid nets while it routes the unit, in its
+    frame, and the rest in one pass after the belts, as before). ``lay`` holds the machines and
+    what stands (kept routes); ``blocked``: terrain tiles; ``box``: the search bounds (default
+    the layout); ``jobs``: the belt jobs (``route.jobs``), whose attach tiles stay free of pipes
+    (worked out here when not given).
+
+    ``lay(order, ground, budget)`` routes ``order`` (fluid nets) in the world: each in its own
+    frame (``net_frames``), once each, and, when one fails, in other orders up to the budget
+    (3.0). ``ground`` (entities, or None for the whole layout): what stands near the nets now,
+    the belts laid since the world was built included: their tiles are blocked for this call
+    and the judge (``fkcore.connect``) sees them. The carriers laid stay in the world (their
+    tiles owned, their pairs' spans), so the next call keeps off them; ``adopt`` puts carriers
+    laid elsewhere (a twin's, the store's) in the world the same way."""
+
+    def __init__(self, flat, lay, cat, blocked=(), box=None, limit=60000, jobs=None):
+        from . import route as routemod                 # the belt jobs: their attach tiles stay free
+        from .expand import frame_of
+        self.flat, self.layout, self.cat, self.limit = flat, lay, cat, limit
+        w0, h0 = lay.size or (0, 0)
+        self.box = box or (0, 0, w0, h0)
+        keep = set()
+        for name, job in (jobs if jobs is not None else routemod.jobs(flat, lay, cat)).items():
+            if not job.fluid:
+                keep |= set(job.ends())
+        # 2.0.62 (the opus run's Oil module: "every connection tile of its box is taken"): every
+        # frame was blocked for every net, a sealed module's own included, so no pipe could stand
+        # inside a module. Now, as for belts (route.net_frames), a net inside a sealed module
+        # routes in that module's frame and keeps off every other frame. 2.0.75: two sealed
+        # frames that overlap share the tiles they both cover, as for belts
+        self.frames = {}
+        for path, rec in lay.insts.items():
+            if rec.kind != "Literal" and path in flat.insts:
+                self.frames[path] = frame_of(flat, lay, path, cat)
+        self.sealed = set(getattr(flat, "sealed", ()) or ())
+        self.tiles_of = {p: {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
+                         for p, (x0, y0, x1, y1) in self.frames.items()}
+        fluid_all = sorted(routemod.fluid_nets(flat, cat))
+        self.edges = port_edges(flat, lay, cat)
+        self.reach = int(cat.entity(_LAY[1]).get("max_distance") or 10)
+        self.base = list(lay.entities.values())
+        self.w, self.owners, self.g = _world(flat, lay, cat, fluid_all, blocked, self.box, keep)
+        self.occ0 = set(self.w.occ)
+        self._ends, self._frames_of = {}, {}
+
+    def net_frames(self, net):
+        """(the tiles blocked for ``net``, the box it searches): a net inside a sealed module
+        routes in that module's frame."""
+        got = self._frames_of.get(net)
+        if got is not None:
+            return got
+        parts = net.split("/")[:-1]
+        inside = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+        inside = [p for p in inside if p in self.sealed and p in self.frames]
+        blocked = set()
+        inner = inside[-1] if inside else None
+        for p, tiles in self.tiles_of.items():
+            if p in inside:
+                continue
+            if inner is not None and p in self.sealed and not p.startswith(inner + "/") \
+                    and not inner.startswith(p + "/"):
+                tiles = tiles - self.tiles_of[inner]
+            blocked |= tiles
+        got = self._frames_of[net] = (blocked, self.frames[inner] if inside else self.box)
+        return got
+
+    def ends_of(self, net):
+        """The net's endpoints (``_ends``), or a ``_Skip`` reason string."""
+        if net not in self._ends:
+            try:
+                self._ends[net] = _ends(self.flat, self.layout, self.cat, net)
+            except _Skip as exc:
+                self._ends[net] = str(exc)
+        return self._ends[net]
+
+    def judge(self, net, carriers, ground):
+        """``fkcore.connect`` on ``ground`` with ``carriers`` as the net's route: None when it
+        connects the net and spills nowhere, else the reason (a twin's or the store's routes,
+        moved here, are judged as any route)."""
+        return _judge(self.cat, ground, [], self.flat, net, list(carriers), self.edges)
+
+    def adopt(self, net, carriers):
+        """Put ``net``'s carriers (laid elsewhere) in the world: their tiles its own, its
+        pipe-to-ground ends and pair spans known, so what is routed next keeps off them."""
+        w = self.w
+        for e in carriers:
+            for t in fkpmod.tiles_of(self.cat, e):
+                w.owner[t] = net
+            if e.name == PTG or self.cat.kind(e.name) == "pipe-to-ground":
+                w.ends[_axis(e.dir or 0)] |= fkpmod.tiles_of(self.cat, e)
+        g = connectmod.graph(list(carriers), self.cat, None)
+        by_key = {e.key: e for e in carriers}
+        for a, b in sorted(g.fluid_pairs.items()):
+            if a < b and a in by_key and b in by_key:
+                ea, eb = by_key[a], by_key[b]
+                ta = (math.floor(float(ea.x)), math.floor(float(ea.y)))
+                tb = (math.floor(float(eb.x)), math.floor(float(eb.y)))
+                w.spans[_axis(ea.dir or 0)] |= set(_between(ta, tb))
+
+    def lay(self, order, ground=None, budget=None, which="fluid pass"):
+        """Route the fluid nets ``order`` in the world (see the class): -> (added {net: [Entity]},
+        how {net: text}, failed {net: reason}). ``budget``: seconds per net that failed the first
+        pass for passes in another order (3.0, the build script's ``--group-budget``; a pass that
+        would not fit in what is left is not started); None: as many as help."""
+        import time
+        from . import route as routemod
+        w, cat = self.w, self.cat
+        ends, failed0 = {}, {}
+        for net in order:
+            got = self.ends_of(net)
+            if isinstance(got, str):
+                failed0[net] = got
+            else:
+                ends[net] = got
+        order = [n for n in order if n in ends]
+        if ground is None:
+            ground, more = self.base, set()
+        else:
+            ground = list(ground)
+            more = set()
+            for e in ground:
+                more |= fkpmod.tiles_of(cat, e)
+        snap0 = w.snapshot()
+        best = None
+        # 2.1.29: retries stop once one routes no more nets than the best before it; each laid
+        # every fluid net again, len(order) + 1 times (12+ min on the 20261030-2352 world)
+        last = 0
+        took = spent = 0.0
+        left = None                    # 3.0: the retry budget, set by the first pass's failures
+        for attempt in range(len(order) + 1):
+            if attempt > 1 and best[0][0] <= last:
+                break
+            if attempt and left is not None and spent + took > left:
+                # 3.0: one pass, as the belts: another would go past the build script's budget
+                for net in best[3]:
+                    if net in ends:
+                        best[3][net] += (f"; not tried again in another order: a fluid pass "
+                                         f"takes {took:.0f} s, past the route's --group-budget")
+                break
+            last = best[0][0] if best else 0
+            t0 = time.monotonic()
+            w.restore(_copy(snap0))
+            added, how, failed = {}, {}, dict(failed0)
+            extra = []
+            for k, net in enumerate(order):
+                routemod._progress(attempt, k, order, net, which=f"{which} {attempt + 1}")
+                blocked, box = self.net_frames(net)
+                w.occ = self.occ0 | blocked | more
+                w.box = box
+                got, why = _route_net(w, self.owners, self.g, self.flat, cat, net, ends[net],
+                                      ground, extra, self.reach, self.limit, self.edges)
+                w.occ, w.box = self.occ0, self.box
+                if got is None:
+                    failed[net] = why
+                    continue
+                added[net], how[net] = got, why
+                extra += got
+            score = (len(added), -attempt)
+            if best is None or score > best[0]:
+                best = (score, added, how, failed, w.snapshot())
+            took = time.monotonic() - t0
+            if attempt:
+                spent += took
+            elif budget is not None:
+                left = float(budget) * sum(1 for n in failed if n in ends)
+            if len(added) == len(order):
+                break
+            order = [n for n in order if n in failed] + [n for n in order if n not in failed]
+        if best is None:
+            w.restore(_copy(snap0))
+            return {}, {}, dict(failed0)
+        _score, added, how, failed, snap = best
+        w.restore(_copy(snap))             # the best pass's carriers stay in the world
+        return added, how, failed
+
+
+def _copy(snap):
+    """A ``_World.snapshot`` the world may change without touching the one copied."""
+    return (dict(snap[0]), {k: set(v) for k, v in snap[1].items()},
+            {k: set(v) for k, v in snap[2].items()})
+
+
+def route(flat, lay, cat, nets, blocked=(), box=None, limit=60000, budget=None, jobs=None):
     """Route the fluid nets ``nets`` of ``flat`` on ``lay`` (belts already laid). ``blocked``:
     terrain tiles in the factory frame; ``box`` (x0, y0, x1, y1): the search bounds (default:
     the factory frame). ``budget``: seconds per net that failed the first pass for passes in
     another order (3.0, the build script's ``--group-budget``; a pass that would not fit in what
     is left is not started); None: as many as help. -> (added {net: [Entity]}, how {net: text},
-    failed {net: reason})."""
-    import time
-    from . import route as routemod                 # the belt jobs: their attach tiles stay free
-    from .expand import frame_of
-    w0, h0 = lay.size or (0, 0)
-    box = box or (0, 0, w0, h0)
-    keep = set()
-    for name, job in routemod.jobs(flat, lay, cat).items():
-        if not job.fluid:
-            keep |= set(job.ends())
-    # 2.0.62 (the opus run's Oil module: "every connection tile of its box is taken"): every
-    # frame was blocked for every net, a sealed module's own included, so no pipe could stand
-    # inside a module. Now, as for belts (route.net_frames), a net inside a sealed module routes in
-    # that module's frame and keeps off every other frame. 2.0.75: two sealed frames that overlap
-    # share the tiles they both cover, as for belts
-    frames = {}
-    for path, rec in lay.insts.items():
-        if rec.kind != "Literal" and path in flat.insts:
-            frames[path] = frame_of(flat, lay, path, cat)
-    sealed = set(getattr(flat, "sealed", ()) or ())
-    tiles_of = {p: {(x, y) for x in range(x0, x1) for y in range(y0, y1)}
-                for p, (x0, y0, x1, y1) in frames.items()}
-
-    def net_frames(net):
-        parts = net.split("/")[:-1]
-        inside = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
-        inside = [p for p in inside if p in sealed and p in frames]
-        blocked = set()
-        inner = inside[-1] if inside else None
-        for p, tiles in tiles_of.items():
-            if p in inside:
-                continue
-            if inner is not None and p in sealed and not p.startswith(inner + "/") \
-                    and not inner.startswith(p + "/"):
-                tiles = tiles - tiles_of[inner]
-            blocked |= tiles
-        return blocked, (frames[inner] if inside else box)
-    fluid_all = sorted(routemod.fluid_nets(flat, cat))
-    edges = port_edges(flat, lay, cat)
-    reach = int(cat.entity(_LAY[1]).get("max_distance") or 10)
-    base = list(lay.entities.values())
-    todo = list(nets)
-    ends = {}
-    failed0 = {}
-    for net in todo:
-        try:
-            ends[net] = _ends(flat, lay, cat, net)
-        except _Skip as exc:
-            failed0[net] = str(exc)
-    order = [n for n in todo if n in ends]
-    per_net = {}
-    best = None
-    # 2.1.29: retries stop once one routes no more nets than the best before it; each laid every
-    # fluid net again, len(order) + 1 times (12+ min on the 20261030-2352 world)
-    last = 0
-    took = spent = 0.0
-    left = None                    # 3.0: the retry budget, set by the first pass's failures
-    for attempt in range(len(order) + 1):
-        if attempt > 1 and best[0][0] <= last:
-            break
-        if attempt and left is not None and spent + took > left:
-            # 3.0: one pass, as the belts: another would go past the build script's budget
-            for net in best[3]:
-                if net in ends:
-                    best[3][net] += (f"; not tried again in another order: a fluid pass takes "
-                                     f"{took:.0f} s, past the route's --group-budget")
-            break
-        last = best[0][0] if best else 0
-        t0 = time.monotonic()
-        w, owners, g = _world(flat, lay, cat, fluid_all, blocked, box, keep)
-        added, how, failed = {}, {}, dict(failed0)
-        extra = []
-        occ0 = set(w.occ)
-        for k, net in enumerate(order):
-            routemod._progress(attempt, k, order, net, which=f"fluid pass {attempt + 1}")
-            if net not in per_net:
-                per_net[net] = net_frames(net)
-            w.occ = occ0 | per_net[net][0]
-            w.box = per_net[net][1]
-            got, why = _route_net(w, owners, g, flat, cat, net, ends[net], base, extra, reach,
-                                  limit, edges)
-            w.occ, w.box = occ0, box
-            if got is None:
-                failed[net] = why
-                continue
-            added[net], how[net] = got, why
-            extra += got
-        score = (len(added), -attempt)
-        if best is None or score > best[0]:
-            best = (score, added, how, failed)
-        took = time.monotonic() - t0
-        if attempt:
-            spent += took
-        elif budget is not None:
-            left = float(budget) * sum(1 for n in failed if n in ends)
-        if len(added) == len(order):
-            break
-        order = [n for n in order if n in failed] + [n for n in order if n not in failed]
-    _score, added, how, failed = best
-    return added, how, failed
+    failed {net: reason}). One ``Pass`` over the layout; ``jobs``: the belt jobs when the caller
+    has them."""
+    return Pass(flat, lay, cat, blocked, box, limit, jobs).lay(list(nets), None, budget)

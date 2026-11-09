@@ -194,7 +194,7 @@ class CompiledTest(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(main(["status", self.dir]), 0)
-        self.assertIn("compiled: 1 module, 1 entry (router 3.1)", out.getvalue())
+        self.assertIn(f"compiled: 1 module, 1 entry (router {compiled.ROUTER})", out.getvalue())
         self.assertIn("  Gears: 1 entry, current ", out.getvalue())
 
     def test_reuse_lab_takes_what_the_lab_routed(self):

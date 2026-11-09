@@ -1125,7 +1125,8 @@ def s_route(ctx, args):
                       f"routes (route --failed keep)" for n, k in sorted(standing.items())]
         _write_nets(ctx, factory, r, held, seeds, stood)
         # 3.1: what the compile store did for each sealed unit (route.Routed.compiled)
-        comp = {n for c in r.compiled.values() if c["from"] == "store" for n in c["nets"]}
+        comp = {n for c in r.compiled.values() if c["from"] == "store"
+                for n in c.get("laid", c["nets"])}
         lines += _compiled_lines(factory, r)
         r.layout, rehanded = _rehand(r.layout, ctx.cat, hand)
         dnp = route.tag_dnp(flat, r.layout, ctx.cat)
@@ -1188,6 +1189,11 @@ def _route_compile(ctx, module, hand_word):
                 lines.append(f"{factory}: compile {path}: no net of its own to route")
             elif c["from"] == "store":
                 lines.append(f"{factory}: compile {path}: already compiled ({module} {c['key']})")
+            elif c["from"] == "standing":
+                # 3.1.4: its routes stand (pinned); the unit is stored as it stands
+                lines.append(f"{factory}: compile {path}: its {len(c['nets'])} nets stand as laid, "
+                             + ("stored" if c["stored"] else "already compiled")
+                             + f" ({module} {c['key']})")
             elif c["from"] and c["from"].startswith("twin "):
                 lines.append(f"{factory}: compile {path}: the same inside as {c['from'][5:]}")
             elif c["stored"]:
@@ -1208,8 +1214,11 @@ def _compiled_lines(factory, r):
     lines = []
     for path, c in sorted(r.compiled.items()):
         if c["from"] == "store":
-            lines.append(f"{factory}: compiled  {path}: {len(c['nets'])} nets laid from the store "
-                         f"({c['module']} {c['key']})")
+            laid = c.get("laid", c["nets"])
+            lines.append(f"{factory}: compiled  {path}: {len(laid)} nets laid from the store "
+                         f"({c['module']} {c['key']})"
+                         + (f", {len(c['nets']) - len(laid)} stand" if len(laid) < len(c["nets"])
+                            else ""))
         elif c["refused"]:
             lines.append(f"{factory}: compiled  {path}: its stored entry ({c['module']}) holds "
                          f"{', '.join(c['refused'])}, not researched here: routed again")

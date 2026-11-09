@@ -158,10 +158,15 @@ measured, not the default.
 
 ### Sealed modules compile once
 
-Each sealed module is routed alone in its frame, the innermost first, then the nets outside them.
-Every module routed whole is stored in `game\out\compiled\<module>\<key>.json` (`current` beside it
-points at the last key laid); a build that places the module lays the stored inside wherever it
-stands now and routes only the nets that cross frames. The key hashes everything the inside is
+Each sealed module is routed alone in its frame, the innermost first, then the nets outside them;
+its pipes are laid with it, on its belts (3.1.4: until then every pipe net went to one pass over
+the whole world after the belts, so a module of pipes never compiled). Every module whose routes
+all stand is stored in `game\out\compiled\<module>\<key>.json` (`current` beside it points at
+the last key laid), belts and pipes together; a build that places the module lays the stored
+inside wherever it stands now and routes only the nets that cross frames. A twin's pipes are
+taken only where they join nothing of another net: a cell whose pipe runs along its edge is
+routed on its own each time (stacked, the pipes above and below would touch), so run a cell's
+pipes straight through it, as the megabelt's cells do. The key hashes everything the inside is
 laid to (the frame, what stands in it, each net's ends, items, lanes and taps, the children's keys,
 the catalog and terrain facts, the router's settings, seeds and held routes, the router version),
 so a change inside routes it again by itself; nothing to clear. A module built alone on the lab
