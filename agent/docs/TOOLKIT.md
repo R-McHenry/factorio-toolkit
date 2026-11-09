@@ -409,7 +409,8 @@ runs full: `tier minimize --allow yellow,red`, a second belt), `no-route` / `par
 on it), `bootstrap` (chapter 9), `no-robots` (a logistic chest outside every logistic area, chapter
 2), `on-water-or-cliff` / `no-water` / `no-ore`, `mixed-patch` (an `@patch` row with no spot that
 keeps every drill's mining area off a second resource: the drills that reach it, filtered to the
-row's resource when the drill has a filter, left out when it has none), `by-hand` (diff: who changed what, where, and what
+row's resource when the drill has a filter, left out when it has none; no drill of the game has
+one, measured on 2.1.24, so they are left out: chapter 3), `by-hand` (diff: who changed what, where, and what
 the paste does; `out\hand.txt` keeps every one), `mismatch` (chapter 14), `re-laid`,
 `short-stock` / `needs-research`, `malformed` (always stops), `no-terrain`.
 

@@ -610,9 +610,12 @@ def _consumers_first(flat):
     a loop of nets is cut where the walk closes it)."""
     feeds = {p: [] for p in _leaves(flat)}
     for net in flat.nets.values():
-        drivers = _insts(flat, [k for k, _i in net.drivers])
+        # 43-mines: a sealed module's port machine belongs to the module instance, not a leaf;
+        # the order is the leaves' (a module on a net raised KeyError here)
+        drivers = [d for d in _insts(flat, [k for k, _i in net.drivers]) if d in feeds]
         for c in _insts(flat, [k for k, _i in net.consumers]):
-            feeds[c] += [d for d in drivers if d != c and d not in feeds[c]]
+            if c in feeds:
+                feeds[c] += [d for d in drivers if d != c and d not in feeds[c]]
     post, seen = [], set()
 
     def visit(p):
@@ -1241,20 +1244,42 @@ def _lanes(sz, cat, name):
     return out
 
 
+def _module_shape(inst):
+    """A sealed module instance's declared frame (its ``shape`` polygon or ``size`` box,
+    ``expand.own_frame``) turned about its origin and moved to its ``@(x, y, rot)`` hint, before
+    anything is placed; None without a hint or a declared frame. 43-mines (PLAN-ORGANIC H4's
+    leftover in this file): ``fit`` judges a polygon by its tiles, not its box."""
+    hint = (inst.hints or {}).get("at")
+    own = expand.own_frame(inst)
+    if hint is None or own is None:
+        return None
+    rot = int(hint[2]) if len(hint) > 2 else 0
+    return own.turn(rot).moved(int(hint[0]), int(hint[1]))
+
+
+def _frame_text(fr):
+    w, h = fr.size
+    return f"{_n(w)}x{_n(h)}" if fr.is_box else f"{len(fr)} tiles of {_n(w)}x{_n(h)}"
+
+
 def fit(sz, places, cat):
     """``does-not-fit`` lines: a sized row whose frame, at its ``@(x, y)`` hint, runs past its factory's
     plot or into another instance's frame. Nothing is moved: rows grow, and the player arranges
-    the layout (place stops on two entities on a tile, floorplan on a factory past its plot)."""
+    the layout (place stops on two entities on a tile, floorplan on a factory past its plot).
+    Frames are tile sets (``fkcore.frame``): a row's is its box, a sealed module's its declared
+    ``shape`` or ``size`` at its hint, and a polygon is judged by its tiles."""
     checks = []
     for f, flat in sz.flats.items():
         mine = [r for r in sz.rows if r.factory == f]
         if not mine:
             continue
         cache, frames = {}, {}
-        for path in flat.insts:
-            box = expand.planned_frame(flat, path, cat, cache)
-            if box is not None:
-                frames[path] = box
+        for path, inst in flat.insts.items():
+            fr = expand.planned_shape(flat, path, cat, cache)
+            if fr is None and inst.module is not None:
+                fr = _module_shape(inst)
+            if fr is not None and fr.box is not None:
+                frames[path] = fr
         p = places.get(f) if places else None
         room = terrainmod.frame_size(p) if p is not None else None
         order = {r.path: i for i, r in enumerate(mine)}      # a pair once, under the first row
@@ -1268,9 +1293,10 @@ def fit(sz, places, cat):
                 return f"@({_n(box[0])}, {_n(box[1])})"
             return f"@({_n(h[0])}, {_n(h[1])}" + (f", rot {int(h[2])}" if int(h[2]) % 4 else "") + ")"
         for r in mine:
-            box = frames.get(r.path)
-            if box is None:
+            fr = frames.get(r.path)
+            if fr is None:
                 continue
+            box = fr.box
             x0, y0, x1, y1 = box
             what = (f"n={r.n} ({_auto(r)}) makes it {_n(x1 - x0)}x{_n(y1 - y0)} at "
                     f"{at(r.path, box)}")
@@ -1281,16 +1307,17 @@ def fit(sz, places, cat):
                 checks.append(Check("does-not-fit", f"{f} {r.path}",
                                     f"{what}: it runs past plot {f} ({room[0]}x{room[1]} in the "
                                     f"factory's frame), {', '.join(t for t in past if t)}"))
-            for other, ob in frames.items():
+            for other, of in frames.items():
                 if other == r.path or order.get(other, len(order)) < order[r.path]:
                     continue
-                w = min(x1, ob[2]) - max(x0, ob[0])
-                h = min(y1, ob[3]) - max(y0, ob[1])
-                if w > 0 and h > 0:
+                ov = fr.overlap(of)
+                if ov:
+                    w, h = ov.size
+                    shared = (f"{_n(w)}x{_n(h)} tiles" if ov.is_box
+                              else f"{len(ov)} tiles in {_n(w)}x{_n(h)}")
                     checks.append(Check("does-not-fit", f"{f} {r.path}",
                                         f"{what}: its frame overlaps {other}'s "
-                                        f"({_n(ob[2] - ob[0])}x{_n(ob[3] - ob[1])} at "
-                                        f"{at(other, ob)}) on {_n(w)}x{_n(h)} tiles"))
+                                        f"({_frame_text(of)} at {at(other, of.box)}) on {shared}"))
     return checks
 
 
