@@ -265,11 +265,12 @@ def control_behavior(attrs, where="entity"):
     rf = attrs.get("resource_filter")
     if rf:
         # 3.1 (PLAN-ORGANIC M1): a mining drill's resource filter. The placer writes this attr
-        # only on a drill whose facts.json row has ``filter_count`` (``placer.filter_slots``);
-        # the 2.0.77 facts record none, so no drill gets it until tools/read_facts.py is re-run.
-        # The field shape below (a top-level ``filter`` of slot filters and a mode) is
-        # UNCONFIRMED against a game export: decode a filtered drill's blueprint with
-        # ``parse_blueprint`` on a laptop server and fix it here (docs/notes-41-mines.md).
+        # only on a drill whose facts.json row has ``filter_count`` (``placer.filter_slots``).
+        # 43-mines, measured on a 2.1.24 laptop server: every drill of the game (electric,
+        # burner, big, pumpjack) has filter_count 0 and set_filter refuses ("Callable only on
+        # entities that have filters"), so no drill gets this attr and no game export can show
+        # the field: the shape below stays a guess, UNCONFIRMED, for a modded drill with slots
+        # (the game dropped it, and every other candidate, on import: docs/notes-43-mines.md).
         fields["filter"] = {"filters": [{"index": k + 1, "name": r}
                                         for k, r in enumerate(str(rf).split("|"))],
                             "mode": "whitelist"}

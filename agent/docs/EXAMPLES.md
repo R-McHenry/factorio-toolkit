@@ -9,7 +9,8 @@ Every example builds where it stands (`fk check docs\examples\gears.fk`) and cop
 (the ones that import cells take them from `cells.fk` beside them; `docs\examples\cells.fk` is the
 library as the toolkit ships it, and in `game\` yours is used). The output quoted here is a paper
 build: the template's build script through `report_checks`, no terrain, the plot size the chapter
-names. Two lines appear in almost every chapter and are explained once:
+names (chapter 3's ore examples build on their terrain fixture, `patch.terrain.json`, through
+`place`). Two lines appear in almost every chapter and are explained once:
 
 - `NO_POWER nauvis NAME: its grid reaches no generator (bridge it: floorplan --bridge-power)`: on
   paper the file has no generator. In your base the `floorplan --bridge-power` step joins the
@@ -192,6 +193,78 @@ rows need ore under them: put the plot on the patch.
 ore_`)`: two single-item nets into the same machines on two belts, a lane each; chapter 4 pairs
 them. `short-feed smelting net ore_: iron-ore: its drivers make 120.0/min at most, its consumers
 would take 150.0/min, so they run at about 80% for it`: four drills for eight furnaces.
+
+**On the ore: ore-patch.fk and mixed-patch.fk.** `@patch(iron-ore)` pins a miner row to its ore
+instead of a position, and the terrain file the surface names says where the ore is.
+`docs\examples\patch.terrain.json` holds two 30x7 iron strips, a copper streak under the west end
+of the first and copper under the whole south edge of the second; `ore-patch.fk` takes plot
+60x40 at 0,0 and `mixed-patch.fk` plot 60x40 at 0,40. `docs\examples\patch.build.fkb` is the
+build through `place` (`read_surface`, `read_terrain patch`, `elaborate`, `size`, `place`: the
+template's own steps, with the terrain named `patch`).
+
+```
+ore = MinerRow<n=auto 4..30, resource=iron-ore> @patch(iron-ore)
+box = Chest<provider, limit=4>                  @(50, 30)
+
+net ore_: ore -> box
+```
+
+```
+terrain patch
+place ore-patch   = ore-patch   plot 0,0  60x40
+place mixed-patch = mixed-patch plot 0,40 60x40
+```
+
+```
+fk build --to place
+```
+
+`out\size.txt`:
+
+```
+sized: ore n=14 (auto 4..30)
+  1 n=auto row, 14 machines; every target and assert holds, and every net of an n=auto row carries what its consumers ask; 2 model solves, 0 growth steps after the seed
+
+  row                  kind           n seed   bounds  serves
+  ore                  MinerRow      14   14    4..30  its patch: what the ore holds (below)
+                       @patch(iron-ore): the iron-ore in the plot spans 30x7, long axis E-W; 14 drills stand on it with their mining areas off other resources, the row E-W at 7,10 rot 0, 161 ore tiles in reach (80.5k)
+
+  on their ore by place (@patch): ore n=14 (what the patch holds); place says when that many drills don't fit
+```
+
+`out\place.txt`:
+
+```
+  placed ore: @patch(iron-ore) at 7,10 rot 0, the row runs E-W (the iron-ore in the plot spans 30x7, long axis E-W): 14/14 drills on iron-ore, 126 ore tiles under them (63.0k), 161 in their mining areas (80.5k)
+```
+
+`mixed-patch.fk` is the same row written `n=8`, on the strip with copper under its whole south
+edge. `out\place.txt` and the check line:
+
+```
+  placed ore: @patch(iron-ore) at 1,10 rot 0, the row runs E-W (the iron-ore in the plot spans 30x7, long axis E-W): 8/8 drills on iron-ore, 72 ore tiles under them (36.0k), 98 in their mining areas (49.0k); 4 left out (mixed-patch)
+```
+
+```
+mixed-patch mixed-patch ore: 4 of 8 drills' mining areas reach copper-ore (m4, m5, m6, m7) at 1,10 rot 0, the spot where the fewest do; electric-mining-drill has no resource filter slots in facts.json, so they are left out: 4 of 8 drills placed
+```
+
+**The idea.** A drill mines every resource under its 5x5 mining area, so a drill over iron and
+copper puts both on the belt. The placer keeps every drill's body on the row's resource and
+every mining area off any other, and `n=auto` takes from the patch the most drills that stand
+that way, laid along its long axis: 14 here, the six the copper streak costs are the west end.
+Where no spot is clean (`mixed-patch.fk`) the row goes where the fewest drills reach the other
+ore, `n` stays as written, and those drills are left out, since no drill of the game has a
+resource filter (measured on 2.1.24: `filter_count` 0 on every drill); the check line names
+them. The terrain is one file the design names (`terrain patch`, read once with
+`fk read-terrain`): `fk build` and `fk layout` read that file, and nothing reads the world on
+the way.
+
+**What goes wrong here.** The four left-out drills are still the net's drivers, so the build's
+next step says `no-route mixed-patch net ore_: its route does not connect 4 driver->consumer
+pairs` and `report_checks` names them, `not in the layout: ore/m4, ore/m5, ore/m6, ore/m7`; the
+net stays unrouted. Write the row for what the patch holds: `n=auto 4..30` on that strip gives
+`sized: ore n=4 (auto 4..30)`, the row turned N-S (`4/4 drills on iron-ore`), and the net routes.
 
 **Aside: smelter-array.fk.** `SmelterArray<n=24, recipe=iron-plate>` is the older stack row,
 furnaces on both sides of each plate belt; the library's `SmelterPair` replaces it. On paper
@@ -1008,7 +1081,9 @@ domain's. `NO_POWER` (every chapter): the factory's poles reach no grid with gen
 > changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
 > where it happened. The fix is always the same and always the designer's: seal the sub-unit
 > (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
-> inside one module can never touch another. This chapter is that fix, shown once.
+> inside one module can never touch another. Each level routes a handful of nets: `fk check` says
+> `flat` for a level past 60, and the build's `level` lines give every level's nets, seconds and
+> frame (a minute at one level is too long). This chapter is that fix, shown once.
 
 `docs\examples\red-chain.fk`, plot 92x76, is the lab's red-circuit chain: copper and iron smelted
 on beaconed furnaces, green circuits, plastic from gas and coal, red circuits, all inside one
@@ -1076,8 +1151,15 @@ one's layout:
 ```
 red-chain: compiled  stored chain, chain/cu2/0, chain/fea/0, chain/ga/0, chain/pl, chain/pl/p1, chain/rp, chain/rp/red/0 (out/compiled): laid from there wherever each stands next
 red-chain: 85 routed, 0 kept, 33 pass-through (0 pinned from the committed .fkp), 0 failed, 1 pass
+  level     chain (RedMod): 9 nets searched, 0 failed, 2.7 s, frame 74x56
+  level     the top level: 5 nets searched, 0 failed, 0.0 s, frame 87x71
+  level     chain/pl/p1 (Plas2): 3 nets searched, 0 failed, 0.0 s, frame 11x8
   routed    chain/cu2/1/o: 1 -> 2, laid as chain/cu2/0 laid it (compiled once, PLAN-3.0 §4)
 ```
+
+(nine `level` lines in all, one per level that searched: `RedMod` its own nine nets in 2.7 s, the
+top level its five trunks, and each sub-module a handful in no time; the 26 other nets inside
+`RedMod` are its sub-modules' or pass-throughs, two ports meeting on one edge.)
 
 The 33 `pass-through` nets are counted apart from the routed ones: a Stack's cells meet port to
 port on one edge, a drill drops straight onto a belt, two fluid boxes join as they stand; such a
@@ -1154,6 +1236,16 @@ module powers its own frame, so move the entity into the parent or leave a tile 
 `port-not-in-line port NAME` names a pair port (`a | b`) whose straight run inside the frame (the
 stem the side-load needs, three tiles) something of the module stands in, with the tiles: put the
 port in line with the column it feeds (blue6.fk below prints four).
+
+**`flat`: the hierarchy measured.** `fk check` says `flat module NAME: N nets route at one level
+(the limit is 60)` for a level that routes more than 60 nets at once, and the route step says the
+same of a level that searched more than 60 nets or took more than 60 s (`level ...; flat: over 60
+nets or 60 s`, and the check `flat` in the report, which `stop_on flat` holds the paste on). The
+megabelt's flower (11-09) had ten levels of 62 to 118 nets and took 35 minutes a build while
+every report read "all connected"; this chapter's `RedMod` routes 35 nets of its own, 9 of them
+searched, in under 3 s. `ports-touch port X: @s3 (water) and Y @s4 (petroleum-gas) stand on
+adjacent tiles ...`: two fluid ports of different fluids side by side on one edge; their pipes
+join, so leave a tile between them (two ports of one fluid may touch).
 
 **Aside: blue6.fk.** `docs\examples\blue6.fk` (plot 60x40) is an older sealed cell written before
 cells had parameters: `BlueCell6`, 18x6, two units of an engine assembler and an advanced circuit

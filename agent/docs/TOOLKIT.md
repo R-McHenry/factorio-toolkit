@@ -137,7 +137,9 @@ run of the other route becomes an underground pair; `promoted` in `out\route.txt
 > changed something else is a design fault, not a router fault: the hierarchy is missing or wrong
 > where it happened. The fix is always the same and always the designer's: seal the sub-unit
 > (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
-> inside one module can never touch another. The options below tune a search inside one module;
+> inside one module can never touch another. Each level routes a handful of nets: `fk check` says
+> `flat` for a level past 60, and the `level` lines below give every level's nets, seconds and
+> frame (a minute at one level is too long). The options below tune a search inside one module;
 > none of them fixes a design. The checks name the module and the cause.
 
 Each net is routed **once**, in order, and keeps what it laid. A net that fails is tried again with
@@ -161,8 +163,11 @@ The route step writes one file per net, `out\design\<factory>\nets\<net>.net` (i
 carriers), and the next build starts from these, even when the last one stopped mid-route. `fk
 status`, `fk hold`, `fk seed` and `fk route NET` work on them (chapter 11). A net the router can't
 find a way for can be sent through a piece from `game\routing.fk` (LANGUAGE.md). `out\route.txt`
-has a `group` line for each net that got a group try, a `ribbon` line per ribbon (chapter 8), and
-`compiled` lines for the store. Its summary counts what was searched: `5 routed, 737 kept, 584
+has a `group` line for each net that got a group try, a `ribbon` line per ribbon (chapter 8),
+`compiled` lines for the store, and a `level` line per level that searched this build (the top
+level, or one sealed module; a twin or a stored unit searched nothing): its nets, how many failed,
+the seconds and the frame, slowest first, the twelve slowest shown. A level past 60 nets or 60 s
+is the check `flat` (chapter 11). Its summary counts what was searched: `5 routed, 737 kept, 584
 pass-through` means five nets were laid, 737 stand as they were, and 584 lay nothing (two ports
 that meet on one edge, a drill dropping straight in); a rebuild with no change searches nothing.
 `FK_NEGOTIATE=1` turns on an opt-in negotiation pass; it is measured, not the default.
@@ -392,7 +397,9 @@ the same per item; `stop_on reach`).
 `short-feed` (chapter 1), `cannot-carry` (a net names a machine with no endpoint for its items;
 the template stops on it), `feed-rides-on` (chapter 9), `no-limit` (chapter 6), `no-rate` (chapter
 2), `could-pair` (chapter 3), `no-match` (a `set` that matches nothing), `two-nets`, `port`,
-`crosses-frame`, `overlap` (chapter 11), `CIRCUIT`, `cannot-filter`, `no-signal`, `no-wire`,
+`crosses-frame`, `overlap`, `flat` (a level that routes more than 60 nets, or searched more than
+60 s: the hierarchy is missing there), `ports-touch` (two fluid ports of different fluids on
+adjacent tiles of one side: the pipes join) (chapter 11), `CIRCUIT`, `cannot-filter`, `no-signal`, `no-wire`,
 `wire-too-far`, `wires-share`, `gate-open`, `require-not-met`, `gate-auto`, `limited` (LANGUAGE.md,
 "Circuits"), `taken-up` (the build takes up a lot and the robots need minutes; `fk merge` when a
 factory moved), `rate-not-met` / `target-not-met`, `size` / `does-not-fit` (chapter 5),
@@ -402,7 +409,8 @@ runs full: `tier minimize --allow yellow,red`, a second belt), `no-route` / `par
 on it), `bootstrap` (chapter 9), `no-robots` (a logistic chest outside every logistic area, chapter
 2), `on-water-or-cliff` / `no-water` / `no-ore`, `mixed-patch` (an `@patch` row with no spot that
 keeps every drill's mining area off a second resource: the drills that reach it, filtered to the
-row's resource when the drill has a filter, left out when it has none), `by-hand` (diff: who changed what, where, and what
+row's resource when the drill has a filter, left out when it has none; no drill of the game has
+one, measured on 2.1.24, so they are left out: chapter 3), `by-hand` (diff: who changed what, where, and what
 the paste does; `out\hand.txt` keeps every one), `mismatch` (chapter 14), `re-laid`,
 `short-stock` / `needs-research`, `malformed` (always stops), `no-terrain`.
 

@@ -1,0 +1,12 @@
+# mixed-patch.fk: eight drills on a patch with copper under its whole south edge. Plot 60x40 at
+# 0,40 on docs\examples\patch.terrain.json (`terrain patch`). Shows: no spot keeps every drill's
+# mining area off the copper, so the row goes where the fewest reach it and those drills are left
+# out (the game's drills have no resource filter): the `mixed-patch` check line names them.
+# Run:  fk build --to place    (then read out\place.txt and the check lines)
+# Expect: `placed ore: @patch(iron-ore) at 1,10 rot 0 ...: 8/8 drills on iron-ore ...; 4 left out
+# (mixed-patch)`; `mixed-patch mixed-patch ore: 4 of 8 drills' mining areas reach copper-ore (m4,
+# m5, m6, m7) ... 4 of 8 drills placed`.
+ore = MinerRow<n=8, resource=iron-ore> @patch(iron-ore)
+box = Chest<provider, limit=4>         @(50, 30)
+
+net ore_: ore -> box

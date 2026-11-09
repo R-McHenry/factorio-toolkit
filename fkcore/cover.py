@@ -626,7 +626,10 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
-            reason = _why_not(ground, rect, s, pole, lay.size, frame)
+            # a sealed unit's pass (cover_power_units) has no layout size, only its frame: the
+            # 3.1.3 crash on plasticcol's edge beacon (fk-run2 FRICTION.md, PLAN-ORGANIC D3)
+            reason = _why_not(ground, rect, s, pole, lay.size, frame,
+                              sealed=lay.size is None and frame is not None)
             uncovered.append((key, reason))
             checks.append(Check("domain-overlap" if "another power domain" in reason
                                 else "NO_POWER", key, reason))
@@ -783,11 +786,12 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     return poles, rep
 
 
-def _why_not(ground, rect, s, pole, size, frame=None):
+def _why_not(ground, rect, s, pole, size, frame=None, sealed=False):
     """Why no pole powers an entity: what takes each spot that could. ``frame``: the box the
     poles stand in when it is not the layout's (a sealed unit's, ``cover_power_units``; 43-
     hierarchy: a cell's cover has ``size`` None, and the beacon on fen's cell edge that no spot
-    inside the cell could power crashed here, FRICTION 11-08)."""
+    inside the cell could power crashed here, FRICTION 11-08). ``sealed``: the pass is one
+    sealed unit's, whose poles stand only inside its frame (44-levels): the line says the rule."""
     spots = ground.spots_powering(rect, s)
     count, owners = {}, []
     for spot in spots:
@@ -818,7 +822,9 @@ def _why_not(ground, rect, s, pole, size, frame=None):
             where = f"the {size[0]}x{size[1]} frame"
         else:
             where = "the frame"
-        parts.append(f"{count['frame']} outside {where}")
+        parts.append(f"{count['frame']} outside {where}"
+                     + ("; a sealed cell powers only its own frame: free a tile inside it for a "
+                        "pole, or move the entity into the parent module" if sealed else ""))
     if count.get("domain"):
         parts.append(f"{count['domain']} would power another power domain's machines too")
     return f"all {len(spots)} spots a {pole} could power it from are taken: " + "; ".join(parts)
