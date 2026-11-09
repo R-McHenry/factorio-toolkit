@@ -1,0 +1,58 @@
+# mesacells.fk: the Mesa river's own cells (megabelt RIVERS.md, RiverMesa).
+import FurnB, Beacon1, Asm3P from "flowercells.fk"
+
+# LDS: low-density-structure, one beaconed assembler 3 (prod2). One beacon column west of the
+# machine only: the rate model (and the game) reach a machine only when the gap to a beacon is at
+# most 2 tiles (hand + one belt), so a machine with two belts on a side (RedB's x6) sees no
+# beacon, and a belt east of it puts the next column's beacons out of reach. Three beacons a
+# machine: ~2.70 speed, ~0.223 LDS/s from 3.6 copper, 0.36 steel, 0.9 plastic a second.
+# Copper down the west belt (from the north springs; the leftover leaves south for the tap),
+# LDS out down the near east belt, steel | plastic up the far east belt (long hand).
+# Beacon x 0..2, copper x 3, hand x 4, assembler x 5..7, hand x 8, LDS x 9, steel|plastic x 10.
+module LdsB size 11x3 {
+  port cu_in  : in  copper-plate @n3
+  port cu_out : out copper-plate @s3
+  port l_in   : in  low-density-structure @n9
+  port l_out  : out low-density-structure @s9
+  port sp_in  : in  steel-plate | plastic-bar @s10
+  port sp_out : out steel-plate | plastic-bar @n10
+  stack cu_out -> cu_in, l_out -> l_in, sp_in -> sp_out
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=low-density-structure> @(5, 0)
+  net c items copper-plate: cu_in -> a, cu_out
+  net s items steel-plate:  sp_in -> a, sp_out
+  net p items plastic-bar:  sp_in -> a, sp_out
+  lanes s | p
+  net l: l_in, a -> l_out
+}
+
+# SpringN: spring.fk's brick with 12 furnaces a column (24 furnaces, ~50 plates/s capacity; one
+# lane a column carries 22.5/s, so ~45/s leave). Used for the iron (43 ore/s in) and the steel.
+module SpringN<plate=iron-plate, ore=iron-ore> size 27x50 {
+  port ore : in  $ore | $ore @s6
+  port pa  : out $plate @s10
+  port pb  : out $plate @s20
+  a  = Stack<cell=FurnB, n=12, plate=$plate, ore=$ore> @(1, 5)
+  b  = Stack<cell=FurnB, n=12, plate=$plate, ore=$ore> @(11, 5)
+  cap0 = Beacon1 @(21, 5)
+  cap1 = Beacon1 @(21, 8)
+  cap2 = Beacon1 @(21, 11)
+  cap3 = Beacon1 @(21, 14)
+  cap4 = Beacon1 @(21, 17)
+  cap5 = Beacon1 @(21, 20)
+  cap6 = Beacon1 @(21, 23)
+  cap7 = Beacon1 @(21, 26)
+  cap8 = Beacon1 @(21, 29)
+  cap9 = Beacon1 @(21, 32)
+  cap10 = Beacon1 @(21, 35)
+  cap11 = Beacon1 @(21, 38)
+  top0 = Beacon1 @(1, 2)
+  bot0 = Beacon1 @(1, 41)
+  top1 = Beacon1 @(11, 2)
+  bot1 = Beacon1 @(11, 41)
+  top2 = Beacon1 @(21, 2)
+  bot2 = Beacon1 @(21, 41)
+  net o: ore -> a.ore_in, b.ore_in
+  net pa_: a.pl_out -> pa
+  net pb_: b.pl_out -> pb
+}

@@ -1,0 +1,357 @@
+# flower.fk: the megabelt flower, written by megabelt/layout.py (do not edit by hand).
+# Six rivers round the core, each turned so its mouth faces it, and four corridors in
+# the gaps that every belt and pipe between them runs through (megabelt/RIVERS.md).
+
+import RiverCircuit from "river_circuit.fk"
+import RiverFen from "river_fen.fk"
+import RiverWorks from "river_works.fk"
+import RiverMesa from "river_mesa.fk"
+import RiverMeadow from "river_meadow.fk"
+import RiverRidge from "river_ridge.fk"
+import Core from "core.fk"
+
+# corridor N: pass-throughs only
+module CorrN size 342x18 {
+  port circuit_rp_ridge_i : inout advanced-circuit | productivity-module @n101
+  port circuit_rp_ridge_o : inout advanced-circuit | productivity-module @s2
+  port circuit_g_meadow_i : inout electronic-circuit @n81
+  port circuit_g_meadow_o : inout electronic-circuit @s8
+  port circuit_rg_works_i : inout advanced-circuit | electronic-circuit @n126
+  port circuit_rg_works_o : inout advanced-circuit | electronic-circuit @s325
+  port fen_plastic_out1_i : inout plastic-bar | plastic-bar @s329
+  port fen_plastic_out1_o : inout plastic-bar | plastic-bar @n241
+  port fen_plastic_out2_i : inout plastic-bar | plastic-bar @s333
+  port fen_plastic_out2_o : inout plastic-bar | plastic-bar @n251
+  port fen_acid_out_i : inout sulfuric-acid @s338
+  port fen_acid_out_o : inout sulfuric-acid @n261
+  port circuit_pu_i : inout processing-unit @n151
+  port circuit_pu_o : inout processing-unit @s121
+  port circuit_tap1_i : inout electronic-circuit | advanced-circuit @n176
+  port circuit_tap1_o : inout electronic-circuit | advanced-circuit @s157
+  port circuit_tap2_i : inout processing-unit | copper-plate @n196
+  port circuit_tap2_o : inout processing-unit | copper-plate @s171
+
+  net p_circuit_rp_ridge_a items advanced-circuit: circuit_rp_ridge_i -> circuit_rp_ridge_o
+  net p_circuit_rp_ridge_b items productivity-module: circuit_rp_ridge_i -> circuit_rp_ridge_o
+  lanes p_circuit_rp_ridge_a | p_circuit_rp_ridge_b
+  net p_circuit_g_meadow: circuit_g_meadow_i -> circuit_g_meadow_o
+  net p_circuit_rg_works_a items advanced-circuit: circuit_rg_works_i -> circuit_rg_works_o
+  net p_circuit_rg_works_b items electronic-circuit: circuit_rg_works_i -> circuit_rg_works_o
+  lanes p_circuit_rg_works_a | p_circuit_rg_works_b
+  net p_fen_plastic_out1: fen_plastic_out1_i -> fen_plastic_out1_o
+  net p_fen_plastic_out2: fen_plastic_out2_i -> fen_plastic_out2_o
+  net p_fen_acid_out: fen_acid_out_i -> fen_acid_out_o
+  net p_circuit_pu: circuit_pu_i -> circuit_pu_o
+  net p_circuit_tap1_a items electronic-circuit: circuit_tap1_i -> circuit_tap1_o
+  net p_circuit_tap1_b items advanced-circuit: circuit_tap1_i -> circuit_tap1_o
+  lanes p_circuit_tap1_a | p_circuit_tap1_b
+  net p_circuit_tap2_a items processing-unit: circuit_tap2_i -> circuit_tap2_o
+  net p_circuit_tap2_b items copper-plate: circuit_tap2_i -> circuit_tap2_o
+  lanes p_circuit_tap2_a | p_circuit_tap2_b
+}
+
+# corridor E: pass-throughs only
+module CorrE size 18x424 {
+  port circuit_rg_works_i : inout advanced-circuit | electronic-circuit @n1
+  port circuit_rg_works_o : inout advanced-circuit | electronic-circuit @e314
+  port fen_plastic_out1_i : inout plastic-bar | plastic-bar @e24
+  port fen_plastic_out1_o : inout plastic-bar | plastic-bar @n5
+  port fen_plastic_out2_i : inout plastic-bar | plastic-bar @e60
+  port fen_plastic_out2_o : inout plastic-bar | plastic-bar @n9
+  port fen_acid_out_i : inout sulfuric-acid @e86
+  port fen_acid_out_o : inout sulfuric-acid @n14
+  port fen_plastic_mesa_i : inout plastic-bar | plastic-bar @e114
+  port fen_plastic_mesa_o : inout plastic-bar | plastic-bar @s9
+  port fen_tap_i : inout plastic-bar | sulfur @e142
+  port fen_tap_o : inout plastic-bar | sulfur @w28
+  port fen_lube_mall_i : inout lubricant @e160
+  port fen_lube_mall_o : inout lubricant @w100
+  port fen_lube_works_i : inout lubricant @e168
+  port fen_lube_works_o : inout lubricant @e242
+  port fen_sb_works_i : inout sulfur | battery @e184
+  port fen_sb_works_o : inout sulfur | battery @e310
+  port works_blue_i : inout chemical-science-pack @e344
+  port works_blue_o : inout chemical-science-pack @w240
+  port works_rf_i : inout flying-robot-frame @e364
+  port works_rf_o : inout flying-robot-frame @w262
+  port works_tap1_i : inout steel-plate | iron-gear-wheel @e387
+  port works_tap1_o : inout steel-plate | iron-gear-wheel @w284
+  port works_tap2_i : inout engine-unit | electric-engine-unit @e409
+  port works_tap2_o : inout engine-unit | electric-engine-unit @w306
+
+  net p_circuit_rg_works_a items advanced-circuit: circuit_rg_works_i -> circuit_rg_works_o
+  net p_circuit_rg_works_b items electronic-circuit: circuit_rg_works_i -> circuit_rg_works_o
+  lanes p_circuit_rg_works_a | p_circuit_rg_works_b
+  net p_fen_plastic_out1: fen_plastic_out1_i -> fen_plastic_out1_o
+  net p_fen_plastic_out2: fen_plastic_out2_i -> fen_plastic_out2_o
+  net p_fen_acid_out: fen_acid_out_i -> fen_acid_out_o
+  net p_fen_plastic_mesa: fen_plastic_mesa_i -> fen_plastic_mesa_o
+  net p_fen_tap_a items plastic-bar: fen_tap_i -> fen_tap_o
+  net p_fen_tap_b items sulfur: fen_tap_i -> fen_tap_o
+  lanes p_fen_tap_a | p_fen_tap_b
+  net p_fen_lube_mall: fen_lube_mall_i -> fen_lube_mall_o
+  net p_fen_lube_works: fen_lube_works_i -> fen_lube_works_o
+  net p_fen_sb_works_a items sulfur: fen_sb_works_i -> fen_sb_works_o
+  net p_fen_sb_works_b items battery: fen_sb_works_i -> fen_sb_works_o
+  lanes p_fen_sb_works_a | p_fen_sb_works_b
+  net p_works_blue: works_blue_i -> works_blue_o
+  net p_works_rf: works_rf_i -> works_rf_o
+  net p_works_tap1_a items steel-plate: works_tap1_i -> works_tap1_o
+  net p_works_tap1_b items iron-gear-wheel: works_tap1_i -> works_tap1_o
+  lanes p_works_tap1_a | p_works_tap1_b
+  net p_works_tap2_a items engine-unit: works_tap2_i -> works_tap2_o
+  net p_works_tap2_b items electric-engine-unit: works_tap2_i -> works_tap2_o
+  lanes p_works_tap2_a | p_works_tap2_b
+}
+
+# corridor S: pass-throughs only
+module CorrS size 342x18 {
+  port fen_plastic_mesa_i : inout plastic-bar | plastic-bar @n333
+  port fen_plastic_mesa_o : inout plastic-bar | plastic-bar @s230
+  port mesa_lds_i : inout low-density-structure @s170
+  port mesa_lds_o : inout low-density-structure @n214
+  port mesa_tap_i : inout low-density-structure | copper-plate @s150
+  port mesa_tap_o : inout low-density-structure | copper-plate @n179
+
+  net p_fen_plastic_mesa: fen_plastic_mesa_i -> fen_plastic_mesa_o
+  net p_mesa_lds: mesa_lds_i -> mesa_lds_o
+  net p_mesa_tap_a items low-density-structure: mesa_tap_i -> mesa_tap_o
+  net p_mesa_tap_b items copper-plate: mesa_tap_i -> mesa_tap_o
+  lanes p_mesa_tap_a | p_mesa_tap_b
+}
+
+# corridor W: pass-throughs only
+module CorrW size 18x424 {
+  port circuit_rp_ridge_i : inout advanced-circuit | productivity-module @n2
+  port circuit_rp_ridge_o : inout advanced-circuit | productivity-module @w12
+  port circuit_g_meadow_i : inout electronic-circuit @n8
+  port circuit_g_meadow_o : inout electronic-circuit @w299
+  port meadow_red_i : inout automation-science-pack @w404
+  port meadow_red_o : inout automation-science-pack @e316
+  port meadow_green_i : inout logistic-science-pack @w364
+  port meadow_green_o : inout logistic-science-pack @e314
+  port meadow_tap_i : inout iron-plate | iron-gear-wheel @w328
+  port meadow_tap_o : inout iron-plate | iron-gear-wheel @e215
+  port ridge_purple_i : inout production-science-pack @w193
+  port ridge_purple_o : inout production-science-pack @e200
+  port ridge_tap1_i : inout steel-plate | iron-plate @w159
+  port ridge_tap1_o : inout steel-plate | iron-plate @e110
+  port ridge_tap2_i : inout stone-brick | rail @w129
+  port ridge_tap2_o : inout stone-brick | rail @e90
+  port ridge_tap3_i : inout electric-furnace | stone @w99
+  port ridge_tap3_o : inout electric-furnace | stone @e70
+
+  net p_circuit_rp_ridge_a items advanced-circuit: circuit_rp_ridge_i -> circuit_rp_ridge_o
+  net p_circuit_rp_ridge_b items productivity-module: circuit_rp_ridge_i -> circuit_rp_ridge_o
+  lanes p_circuit_rp_ridge_a | p_circuit_rp_ridge_b
+  net p_circuit_g_meadow: circuit_g_meadow_i -> circuit_g_meadow_o
+  net p_meadow_red: meadow_red_i -> meadow_red_o
+  net p_meadow_green: meadow_green_i -> meadow_green_o
+  net p_meadow_tap_a items iron-plate: meadow_tap_i -> meadow_tap_o
+  net p_meadow_tap_b items iron-gear-wheel: meadow_tap_i -> meadow_tap_o
+  lanes p_meadow_tap_a | p_meadow_tap_b
+  net p_ridge_purple: ridge_purple_i -> ridge_purple_o
+  net p_ridge_tap1_a items steel-plate: ridge_tap1_i -> ridge_tap1_o
+  net p_ridge_tap1_b items iron-plate: ridge_tap1_i -> ridge_tap1_o
+  lanes p_ridge_tap1_a | p_ridge_tap1_b
+  net p_ridge_tap2_a items stone-brick: ridge_tap2_i -> ridge_tap2_o
+  net p_ridge_tap2_b items rail: ridge_tap2_i -> ridge_tap2_o
+  lanes p_ridge_tap2_a | p_ridge_tap2_b
+  net p_ridge_tap3_a items electric-furnace: ridge_tap3_i -> ridge_tap3_o
+  net p_ridge_tap3_b items stone: ridge_tap3_i -> ridge_tap3_o
+  lanes p_ridge_tap3_a | p_ridge_tap3_b
+}
+
+module Flower size 900x1024 {
+  port circuit_cu_ore1 : in copper-ore | copper-ore @n356
+  port circuit_fe_ore1 : in iron-ore | iron-ore @n376
+  port circuit_cu_ore2 : in copper-ore | copper-ore @n404
+  port circuit_fe_ore2 : in iron-ore | iron-ore @n424
+  port circuit_cu_ore3 : in copper-ore | copper-ore @n452
+  port circuit_fe_ore3 : in iron-ore | iron-ore @n472
+  port circuit_cu_ore4 : in copper-ore | copper-ore @n500
+  port circuit_cu_ore5 : in copper-ore | copper-ore @n520
+  port fen_water : in water @e302
+  port fen_crude1 : in crude-oil @e305
+  port fen_crude2 : in crude-oil @e308
+  port fen_fecu : in iron-ore | copper-ore @e484
+  port fen_coal : in coal | coal @e496
+  port works_fe_ore1 : in iron-ore | iron-ore @e557
+  port works_fe_ore2 : in iron-ore | iron-ore @e587
+  port mesa_cu_ore1 : in copper-ore | copper-ore @s515
+  port mesa_cu_ore2 : in copper-ore | copper-ore @s475
+  port mesa_cu_ore3 : in copper-ore | copper-ore @s435
+  port mesa_fe_ore1 : in iron-ore | iron-ore @s395
+  port meadow_cu_ore1 : in copper-ore @w717
+  port meadow_fe_ore1 : in iron-ore | iron-ore @w685
+  port ridge_fe_ore1 : in iron-ore | iron-ore @w497
+  port ridge_fe_ore2 : in iron-ore | iron-ore @w465
+  port ridge_fe_ore3 : in iron-ore | iron-ore @w433
+  port ridge_fe_ore4 : in iron-ore | iron-ore @w401
+  port ridge_fe_ore5 : in iron-ore | iron-ore @w369
+  port ridge_stone1 : in stone | stone @w337
+  port ridge_stone2 : in stone | stone @w303
+
+  circuit = RiverCircuit @(350, 16)
+  fen = RiverFen @(824, 300, rot 1)
+  works = RiverWorks @(824, 524, rot 1)
+  mesa = RiverMesa @(550, 1008, rot 2)
+  meadow = RiverMeadow @(76, 724, rot 3)
+  ridge = RiverRidge @(76, 500, rot 3)
+  core = Core @(300, 300)
+  cn = CorrN @(279, 279)
+  ce = CorrE @(603, 300)
+  cs = CorrS @(279, 727)
+  cw = CorrW @(279, 300)
+
+  net circuit_cu_ore1_: circuit_cu_ore1 -> circuit.cu_ore1
+  net circuit_fe_ore1_: circuit_fe_ore1 -> circuit.fe_ore1
+  net circuit_cu_ore2_: circuit_cu_ore2 -> circuit.cu_ore2
+  net circuit_fe_ore2_: circuit_fe_ore2 -> circuit.fe_ore2
+  net circuit_cu_ore3_: circuit_cu_ore3 -> circuit.cu_ore3
+  net circuit_fe_ore3_: circuit_fe_ore3 -> circuit.fe_ore3
+  net circuit_cu_ore4_: circuit_cu_ore4 -> circuit.cu_ore4
+  net circuit_cu_ore5_: circuit_cu_ore5 -> circuit.cu_ore5
+  net fen_water_: fen_water -> fen.water
+  net fen_crude1_: fen_crude1 -> fen.crude1
+  net fen_crude2_: fen_crude2 -> fen.crude2
+  net fen_fecu__a items iron-ore: fen_fecu -> fen.fecu
+  net fen_fecu__b items copper-ore: fen_fecu -> fen.fecu
+  lanes fen_fecu__a | fen_fecu__b
+  net fen_coal_: fen_coal -> fen.coal
+  net works_fe_ore1_: works_fe_ore1 -> works.fe_ore1
+  net works_fe_ore2_: works_fe_ore2 -> works.fe_ore2
+  net mesa_cu_ore1_: mesa_cu_ore1 -> mesa.cu_ore1
+  net mesa_cu_ore2_: mesa_cu_ore2 -> mesa.cu_ore2
+  net mesa_cu_ore3_: mesa_cu_ore3 -> mesa.cu_ore3
+  net mesa_fe_ore1_: mesa_fe_ore1 -> mesa.fe_ore1
+  net meadow_cu_ore1_: meadow_cu_ore1 -> meadow.cu_ore1
+  net meadow_fe_ore1_: meadow_fe_ore1 -> meadow.fe_ore1
+  net ridge_fe_ore1_: ridge_fe_ore1 -> ridge.fe_ore1
+  net ridge_fe_ore2_: ridge_fe_ore2 -> ridge.fe_ore2
+  net ridge_fe_ore3_: ridge_fe_ore3 -> ridge.fe_ore3
+  net ridge_fe_ore4_: ridge_fe_ore4 -> ridge.fe_ore4
+  net ridge_fe_ore5_: ridge_fe_ore5 -> ridge.fe_ore5
+  net ridge_stone1_: ridge_stone1 -> ridge.stone1
+  net ridge_stone2_: ridge_stone2 -> ridge.stone2
+
+  net circuit_rp_ridge_0_a items advanced-circuit: circuit.rp_ridge -> cn.circuit_rp_ridge_i
+  net circuit_rp_ridge_0_b items productivity-module: circuit.rp_ridge -> cn.circuit_rp_ridge_i
+  lanes circuit_rp_ridge_0_a | circuit_rp_ridge_0_b
+  net circuit_rp_ridge_1_a items advanced-circuit: cn.circuit_rp_ridge_o -> cw.circuit_rp_ridge_i
+  net circuit_rp_ridge_1_b items productivity-module: cn.circuit_rp_ridge_o -> cw.circuit_rp_ridge_i
+  lanes circuit_rp_ridge_1_a | circuit_rp_ridge_1_b
+  net circuit_rp_ridge_2_a items advanced-circuit: cw.circuit_rp_ridge_o -> ridge.rp_in
+  net circuit_rp_ridge_2_b items productivity-module: cw.circuit_rp_ridge_o -> ridge.rp_in
+  lanes circuit_rp_ridge_2_a | circuit_rp_ridge_2_b
+  net circuit_g_meadow_0: circuit.g_meadow -> cn.circuit_g_meadow_i
+  net circuit_g_meadow_1: cn.circuit_g_meadow_o -> cw.circuit_g_meadow_i
+  net circuit_g_meadow_2: cw.circuit_g_meadow_o -> meadow.g_in
+  net circuit_rg_works_0_a items advanced-circuit: circuit.rg_works -> cn.circuit_rg_works_i
+  net circuit_rg_works_0_b items electronic-circuit: circuit.rg_works -> cn.circuit_rg_works_i
+  lanes circuit_rg_works_0_a | circuit_rg_works_0_b
+  net circuit_rg_works_1_a items advanced-circuit: cn.circuit_rg_works_o -> ce.circuit_rg_works_i
+  net circuit_rg_works_1_b items electronic-circuit: cn.circuit_rg_works_o -> ce.circuit_rg_works_i
+  lanes circuit_rg_works_1_a | circuit_rg_works_1_b
+  net circuit_rg_works_2_a items advanced-circuit: ce.circuit_rg_works_o -> works.rg_in
+  net circuit_rg_works_2_b items electronic-circuit: ce.circuit_rg_works_o -> works.rg_in
+  lanes circuit_rg_works_2_a | circuit_rg_works_2_b
+  net fen_plastic_out1_0: fen.plastic_out1 -> ce.fen_plastic_out1_i
+  net fen_plastic_out1_1: ce.fen_plastic_out1_o -> cn.fen_plastic_out1_i
+  net fen_plastic_out1_2: cn.fen_plastic_out1_o -> circuit.plastic_in1
+  net fen_plastic_out2_0: fen.plastic_out2 -> ce.fen_plastic_out2_i
+  net fen_plastic_out2_1: ce.fen_plastic_out2_o -> cn.fen_plastic_out2_i
+  net fen_plastic_out2_2: cn.fen_plastic_out2_o -> circuit.plastic_in2
+  net fen_acid_out_0: fen.acid_out -> ce.fen_acid_out_i
+  net fen_acid_out_1: ce.fen_acid_out_o -> cn.fen_acid_out_i
+  net fen_acid_out_2: cn.fen_acid_out_o -> circuit.acid_in
+  net fen_plastic_mesa_0: fen.plastic_mesa -> ce.fen_plastic_mesa_i
+  net fen_plastic_mesa_1: ce.fen_plastic_mesa_o -> cs.fen_plastic_mesa_i
+  net fen_plastic_mesa_2: cs.fen_plastic_mesa_o -> mesa.plastic_in
+  net circuit_pu_0: circuit.pu -> cn.circuit_pu_i
+  net circuit_pu_1: cn.circuit_pu_o -> core.pu
+  net circuit_tap1_0_a items electronic-circuit: circuit.tap1 -> cn.circuit_tap1_i
+  net circuit_tap1_0_b items advanced-circuit: circuit.tap1 -> cn.circuit_tap1_i
+  lanes circuit_tap1_0_a | circuit_tap1_0_b
+  net circuit_tap1_1_a items electronic-circuit: cn.circuit_tap1_o -> core.c_tap1
+  net circuit_tap1_1_b items advanced-circuit: cn.circuit_tap1_o -> core.c_tap1
+  lanes circuit_tap1_1_a | circuit_tap1_1_b
+  net circuit_tap2_0_a items processing-unit: circuit.tap2 -> cn.circuit_tap2_i
+  net circuit_tap2_0_b items copper-plate: circuit.tap2 -> cn.circuit_tap2_i
+  lanes circuit_tap2_0_a | circuit_tap2_0_b
+  net circuit_tap2_1_a items processing-unit: cn.circuit_tap2_o -> core.c_tap2
+  net circuit_tap2_1_b items copper-plate: cn.circuit_tap2_o -> core.c_tap2
+  lanes circuit_tap2_1_a | circuit_tap2_1_b
+  net fen_tap_0_a items plastic-bar: fen.tap -> ce.fen_tap_i
+  net fen_tap_0_b items sulfur: fen.tap -> ce.fen_tap_i
+  lanes fen_tap_0_a | fen_tap_0_b
+  net fen_tap_1_a items plastic-bar: ce.fen_tap_o -> core.f_tap
+  net fen_tap_1_b items sulfur: ce.fen_tap_o -> core.f_tap
+  lanes fen_tap_1_a | fen_tap_1_b
+  net fen_lube_mall_0: fen.lube_mall -> ce.fen_lube_mall_i
+  net fen_lube_mall_1: ce.fen_lube_mall_o -> core.lube
+  net fen_lube_works_0: fen.lube_works -> ce.fen_lube_works_i
+  net fen_lube_works_1: ce.fen_lube_works_o -> works.lube_in
+  net fen_sb_works_0_a items sulfur: fen.sb_works -> ce.fen_sb_works_i
+  net fen_sb_works_0_b items battery: fen.sb_works -> ce.fen_sb_works_i
+  lanes fen_sb_works_0_a | fen_sb_works_0_b
+  net fen_sb_works_1_a items sulfur: ce.fen_sb_works_o -> works.sb_in
+  net fen_sb_works_1_b items battery: ce.fen_sb_works_o -> works.sb_in
+  lanes fen_sb_works_1_a | fen_sb_works_1_b
+  net works_blue_0: works.blue -> ce.works_blue_i
+  net works_blue_1: ce.works_blue_o -> core.blue
+  net works_rf_0: works.rf -> ce.works_rf_i
+  net works_rf_1: ce.works_rf_o -> core.rf
+  net works_tap1_0_a items steel-plate: works.tap1 -> ce.works_tap1_i
+  net works_tap1_0_b items iron-gear-wheel: works.tap1 -> ce.works_tap1_i
+  lanes works_tap1_0_a | works_tap1_0_b
+  net works_tap1_1_a items steel-plate: ce.works_tap1_o -> core.w_tap1
+  net works_tap1_1_b items iron-gear-wheel: ce.works_tap1_o -> core.w_tap1
+  lanes works_tap1_1_a | works_tap1_1_b
+  net works_tap2_0_a items engine-unit: works.tap2 -> ce.works_tap2_i
+  net works_tap2_0_b items electric-engine-unit: works.tap2 -> ce.works_tap2_i
+  lanes works_tap2_0_a | works_tap2_0_b
+  net works_tap2_1_a items engine-unit: ce.works_tap2_o -> core.w_tap2
+  net works_tap2_1_b items electric-engine-unit: ce.works_tap2_o -> core.w_tap2
+  lanes works_tap2_1_a | works_tap2_1_b
+  net mesa_lds_0: mesa.lds -> cs.mesa_lds_i
+  net mesa_lds_1: cs.mesa_lds_o -> core.lds
+  net mesa_tap_0_a items low-density-structure: mesa.tap -> cs.mesa_tap_i
+  net mesa_tap_0_b items copper-plate: mesa.tap -> cs.mesa_tap_i
+  lanes mesa_tap_0_a | mesa_tap_0_b
+  net mesa_tap_1_a items low-density-structure: cs.mesa_tap_o -> core.s_tap
+  net mesa_tap_1_b items copper-plate: cs.mesa_tap_o -> core.s_tap
+  lanes mesa_tap_1_a | mesa_tap_1_b
+  net meadow_red_0: meadow.red -> cw.meadow_red_i
+  net meadow_red_1: cw.meadow_red_o -> core.red
+  net meadow_green_0: meadow.green -> cw.meadow_green_i
+  net meadow_green_1: cw.meadow_green_o -> core.green
+  net meadow_tap_0_a items iron-plate: meadow.tap -> cw.meadow_tap_i
+  net meadow_tap_0_b items iron-gear-wheel: meadow.tap -> cw.meadow_tap_i
+  lanes meadow_tap_0_a | meadow_tap_0_b
+  net meadow_tap_1_a items iron-plate: cw.meadow_tap_o -> core.m_tap
+  net meadow_tap_1_b items iron-gear-wheel: cw.meadow_tap_o -> core.m_tap
+  lanes meadow_tap_1_a | meadow_tap_1_b
+  net ridge_purple_0: ridge.purple -> cw.ridge_purple_i
+  net ridge_purple_1: cw.ridge_purple_o -> core.purple
+  net ridge_tap1_0_a items steel-plate: ridge.tap1 -> cw.ridge_tap1_i
+  net ridge_tap1_0_b items iron-plate: ridge.tap1 -> cw.ridge_tap1_i
+  lanes ridge_tap1_0_a | ridge_tap1_0_b
+  net ridge_tap1_1_a items steel-plate: cw.ridge_tap1_o -> core.r_tap1
+  net ridge_tap1_1_b items iron-plate: cw.ridge_tap1_o -> core.r_tap1
+  lanes ridge_tap1_1_a | ridge_tap1_1_b
+  net ridge_tap2_0_a items stone-brick: ridge.tap2 -> cw.ridge_tap2_i
+  net ridge_tap2_0_b items rail: ridge.tap2 -> cw.ridge_tap2_i
+  lanes ridge_tap2_0_a | ridge_tap2_0_b
+  net ridge_tap2_1_a items stone-brick: cw.ridge_tap2_o -> core.r_tap2
+  net ridge_tap2_1_b items rail: cw.ridge_tap2_o -> core.r_tap2
+  lanes ridge_tap2_1_a | ridge_tap2_1_b
+  net ridge_tap3_0_a items electric-furnace: ridge.tap3 -> cw.ridge_tap3_i
+  net ridge_tap3_0_b items stone: ridge.tap3 -> cw.ridge_tap3_i
+  lanes ridge_tap3_0_a | ridge_tap3_0_b
+  net ridge_tap3_1_a items electric-furnace: cw.ridge_tap3_o -> core.r_tap3
+  net ridge_tap3_1_b items stone: cw.ridge_tap3_o -> core.r_tap3
+  lanes ridge_tap3_1_a | ridge_tap3_1_b
+}
+
+flower = Flower @(0, 0)

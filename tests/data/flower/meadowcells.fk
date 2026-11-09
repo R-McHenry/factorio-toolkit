@@ -1,0 +1,86 @@
+# meadowcells.fk: the megabelt Meadow river's own beaconed cells (megabelt RIVERS.md, RiverMeadow).
+# Built like flowercells.fk's: a beacon west of the machine, stacked columns share beacons, the
+# parent closes the east side with a column of Beacon1. Every cell is 3 tall, the belts run north,
+# the product comes back south on the east belt (one lane).
+import Beacon1, Asm3P from "flowercells.fk"
+
+kind Asm3N = Machine<entity=assembling-machine-3>
+
+# A copper furnace fed by a one-lane ore belt (the river's copper ore comes in on one lane).
+kind EFurnP2 = Machine<entity=electric-furnace, modules=productivity-module-2>
+module CuB size 10x3 {
+  port ore_in  : in  copper-ore @s3
+  port ore_out : out copper-ore @n3
+  port pl_in   : in  copper-plate @n9
+  port pl_out  : out copper-plate @s9
+  stack ore_in -> ore_out, pl_out -> pl_in
+  b = Beacon1 @(0, 0)
+  f = EFurnP2<recipe=copper-plate> @(5, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# Gears: iron plates up the west belt, gears back down the east one (one lane). ~8.7 gears/s.
+module GearB size 10x3 {
+  port fe_in  : in  iron-plate @s3
+  port fe_out : out iron-plate @n3
+  port g_in   : in  iron-gear-wheel @n9
+  port g_out  : out iron-gear-wheel @s9
+  stack fe_in -> fe_out, g_out -> g_in
+  b = Beacon1 @(0, 0)
+  m = Asm3P<recipe=iron-gear-wheel> @(5, 0)
+  net f: fe_in -> m, fe_out
+  net g: g_in, m -> g_out
+}
+
+# A science pack assembler: two ingredients on the two lanes of the west belt, the pack back down
+# the east belt. ~0.87 red packs/s, ~0.73 green packs/s a machine (prod2, 6 beacons).
+module SciB<recipe, a, b, pack> size 10x3 {
+  port in_in  : in  $a | $b @s3
+  port in_out : out $a | $b @n3
+  port p_in   : in  $pack @n9
+  port p_out  : out $pack @s9
+  stack in_in -> in_out, p_out -> p_in
+  bc = Beacon1 @(0, 0)
+  m = Asm3P<recipe=$recipe> @(5, 0)
+  net na items $a: in_in -> m, in_out
+  net nb items $b: in_in -> m, in_out
+  lanes na | nb
+  net o: p_in, m -> p_out
+}
+
+# Transport belts: iron | gear on the west belt, belts back down the east one. The recipe takes
+# no productivity: a plain assembler 3 (~14 belts/s a machine).
+module BeltB size 10x3 {
+  port in_in  : in  iron-plate | iron-gear-wheel @s3
+  port in_out : out iron-plate | iron-gear-wheel @n3
+  port p_in   : in  transport-belt @n9
+  port p_out  : out transport-belt @s9
+  stack in_in -> in_out, p_out -> p_in
+  bc = Beacon1 @(0, 0)
+  m = Asm3N<recipe=transport-belt> @(5, 0)
+  net fe items iron-plate: in_in -> m, in_out
+  net gw items iron-gear-wheel: in_in -> m, in_out
+  lanes fe | gw
+  net o: p_in, m -> p_out
+}
+
+# Inserters (no productivity either): iron up the far belt, green circuit | gear up the near one
+# (a long hand over it, as RedB does), inserters back down the east belt. ~7 inserters/s.
+# Beacon x 0..2, iron belt x 3, circuit|gear belt x 4, assembler x 6..8, out belt x 10.
+module InsB size 11x3 {
+  port fe_in  : in  iron-plate @s3
+  port fe_out : out iron-plate @n3
+  port cg_in  : in  electronic-circuit | iron-gear-wheel @s4
+  port cg_out : out electronic-circuit | iron-gear-wheel @n4
+  port p_in   : in  inserter @n10
+  port p_out  : out inserter @s10
+  stack fe_in -> fe_out, cg_in -> cg_out, p_out -> p_in
+  bc = Beacon1 @(0, 0)
+  m = Asm3N<recipe=inserter> @(6, 0)
+  net fe: fe_in -> m, fe_out
+  net c items electronic-circuit: cg_in -> m, cg_out
+  net g items iron-gear-wheel:    cg_in -> m, cg_out
+  lanes c | g
+  net o: p_in, m -> p_out
+}

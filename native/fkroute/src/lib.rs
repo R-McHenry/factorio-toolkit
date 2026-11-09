@@ -14,6 +14,7 @@ mod lane;
 mod physics;
 mod place;
 mod search;
+mod territory;
 
 pub(crate) type St = (i64, i64, i64, i64); // x, y, heading 0..3 = N E S W, just exited an underground
 pub(crate) type T = (i64, i64);
@@ -35,6 +36,8 @@ fn fkroute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(physics::physics_lookup, m)?)?;
     m.add_function(wrap_pyfunction!(place::field, m)?)?;
     m.add_function(wrap_pyfunction!(place::place, m)?)?;
+    m.add_function(wrap_pyfunction!(territory::voronoi, m)?)?;
+    m.add_function(wrap_pyfunction!(place::place_seeds, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

@@ -1,0 +1,20 @@
+# territory.fk: two sealed modules with no positions. Plot 40x40. A sealed module without an
+# @(x, y) is placed by territory: fk layout gives each a cell sized to its need (its frame here)
+# and moves the modules until the belt between their ports is short, then writes the hints.
+# Run:  fk layout territory.fk --plot 40x40 --write    fk build --to report_checks
+# Expect: `layout territory: 2 modules, 2 placed now`; the build routes the gear belt between them.
+module Maker size 8x8 {
+  port o : out iron-gear-wheel @s2
+  fe   = Chest<requester, item=iron-plate, rate=2/s> @(1, 1)
+  gear = Assembler<recipe=iron-gear-wheel> @(3, 1)
+  net f: fe -> gear
+  net g: gear -> o
+}
+module Taker size 8x8 {
+  port i : in iron-gear-wheel @n4
+  box = Chest<provider, limit=4> @(3, 3)
+  net g: i -> box
+}
+a = Maker
+b = Taker
+net g: a.o -> b.i

@@ -1,0 +1,115 @@
+# river_meadow.fk: RiverMeadow of the megabelt flower (megabelt RIVERS.md): 8.3 red and 8.3 green
+# science packs a second from iron ore (33/s), copper ore (6/s) and green circuits (6.7/s).
+# Canonical orientation: ore in on the north edge, everything else on the south edge (the mouth),
+# west to east: red, green, tap, g_in. Every column heads south; the corridor y 150..200 is belts.
+#   iron spring (Spring, 2 lanes ~37/s) -> gears (gr for red, gi1 for inserters, gi2 for belts)
+#   copper column (4 beaconed furnaces) -> red science (10 asm, copper | gear)
+#   inserter asm (circuit | gear, iron) + belt asm (iron | gear) -> green science (12 asm)
+import Spring from "spring.fk"
+import Beacon1, Asm3P from "flowercells.fk"
+import CuB, GearB, SciB, BeltB, InsB from "meadowcells.fk"
+
+module RiverMeadow size 200x200 {
+  port fe_ore1 : in  iron-ore | iron-ore @n38
+  port cu_ore1 : in  copper-ore @n6
+  port red     : out automation-science-pack @s19
+  port green   : out logistic-science-pack @s59
+  port tap     : out iron-plate | iron-gear-wheel @s95
+  port g_in    : in  electronic-circuit @s124
+  sp = Spring @(40, 4)
+  cu = Stack<cell=CuB, n=4> @(10, 14)
+  cuc0 = Beacon1 @(20, 14)
+  cuc1 = Beacon1 @(20, 17)
+  cuc2 = Beacon1 @(20, 20)
+  cuc3 = Beacon1 @(20, 23)
+  cutw = Beacon1 @(10, 11)
+  cubw = Beacon1 @(10, 26)
+  cute = Beacon1 @(20, 11)
+  cube = Beacon1 @(20, 26)
+  rs = Stack<cell=SciB, n=10, recipe=automation-science-pack, a=copper-plate, b=iron-gear-wheel, pack=automation-science-pack> @(10, 117)
+  rsc0 = Beacon1 @(20, 117)
+  rsc1 = Beacon1 @(20, 120)
+  rsc2 = Beacon1 @(20, 123)
+  rsc3 = Beacon1 @(20, 126)
+  rsc4 = Beacon1 @(20, 129)
+  rsc5 = Beacon1 @(20, 132)
+  rsc6 = Beacon1 @(20, 135)
+  rsc7 = Beacon1 @(20, 138)
+  rsc8 = Beacon1 @(20, 141)
+  rsc9 = Beacon1 @(20, 144)
+  rstw = Beacon1 @(10, 114)
+  rsbw = Beacon1 @(10, 147)
+  rste = Beacon1 @(20, 114)
+  rsbe = Beacon1 @(20, 147)
+  gs = Stack<cell=SciB, n=12, recipe=logistic-science-pack, a=inserter, b=transport-belt, pack=logistic-science-pack> @(50, 111)
+  gsc0 = Beacon1 @(60, 111)
+  gsc1 = Beacon1 @(60, 114)
+  gsc2 = Beacon1 @(60, 117)
+  gsc3 = Beacon1 @(60, 120)
+  gsc4 = Beacon1 @(60, 123)
+  gsc5 = Beacon1 @(60, 126)
+  gsc6 = Beacon1 @(60, 129)
+  gsc7 = Beacon1 @(60, 132)
+  gsc8 = Beacon1 @(60, 135)
+  gsc9 = Beacon1 @(60, 138)
+  gsc10 = Beacon1 @(60, 141)
+  gsc11 = Beacon1 @(60, 144)
+  gstw = Beacon1 @(50, 108)
+  gsbw = Beacon1 @(50, 147)
+  gste = Beacon1 @(60, 108)
+  gsbe = Beacon1 @(60, 147)
+  gr = Stack<cell=GearB, n=1> @(30, 144)
+  grtw = Beacon1 @(30, 141)
+  grbw = Beacon1 @(30, 147)
+  grte = Beacon1 @(40, 141)
+  grce = Beacon1 @(40, 144)
+  grbe = Beacon1 @(40, 147)
+  ba = Stack<cell=BeltB, n=1> @(80, 144)
+  batw = Beacon1 @(80, 141)
+  babw = Beacon1 @(80, 147)
+  bate = Beacon1 @(90, 141)
+  bace = Beacon1 @(90, 144)
+  babe = Beacon1 @(90, 147)
+  gi2 = Stack<cell=GearB, n=1> @(100, 144)
+  gi2tw = Beacon1 @(100, 141)
+  gi2bw = Beacon1 @(100, 147)
+  gi2te = Beacon1 @(110, 141)
+  gi2ce = Beacon1 @(110, 144)
+  gi2be = Beacon1 @(110, 147)
+  gi1 = Stack<cell=GearB, n=1> @(142, 144)
+  gi1tw = Beacon1 @(142, 141)
+  gi1bw = Beacon1 @(142, 147)
+  gi1te = Beacon1 @(152, 141)
+  gi1ce = Beacon1 @(152, 144)
+  gi1be = Beacon1 @(152, 147)
+  ia = Stack<cell=InsB, n=2> @(120, 141)
+  iac0 = Beacon1 @(131, 141)
+  iac1 = Beacon1 @(131, 144)
+  iatw = Beacon1 @(120, 138)
+  iabw = Beacon1 @(120, 147)
+  iate = Beacon1 @(131, 138)
+  iabe = Beacon1 @(131, 147)
+
+  net ore_fe: fe_ore1 -> sp.ore
+  net ore_cu: cu_ore1 -> cu.ore_in
+  # iron: lane pa feeds red's gears and the inserter assembler, lane pb the other gears and belts
+  net fa: sp.pa -> gr.fe_in, ia.fe_in
+  net fb: sp.pb -> gi1.fe_in, gi2.fe_in, ba.in_in, tap
+  # gears
+  net gr_: gr.g_out -> rs.in_in
+  net gi1_: gi1.g_out -> ia.cg_in
+  net gi2_: gi2.g_out -> ba.in_in, tap
+  net cu_: cu.pl_out -> rs.in_in
+  net ci: g_in -> ia.cg_in
+  lanes fb | gi2_
+  lanes cu_ | gr_
+  lanes ci | gi1_
+  lanes ins_ | bel_
+  # science
+  net ins_: ia.p_out -> gs.in_in
+  net bel_: ba.p_out -> gs.in_in
+  net red_: rs.p_out -> red
+  net grn_: gs.p_out -> green
+}
+
+m = RiverMeadow @(0, 0)

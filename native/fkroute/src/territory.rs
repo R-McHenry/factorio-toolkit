@@ -9,6 +9,17 @@ use pyo3::prelude::*;
 
 pub(crate) type Rect = (i64, i64, i64, i64);
 
+/// Python's `//`: the quotient rounded toward minus infinity for either sign of the divisor.
+#[inline]
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if a % b != 0 && ((a < 0) != (b < 0)) {
+        q - 1
+    } else {
+        q
+    }
+}
+
 const DX: [i64; 4] = [0, 1, 0, -1];
 const DY: [i64; 4] = [-1, 0, 1, 0];
 
@@ -233,6 +244,9 @@ impl Diagram {
             if who < 0 {
                 let mut best = self.wd2[k];
                 for (i, p) in self.points.iter().enumerate() {
+                    if self.fixed[i].is_some() {
+                        continue;
+                    }
                     if let Some((sx, sy)) = p {
                         let d = (cx - sx) * (cx - sx) + (cy - sy) * (cy - sy) - self.weights[i];
                         if d < best {
@@ -314,14 +328,22 @@ impl Diagram {
     /// within `tol` per cent of its need or the cap. -> the rounds run.
     pub fn adapt(&mut self, grid: &Grid, needs: &[i64], iters: i64, tol: i64) -> i64 {
         let n = self.n_seeds;
-        let mut gain = vec![16i64; n];
-        let mut last = vec![0i64; n];
+        let mut rate = vec![64i64; n];
+        let mut last_dw = vec![0i64; n];
+        let mut last_area = vec![0i64; n];
         let side = (grid.x1 - grid.x0).max(grid.y1 - grid.y0);
         let cap = (2 * side) * (2 * side);
         let mut rounds = 0i64;
         loop {
             self.recompute(grid, None);
             rounds += 1;
+            for i in 0..n {
+                if last_dw[i] != 0 {
+                    let seen = floordiv((self.areas[i] - last_area[i]) * 256, last_dw[i]);
+                    rate[i] = if seen > 0 { ((rate[i] + seen).div_euclid(2)).max(8).min(4096) } else { (rate[i] * 2).min(4096) };
+                }
+                last_dw[i] = 0;
+            }
             let off: Vec<usize> = (0..n)
                 .filter(|&i| {
                     self.fixed[i].is_none()
@@ -334,12 +356,42 @@ impl Diagram {
             }
             for i in off {
                 let diff = needs[i] - self.areas[i];
-                if last[i] != 0 && (diff > 0) != (last[i] > 0) {
-                    gain[i] = (gain[i] / 2).max(1);
+                let dw = (diff * 256).div_euclid(rate[i]);
+                let w = (self.weights[i] + dw).max(-cap).min(cap);
+                last_dw[i] = w - self.weights[i];
+                last_area[i] = self.areas[i];
+                self.weights[i] = w;
+            }
+            self.keep_homes(grid, cap);
+        }
+    }
+
+    /// No movable seed without a frame loses the cell under its point: there its power distance
+    /// stays below the wall's and every other movable seed's (the weight raised to just above that
+    /// floor). A seed with a frame holds it outright and may shrink to it.
+    fn keep_homes(&mut self, grid: &Grid, cap: i64) {
+        let live: Vec<usize> = (0..self.n_seeds).filter(|&i| self.fixed[i].is_none() && self.points[i].is_some()).collect();
+        for &i in &live {
+            if self.frames[i].is_some() {
+                continue;
+            }
+            let (sx, sy) = self.points[i].unwrap();
+            let home = match grid.cell_of(sx.div_euclid(2), sy.div_euclid(2)) {
+                Some(h) if !self.wall[h] && self.fixed_owner[h] < 0 => h,
+                _ => continue,
+            };
+            let (cx, cy) = grid.centre(home);
+            let d_self = (cx - sx) * (cx - sx) + (cy - sy) * (cy - sy);
+            let mut floor = d_self - self.wd2[home];
+            for &j in &live {
+                if j == i {
+                    continue;
                 }
-                last[i] = diff;
-                let w = self.weights[i] + (diff * gain[i]).div_euclid(16);
-                self.weights[i] = w.max(-cap).min(cap);
+                let (tx, ty) = self.points[j].unwrap();
+                floor = floor.max(d_self - (cx - tx) * (cx - tx) - (cy - ty) * (cy - ty) + self.weights[j]);
+            }
+            if self.weights[i] <= floor {
+                self.weights[i] = (floor + 1).min(cap);
             }
         }
     }
@@ -359,6 +411,36 @@ impl Diagram {
         }
         out
     }
+}
+
+/// fkcore.territory.runs_of: seed `i`'s cells as tile row runs (y, x0, x1), x1 exclusive.
+pub(crate) fn runs_of(owner: &[i64], grid: &Grid, i: i64) -> Vec<(i64, i64, i64)> {
+    let mut out = Vec::new();
+    let gw = grid.gw as usize;
+    for j in 0..grid.gh as usize {
+        let row = &owner[j * gw..(j + 1) * gw];
+        let mut runs: Vec<(i64, i64)> = Vec::new();
+        let mut x = 0usize;
+        while x < gw {
+            if row[x] != i {
+                x += 1;
+                continue;
+            }
+            let s = x;
+            while x < gw && row[x] == i {
+                x += 1;
+            }
+            runs.push((grid.xa[s], grid.xb[x - 1]));
+        }
+        if !runs.is_empty() {
+            for y in grid.ya[j]..grid.yb[j] {
+                for &(a, b) in &runs {
+                    out.push((y, a, b));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// fkcore.territory.voronoi_py: the power diagram with adapted weights on a coarse grid.

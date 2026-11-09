@@ -36,8 +36,6 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from .compose import turn
-
 try:
     import fkroute as _native
 except ImportError:          # stdlib only: the native kernel is a speed-up, never a dependency
@@ -84,7 +82,8 @@ class TParams:
     decay: int = 800          # per mille kept where no route crowds
     reach: int = 5            # an underground's reach in tiles (tunnels when the cell allows)
     steps: tuple = (32, 16, 8, 4, 2, 1)
-    cells: tuple = (8, 8, 4, 4, 4, 4)     # the grid's cell per step; the territories are cut at 1
+    cells: tuple = (8, 8, 4, 4, 4, 4)     # the grid's cell per step
+    final_cell: int = 1       # the grid the territories are cut on at the end
     trespass: int = MILLI     # milli-tiles added per tile inside any cell: a belt keeps outside
     iters: int = 40           # weight adaptation rounds per voronoi call
     tol: int = 5              # per cent of its need a cell may miss
@@ -228,11 +227,26 @@ def turned_box(at, size):
     return x, y, x + w, y + h
 
 
+def turn_tile(px, py, rot, size):
+    """Tile (px, py) of a ``size`` frame turned ``rot`` quarter turns clockwise, in the turned
+    frame (``compose.turn`` of the tile's centre, in integers)."""
+    w, h = size
+    rot %= 4
+    if rot == 0:
+        return px, py
+    if rot == 1:
+        return h - 1 - py, px
+    if rot == 2:
+        return w - 1 - px, h - 1 - py
+    return py, w - 1 - px
+
+
 # -- the power diagram -----------------------------------------------------------------------------
-def _assign(grid, points, weights, frames, wall, wd2, fixed_owner, owner, ks):
+def _assign(grid, points, weights, frames, fixed, wall, wd2, fixed_owner, owner, ks):
     """Owner per cell in ``ks``: the seed whose declared frame holds the cell's centre (its
-    claim, outright), else the seed of the least power distance when it beats the wall, -1 else;
-    a wall or a fixed instance's cell keeps what it has."""
+    claim, outright), else the movable seed of the least power distance when it beats the wall,
+    -1 else; a wall or a fixed instance's cell keeps what it has (a fixed seed's cell is its frame
+    and it competes for nothing)."""
     for k in ks:
         if wall[k] or fixed_owner[k] >= 0:
             continue
@@ -245,7 +259,7 @@ def _assign(grid, points, weights, frames, wall, wd2, fixed_owner, owner, ks):
         if who < 0:
             best = wd2[k]
             for i, (sx, sy) in enumerate(points):
-                if sx is None:
+                if sx is None or fixed[i] is not None:
                     continue
                 d = (cx - sx) ** 2 + (cy - sy) ** 2 - weights[i]
                 if d < best:
@@ -318,8 +332,8 @@ class Diagram:
         holding its point."""
         grid = self.grid
         pts = [(None, None) if p is None else p for p in self.points]
-        _assign(grid, pts, self.weights, self.frames, self.wall, self.wd2, self.fixed_owner,
-                self.owner, range(grid.n) if ks is None else ks)
+        _assign(grid, pts, self.weights, self.frames, self.fixed, self.wall, self.wd2,
+                self.fixed_owner, self.owner, range(grid.n) if ks is None else ks)
         for i in range(self.n_seeds):
             if self.fixed[i] is not None:
                 continue
@@ -331,28 +345,61 @@ class Diagram:
 
     def adapt(self, needs, iters, tol):
         """Capacity-constrained weights: ``iters`` rounds of recompute and step (a cell under its
-        need grows its weight by the shortfall, over it shrinks, each seed's gain halved when its
-        shortfall changes sign) until every movable cell is within ``tol`` per cent of its need or
-        the cap. -> the rounds run."""
+        need grows its weight, over it shrinks, by the shortfall over the seed's **rate**, the
+        tiles its cell gains per unit of weight as observed on the last step, in 1/256: it starts
+        at 1/4, a step that moved the area the wrong way or not at all halves it) until every
+        movable cell is within ``tol`` per cent of its need or the cap. -> the rounds run."""
         n = self.n_seeds
-        gain = [16] * n
-        last = [0] * n
+        rate = [64] * n
+        last_dw = [0] * n
+        last_area = [0] * n
         cap = (2 * max(self.grid.x1 - self.grid.x0, self.grid.y1 - self.grid.y0)) ** 2
         rounds = 0
         while True:
             self.recompute()
             rounds += 1
+            for i in range(n):
+                if last_dw[i]:
+                    seen = (self.areas[i] - last_area[i]) * 256 // last_dw[i]
+                    rate[i] = max(8, min(4096, (rate[i] + seen) // 2)) if seen > 0 \
+                        else min(4096, rate[i] * 2)
+                last_dw[i] = 0
             off = [i for i in range(n) if self.fixed[i] is None and self.points[i] is not None
                    and abs(self.areas[i] - needs[i]) * 100 > tol * needs[i]]
             if not off or rounds > iters:
                 return rounds
             for i in off:
                 diff = needs[i] - self.areas[i]
-                if last[i] and (diff > 0) != (last[i] > 0):
-                    gain[i] = max(1, gain[i] // 2)
-                last[i] = diff
-                w = self.weights[i] + diff * gain[i] // 16
-                self.weights[i] = max(-cap, min(cap, w))
+                dw = diff * 256 // rate[i]
+                w = max(-cap, min(cap, self.weights[i] + dw))
+                last_dw[i] = w - self.weights[i]
+                last_area[i] = self.areas[i]
+                self.weights[i] = w
+            self.keep_homes(cap)
+
+    def keep_homes(self, cap):
+        """No movable seed without a frame loses the cell under its point: there its power
+        distance stays below the wall's and every other movable seed's (the weight raised to just
+        above that floor). A seed with a frame holds it outright and may shrink to it."""
+        grid, n = self.grid, self.n_seeds
+        live = [i for i in range(n) if self.fixed[i] is None and self.points[i] is not None]
+        for i in live:
+            if self.frames[i] is not None:
+                continue
+            sx, sy = self.points[i]
+            home = grid.cell_of(sx // 2, sy // 2)
+            if home is None or self.wall[home] or self.fixed_owner[home] >= 0:
+                continue
+            cx, cy = grid.centre(home)
+            d_self = (cx - sx) ** 2 + (cy - sy) ** 2
+            floor = d_self - self.wd2[home]
+            for j in live:
+                if j == i:
+                    continue
+                tx, ty = self.points[j]
+                floor = max(floor, d_self - (cx - tx) ** 2 - (cy - ty) ** 2 + self.weights[j])
+            if self.weights[i] <= floor:
+                self.weights[i] = min(cap, floor + 1)
 
     def boundary(self, i, side):
         """The cells of seed ``i`` whose neighbour in direction ``side`` is not its own, sorted."""
@@ -452,6 +499,21 @@ class _World:
         self.dia = None
         self.price = []
         self.hard = [tuple(r) for r in spec.blocked]
+        # a pinned edge port's tile and the tile inside it: no frame may cover them
+        self.edge_tiles = []
+        bx0, by0, bx1, by1 = spec.box
+        for _name, side, pos in spec.edges:
+            if pos is None:
+                continue
+            d = _SIDES.index(side)
+            if side in "ns":
+                t = (bx0 + pos, by0 if side == "n" else by1 - 1)
+            else:
+                t = (bx0 if side == "w" else bx1 - 1, by0 + pos)
+            self.edge_tiles.append(t)
+            self.edge_tiles.append((t[0] - _DX[d], t[1] - _DY[d]))
+        bw, bh = bx1 - bx0, by1 - by0
+        self.penalty = 2 * (bw + bh) * MILLI      # a terminal no route reaches costs this
 
     def set_cell(self, c):
         """The grid at ``c`` tiles a cell; the price carried over by tile."""
@@ -474,21 +536,53 @@ class _World:
         self.dia.recompute()
 
     def fits(self, i, at):
-        """The turned frame inside the box, off the blocked rectangles and the other frames."""
-        box = turned_box(at, self.spec.seeds[i].size)
+        """The turned frame inside the box, off the blocked rectangles, the other frames and the
+        pinned edge ports' tiles; each pinned port's belt has its tile outside the frame free (in
+        the box, off the blocked ground and every other frame) and one more tile in the box beyond
+        it (a port on a frame edge against another frame or the box is a belt the router cannot
+        lay)."""
+        sd = self.spec.seeds[i]
+        box = turned_box(at, sd.size)
         bx0, by0, bx1, by1 = self.spec.box
         if box[0] < bx0 or box[1] < by0 or box[2] > bx1 or box[3] > by1:
             return False
         for r in self.hard:
             if box[0] < r[2] and r[0] < box[2] and box[1] < r[3] and r[1] < box[3]:
                 return False
+        others = []
         for j, a in enumerate(self.at):
             if j == i or a is None:
                 continue
             o = turned_box(a, self.spec.seeds[j].size)
             if box[0] < o[2] and o[0] < box[2] and box[1] < o[3] and o[1] < box[3]:
                 return False
+            others.append(o)
+        for tx, ty in self.edge_tiles:
+            if box[0] <= tx < box[2] and box[1] <= ty < box[3]:
+                return False
+        w, h = sd.size
+        rot = at[2] % 4
+        for _name, side, pos in sd.ports:
+            if pos is None:
+                continue
+            if side in "ns":
+                px, py = pos, (0 if side == "n" else h - 1)
+            else:
+                px, py = (0 if side == "w" else w - 1), pos
+            tx, ty = turn_tile(px, py, rot, (w, h))
+            d = (_SIDES.index(side) + rot) % 4
+            ox, oy = at[0] + tx + _DX[d], at[1] + ty + _DY[d]
+            fx, fy = ox + _DX[d], oy + _DY[d]
+            if not (bx0 <= fx < bx1 and by0 <= fy < by1):
+                return False
+            for r in self.hard + others:
+                if r[0] <= ox < r[2] and r[1] <= oy < r[3]:
+                    return False
         return True
+
+    def claims(self):
+        """The turned frames of the placed seeds: sealed, so no belt of the scope crosses them."""
+        return [turned_box(a, sd.size) for a, sd in zip(self.at, self.spec.seeds) if a is not None]
 
     def move(self, i, at):
         self.at[i] = at
@@ -530,8 +624,8 @@ class _World:
                 px, py = pos, (0 if side == "n" else h - 1)
             else:
                 px, py = (0 if side == "w" else w - 1), pos
-            tx, ty, _d = turn(px, py, None, rot, (w, h))
-            tx, ty = at[0] + int(tx), at[1] + int(ty)
+            tx, ty = turn_tile(px, py, rot, (w, h))
+            tx, ty = at[0] + tx, at[1] + ty
             k = grid.cell_of(tx, ty)
             if k is None:
                 return None, True
@@ -568,19 +662,54 @@ class _World:
                 best = (key, k)
         return best[1]
 
+    def edge_point(self, idx, point):
+        """Where edge terminal ``idx`` stands for a seed at ``point`` (half-tiles): its pinned
+        tile's centre, else the point of its side nearest ``point`` (the side's middle when
+        None), in half-tiles."""
+        _name, side, pos = self.spec.edges[idx]
+        x0, y0, x1, y1 = self.spec.box
+        if side in "ns":
+            y = 2 * y0 + 1 if side == "n" else 2 * y1 - 1
+            if pos is not None:
+                return 2 * (x0 + pos) + 1, y
+            return (x0 + x1 if point is None else min(max(point[0], 2 * x0 + 1), 2 * x1 - 1)), y
+        x = 2 * x0 + 1 if side == "w" else 2 * x1 - 1
+        if pos is not None:
+            return x, 2 * (y0 + pos) + 1
+        return x, (y0 + y1 if point is None else min(max(point[1], 2 * y0 + 1), 2 * y1 - 1))
+
+    def port_point(self, who, idx):
+        """Where port ``idx`` of placed seed ``who`` stands, in half-tiles: its pinned tile's
+        centre in the turned frame, else the seed's point."""
+        at = self.at[who]
+        sd = self.spec.seeds[who]
+        _name, side, pos = sd.ports[idx]
+        if pos is None:
+            return seed_point(at, sd.size)
+        w, h = sd.size
+        if side in "ns":
+            px, py = pos, (0 if side == "n" else h - 1)
+        else:
+            px, py = (0 if side == "w" else w - 1), pos
+        tx, ty = turn_tile(px, py, at[2] % 4, (w, h))
+        return 2 * (at[0] + tx) + 1, 2 * (at[1] + ty) + 1
+
     def term_partner(self, net, ti):
-        """The seed point the other ends of ``net`` stand at (the first placed one, drivers
-        first), in half-tiles, or None."""
+        """The point the other ends of ``net`` stand at for terminal ``ti`` (the first placed one,
+        drivers first: its pinned port's tile, else its seed; an edge terminal as ``edge_point``
+        puts it), in half-tiles, or None."""
+        who_me = net.terms[ti][0]
+        me = None
+        if who_me >= 0 and self.at[who_me] is not None:
+            me = self.port_point(who_me, net.terms[ti][1])
         pts = []
         for tj, (who, idx, drv) in enumerate(net.terms):
             if tj == ti:
                 continue
             if who >= 0 and self.at[who] is not None:
-                pts.append((not drv, tj, seed_point(self.at[who], self.spec.seeds[who].size)))
+                pts.append((not drv, tj, self.port_point(who, idx)))
             elif who < 0:
-                k, _off = self.term_cell((who, idx, drv), None)
-                if k is not None:
-                    pts.append((not drv, tj, self.grid.centre(k)))
+                pts.append((not drv, tj, self.edge_point(idx, me)))
         if not pts:
             return None
         pts.sort()
@@ -595,16 +724,28 @@ class _World:
         return out
 
     # -- the walk
-    def field(self, seeds, window, priced=True):
+    def field(self, seeds, window, priced=True, goals=()):
         """Dijkstra over the grid's cells inside ``window`` (i0, j0, i1, j1 inclusive), a step
-        to the first non-wall cell within ``reach`` cells along a heading at ``c`` milli-tiles a
-        tile plus the cell's price and ``trespass`` when a seed owns it. -> ({cell: dist},
-        {cell: pred})."""
+        to the first cell within ``reach`` cells along a heading that is neither a wall nor inside
+        a placed seed's frame (sealed: the router keeps out; a ``goals`` cell, a terminal, may be
+        entered), at ``c`` milli-tiles a tile plus the cell's price and ``trespass`` when a seed
+        owns it. -> ({cell: dist}, {cell: pred})."""
         grid, dia, p = self.grid, self.dia, self.p
         i0, j0, i1, j1 = window
         gw = grid.gw
         reach = max(1, p.reach // grid.c) if grid.c <= p.reach else 1
         step = grid.c * MILLI
+        frames = self.claims()
+        goals = set(goals)
+
+        def open_(u):
+            if dia.owner[u] == -2:
+                return False
+            if u in goals:
+                return True
+            cx, cy = grid.centre(u)
+            return not any(2 * r[0] <= cx < 2 * r[2] and 2 * r[1] <= cy < 2 * r[3] for r in frames)
+
         dist, pred = {}, {}
         todo = []
         for k in sorted(set(seeds)):
@@ -623,7 +764,7 @@ class _World:
                     if not (i0 <= ux <= i1 and j0 <= uy <= j1):
                         break
                     u = uy * gw + ux
-                    if dia.owner[u] != -2:
+                    if open_(u):
                         nd = d + j * step
                         if priced:
                             nd += self.price[u] + (p.trespass * grid.c if dia.owner[u] >= 0 else 0)
@@ -663,11 +804,13 @@ class _World:
         # a placed seed whose port has no tile (its cell is empty): no partner reaches it
         lost = [ti for ti, ((k, _o), (who, _i, _d)) in enumerate(zip(cells, net.terms))
                 if k is None and (who < 0 or self.at[who] is not None)]
+        cost = self.penalty * len(lost)          # a terminal no route reaches is dear, never free
         if not drivers or not consumers:
-            return 0, [], lost, off
+            return cost, [], lost, off
         win = self.window([k for _ti, k in drivers + consumers])
-        cost, routes, unreached = 0, [], []
-        dist, pred = self.field([k for _ti, k in drivers], win, priced)
+        routes, unreached = [], []
+        goals = [k for _ti, k in drivers + consumers]
+        dist, pred = self.field([k for _ti, k in drivers], win, priced, goals)
         unreached.extend(lost)
         for ti, k in consumers:
             if k in dist:
@@ -675,8 +818,9 @@ class _World:
                 routes.append(self.trace(pred, k))
             else:
                 unreached.append(ti)
+                cost += self.penalty
         if len(drivers) > 1:
-            fields = [self.field([k], win, priced) for _ti, k in drivers]
+            fields = [self.field([k], win, priced, goals) for _ti, k in drivers]
             in_tree = {0}
             while len(in_tree) < len(drivers):
                 best = None
@@ -689,7 +833,9 @@ class _World:
                         if k in da and (best is None or (da[k], a, b) < best):
                             best = (da[k], a, b)
                 if best is None:
-                    unreached.extend(drivers[b][0] for b in range(len(drivers)) if b not in in_tree)
+                    far = [b for b in range(len(drivers)) if b not in in_tree]
+                    unreached.extend(drivers[b][0] for b in far)
+                    cost += self.penalty * len(far)
                     break
                 d, a, b = best
                 in_tree.add(b)
@@ -702,26 +848,36 @@ class _World:
         lattice nearest (weighted Manhattan between seed points, in half-tiles) its nets' placed
         partners, or nearest the box's centre; ties to the smaller (y, x, rot)."""
         spec = self.spec
-        partners = []
+        partners = []          # (weight, [points], [sides of unpinned edge ports])
         for net in spec.nets:
             mine = [t for t in net.terms if t[0] == i]
             if not mine:
                 continue
-            far = []
-            for who, idx, drv in net.terms:
+            far, sides = [], []
+            for who, idx, _drv in net.terms:
                 if who == i:
                     continue
                 if who >= 0 and self.at[who] is not None:
                     far.append(seed_point(self.at[who], spec.seeds[who].size))
                 elif who < 0:
-                    k, _o = self.term_cell((who, idx, drv), None)
-                    if k is not None:
-                        far.append(self.grid.centre(k))
-            if far:
-                partners.append((net.weight, far))
+                    if spec.edges[idx][2] is None:
+                        sides.append(spec.edges[idx][1])
+                    else:
+                        far.append(self.edge_point(idx, None))
+            if far or sides:
+                partners.append((net.weight, far, sides))
         bx0, by0, bx1, by1 = spec.box
         cx, cy = bx0 + bx1, by0 + by1
         lat = self.p.steps[0] if self.p.steps else 8
+        while True:
+            best = self._start_on(i, lat, partners, cx, cy)
+            if best is not None or lat <= 1:
+                return best
+            lat //= 2           # a lattice too coarse for the box: finer until something fits
+
+    def _start_on(self, i, lat, partners, cx, cy):
+        spec = self.spec
+        bx0, by0, bx1, by1 = spec.box
         best = None
         for rot in range(4):
             w, h = spec.seeds[i].size if rot % 2 == 0 else spec.seeds[i].size[::-1]
@@ -729,8 +885,12 @@ class _World:
                 for x in range(bx0, bx1 - w + 1, lat):
                     sx, sy = 2 * x + w, 2 * y + h
                     if partners:
-                        score = sum(wgt * min(abs(sx - fx) + abs(sy - fy) for fx, fy in far)
-                                    for wgt, far in partners)
+                        score = 0
+                        for wgt, far, sides in partners:
+                            ds = [abs(sx - fx) + abs(sy - fy) for fx, fy in far]
+                            ds += [(sy - 2 * by0, 2 * bx1 - sx, 2 * by1 - sy, sx - 2 * bx0)[_SIDES.index(s)]
+                                   for s in sides]
+                            score += wgt * min(ds)
                     else:
                         score = abs(sx - cx) + abs(sy - cy)
                     key = (score, y, x, rot)
@@ -860,8 +1020,8 @@ def _place_seeds_py(spec):
             else:
                 break
     # the territories at tile resolution
-    if st.grid.c != 1:
-        st.set_cell(1)
+    if st.grid.c != p.final_cell:
+        st.set_cell(p.final_cell)
         st.dia.adapt(st.needs, p.iters, p.tol)
         st.weights = st.dia.weights
     costs1, _r1, u1, _l, un1, off1 = full(False)
@@ -890,7 +1050,7 @@ def _flatten(spec):
     return (tuple(int(v) for v in spec.box), [tuple(int(v) for v in r) for r in spec.blocked],
             seeds, nets, edges,
             (int(p.sweeps), int(p.alpha), int(p.decay), int(p.reach), [int(s) for s in p.steps],
-             [int(c) for c in p.cells], int(p.trespass), int(p.iters), int(p.tol)))
+             [int(c) for c in p.cells], int(p.final_cell), int(p.trespass), int(p.iters), int(p.tol)))
 
 
 def _place_seeds_native(spec):
@@ -1048,6 +1208,51 @@ def build_tspec(flat, cat, scope="", all_=False, plot=None, params=None) -> Buil
 
 
 # -- the command ----------------------------------------------------------------------------------
+def touching(cells):
+    """The pairs (i, j), i < j, of seeds whose cells (row runs) share a boundary: a tile of one
+    4-adjacent to a tile of the other."""
+    rows = {}
+    for i, runs in enumerate(cells):
+        for y, x0, x1 in runs:
+            rows.setdefault(y, []).append((x0, x1, i))
+    pairs = set()
+    for y, runs in rows.items():
+        runs.sort()
+        for (a0, a1, i), (b0, _b1, j) in zip(runs, runs[1:]):
+            if a1 == b0 and i != j:
+                pairs.add((min(i, j), max(i, j)))
+        below = rows.get(y + 1)
+        if not below:
+            continue
+        for a0, a1, i in runs:
+            for b0, b1, j in below:
+                if i != j and a0 < b1 and b0 < a1:
+                    pairs.add((min(i, j), max(i, j)))
+    return pairs
+
+
+def shared_boundary_line(spec, res):
+    """The report line on the nets between two modules: how many have their modules' cells
+    touching (the ports then stand on a shared boundary), and which do not."""
+    pairs = touching(res.cells)
+    between, apart = 0, []
+    for net in spec.nets:
+        who = sorted({w for w, _i, _d in net.terms if w >= 0 and res.at[w] is not None})
+        if len(who) < 2:
+            continue
+        between += 1
+        off = [(a, b) for ai, a in enumerate(who) for b in who[ai + 1:] if (a, b) not in pairs]
+        if off:
+            names = "|".join(sorted({spec.seeds[w].name.rsplit("/", 1)[-1] for ab in off for w in ab}))
+            apart.append(f"{net.name.rsplit('/', 1)[-1]} ({names})")
+    if not between:
+        return "  shared boundary: no net runs between two modules"
+    line = f"  shared boundary: {between - len(apart)} of {between} nets between modules have their cells touching"
+    if apart:
+        line += "; apart: " + ", ".join(apart[:8]) + (" ..." if len(apart) > 8 else "")
+    return line
+
+
 def territories_path(path):
     """``out/territories.json`` beside the design."""
     return os.path.join(os.path.dirname(os.path.abspath(path)), "out", "territories.json")
@@ -1138,6 +1343,7 @@ def layout_world(path, flat, cat, scope, all_=False, write=False, sweeps=None, p
             + (" ..." if len(res.hot) > 8 else "")
     out.append(f"  estimated belts {before // MILLI} -> {after // MILLI} over {len(spec.nets)} "
                f"nets; {reach}; {len(res.hot)} hot tiles{hot}; {res.sweeps} sweeps")
+    out.append(shared_boundary_line(spec, res))
     tpath = write_territories(path, built, res)
     out.append(f"  territories: {os.path.relpath(tpath, os.path.dirname(os.path.abspath(path)))}")
     out.append(f"  took {took:.1f} s ({which()})")

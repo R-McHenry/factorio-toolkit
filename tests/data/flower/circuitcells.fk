@@ -1,0 +1,343 @@
+# circuitcells.fk: RiverCircuit's cells and columns, all flowing north to south (megabelt
+# RIVERS.md): the head of every column is its north end and the product leaves by the south end,
+# so nothing wraps round a column. Copies of flowercells.fk's cells with the ports on the other
+# edges; the machines, beacons and rates are the same.
+import FurnB, GreenB, Beacon1, Asm3P, EFurnP from "flowercells.fk"
+
+# FurnB turned round: ore down the west belt (both lanes), plates down the east belt (one lane).
+module FurnS<plate, ore> size 10x3 {
+  port ore_in  : in  $ore | $ore @n3
+  port ore_out : out $ore | $ore @s3
+  port pl_in   : in  $plate @n9
+  port pl_out  : out $plate @s9
+  stack ore_in -> ore_out, pl_in -> pl_out
+  b = Beacon1 @(0, 0)
+  f = EFurnP<recipe=$plate> @(5, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# Spring turned round: ore in at the north, two plate belts out at the south.
+module SpringS<plate=iron-plate, ore=iron-ore> size 27x40 {
+  port ore : in  $ore | $ore @n4
+  port pa  : out $plate @s10
+  port pb  : out $plate @s20
+  a  = Stack<cell=FurnS, n=10, plate=$plate, ore=$ore> @(1, 6)
+  b  = Stack<cell=FurnS, n=10, plate=$plate, ore=$ore> @(11, 6)
+  cap0 = Beacon1 @(21, 6)
+  cap1 = Beacon1 @(21, 9)
+  cap2 = Beacon1 @(21, 12)
+  cap3 = Beacon1 @(21, 15)
+  cap4 = Beacon1 @(21, 18)
+  cap5 = Beacon1 @(21, 21)
+  cap6 = Beacon1 @(21, 24)
+  cap7 = Beacon1 @(21, 27)
+  cap8 = Beacon1 @(21, 30)
+  cap9 = Beacon1 @(21, 33)
+  top0 = Beacon1 @(1, 3)
+  bot0 = Beacon1 @(1, 36)
+  top1 = Beacon1 @(11, 3)
+  bot1 = Beacon1 @(11, 36)
+  top2 = Beacon1 @(21, 3)
+  bot2 = Beacon1 @(21, 36)
+  net o: ore -> a.ore_in, b.ore_in
+  net pa_: a.pl_out -> pa
+  net pb_: b.pl_out -> pb
+}
+
+# GreenB turned round: copper|iron down the west belt, circuits down the east belt. ~7.2/s a cell.
+module GreenS size 10x7 {
+  port in_in  : in  copper-plate | iron-plate @n3
+  port in_out : out copper-plate | iron-plate @s3
+  port g_in   : in  electronic-circuit @n9
+  port g_out  : out electronic-circuit @s9
+  stack in_in -> in_out, g_in -> g_out
+  b1 = Beacon1 @(0, 0)
+  b2 = Beacon1 @(0, 3)
+  c = Asm3P<recipe=copper-cable> @(5, 0)
+  g = Asm3P<recipe=electronic-circuit> @(5, 4)
+  net cu items copper-plate: in_in -> c, in_out
+  net fe items iron-plate:   in_in -> g, in_out
+  lanes cu | fe
+  net k: c -> g
+  net o: g_in, g -> g_out
+}
+
+# RedB turned round, and with the assembler within reach of its beacon (2 tiles: the rate model
+# and the game count no farther): beacon x 0..2, cable belt x3, hand x4, assembler x 5..7, hand
+# x8, green|plastic x9, red x10 (a long hand over x9). One beacon column a machine: 3 beacons.
+module RedS size 11x3 {
+  port k_in   : in  copper-cable | copper-cable @n3
+  port k_out  : out copper-cable | copper-cable @s3
+  port gp_in  : in  electronic-circuit | plastic-bar @n9
+  port gp_out : out electronic-circuit | plastic-bar @s9
+  port r_in   : in  advanced-circuit @n10
+  port r_out  : out advanced-circuit @s10
+  stack k_in -> k_out, gp_in -> gp_out, r_in -> r_out
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=advanced-circuit> @(5, 0)
+  net k: k_in -> a, k_out
+  net g items electronic-circuit: gp_in -> a, gp_out
+  net p items plastic-bar:        gp_in -> a, gp_out
+  lanes g | p
+  net r: r_in, a -> r_out
+}
+
+# CableHead turned round (beacons above, cable leaves by the south): copper in at the north.
+module CableHeadS size 13x7 {
+  port cu : in  copper-plate | copper-plate @n3
+  port k  : out copper-cable @s9
+  b0 = Beacon1 @(4, 0)
+  b1 = Beacon1 @(7, 0)
+  b2 = Beacon1 @(10, 0)
+  bw = Beacon1 @(0, 3)
+  a  = Asm3P<recipe=copper-cable> @(5, 3)
+  be = Beacon1 @(10, 3)
+  net i: cu -> a
+  net o: a -> k
+}
+
+# PUB turned round, assembler within reach of the beacon: beacon x 0..2, green|red x3, hand x4,
+# assembler x 5..7, hand x8, acid pipe x9, units x10 (long hand). 3 beacons a machine. Four
+# tall: the free row above the assembler carries the pipe to its fluid box.
+module PUS size 11x4 {
+  port gr_in    : in  electronic-circuit | advanced-circuit @n3
+  port gr_out   : out electronic-circuit | advanced-circuit @s3
+  port acid_in  : in  sulfuric-acid @n9
+  port acid_out : out sulfuric-acid @s9
+  port u_in     : in  processing-unit @n10
+  port u_out    : out processing-unit @s10
+  stack gr_in -> gr_out, acid_in -> acid_out, u_in -> u_out
+  b = Beacon1 @(0, 1)
+  a = Asm3P<recipe=processing-unit> @(5, 1)
+  net g items electronic-circuit: gr_in -> a, gr_out
+  net r items advanced-circuit:   gr_in -> a, gr_out
+  lanes g | r
+  net acid: acid_in -> a, acid_out
+  net u: u_in, a -> u_out
+}
+
+# Productivity module 1: no productivity (the recipe refuses it), speed beacons only.
+kind Asm3 = Machine<entity=assembling-machine-3>
+module ModS size 10x3 {
+  port gr_in  : in  electronic-circuit | advanced-circuit @n3
+  port gr_out : out electronic-circuit | advanced-circuit @s3
+  port m_in   : in  productivity-module @n9
+  port m_out  : out productivity-module @s9
+  stack gr_in -> gr_out, m_in -> m_out
+  b = Beacon1 @(0, 0)
+  a = Asm3<recipe=productivity-module> @(5, 0)
+  net g items electronic-circuit: gr_in -> a, gr_out
+  net r items advanced-circuit:   gr_in -> a, gr_out
+  lanes g | r
+  net m: m_in, a -> m_out
+}
+
+# One strip of the rim: two springs side by side (four columns of ten furnaces, ore down, plates
+# down), one plate belt a column. Columns at x 1, 11, 21, 31 share beacons; cap at x 41.
+module RimStrip<p1, o1, p2, o2> size 44x40 {
+  port ore1 : in  $o1 | $o1 @n4
+  port ore2 : in  $o2 | $o2 @n24
+  port q0 : out $p1 @s10
+  port q1 : out $p1 @s20
+  port q2 : out $p2 @s30
+  port q3 : out $p2 @s40
+  a = Stack<cell=FurnS, n=10, plate=$p1, ore=$o1> @(1, 6)
+  b = Stack<cell=FurnS, n=10, plate=$p1, ore=$o1> @(11, 6)
+  c = Stack<cell=FurnS, n=10, plate=$p2, ore=$o2> @(21, 6)
+  d = Stack<cell=FurnS, n=10, plate=$p2, ore=$o2> @(31, 6)
+  cap0 = Beacon1 @(41, 6)
+  cap1 = Beacon1 @(41, 9)
+  cap2 = Beacon1 @(41, 12)
+  cap3 = Beacon1 @(41, 15)
+  cap4 = Beacon1 @(41, 18)
+  cap5 = Beacon1 @(41, 21)
+  cap6 = Beacon1 @(41, 24)
+  cap7 = Beacon1 @(41, 27)
+  cap8 = Beacon1 @(41, 30)
+  cap9 = Beacon1 @(41, 33)
+  top0 = Beacon1 @(1, 3)
+  top1 = Beacon1 @(11, 3)
+  top2 = Beacon1 @(21, 3)
+  top3 = Beacon1 @(31, 3)
+  top4 = Beacon1 @(41, 3)
+  bot0 = Beacon1 @(1, 36)
+  bot1 = Beacon1 @(11, 36)
+  bot2 = Beacon1 @(21, 36)
+  bot3 = Beacon1 @(31, 36)
+  bot4 = Beacon1 @(41, 36)
+  net oa: ore1 -> a.ore_in, b.ore_in
+  net ob: ore2 -> c.ore_in, d.ore_in
+  net qa: a.pl_out -> q0
+  net qb: b.pl_out -> q1
+  net qc: c.pl_out -> q2
+  net qd: d.pl_out -> q3
+}
+
+# Two grove columns (three GreenS each, ~21 green circuits/s a column) with a cap. Copper and iron
+# in at the north, one lane each a column; circuits out at the south, one lane a column.
+module GroveGroup size 26x35 {
+  port cu_a : in  copper-plate @n4
+  port fe_a : in  iron-plate @n6
+  port g_a  : out electronic-circuit @s10
+  port cu_b : in  copper-plate @n14
+  port fe_b : in  iron-plate @n16
+  port g_b  : out electronic-circuit @s20
+  a = Stack<cell=GreenS, n=3> @(1, 8)
+  b = Stack<cell=GreenS, n=3> @(11, 8)
+  cap0 = Beacon1 @(21, 8)
+  cap1 = Beacon1 @(21, 11)
+  cap2 = Beacon1 @(21, 15)
+  cap3 = Beacon1 @(21, 18)
+  cap4 = Beacon1 @(21, 22)
+  cap5 = Beacon1 @(21, 25)
+  top0 = Beacon1 @(1, 5)
+  top1 = Beacon1 @(11, 5)
+  top2 = Beacon1 @(21, 5)
+  bot0 = Beacon1 @(1, 29)
+  bot1 = Beacon1 @(11, 29)
+  bot2 = Beacon1 @(21, 29)
+  net cua items copper-plate: cu_a -> a.in_in
+  net fea items iron-plate: fe_a -> a.in_in
+  lanes cua | fea
+  net ga: a.g_out -> g_a
+  net cub items copper-plate: cu_b -> b.in_in
+  net feb items iron-plate: fe_b -> b.in_in
+  lanes cub | feb
+  net gb: b.g_out -> g_b
+}
+
+# RedS mirrored: red x0, green|plastic x1, hand x2, assembler x 3..5, hand x6, cable belt x7,
+# beacon x 8..10 (same reach as RedS, belts on the west so a head can feed from the east).
+module RedSm size 11x3 {
+  port k_in   : in  copper-cable | copper-cable @n7
+  port k_out  : out copper-cable | copper-cable @s7
+  port gp_in  : in  electronic-circuit | plastic-bar @n1
+  port gp_out : out electronic-circuit | plastic-bar @s1
+  port r_in   : in  advanced-circuit @n0
+  port r_out  : out advanced-circuit @s0
+  stack k_in -> k_out, gp_in -> gp_out, r_in -> r_out
+  b = Beacon1 @(8, 0)
+  a = Asm3P<recipe=advanced-circuit> @(3, 0)
+  net k: k_in -> a, k_out
+  net g items electronic-circuit: gp_in -> a, gp_out
+  net p items plastic-bar:        gp_in -> a, gp_out
+  lanes g | p
+  net r: r_in, a -> r_out
+}
+
+# Two red circuit columns (ten cells each, ~5 red circuits/s a column). Column 0 is RedS with its
+# beacons on the west and a cable head above its west side; column 1 is RedSm, a mirror, with its
+# beacons on the east and a cable head above its east side: no cable belt crosses a green|plastic
+# belt. One bypass belt (x 45) carries green circuits through for the blocks below.
+module RedGroup size 48x46 {
+  port cu0 : in  copper-plate | copper-plate @n3
+  port cu1 : in  copper-plate | copper-plate @n33
+  port gp0 : in  electronic-circuit | plastic-bar @n23
+  port gp1 : in  electronic-circuit | plastic-bar @n26
+  port bp_in  : in  electronic-circuit @n45
+  port bp_out : out electronic-circuit @s45
+  port r0 : out advanced-circuit @s24
+  port r1 : out advanced-circuit @s25
+  h0 = CableHeadS @(0, 0)
+  h1 = CableHeadS @(30, 0)
+  c0 = Stack<cell=RedS, n=10> @(14, 10)
+  c1 = Stack<cell=RedSm, n=10> @(25, 10)
+  bot0 = Beacon1 @(14, 40)
+  bot1 = Beacon1 @(33, 40)
+  net cua: cu0 -> h0.cu
+  net cub: cu1 -> h1.cu
+  net ka: h0.k -> c0.k_in
+  net kb: h1.k -> c1.k_in
+  net g0 items electronic-circuit: gp0 -> c0.gp_in
+  net p0 items plastic-bar:        gp0 -> c0.gp_in
+  lanes g0 | p0
+  net g1 items electronic-circuit: gp1 -> c1.gp_in
+  net p1 items plastic-bar:        gp1 -> c1.gp_in
+  lanes g1 | p1
+  net bp: bp_in -> bp_out
+  net ra: c0.r_out -> r0
+  net rb: c1.r_out -> r1
+}
+
+module PUBank size 48x23 {
+  port gr0 : in  electronic-circuit | advanced-circuit @n4
+  port ac0 : in  sulfuric-acid @n10
+  port u0  : out processing-unit @s11
+  port gr1 : in  electronic-circuit | advanced-circuit @n15
+  port ac1 : in  sulfuric-acid @n21
+  port u1  : out processing-unit @s22
+  port gr2 : in  electronic-circuit | advanced-circuit @n26
+  port ac2 : in  sulfuric-acid @n32
+  port u2  : out processing-unit @s33
+  port gr3 : in  electronic-circuit | advanced-circuit @n37
+  port ac3 : in  sulfuric-acid @n43
+  port u3  : out processing-unit @s44
+  c0 = Stack<cell=PUS, n=3> @(1, 6)
+  c1 = Stack<cell=PUS, n=3> @(12, 6)
+  c2 = Stack<cell=PUS, n=3> @(23, 6)
+  c3 = Stack<cell=PUS, n=3> @(34, 6)
+  cap0 = Beacon1 @(45, 6)
+  cap1 = Beacon1 @(45, 10)
+  cap2 = Beacon1 @(45, 14)
+  top0 = Beacon1 @(1, 3)
+  top1 = Beacon1 @(12, 3)
+  top2 = Beacon1 @(23, 3)
+  top3 = Beacon1 @(34, 3)
+  top4 = Beacon1 @(45, 3)
+  bot0 = Beacon1 @(1, 18)
+  bot1 = Beacon1 @(12, 18)
+  bot2 = Beacon1 @(23, 18)
+  bot3 = Beacon1 @(34, 18)
+  bot4 = Beacon1 @(45, 18)
+  net g0 items electronic-circuit: gr0 -> c0.gr_in
+  net r0 items advanced-circuit:   gr0 -> c0.gr_in
+  lanes g0 | r0
+  net a0: ac0 -> c0.acid_in
+  net u0_: c0.u_out -> u0
+  net g1 items electronic-circuit: gr1 -> c1.gr_in
+  net r1 items advanced-circuit:   gr1 -> c1.gr_in
+  lanes g1 | r1
+  net a1: ac1 -> c1.acid_in
+  net u1_: c1.u_out -> u1
+  net g2 items electronic-circuit: gr2 -> c2.gr_in
+  net r2 items advanced-circuit:   gr2 -> c2.gr_in
+  lanes g2 | r2
+  net a2: ac2 -> c2.acid_in
+  net u2_: c2.u_out -> u2
+  net g3 items electronic-circuit: gr3 -> c3.gr_in
+  net r3 items advanced-circuit:   gr3 -> c3.gr_in
+  lanes g3 | r3
+  net a3: ac3 -> c3.acid_in
+  net u3_: c3.u_out -> u3
+}
+
+module ModBank size 27x32 {
+  port gr0 : in  electronic-circuit | advanced-circuit @n4
+  port m0  : out productivity-module @s10
+  port gr1 : in  electronic-circuit | advanced-circuit @n14
+  port m1  : out productivity-module @s20
+  c0 = Stack<cell=ModS, n=7> @(1, 6)
+  c1 = Stack<cell=ModS, n=7> @(11, 6)
+  cap0 = Beacon1 @(21, 6)
+  cap1 = Beacon1 @(21, 9)
+  cap2 = Beacon1 @(21, 12)
+  cap3 = Beacon1 @(21, 15)
+  cap4 = Beacon1 @(21, 18)
+  cap5 = Beacon1 @(21, 21)
+  cap6 = Beacon1 @(21, 24)
+  top0 = Beacon1 @(1, 3)
+  top1 = Beacon1 @(11, 3)
+  top2 = Beacon1 @(21, 3)
+  bot0 = Beacon1 @(1, 27)
+  bot1 = Beacon1 @(11, 27)
+  bot2 = Beacon1 @(21, 27)
+  net g0 items electronic-circuit: gr0 -> c0.gr_in
+  net r0 items advanced-circuit:   gr0 -> c0.gr_in
+  lanes g0 | r0
+  net m0_: c0.m_out -> m0
+  net g1 items electronic-circuit: gr1 -> c1.gr_in
+  net r1 items advanced-circuit:   gr1 -> c1.gr_in
+  lanes g1 | r1
+  net m1_: c1.m_out -> m1
+}

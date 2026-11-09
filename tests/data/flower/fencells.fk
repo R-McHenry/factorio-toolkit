@@ -1,0 +1,378 @@
+# fencells.fk: RiverFen's blocks (megabelt). Each block is a sealed row or column of beaconed
+# machines with its pipes and belts at the edge; river_fen.fk places them and joins their ports.
+# The labbed numbers: a beaconed chemical plant with prod2 runs at speed 2.26 and +18%
+# (plastic 5.3/s); 2 beacons (a row with one in every gap) make speed 1.98.
+kind RefP    = Machine<entity=oil-refinery, recipe=advanced-oil-processing, modules=productivity-module-2>
+kind ChemP   = Machine<entity=chemical-plant, modules=productivity-module-2>
+kind EFurnP  = Machine<entity=electric-furnace, modules=productivity-module-2>
+kind Beacon1 = Entity<name=beacon, modules=speed-module-2>
+
+# ---- fluid Stacks (11-08): one machine a cell, every fluid it uses or makes a pipe straight through
+# the cell (NEAR port on the south edge, FAR on the north, all flowing south). Cells laid edge to
+# edge join their pipes by touching. Two fluids' pipes never touch, not even a pipe-to-ground end:
+# a second line on a side is reached by a pipe-to-ground that enters two tiles before the first line
+# and leaves two tiles after it (the router will not put an end next to a foreign pipe).
+
+# One refinery on advanced oil processing, turned (rot 1) so its inputs face west (water row 4,
+# crude row 6) and its outputs east (heavy row 3, light row 5, gas row 7). West lines: crude x0
+# (under the water line), water x3; east lines: heavy x15, light x18 (under heavy), gas x21 (under
+# both). A beacon row (2 beacons) above the refinery; the next cell's row is the one below.
+module RefCell size 22x8 {
+  port crude_in  : in  crude-oil     @n0
+  port crude_out : out crude-oil     @s0
+  port water_in  : in  water         @n3
+  port water_out : out water         @s3
+  port heavy_in  : in  heavy-oil     @n15
+  port heavy_out : out heavy-oil     @s15
+  port light_in  : in  light-oil     @n18
+  port light_out : out light-oil     @s18
+  port gas_in    : in  petroleum-gas @n21
+  port gas_out   : out petroleum-gas @s21
+  stack crude_out -> crude_in, water_out -> water_in, heavy_out -> heavy_in, light_out -> light_in, gas_out -> gas_in
+  bk0 = Beacon1 @(7, 0)
+  bk1 = Beacon1 @(10, 0)
+  pw = Pole @(6, 3)
+  pe = Pole @(13, 4)
+  r = RefP @(7, 3, rot 1)
+  net c items crude-oil: crude_in -> r, crude_out
+  net w items water: water_in -> r, water_out
+  net h items heavy-oil: heavy_in, r -> heavy_out
+  net l items light-oil: light_in, r -> light_out
+  net g items petroleum-gas: gas_in, r -> gas_out
+}
+
+# n refineries in a column, a beacon row under the last one.
+module RefCol5 size 22x46 {
+  port crude_in  : in  crude-oil     @n0
+  port water_in  : in  water         @n3
+  port water_out : out water         @s3
+  port heavy_out : out heavy-oil     @s15
+  port light_out : out light-oil     @s18
+  port gas_out   : out petroleum-gas @s21
+  c = Stack<cell=RefCell, n=5> @(0, 3)
+  bot0 = Beacon1 @(7, 43)
+  bot1 = Beacon1 @(10, 43)
+  net cc items crude-oil: crude_in -> c.crude_in
+  net ww items water: water_in -> c.water_in
+  net wo items water: c.water_out -> water_out
+  net hh items heavy-oil: c.heavy_out -> heavy_out
+  net ll items light-oil: c.light_out -> light_out
+  net gg items petroleum-gas: c.gas_out -> gas_out
+}
+
+# A cracker cell: a chemical plant turned (rot 3) so its inputs face west (box 2, the oil, on row 0;
+# box 1, water, on row 2) and its output east (line x10). West lines: water x0 (under the oil
+# line), the oil x3; pole x11; the beacon x12..14 (a beacon at every cell: each plant sees three).
+# The cell is 4 tall (a spare row): at pitch 3 one cell's water pipe would touch the next one's oil.
+module HeavyCell size 15x4 {
+  port water_in  : in  water     @n0
+  port water_out : out water     @s0
+  port heavy_in  : in  heavy-oil @n3
+  port heavy_out : out heavy-oil @s3
+  port light_in  : in  light-oil @n10
+  port light_out : out light-oil @s10
+  stack water_out -> water_in, heavy_out -> heavy_in, light_out -> light_in
+  p = ChemP<recipe=heavy-oil-cracking> @(7, 0, rot 3)
+  pole = Pole @(11, 3)
+  bk = Beacon1 @(12, 0)
+  net w items water: water_in -> p, water_out
+  net h items heavy-oil: heavy_in -> p, heavy_out
+  net l items light-oil: light_in, p -> light_out
+}
+
+module LightCell size 15x4 {
+  port water_in  : in  water         @n0
+  port water_out : out water         @s0
+  port light_in  : in  light-oil     @n3
+  port light_out : out light-oil     @s3
+  port gas_in    : in  petroleum-gas @n10
+  port gas_out   : out petroleum-gas @s10
+  stack water_out -> water_in, light_out -> light_in, gas_out -> gas_in
+  p = ChemP<recipe=light-oil-cracking> @(7, 0, rot 3)
+  pole = Pole @(11, 3)
+  bk = Beacon1 @(12, 0)
+  net w items water: water_in -> p, water_out
+  net l items light-oil: light_in -> p, light_out
+  net g items petroleum-gas: gas_in, p -> gas_out
+}
+
+module HeavyCol6 size 15x31 {
+  port water_in   : in  water     @n0
+  port water_out  : out water     @s0
+  port heavy_in   : in  heavy-oil @n3
+  port light_out  : out light-oil @s10
+  c = Stack<cell=HeavyCell, n=6> @(0, 4)
+  bk0 = Beacon1 @(12, 0)
+  bk1 = Beacon1 @(12, 28)
+  net w items water: water_in -> c.water_in
+  net wo items water: c.water_out -> water_out
+  net h items heavy-oil: heavy_in -> c.heavy_in
+  net l items light-oil: c.light_out -> light_out
+}
+
+module LightCol10 size 15x47 {
+  port water_in   : in  water         @n0
+  port water_out  : out water         @s0
+  port light_in   : in  light-oil     @n3
+  port gas_in     : in  petroleum-gas @n10
+  port gas_out    : out petroleum-gas @s10
+  c = Stack<cell=LightCell, n=10> @(0, 4)
+  bk0 = Beacon1 @(12, 0)
+  bk1 = Beacon1 @(12, 44)
+  net w items water: water_in -> c.water_in
+  net wo items water: c.water_out -> water_out
+  net l items light-oil: light_in -> c.light_in
+  net gi items petroleum-gas: gas_in -> c.gas_in
+  net g items petroleum-gas: c.gas_out -> gas_out
+}
+
+# Lubricant from heavy oil: both inputs are heavy oil, so one line touches both (x0).
+module LubeCell size 9x3 {
+  port heavy_in  : in  heavy-oil @n0
+  port heavy_out : out heavy-oil @s0
+  port lube_in   : in  lubricant @n4
+  port lube_out  : out lubricant @s4
+  stack heavy_out -> heavy_in, lube_out -> lube_in
+  p = ChemP<recipe=lubricant> @(1, 0, rot 3)
+  pole = Pole @(5, 1)
+  bk = Beacon1 @(6, 0)
+  net h items heavy-oil: heavy_in -> p, heavy_out
+  net l items lubricant: lube_in, p -> lube_out
+}
+
+module LubeCol2 size 9x12 {
+  port heavy_in : in  heavy-oil @n0
+  port lube_out : out lubricant @s4
+  c = Stack<cell=LubeCell, n=2> @(0, 3)
+  bk0 = Beacon1 @(6, 0)
+  bk1 = Beacon1 @(6, 9)
+  net h items heavy-oil: heavy_in -> c.heavy_in
+  net l items lubricant: c.lube_out -> lube_out
+}
+
+# Sulfur: water x0 (under the gas line), gas x3, plant, hand and pole x10, the sulfur belt x11
+# running south, beacons x12..14.
+module SulfurCell size 15x4 {
+  port water_in  : in  water         @n0
+  port water_out : out water         @s0
+  port gas_in    : in  petroleum-gas @n3
+  port gas_out   : out petroleum-gas @s3
+  port s_in      : in  sulfur        @n11
+  port s_out     : out sulfur        @s11
+  stack water_out -> water_in, gas_out -> gas_in, s_out -> s_in
+  p = ChemP<recipe=sulfur> @(7, 0, rot 3)
+  pole = Pole @(10, 3)
+  bk = Beacon1 @(12, 0)
+  net w items water: water_in -> p, water_out
+  net g items petroleum-gas: gas_in -> p, gas_out
+  net s items sulfur: s_in, p -> s_out
+}
+
+# A column of 2 sulfur plants; two columns make the 4 (one for the acid, one for Works and the tap).
+module SulfurCol2 size 15x15 {
+  port water_in  : in  water         @n0
+  port water_out : out water         @s0
+  port gas_in    : in  petroleum-gas @n3
+  port sulfur_out : out sulfur       @s11
+  c = Stack<cell=SulfurCell, n=2> @(0, 4)
+  bk0 = Beacon1 @(12, 0)
+  bk1 = Beacon1 @(12, 12)
+  net w items water: water_in -> c.water_in
+  net wo items water: c.water_out -> water_out
+  net g items petroleum-gas: gas_in -> c.gas_in
+  net s items sulfur: c.s_out -> sulfur_out
+}
+
+# PlasticB turned round: the petroleum pipe and the coal belt come in at the north end of a column
+# and run south, plastic leaves at the south end. The plant is the labbed one (rot 3).
+# Pipe x 0, plant x 1..3, hands and pole x 4, plastic x 5, coal x 6, beacon x 7..9.
+module PlasticN size 10x3 {
+  port gas_in  : in  petroleum-gas @n0
+  port gas_out : out petroleum-gas @s0
+  port p_in    : in  plastic-bar   @n5
+  port p_out   : out plastic-bar   @s5
+  port c_in    : in  coal          @n6
+  port c_out   : out coal          @s6
+  stack gas_out -> gas_in, p_out -> p_in, c_out -> c_in
+  plant = ChemP<recipe=plastic-bar> @(1, 0, rot 3)
+  pole = Pole @(4, 1)
+  be = Beacon1 @(7, 0)
+  net g: gas_in -> plant, gas_out
+  net c: c_in -> plant, c_out
+  net p: p_in, plant -> p_out
+}
+
+# A battery plant in the same shape: acid down the pipe (x 0), iron | copper plate down the belt
+# (x 6), batteries out on x 5.
+module BatN size 10x3 {
+  port a_in   : in  sulfuric-acid @n0
+  port a_out  : out sulfuric-acid @s0
+  port b_in   : in  battery @n5
+  port b_out  : out battery @s5
+  port m_in   : in  iron-plate | copper-plate @n6
+  port m_out  : out iron-plate | copper-plate @s6
+  stack a_out -> a_in, b_out -> b_in, m_out -> m_in
+  plant = ChemP<recipe=battery> @(1, 0, rot 3)
+  pole = Pole @(4, 1)
+  be = Beacon1 @(7, 0)
+  net a: a_in -> plant, a_out
+  net fe items iron-plate: m_in -> plant, m_out
+  net cu items copper-plate: m_in -> plant, m_out
+  lanes fe | cu
+  net b: b_in, plant -> b_out
+}
+
+# A column of 1 PlasticN cells, a beacon column each side with a beacon at both ends.
+module PlasticCol1 size 16x9 {
+  port gas_in : in petroleum-gas @n4
+  port coal_in : in coal @n10
+  port plastic_out : out plastic-bar @s9
+  c = Stack<cell=PlasticN, n=1> @(4, 3)
+  bw0 = Beacon1 @(1, 0)
+  bw1 = Beacon1 @(1, 3)
+  bw2 = Beacon1 @(1, 6)
+  be0 = Beacon1 @(11, 0)
+  be2 = Beacon1 @(11, 6)
+  net gg: gas_in -> c.gas_in
+  net cc: coal_in -> c.c_in
+  net pp: c.p_out -> plastic_out
+}
+
+# A column of 2 PlasticN cells, a beacon column each side with a beacon at both ends.
+module PlasticCol2 size 16x12 {
+  port gas_in : in petroleum-gas @n4
+  port coal_in : in coal @n10
+  port plastic_out : out plastic-bar @s9
+  c = Stack<cell=PlasticN, n=2> @(4, 3)
+  bw0 = Beacon1 @(1, 0)
+  bw1 = Beacon1 @(1, 3)
+  bw2 = Beacon1 @(1, 6)
+  bw3 = Beacon1 @(1, 9)
+  be0 = Beacon1 @(11, 0)
+  be3 = Beacon1 @(11, 9)
+  net gg: gas_in -> c.gas_in
+  net cc: coal_in -> c.c_in
+  net pp: c.p_out -> plastic_out
+}
+
+# A column of 3 PlasticN cells, a beacon column each side with a beacon at both ends.
+module PlasticCol3 size 16x15 {
+  port gas_in : in petroleum-gas @n4
+  port coal_in : in coal @n10
+  port plastic_out : out plastic-bar @s9
+  c = Stack<cell=PlasticN, n=3> @(4, 3)
+  bw0 = Beacon1 @(1, 0)
+  bw1 = Beacon1 @(1, 3)
+  bw2 = Beacon1 @(1, 6)
+  bw3 = Beacon1 @(1, 9)
+  bw4 = Beacon1 @(1, 12)
+  be0 = Beacon1 @(11, 0)
+  be4 = Beacon1 @(11, 12)
+  net gg: gas_in -> c.gas_in
+  net cc: coal_in -> c.c_in
+  net pp: c.p_out -> plastic_out
+}
+
+# A column of 6 BatN cells, a beacon column each side with a beacon at both ends.
+module BatCol6 size 16x24 {
+  port acid_in : in sulfuric-acid @n4
+  port plates_in : in iron-plate | copper-plate @n10
+  port battery_out : out battery @s9
+  c = Stack<cell=BatN, n=6> @(4, 3)
+  bw0 = Beacon1 @(1, 0)
+  bw1 = Beacon1 @(1, 3)
+  bw2 = Beacon1 @(1, 6)
+  bw3 = Beacon1 @(1, 9)
+  bw4 = Beacon1 @(1, 12)
+  bw5 = Beacon1 @(1, 15)
+  bw6 = Beacon1 @(1, 18)
+  bw7 = Beacon1 @(1, 21)
+  be0 = Beacon1 @(11, 0)
+  be7 = Beacon1 @(11, 21)
+  net aa: acid_in -> c.a_in
+  net fe items iron-plate: plates_in -> c.m_in
+  net cu items copper-plate: plates_in -> c.m_in
+  lanes fe | cu
+  net bb: c.b_out -> battery_out
+}
+
+# Sulfuric acid: sulfur, iron plate and water to acid; one plant in a pocket (117 acid/s).
+module AcidBlock1 size 13x34 {
+  port water_in : in water @w4
+  port sulfur_in : in sulfur @n3
+  port iron_in : in iron-plate @n9
+  port acid_out : out sulfuric-acid @s6
+  bk0 = Beacon1 @(0, 12)
+  bk1 = Beacon1 @(10, 12)
+  p0 = ChemP<recipe=sulfuric-acid> @(5, 12)
+  net w items water: water_in -> p0
+  net su items sulfur: sulfur_in -> p0
+  net fe items iron-plate: iron_in -> p0
+  net ac items sulfuric-acid: p0 -> acid_out
+}
+
+
+# Iron and copper plates from one mixed ore belt: ore is iron | copper on the west belt (a lane
+# each, x 3); a cell is an iron furnace over a copper furnace, each hand filtered to its own ore;
+# iron plates leave on x 9, copper plates on x 10, at the south end. Beacon x 0..2.
+module FurnX size 11x6 {
+  port ore_in  : in  iron-ore | copper-ore @n3
+  port ore_out : out iron-ore | copper-ore @s3
+  port fe_in   : in  iron-plate   @n9
+  port fe_out  : out iron-plate   @s9
+  port cu_in   : in  copper-plate @n10
+  port cu_out  : out copper-plate @s10
+  stack ore_in -> ore_out, fe_in -> fe_out, cu_in -> cu_out
+  b0 = Beacon1 @(0, 0)
+  b1 = Beacon1 @(0, 3)
+  f1 = EFurnP<recipe=iron-plate> @(5, 0)
+  f2 = EFurnP<recipe=copper-plate> @(5, 3)
+  net oa items iron-ore: ore_in -> f1, ore_out
+  net ob items copper-ore: ore_in -> f2, ore_out
+  lanes oa | ob
+  net pa items iron-plate: fe_in, f1 -> fe_out
+  net pb items copper-plate: cu_in, f2 -> cu_out
+  set f1.in: filter=iron-ore
+  set f2.in: filter=copper-ore
+}
+module FurnColX3 size 15x24 {
+  port ore_in : in  iron-ore | copper-ore @n4
+  port fe_out : out iron-plate   @s10
+  port cu_out : out copper-plate @s11
+  c = Stack<cell=FurnX, n=3> @(1, 3)
+  cap0 = Beacon1 @(12, 3)
+  cap1 = Beacon1 @(12, 6)
+  cap2 = Beacon1 @(12, 9)
+  cap3 = Beacon1 @(12, 12)
+  cap4 = Beacon1 @(12, 15)
+  cap5 = Beacon1 @(12, 18)
+  top0 = Beacon1 @(1, 0)
+  top1 = Beacon1 @(12, 0)
+  bot0 = Beacon1 @(1, 21)
+  bot1 = Beacon1 @(12, 21)
+  net o items iron-ore: ore_in -> c.ore_in
+  net o2 items copper-ore: ore_in -> c.ore_in
+  lanes o | o2
+  net pf items iron-plate: c.fe_out -> fe_out
+  net pc items copper-plate: c.cu_out -> cu_out
+}
+
+
+# Two belts to one belt with a lane each: a is the left lane, b the right (looking downstream).
+module MixLane<a, b> size 5x10 {
+  port a_in  : in  $a @n1
+  port b_in  : in  $b @n3
+  port mix_out : out $a | $b @s2
+  net pa items $a: a_in -> mix_out
+  net pb items $b: b_in -> mix_out
+  lanes pa | pb
+}
+
+
+# A pipe tee: one pipe in at the top, two out (south and east). For a tree of one fluid.
+module PipeTee<fluid> size 5x5 {
+  port i : in  $fluid @n2
+  port a : out $fluid @s2
+  port b : out $fluid @e2
+  net t: i -> a, b
+}

@@ -19,7 +19,7 @@ Design, on paper (no game):
 | `fk explain FILE.fk INST \| NET` | `fk explain gears.fk gears`: one instance as its entities and where its belts attach; one net and what limits it | 7 |
 | `fk contract FILE.fk` | `fk contract busbase.fk`: every sealed module's ports with the rates they need and get | 8, 12 |
 | `fk unfold FILE.fk INST` | `fk unfold mall.fk pipe`: an instance as a Literal, its entities pinned as they are | 13 |
-| `fk layout FILE.fk [MODULE] [--all] [--write] [--sweeps N] [--plot WxH]` | `fk layout layout.fk --plot 34x44`: the instances without an `@(x, y)` placed by routability (short, uncrowded belts), printed as source lines with the estimated belts before and after and the hot tiles; `--write` puts the hints into the file; `MODULE` lays out a sealed module inside its frame, its ports fixed | 9 |
+| `fk layout FILE.fk [MODULE] [--all] [--write] [--sweeps N] [--plot WxH]` | `fk layout layout.fk --plot 34x44`: the instances without an `@(x, y)` placed by routability (short, uncrowded belts), printed as source lines with the estimated belts before and after and the hot tiles; `--write` puts the hints into the file; `MODULE` lays out a sealed module inside its frame, its ports fixed. A scope whose sealed modules have no `@` is tessellated instead: each module gets a territory (its cell in a weighted Voronoi diagram, sized to its need) and `out/territories.json` holds the cells | 9 |
 | `fk dnp FILE.fk NAME[,NAME] [--off]` | `fk dnp world.fk sci3`: do not populate, laid out and routed, not built | 12 |
 | `fk migrate-origins FILE [--write]`, `fk migrate-surface [--mode-only]` | a design written before 3.0.1 laid as it was laid; a surface file written before 3.1 as properties | |
 
