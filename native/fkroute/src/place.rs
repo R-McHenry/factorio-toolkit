@@ -122,10 +122,20 @@ struct State<'a> {
     price: Vec<i64>,
     at: Vec<Option<At>>,
     pinned: FxHashMap<T, usize>, // tile -> the instance whose one-tile attach it is
+    /// layout._State.stem_of: (instance, group) -> the straight run of free tiles its belt end
+    /// demands beyond itself (rule 5: the longest stem of the nets it consumes)
+    stem_of: FxHashMap<(usize, usize), i64>,
 }
 
 impl<'a> State<'a> {
-    fn new(bbox: (i64, i64, i64, i64), blocked: &[T], insts: &'a [SInst], nets: &'a [SNet], reach: i64) -> Self {
+    fn new(
+        bbox: (i64, i64, i64, i64),
+        blocked: &[T],
+        insts: &'a [SInst],
+        nets: &'a [SNet],
+        reach: i64,
+        stems: &[i64],
+    ) -> Self {
         let (x0, y0, x1, y1) = bbox;
         let (w, h) = ((x1 - x0).max(0), (y1 - y0).max(0));
         let n = (w * h) as usize;
@@ -141,10 +151,23 @@ impl<'a> State<'a> {
             price: vec![0; n],
             at: vec![None; insts.len()],
             pinned: FxHashMap::default(),
+            stem_of: FxHashMap::default(),
         };
         for &t in blocked {
             if let Some(k) = st.idx(t) {
                 st.owner[k] = -2;
+            }
+        }
+        for (n, net) in nets.iter().enumerate() {
+            let stem = stems.get(n).copied().unwrap_or(0);
+            if stem <= 0 {
+                continue;
+            }
+            for &(i, g, drv) in &net.2 {
+                if !drv {
+                    let e = st.stem_of.entry((i, g)).or_insert(0);
+                    *e = (*e).max(stem);
+                }
             }
         }
         st
@@ -198,18 +221,32 @@ impl<'a> State<'a> {
     }
 
     /// layout._State.usable: free, and (a ring) its inward neighbour free too; `moving` counts
-    /// the instance's own tiles as free.
-    fn usable(&self, i: usize, at: At, glen: usize, t: T, moving: bool) -> bool {
+    /// the instance's own tiles as free. `gi` is the group's index.
+    fn usable(&self, i: usize, at: At, gi: usize, t: T, moving: bool) -> bool {
         let ok = |v: i64| v == -1 || (moving && v == i as i64);
         match self.idx(t) {
             Some(k) if ok(self.owner[k]) => {}
             _ => return false,
         }
+        let glen = self.insts[i].1[at.2 as usize].1[gi].len();
         let o = if glen == 1 {
             // a belt end on another's belt end or a port's tile: a zero-length belt; and the
             // tile beyond it, where its belt arrives or goes on, free and inside the box
             if !self.pinned.get(&t).map_or(true, |&o| o == i) {
                 return false;
+            }
+            // rule 5: a pair's consumer belt end has `stem` free tiles straight beyond it, none
+            // another's belt end: the trunk's root, its back and the belt ahead of it
+            let stem = self.stem_of.get(&(i, gi)).copied().unwrap_or(0);
+            for step in 1..=stem {
+                let s = match self.inward(i, at, t, -step) {
+                    Some(s) => s,
+                    None => break,
+                };
+                match self.idx(s) {
+                    Some(ks) if ok(self.owner[ks]) && self.pinned.get(&s).map_or(true, |&o| o == i) => {}
+                    _ => return false,
+                }
             }
             self.inward(i, at, t, -1)
         } else {
@@ -235,8 +272,8 @@ impl<'a> State<'a> {
             }
         }
         let own: FxHashSet<T> = tiles.iter().copied().collect();
-        for g in self.groups(i, at) {
-            if !g.iter().any(|&t| !own.contains(&t) && self.usable(i, at, g.len(), t, true)) {
+        for (gi, g) in self.groups(i, at).iter().enumerate() {
+            if !g.iter().any(|&t| !own.contains(&t) && self.usable(i, at, gi, t, true)) {
                 return false;
             }
         }
@@ -277,7 +314,7 @@ impl<'a> State<'a> {
             None => return Vec::new(),
         };
         let group = &self.groups(i, at)[g];
-        let mut out: Vec<T> = group.iter().copied().filter(|&t| self.usable(i, at, group.len(), t, false)).collect();
+        let mut out: Vec<T> = group.iter().copied().filter(|&t| self.usable(i, at, g, t, false)).collect();
         out.sort();
         out
     }
@@ -493,7 +530,10 @@ fn full(st: &State, priced: bool) -> Full {
 }
 
 /// fkcore.layout._place_py: -> (positions, before, after, hot tiles, sweeps, unreached).
+/// `stems` (optional, per net) is the straight run of free tiles a net's consumer belt ends
+/// demand beyond themselves (layout rule 5; the number is lanephys's, read through the spec).
 #[pyfunction]
+#[pyo3(signature = (bbox, blocked, insts, nets, params, stems=None))]
 #[allow(clippy::type_complexity)]
 pub fn place(
     bbox: (i64, i64, i64, i64),
@@ -501,10 +541,12 @@ pub fn place(
     insts: Vec<SInst>,
     nets: Vec<SNet>,
     params: (i64, i64, i64, i64, Vec<i64>),
+    stems: Option<Vec<i64>>,
 ) -> PyResult<(Vec<Option<At>>, Vec<i64>, Vec<i64>, Vec<(T, i64)>, i64, Vec<(usize, usize)>)> {
     let (sweeps_cap, alpha, decay, reach, steps) = params;
     let steps = if steps.is_empty() { vec![1] } else { steps };
-    let mut st = State::new(bbox, &blocked, &insts, &nets, reach);
+    let stems = stems.unwrap_or_default();
+    let mut st = State::new(bbox, &blocked, &insts, &nets, reach, &stems);
     for (i, inst) in insts.iter().enumerate() {
         if let Some(at) = inst.2 {
             st.put(i, Some(at));

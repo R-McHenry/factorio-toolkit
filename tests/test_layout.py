@@ -21,6 +21,8 @@ CAT = Catalog.load()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EX = os.path.join(ROOT, "agent", "docs", "examples")
 DOCS = os.path.join(ROOT, "agent", "docs")
+#: the grove (megabelt's circuit river reach, a copy of lab-session's fk-run2 for the R1 bar)
+GROVE = os.path.join(ROOT, "tests", "data", "grove")
 
 
 def square(w, h, groups=1):
@@ -31,6 +33,17 @@ def square(w, h, groups=1):
         ww, hh = (w, h) if rot % 2 == 0 else (h, w)
         tiles = [(x, y) for y in range(hh) for x in range(ww)]
         shapes.append((tiles, [layout._ring(ww, hh) for _ in range(groups)]))
+    return shapes
+
+
+def belt_end(w, h):
+    """A w x h instance (a row) with one one-tile attach group: its belt end's tile just south of
+    the footprint, so the tile beyond it (and a pair's stem run) lies further south."""
+    shapes = []
+    for rot in range(4):
+        ww, hh = (w, h) if rot % 2 == 0 else (h, w)
+        tiles = [(x, y) for y in range(hh) for x in range(ww)]
+        shapes.append((tiles, [[(0, hh)]]))
     return shapes
 
 
@@ -52,17 +65,21 @@ def no_overlap(test, spec, res):
             seen[t] = spec.insts[i].name
 
 
-def random_spec(seed, n_inst=6, box=22, sweeps=6):
+def random_spec(seed, n_inst=6, box=22, sweeps=6, pairs=False):
+    """``pairs``: every other instance is a belt end (a one-tile attach) and every other net a
+    pair with a stem demand on its consumer (layout rule 5)."""
     rnd = random.Random(seed)
     insts, nets = [], []
     for i in range(n_inst):
         w, h = rnd.randint(1, 4), rnd.randint(1, 3)
         placed = rnd.random() < 0.3
         at = (rnd.randint(1, box - w - 2), rnd.randint(1, box - h - 2), 0) if placed else None
-        insts.append(SpecInst(f"i{i}", square(w, h), at, at is None or rnd.random() < 0.5))
+        shapes = belt_end(w, h) if pairs and i % 2 else square(w, h)
+        insts.append(SpecInst(f"i{i}", shapes, at, at is None or rnd.random() < 0.5))
     for n in range(n_inst):
         a, b = rnd.sample(range(n_inst), 2)
-        nets.append(SpecNet(f"n{n}", rnd.randint(1, 2), [(a, 0, True), (b, 0, False)]))
+        stem = rnd.randint(1, 4) if pairs and n % 2 else 0
+        nets.append(SpecNet(f"n{n}", rnd.randint(1, 2), [(a, 0, True), (b, 0, False)], stem))
     blocked = [(rnd.randint(0, box - 1), rnd.randint(0, box - 1)) for _ in range(rnd.randint(0, 6))]
     return Spec((0, 0, box, box), blocked, insts, nets, Params(sweeps=sweeps))
 
@@ -125,13 +142,81 @@ class PlaceTest(unittest.TestCase):
     def test_deterministic_and_no_overlap_on_random_specs(self):
         for seed in range(4):
             with self.subTest(seed=seed):
-                spec = random_spec(seed)
+                spec = random_spec(seed, pairs=bool(seed % 2))
                 a, b = _place_py(spec), _place_py(spec)
                 self.assertEqual(a, b)
                 no_overlap(self, spec, a)
                 for i, inst in enumerate(spec.insts):
                     if not inst.movable and inst.at is not None:
                         self.assertEqual(a.at[i], tuple(inst.at))
+
+
+class StemTest(unittest.TestCase):
+    """Rule 5 (PLAN-ORGANIC R1): a `lanes A | B` pair's consumer belt end demands ``SpecNet.stem``
+    free tiles straight beyond it, none another's belt end; the number is lanephys's."""
+
+    def spec(self, stem, blocked=(), extra=()):
+        row = SpecInst("row", belt_end(3, 1), (5, 5, 0), True)          # belt end at (5, 6)
+        src = SpecInst("src", [([], [[(1, 1)]])] * 4, (0, 0, 0), False)  # a port, far away
+        nets = [SpecNet("a|b", 1, [(1, 0, True), (0, 0, False)], stem)]
+        return Spec((0, 0, 16, 16), list(blocked), [row, src] + list(extra), nets, Params(sweeps=2))
+
+    def usable(self, spec):
+        st = layout._State(spec)
+        for i, inst in enumerate(spec.insts):
+            if inst.at is not None:
+                st.put(i, tuple(inst.at))
+        return st.usable(0, (5, 5, 0), 0, (5, 6))
+
+    def test_build_spec_reads_lanephys(self):
+        from fkcore import lanephys
+        self.assertGreater(lanephys.STEM, 0)
+        with open(layout.__file__, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertNotRegex(src, r"stem\s*=\s*\d", "layout.py writes no lane number of its own")
+
+    def test_blocked_stem_is_not_usable(self):
+        # the run beyond (5, 6) is (5, 7), (5, 8), (5, 9) for a stem of 3
+        self.assertTrue(self.usable(self.spec(3)))
+        for t in ((5, 7), (5, 8), (5, 9)):
+            self.assertFalse(self.usable(self.spec(3, blocked=[t])), f"blocked at {t}")
+        self.assertTrue(self.usable(self.spec(3, blocked=[(5, 10)])), "past the run")
+        self.assertTrue(self.usable(self.spec(3, blocked=[(6, 8)])), "beside the run")
+        self.assertFalse(self.usable(self.spec(0, blocked=[(5, 7)])), "rule 2 still holds")
+        self.assertTrue(self.usable(self.spec(0, blocked=[(5, 8)])), "no pair: no stem")
+
+    def test_belt_end_on_the_stem_is_not_usable(self):
+        port = SpecInst("p", [([], [[(5, 8)]])] * 4, (0, 0, 0), False)
+        self.assertFalse(self.usable(self.spec(3, extra=[port])))
+        self.assertTrue(self.usable(self.spec(1, extra=[port])), "a shorter stem ends before it")
+
+    def test_stem_runs_inside_the_box(self):
+        row = SpecInst("row", belt_end(3, 1), (5, 13, 0), True)          # belt end at (5, 14)
+        src = SpecInst("src", [([], [[(1, 1)]])] * 4, (0, 0, 0), False)
+        spec = Spec((0, 0, 16, 16), [], [row, src],
+                    [SpecNet("a|b", 1, [(1, 0, True), (0, 0, False)], 3)], Params(sweeps=2))
+        st = layout._State(spec)
+        st.put(0, (5, 13, 0))
+        self.assertFalse(st.fits(0, (5, 13, 0)), "the run would leave the box")
+        self.assertTrue(st.fits(0, (5, 11, 0)))
+
+    def test_placed_consumer_keeps_its_stem_free(self):
+        """A belt end pulled towards a driver port on the box's south edge stops short of it:
+        the stem stays free (the room a pair's trunk root needs)."""
+        row = SpecInst("row", belt_end(3, 1), None, True)
+        port = SpecInst("p", [([], [[(6, 15)]])] * 4, (0, 0, 0), False)
+        for stem in (0, 3):
+            spec = Spec((0, 0, 16, 16), [], [row, port],
+                        [SpecNet("a|b", 1, [(1, 0, True), (0, 0, False)], stem)], Params(sweeps=6))
+            res = _place_py(spec)
+            no_overlap(self, spec, res)
+            self.assertEqual(res.unreached, [])
+            x, y, rot = res.at[0]
+            end_y = y + (1 if rot % 2 == 0 else 3)
+            if stem:
+                self.assertLessEqual(end_y + stem, 14, "three free tiles before the port's row")
+            else:
+                self.assertEqual(end_y, 14, "without the rule the belt end meets the port")
 
 
 @unittest.skipUnless(layout.native_on(), "no fkroute with place")
@@ -142,10 +227,19 @@ class ParityTest(unittest.TestCase):
                 spec = random_spec(seed + 10)
                 self.assertEqual(layout._place_native(spec), _place_py(spec))
 
+    def test_python_and_rust_agree_on_pairs(self):
+        """Rule 5 step for step: random specs with belt ends and stem demands."""
+        for seed in range(6):
+            with self.subTest(seed=seed):
+                spec = random_spec(seed + 20, pairs=True)
+                self.assertIsNotNone(layout._stems(spec))
+                self.assertEqual(layout._place_native(spec), _place_py(spec))
+
     def test_check_mode_runs_both(self):
         os.environ["FK_NATIVE"] = "check"
         try:
             place(random_spec(99, n_inst=4, sweeps=3))
+            place(random_spec(98, n_inst=4, sweeps=3, pairs=True))
         finally:
             del os.environ["FK_NATIVE"]
 
@@ -245,6 +339,45 @@ class CommandTest(unittest.TestCase):
         self.assertIn("1 sweeps", text)
         with open(path, encoding="utf-8") as fh:
             self.assertNotIn("@(", fh.read(), "without --write nothing is written")
+
+
+class GroveTest(unittest.TestCase):
+    """PLAN-ORGANIC R1's bar: grove.fk's four Stacks laid out from no hints inside Grove's frame.
+    Each `lanes cu | fe` pair's consumer (a Stack's in_in belt end) keeps ``lanephys.STEM`` free
+    tiles beyond it, and a paper build routes every net (76/76; 68/76 on 3.1.4) with no more
+    carriers than the hand layout (256)."""
+
+    def test_pairs_route_with_the_stem(self):
+        from fkcore import lanephys
+        d = tempfile.mkdtemp(prefix="fkgrove-")
+        self.addCleanup(shutil.rmtree, d, True)
+        for f in os.listdir(GROVE):
+            shutil.copy(os.path.join(GROVE, f), d)
+        path = os.path.join(d, "grove.fk")
+        with open(path, encoding="utf-8") as fh:
+            text = re.sub(r"(c\d = Stack<[^>]*>) *@\([^)]*\)", r"\1", fh.read())
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        flat = elaborate_file(path, CAT)
+        built = layout.build_spec(flat, CAT, module="Grove")
+        stems = {n.name: n.stem for n in built.spec.nets}
+        self.assertEqual({k: v for k, v in stems.items() if v},
+                         {f"g/cu{k}_|g/fe{k}_": lanephys.STEM for k in range(4)})
+        lines, code = layout.layout_file(path, flat, CAT, module="Grove", write=True)
+        self.assertEqual(code, 0)
+        self.assertIn("4 placed now", lines[0])
+        self.assertIn("every net reaches its consumers", "\n".join(lines))
+        flat2 = elaborate_file(path, CAT)
+        for k in range(4):
+            x, y, _r = flat2.insts[f"g/c{k}"].hints["at"]
+            # three GreenB cells of 7: the belt end's tile is row y + 21 (just below the foot),
+            # the stem's run the STEM rows after it, inside the 40-tall frame (rows 0..39)
+            self.assertLessEqual(int(y) + 21 + lanephys.STEM, 39, f"c{k} at {x},{y}")
+        code, summary, carriers = paper_build(d, "grove", plot="46x40")
+        self.assertEqual(code, 0)
+        self.assertIn(" 0 unrouted", summary)
+        self.assertIn(" 0 open", summary)
+        self.assertLessEqual(carriers, 256, "no more carriers than the hand layout")
 
 
 class ExampleTest(unittest.TestCase):

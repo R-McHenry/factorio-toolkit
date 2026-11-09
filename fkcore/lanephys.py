@@ -32,7 +32,7 @@ from __future__ import annotations
 
 __all__ = ["LANES", "RULES", "left", "right", "near", "moves", "carry", "drop_lane",
            "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK", "CARRIERS", "fed",
-           "tile_mask", "mask_bit", "DIRS", "VIAS", "table", "entry"]
+           "tile_mask", "mask_bit", "DIRS", "VIAS", "table", "entry", "STEM"]
 
 LANES = ("L", "R")
 KEEP = ("straight", "turn", "tunnel", "splitter")
@@ -41,6 +41,16 @@ DIRS = (0, 4, 8, 12)
 VIAS = KEEP + ("side", "ug_side")
 SIDE_RANK = (1, 2)       # side-load: the lane entering further upstream first, then the other
 DROP_RANK = 3            # an inserter's or a drill's drop onto a belt: after every belt feed
+
+#: The free tiles a `lanes A | B` pair's consumer belt end needs straight beyond it, along its
+#: belt's approach (PLAN-ORGANIC R1). It mirrors ``pairs.joins``: the trunk's root, the belt A
+#: side-loads from the left and B from the right, stands with the tile behind it and the tile
+#: ahead free and neither an end, and the tile ahead is never the consumer's own belt end; so the
+#: shortest straight trunk into a belt end is root -> ahead -> end, with the root's back free
+#: behind it: three free tiles beyond the end (``_stem`` then counts a stem of three plain belts).
+#: The layout (``fkcore.layout``, the native ``place``) reads the number from here and keeps no
+#: lane rule of its own; the real router stays the judge.
+STEM = 3
 
 #: Every rule, in the words of CORE-V2's "Lane physics" table (the measured rows).
 RULES = {

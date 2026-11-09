@@ -1,0 +1,125 @@
+# flowercells.fk: the megabelt base's beaconed cells (lab-session/megabelt/PLAN.md).
+# The full phase (Rory 11-08): prod2 in every machine that takes it, speed2 beacons, assembler 3.
+# A cell holds one beacon west of its machine; stacked columns side by side share them, so a
+# machine sees its own column's 3 beacons and the next column's 3 (6 a machine).
+
+kind EFurnP  = Machine<entity=electric-furnace, modules=productivity-module-2>
+kind Asm3P   = Machine<entity=assembling-machine-3, modules=productivity-module-2>
+kind Beacon1 = Entity<name=beacon, modules=speed-module-2>
+
+# One beaconed electric furnace: ore north up the west belt (both lanes), plates back south on the
+# east belt (one lane). Beacon at x 0..2, ore belt x 3, furnace x 5..7, plate belt x 9.
+module FurnB<plate, ore> size 10x3 {
+  port ore_in  : in  $ore | $ore @s3
+  port ore_out : out $ore | $ore @n3
+  port pl_in   : in  $plate @n9
+  port pl_out  : out $plate @s9
+  stack ore_in -> ore_out, pl_out -> pl_in
+  b = Beacon1 @(0, 0)
+  f = EFurnP<recipe=$plate> @(5, 0)
+  net o: ore_in -> f, ore_out
+  net p: pl_in, f -> pl_out
+}
+
+# Green circuits: a cable assembler hands straight to the circuit assembler below it (1:1, so the
+# circuit assembler runs at ~83%: ~7.2 circuits/s a cell). Copper and iron up the west belt, a lane
+# each; circuits back down the east one, one lane. 3 cells fill that lane.
+module GreenB size 10x7 {
+  port in_in  : in  copper-plate | iron-plate @s3
+  port in_out : out copper-plate | iron-plate @n3
+  port g_in   : in  electronic-circuit @n9
+  port g_out  : out electronic-circuit @s9
+  stack in_in -> in_out, g_out -> g_in
+  b1 = Beacon1 @(0, 0)
+  b2 = Beacon1 @(0, 3)
+  c = Asm3P<recipe=copper-cable> @(5, 0)
+  g = Asm3P<recipe=electronic-circuit> @(5, 4)
+  net cu items copper-plate: in_in -> c, in_out
+  net fe items iron-plate:   in_in -> g, in_out
+  lanes cu | fe
+  net k: c -> g
+  net o: g_in, g -> g_out
+}
+
+# Red circuits: green circuits and plastic up the near belt (a lane each), cable up the far belt,
+# reached by a long hand over the near one; red circuits back down the east belt, one lane.
+# ~0.73 red circuits/s a machine (prod2, 6 beacons): 2.3 cable, 1.2 green, 1.2 plastic a second.
+# Beacon x 0..2, cable belt x 3, green|plastic x 4, assembler x 6..8, red belt x 10.
+module RedB size 11x3 {
+  port k_in   : in  copper-cable | copper-cable @s3
+  port k_out  : out copper-cable | copper-cable @n3
+  port gp_in  : in  electronic-circuit | plastic-bar @s4
+  port gp_out : out electronic-circuit | plastic-bar @n4
+  port r_in   : in  advanced-circuit @n10
+  port r_out  : out advanced-circuit @s10
+  stack k_in -> k_out, gp_in -> gp_out, r_out -> r_in
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=advanced-circuit> @(6, 0)
+  net k: k_in -> a, k_out
+  net g items electronic-circuit: gp_in -> a, gp_out
+  net p items plastic-bar:        gp_in -> a, gp_out
+  lanes g | p
+  net r: r_in, a -> r_out
+}
+
+# Cable for a red circuit column: one cable assembler with 5 beacons (~16 cable/s, one lane:
+# 7 RedB cells), copper up the west belt, cable out up the east belt. Measured 11-08: with one
+# beacon it made 9.3 cable/s, enough for 4 cells. Beacon x 0..2, copper x 3, assembler x 5..7,
+# cable x 9, beacon x 10..12; three beacons below, clear of the copper belt.
+module CableHead size 13x7 {
+  port cu : in  copper-plate | copper-plate @s3
+  port k  : out copper-cable @n9
+  bw = Beacon1 @(0, 1)
+  a  = Asm3P<recipe=copper-cable> @(5, 1)
+  be = Beacon1 @(10, 1)
+  b0 = Beacon1 @(4, 4)
+  b1 = Beacon1 @(7, 4)
+  b2 = Beacon1 @(10, 4)
+  net i: cu -> a
+  net o: a -> k
+}
+
+# Plastic: one beaconed chemical plant (prod2, ~6.8 plastic/s), turned so its fluid inputs face
+# west: the petroleum pipe runs straight up past every plant. Plastic leaves east by a hand onto
+# the near belt (one lane, south); coal comes up the far belt to a long hand; the cell's pole
+# stands between the two hands. The cell has its east beacon; the column places the west
+# beacons beside it (a cell powers what is inside its own frame, and no pole spot in the cell
+# reaches a west beacon). Pipe x 0, plant x 1..3, hands and pole x 4, plastic x 5, coal x 6,
+# beacon x 7..9.
+kind ChemP = Machine<entity=chemical-plant, modules=productivity-module-2>
+module PlasticB size 10x3 {
+  port gas_in  : in  petroleum-gas @s0
+  port gas_out : out petroleum-gas @n0
+  port p_in    : in  plastic-bar   @n5
+  port p_out   : out plastic-bar   @s5
+  port c_in    : in  coal          @s6
+  port c_out   : out coal          @n6
+  stack gas_in -> gas_out, p_out -> p_in, c_in -> c_out
+  plant = ChemP<recipe=plastic-bar> @(1, 0, rot 3)
+  pole = Pole @(4, 1)
+  be = Beacon1 @(7, 0)
+  net g: gas_in -> plant, gas_out
+  net c: c_in -> plant, c_out
+  net p: p_in, plant -> p_out
+}
+
+# Processing units: green | red circuits up the west belt (a lane each), sulfuric acid up the pipe
+# through every cell, units back down the east belt. ~0.43 PU/s a machine (prod2, 6 beacons):
+# 8.6 green, 0.9 red, 2.2 acid a second. Beacon x 0..2, belt x 3, pipe x 4, assembler x 6..8,
+# out x 10.
+module PUB size 11x3 {
+  port gr_in    : in  electronic-circuit | advanced-circuit @s3
+  port gr_out   : out electronic-circuit | advanced-circuit @n3
+  port acid_in  : in  sulfuric-acid @s4
+  port acid_out : out sulfuric-acid @n4
+  port u_in     : in  processing-unit @n10
+  port u_out    : out processing-unit @s10
+  stack gr_in -> gr_out, acid_in -> acid_out, u_out -> u_in
+  b = Beacon1 @(0, 0)
+  a = Asm3P<recipe=processing-unit> @(6, 0)
+  net g items electronic-circuit: gr_in -> a, gr_out
+  net r items advanced-circuit:   gr_in -> a, gr_out
+  lanes g | r
+  net acid: acid_in -> a, acid_out
+  net u: u_in, a -> u_out
+}

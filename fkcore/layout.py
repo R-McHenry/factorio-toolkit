@@ -13,6 +13,14 @@ consumers, the nearest driver per consumer, plus the MST over the drivers when i
 ``w_n`` is the net's weight in belts from the rate model; ``u_t`` how many relaxed routes (in
 belts) pass tile t, traced back along the walk fields. No entity is placed.
 
+The attach rules, the same in Python and in the kernel: (1) a machine's attach group is the ring
+two tiles out, a tile usable when it and its inward neighbour (the inserter's tile) are free; (2) a
+one-tile attach (a belt end, a port) takes no other instance's one-tile attach tile, and the tile
+beyond it, away from the footprint, is free and inside the box; (3) a ``lanes A | B`` pair is one
+net; (4) the sweeps cap is 150; (5) a pair's consumer belt end has a straight run of ``SpecNet.stem``
+free tiles beyond it, none a belt end: the room the pair's trunk root needs. The number comes
+from ``fkcore.lanephys.STEM`` through the spec (``build_spec``); the loop reads only the spec.
+
 A **sweep** offers every movable instance its neighbours' positions (+-s and +-2s tiles along each
 axis, the four rotations; overlaps, the plot's edge and a covered attach tile are hard) and takes
 the move that lowers L most. After a sweep lambda steps up where routes crowd (``alpha`` per belt
@@ -70,10 +78,13 @@ class SpecInst:
 
 @dataclass
 class SpecNet:
-    """One net: ``weight`` in belts, ``terms`` [(instance index, group index, driver)]."""
+    """One net: ``weight`` in belts, ``terms`` [(instance index, group index, driver)]; ``stem``
+    the free tiles each consumer belt end (a one-tile group) demands straight beyond it (0: none;
+    a ``lanes A | B`` pair: ``lanephys.STEM``, filled by ``build_spec``)."""
     name: str
     weight: int
     terms: list
+    stem: int = 0
 
 
 @dataclass
@@ -123,6 +134,16 @@ class _State:
                 self.owner[i] = -2
         self.pinned = {}           # tile -> instance whose one-tile attach (a belt end, a port) it is:
                                    # no footprint there, and no other one-tile attach on it
+        # (instance, group) -> the straight run of free tiles its belt end demands beyond itself:
+        # the longest stem of the nets it consumes (rule 5)
+        self.stem_of = {}
+        for net in spec.nets:
+            stem = int(getattr(net, "stem", 0) or 0)
+            if stem <= 0:
+                continue
+            for i, g, drv in net.terms:
+                if not drv:
+                    self.stem_of[(i, g)] = max(self.stem_of.get((i, g), 0), stem)
 
     def idx(self, t):
         x, y = t[0] - self.x0, t[1] - self.y0
@@ -159,8 +180,8 @@ class _State:
             return (tx, ty - step)
         return None
 
-    def usable(self, i, at, g, t, moving=False):
-        """Ring tile ``t`` of group ``g`` (its tiles) of instance ``i`` at ``at`` can take an
+    def usable(self, i, at, gi, t, moving=False):
+        """Ring tile ``t`` of group ``gi`` (its index) of instance ``i`` at ``at`` can take an
         attach: free, and (a ring, not a one-tile belt end) its inward neighbour free too, so an
         inserter can stand between the belt and the machine. ``moving``: the instance's own tiles
         count as free (it is leaving them)."""
@@ -168,13 +189,22 @@ class _State:
         k = self.idx(t)
         if k is None or self.owner[k] not in ok:
             return False
-        if len(g) == 1:
+        if len(self.spec.insts[i].shapes[at[2]][1][gi]) == 1:
             # a belt end on another instance's belt end or a port's tile is a zero-length belt the
             # router cannot lay (a pair needs a trunk): leave a tile between; and the tile beyond
             # it, where its belt arrives or goes on, is free and inside the box
             if self.pinned.get(t, i) != i:
                 return False
             o = self.inward(i, at, t, -1)
+            # rule 5: a pair's consumer belt end has ``stem`` free tiles straight beyond it, none
+            # another's belt end: the trunk's root, its back and the belt ahead of it
+            for step in range(1, self.stem_of.get((i, gi), 0) + 1):
+                s = self.inward(i, at, t, -step)
+                if s is None:
+                    break
+                ks = self.idx(s)
+                if ks is None or self.owner[ks] not in ok or self.pinned.get(s, i) != i:
+                    return False
         else:
             o = self.inward(i, at, t)
         if o is not None:
@@ -191,8 +221,8 @@ class _State:
             if k is None or self.owner[k] not in (-1, i) or self.pinned.get(t, i) != i:
                 return False
         own = set(self.tiles(i, at))
-        for g in self.groups(i, at):
-            if not any(t not in own and self.usable(i, at, g, t, True) for t in g):
+        for gi, g in enumerate(self.groups(i, at)):
+            if not any(t not in own and self.usable(i, at, gi, t, True) for t in g):
                 return False
         return True
 
@@ -223,7 +253,7 @@ class _State:
             return []
         at = self.at[i]
         group = self.groups(i, at)[g]
-        out = [t for t in group if self.usable(i, at, group, t)]
+        out = [t for t in group if self.usable(i, at, g, t)]
         out.sort()
         return out
 
@@ -485,8 +515,18 @@ def _flatten(spec):
             (int(p.sweeps), int(p.alpha), int(p.decay), int(p.reach), [int(s) for s in p.steps]))
 
 
+def _stems(spec):
+    """The per-net stem demands for the kernel, or None when no net has one (the kernel's
+    argument shape before rule 5)."""
+    stems = [int(getattr(n, "stem", 0) or 0) for n in spec.nets]
+    return stems if any(stems) else None
+
+
 def _place_native(spec):
-    at, before, after, hot, sweeps, unreached = _native.place(*_flatten(spec))
+    stems = _stems(spec)
+    args = _flatten(spec)
+    at, before, after, hot, sweeps, unreached = _native.place(*args, stems=stems) if stems \
+        else _native.place(*args)
     return Result([None if a is None else tuple(a) for a in at], list(before), list(after),
                   [(tuple(t), u) for t, u in hot], sweeps, [tuple(e) for e in unreached])
 
@@ -736,9 +776,14 @@ def build_spec(flat, cat, module=None, all_=False, plot=None, params=None) -> Bu
             side = int(math.ceil(math.sqrt(3 * area))) + 2
             box, box_from = (0, 0, max(x1, side), max(y1, side)), "room for the instances"
     weights = _weights(flat, cat)
-    for pair in set(lane_of.values()):
+    pairs = set(lane_of.values())
+    for pair in pairs:
         weights[pair] = max(weights.get(p, 1) for p in pair.split("|"))
-    nets = [SpecNet(n, weights.get(n, 1), ts) for n, ts in sorted(terms.items())
+    # rule 5: a pair's consumer belt ends keep the trunk root's room straight beyond them; the
+    # number is lane physics (``lanephys.STEM``), read here and nowhere in the loop
+    from . import lanephys
+    nets = [SpecNet(n, weights.get(n, 1), ts, lanephys.STEM if n in pairs else 0)
+            for n, ts in sorted(terms.items())
             if any(d for _i, _g, d in ts) and any(not d for _i, _g, d in ts)]
     spec = Spec(box, [], insts, nets, params or Params())
     return Built(spec, paths, notes, scope, box_from)

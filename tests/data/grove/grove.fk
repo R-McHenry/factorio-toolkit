@@ -1,0 +1,48 @@
+# grove.fk: the circuit river's middle reach (megabelt PLAN.md). Four columns of three GreenB
+# cells, ~87 green circuits/s. Each column takes its own copper belt (~21/s, one lane, e.g. one
+# spring column) and iron belt (~17/s), paired a lane each at its foot, and sends its circuits out
+# on its own belt (~22/s, one lane). Every port stands straight below the belt it feeds.
+import GreenB, Beacon1 from "flowercells.fk"
+
+module Grove size 46x40 {
+  port cu0 : in  copper-plate @s5
+  port fe0 : in  iron-plate @s7
+  port g0  : out electronic-circuit @s11
+  port cu1 : in  copper-plate @s15
+  port fe1 : in  iron-plate @s17
+  port g1  : out electronic-circuit @s21
+  port cu2 : in  copper-plate @s25
+  port fe2 : in  iron-plate @s27
+  port g2  : out electronic-circuit @s31
+  port cu3 : in  copper-plate @s35
+  port fe3 : in  iron-plate @s37
+  port g3  : out electronic-circuit @s41
+  c0 = Stack<cell=GreenB, n=3> @(2, 10)
+  c1 = Stack<cell=GreenB, n=3> @(12, 10)
+  c2 = Stack<cell=GreenB, n=3> @(22, 10)
+  c3 = Stack<cell=GreenB, n=3> @(32, 10)
+  cap0 = Beacon1 @(42, 10)
+  cap1 = Beacon1 @(42, 13)
+  cap2 = Beacon1 @(42, 17)
+  cap3 = Beacon1 @(42, 20)
+  cap4 = Beacon1 @(42, 24)
+  cap5 = Beacon1 @(42, 27)
+  net cu0_ items copper-plate: cu0 -> c0.in_in
+  net fe0_ items iron-plate: fe0 -> c0.in_in
+  lanes cu0_ | fe0_
+  net g0_: c0.g_out -> g0
+  net cu1_ items copper-plate: cu1 -> c1.in_in
+  net fe1_ items iron-plate: fe1 -> c1.in_in
+  lanes cu1_ | fe1_
+  net g1_: c1.g_out -> g1
+  net cu2_ items copper-plate: cu2 -> c2.in_in
+  net fe2_ items iron-plate: fe2 -> c2.in_in
+  lanes cu2_ | fe2_
+  net g2_: c2.g_out -> g2
+  net cu3_ items copper-plate: cu3 -> c3.in_in
+  net fe3_ items iron-plate: fe3 -> c3.in_in
+  lanes cu3_ | fe3_
+  net g3_: c3.g_out -> g3
+}
+
+g = Grove @(0, 0)
