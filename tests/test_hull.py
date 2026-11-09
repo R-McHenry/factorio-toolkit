@@ -201,6 +201,21 @@ class HullRefinesTest(unittest.TestCase):
         summary = next(l for l in route if l.startswith("ell: ") and "routed" in l)
         self.assertIn("0 routed, 4 kept", summary)
         self.assertEqual(hull_lines(route), ["hull      1 sealed module in out/frames.json: unchanged"])
+        # the hull is not in the unit's key: what the second build's entry differs in from the
+        # first's is `standing` alone (the parent's gears belt through the notch stands inside
+        # the L's claimed box: unit_parts filters standing entities by the box, wave 1's rule)
+        # and `catalog`, which follows it; never `frame`, `width` or `height`
+        store = os.path.join(d, "out", "compiled", "Ell")
+        entries = []
+        for f in sorted(os.listdir(store)):
+            if f.endswith(".json"):
+                with open(os.path.join(store, f), encoding="utf-8") as fh:
+                    entries.append(json.load(fh)["inputs"]["parts"])
+        self.assertLessEqual(len(entries), 2)
+        if len(entries) == 2:
+            p1, p2 = entries
+            differ = sorted(n for n in set(p1) | set(p2) if p1.get(n) != p2.get(n))
+            self.assertTrue(set(differ) <= {"standing", "catalog"}, differ)
         self.assertEqual(frames(d)["ell"]["runs"], first["runs"])
         # the inside changes: the hull is not read, and the build records a new one
         with open(os.path.join(d, "ell.fk"), encoding="utf-8") as fh:

@@ -1344,12 +1344,38 @@ def planned_shape(flat, path, cat, frames=None):
         # 43-hull (H5): a module's frame as the parent sees it, hull then territory then the
         # declaration, turned about its declared reference box (the frame a hull or territory
         # may not fill, or may exceed)
-        shape = own_frame(inst)
-        if shape is None:
-            return None
-        return shape.moved(-own[0], -own[1]).turn(rot, (int(size[0]), int(size[1]))) \
-            .moved(int(x0), int(y0))
+        return _placed_frame(flat, inst, rot, int(x0), int(y0))
     return Frame.from_box(int(size[0]), int(size[1])).turn(rot).moved(int(x0), int(y0))
+
+
+def _placed_frame(flat, inst, rot, x, y, hull=True):
+    """A module instance's resolved frame (``own_frame``: hull, territory, declaration; with
+    ``hull`` False the claim alone: territory, declaration) turned ``rot`` about its declared
+    reference box (0, 0, W, H) and moved to corner (x, y). 43-hull: a hull keeps its claim's box
+    (``Frame.boxed``: the territory's or the declaration's, placed), so ``frame_of`` and the box
+    every rectangle reader takes are the claim's and only the tiles are the hull's. None when the
+    module declares no frame."""
+    res = inst.__dict__.get("_hull")
+    own = own_frame(inst) if hull else \
+        (res.frame_for(inst.path, hull=False) if res is not None else _declared_frame(inst))
+    if own is None:
+        return None
+    ref = (int(inst.size[0]), int(inst.size[1])) if inst.size is not None else None
+    claim = res.frame_for(inst.path, hull=False) if res is not None else None
+
+    def place(f):
+        # a declared frame fills its box from the origin: the fast path turns it as before
+        size = None if (f.is_box and f.box[0] == 0 and f.box[1] == 0 and
+                        (ref is None or (f.box[2], f.box[3]) == ref)) else ref
+        return f.turn(rot, size).moved(x, y)
+    shape = place(own)
+    if claim is not None and claim is not own and claim != own:
+        box = place(claim).box
+        if box is not None and shape.box is not None and \
+                box[0] <= shape.box[0] and box[1] <= shape.box[1] and \
+                shape.box[2] <= box[2] and shape.box[3] <= box[3]:
+            shape = shape.boxed(box)
+    return shape
 
 
 def planned_frame(flat, path, cat, frames=None):
@@ -1376,15 +1402,32 @@ def frame_shape_of(flat, lay, path, cat):
     inst = flat.insts[path]
     if flat.__dict__.get("_hull") is None:
         hullmod.bind(flat)
-    own = own_frame(inst) if inst.module is not None else None
-    if own is None:
-        frag, _binding = fragment_of(flat, path, cat)
-        own = Frame.from_box(int(frag.size[0]), int(frag.size[1]))
-        return own.turn(rec.rot).moved(int(rec.x), int(rec.y))
     # 43-hull: a hull or a territory turns about the declared reference box (0, 0, W, H), as the
-    # record's corner was placed by it; a declared frame fills it and reads as before
-    ref = (int(inst.size[0]), int(inst.size[1])) if inst.size is not None else None
-    return own.turn(rec.rot, ref).moved(int(rec.x), int(rec.y))
+    # record's corner was placed by it, and a hull keeps its claim's box; a declared frame fills
+    # its box and reads as before
+    shape = _placed_frame(flat, inst, rec.rot, int(rec.x), int(rec.y)) \
+        if inst.module is not None else None
+    if shape is None:
+        frag, _binding = fragment_of(flat, path, cat)
+        shape = Frame.from_box(int(frag.size[0]), int(frag.size[1])).turn(rec.rot) \
+            .moved(int(rec.x), int(rec.y))
+    return shape
+
+
+def claim_shape_of(flat, lay, path, cat):
+    """The Frame a placed sealed module instance claims (43-hull): its territory or its
+    declaration, placed as ``frame_shape_of`` places it, never its hull. The unit's own frame in
+    the router (``route._route_layout``'s ``sealed``: the compile key's ``width``, ``height`` and
+    ``frame`` parts, the store's coordinates, the search box of its own nets) is this, so a key
+    is the same wherever the same inside is built (a lab build, ``fk compile``, the world build
+    before any hull exists); ``frame_shape_of`` (the hull) is what every other net keeps out of."""
+    rec = lay.insts[path]
+    inst = flat.insts[path]
+    if flat.__dict__.get("_hull") is None:
+        hullmod.bind(flat)
+    shape = _placed_frame(flat, inst, rec.rot, int(rec.x), int(rec.y), hull=False) \
+        if inst.module is not None else None
+    return shape if shape is not None else frame_shape_of(flat, lay, path, cat)
 
 
 def frame_of(flat, lay, path, cat):

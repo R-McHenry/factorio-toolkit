@@ -49,6 +49,7 @@ __all__ = ["frames_path", "territories_path", "bind", "resolver", "laying_out", 
            "achieved", "assigned", "source", "declared", "record", "read_frames"]
 
 _FILES = {}                   # abs path -> (mtime, size, data): frames.json / territories.json once
+LINES = 12                    # the report names at most this many new or changed hulls
 
 
 def frames_path(design):
@@ -103,9 +104,9 @@ def inside_sha(flat, path):
     pre = path + "/"
     insts = []
     for p in sorted(flat.insts):
-        if p != path and not p.startswith(pre):
-            continue
-        q = flat.insts[p]
+        if not p.startswith(pre):
+            continue                    # the instance's own place is not its inside: a twin
+        q = flat.insts[p]               # moved keeps its hull
         hints = q.hints or {}
         at = hints.get("origin") or hints.get("at")
         lit = q.literal[3] if getattr(q, "literal", None) else None
@@ -127,7 +128,8 @@ def inside_sha(flat, path):
         n = flat.nets[name]
         nets.append((name[len(path):], list(n.items), sorted(n.drivers), sorted(n.consumers),
                      n.width, n.lane, n.any, n.group, n.chain, repr(n.when)))
-    text = repr((inst.module, inst.size, inst.shape, insts, ports, nets))
+    own = sorted((k, repr(v)) for k, v in (inst.params or {}).items())
+    text = repr((inst.module, inst.kind, own, inst.size, inst.shape, insts, ports, nets))
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
 
 
@@ -152,17 +154,22 @@ class Resolver:
         self._sha = {}
         self._hull = {}
         self._cell = {}
+        self._frames = None             # the files, read once per Flat: the overlay a build
+        self._cells = None              # reads is fixed for its life (the hulls it records are
+                                        # the next build's, never a later step's of this one)
 
     # -- the files
     def frames(self):
-        if self.design is None:
-            return {}
-        return _read_json(frames_path(self.design)).get("hulls") or {}
+        if self._frames is None:
+            self._frames = {} if self.design is None else \
+                dict(_read_json(frames_path(self.design)).get("hulls") or {})
+        return self._frames
 
     def cells(self):
-        if self.design is None:
-            return {}
-        return _read_json(territories_path(self.design)).get("cells") or {}
+        if self._cells is None:
+            self._cells = {} if self.design is None else \
+                dict(_read_json(territories_path(self.design)).get("cells") or {})
+        return self._cells
 
     def sha(self, path):
         got = self._sha.get(path)
@@ -317,33 +324,44 @@ def _unit_of(net, sealed):
     return found
 
 
-def record(flat, lay, cat, layout, sealed, compiled, own_all, failed, store):
-    """Write every compiled sealed unit's achieved hull to ``out/frames.json`` beside the design
-    (the one call ``route._route_layout`` makes, after the compile store is written). ``layout``
-    is the routed layout, ``sealed`` {unit path: (x0, y0, x1, y1, tiles)} as the router read the
-    frames, ``compiled`` {unit path: key} the units compiled this build (routed, standing or
-    laid from the store), ``own_all`` {unit: its nets}, ``failed`` {net: why}. A unit with a
-    failed net, or whose module declares no frame, is left as it was. Nothing is written without
-    a ``store`` (a build; a bare ``route_layout`` call records nothing). -> the report lines:
-    one per hull that is new or changed, then one summary line."""
-    if not store or not compiled:
+def record(flat, lay, cat, layout, sealed, compiled, own_all, failed, store, cinfo=None):
+    """Write every sealed unit's achieved hull to ``out/frames.json`` beside the design: the one
+    call ``route._route_layout`` makes once the units are laid. ``layout`` is the routed layout,
+    ``sealed`` {unit path: (x0, y0, x1, y1, tiles)} the units' claimed frames, ``compiled``
+    {unit path: key} the units compiled this build, ``cinfo`` the router's record of every
+    sealed unit (twins included), ``own_all`` {unit: its nets}, ``failed`` {net: why}. Nothing
+    is written without a ``store`` (a build; a bare ``route_layout`` call records nothing).
+
+    The hull is not in the compile key: the unit's own frame there is its claim
+    (``expand.claim_shape_of``), so a key is the same wherever the same inside is built and a
+    rebuild that reads the hull stores nothing new. A unit with a failed net, with a net of its
+    own the build did not lay (held by the player, skipped), or whose module declares no frame
+    keeps the hull it has. -> the report lines: one per hull that is new or changed (at most
+    ``LINES``), then one summary line."""
+    if not store or (not cinfo and not compiled):
         return []
     design = _design_of(flat)
     if design is None:
         return []
     from . import fkp as fkpmod
-    from .expand import frame_shape_of
+    from .expand import claim_shape_of
     res = bind(flat)
+    res.frames()                       # the overlay this build read, fixed before the file moves
     path = frames_path(design)
     old = _read_json(path)
     hulls = dict(old.get("hulls") or {}) if isinstance(old.get("hulls"), dict) else {}
+    units = sorted(set(cinfo or {}) | set(compiled), key=lambda u: (-u.count("/"), u))
+    cinfo = cinfo if cinfo is not None else {}
     # every entity by the unit it belongs to: the unit's own machines, and the carriers of its
     # nets and of the nets of every unsealed scope inside it (a nested sealed unit's are its own)
     tiles_of = {}
+    nets_laid = {}                      # unit -> the nets whose carriers stand in it
     for e in layout.entities.values():
         owner = e.owner
         if owner.startswith("~"):
             u = _unit_of(owner[1:], sealed)
+            if u:
+                nets_laid.setdefault(u, set()).add(owner[1:])
         else:
             u = owner
             while u and u not in sealed:
@@ -353,16 +371,21 @@ def record(flat, lay, cat, layout, sealed, compiled, own_all, failed, store):
         tiles_of.setdefault(u, []).append(e)
     when = time.strftime("%Y-%m-%dT%H:%M:%S")
     lines, changed, done = [], 0, 0
-    for u in sorted(compiled):
+    for u in units:
         inst = flat.insts.get(u)
         rec = lay.insts.get(u)
         if inst is None or rec is None or inst.module is None or inst.size is None:
             continue
-        if any(n in failed for n in own_all.get(u, ())):
+        mine = list(own_all.get(u, ()))
+        if any(n in failed for n in mine):
             continue
+        if any(n not in mine for n in nets_laid.get(u, ())):
+            continue                    # a net of its own the build did not lay: held, skipped
         ref = (int(inst.size[0]), int(inst.size[1]))
-        routed_in = frame_shape_of(flat, lay, u, cat)        # the frame the unit was routed in
-        src = res.source(u)
+        # the frame the unit's own nets were searched in: its claim (territory or declaration);
+        # the hull is clipped to it and never holds a tile outside it
+        routed_in = claim_shape_of(flat, lay, u, cat)
+        src = res.source(u, hull=False)
         ents = [e for v, es in tiles_of.items() if v == u or v.startswith(u + "/") for e in es]
         tiles = set()
         for e in ents:
@@ -380,7 +403,9 @@ def record(flat, lay, cat, layout, sealed, compiled, own_all, failed, store):
                  "frame": {"source": src, "area": routed_in.area,
                            "runs": [list(r) for r in frame_own.runs()]},
                  "declared": {"area": decl.area if decl is not None else None, "size": list(ref)},
-                 "build": {"factory": flat.name, "key": compiled[u], "when": when}}
+                 "build": {"factory": flat.name,
+                           "key": compiled.get(u) or (cinfo.get(u) or {}).get("key"),
+                           "when": when}}
         was = hulls.get(u)
         same = isinstance(was, dict) and was.get("runs") == entry["runs"] \
             and was.get("inside") == entry["inside"]
@@ -390,10 +415,13 @@ def record(flat, lay, cat, layout, sealed, compiled, own_all, failed, store):
             changed += 1
             free = routed_in.area - own.area
             pct = (own.area * 100 // routed_in.area) if routed_in.area else 0
-            lines.append(f"hull      {u}: {own.area} of the {routed_in.area} tiles of its {src} "
-                         f"frame ({pct} %), {free} left free")
+            if changed <= LINES:
+                lines.append(f"hull      {u}: {own.area} of the {routed_in.area} tiles of its {src} "
+                             f"frame ({pct} %), {free} left free")
     if not done:
         return []
+    if changed > LINES:
+        lines.append(f"hull      ... and {changed - LINES} more (out/frames.json has every one)")
     data = {"design": os.path.basename(design), "hulls": hulls}
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -404,7 +432,6 @@ def record(flat, lay, cat, layout, sealed, compiled, own_all, failed, store):
     except OSError as exc:
         return [f"hull      out/frames.json not written: {exc}"]
     _FILES.pop(path, None)
-    res._hull.clear()
     lines.append(f"hull      {done} sealed module{'s' if done != 1 else ''} in out/frames.json: "
                  + (f"{changed} new or changed" if changed else "unchanged"))
     return lines

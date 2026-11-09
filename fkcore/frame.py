@@ -113,7 +113,7 @@ class Frame:
     """A tile set, run-length by row. ``rows`` is {y: ((x0, x1), ...)} with sorted, merged,
     half-open runs; ``box`` is (x0, y0, x1, y1), half-open, or None when empty."""
 
-    __slots__ = ("rows", "box", "_area", "_hash")
+    __slots__ = ("rows", "box", "_area", "_hash", "_claim")
 
     def __init__(self, rows):
         clean = {}
@@ -130,6 +130,7 @@ class Frame:
             self.box = None
         self._area = sum(b - a for runs in clean.values() for a, b in runs)
         self._hash = None
+        self._claim = None
 
     # -- construction -----------------------------------------------------------------------
     @classmethod
@@ -145,6 +146,22 @@ class Frame:
         f.box = (int(x0), int(y0), int(x1), int(y1))
         f._area = (x1 - x0) * (y1 - y0)
         f._hash = None
+        f._claim = None
+        return f
+
+    def boxed(self, box):
+        """This frame with ``box`` (x0, y0, x1, y1, holding every tile) as its ``box``: a hull
+        inside its claim (43-hull). Every reader that asks for the rectangle (the unit's frame
+        in the store and the compile key, ``frame_of``, ``rows_text``) gets the claim; the
+        tiles are the hull's. ``is_box`` is False unless the tiles fill it. ``moved`` keeps
+        the claim; a transform that rebuilds the rows drops it."""
+        box = tuple(int(v) for v in box)
+        if self.box is not None and not (box[0] <= self.box[0] and box[1] <= self.box[1]
+                                         and self.box[2] <= box[2] and self.box[3] <= box[3]):
+            raise ValueError(f"box {box} does not hold the frame's {self.box}")
+        f = Frame.__new__(Frame)
+        f.rows, f._area, f._hash = self.rows, self._area, None
+        f.box, f._claim = box, box
         return f
 
     @classmethod
@@ -348,8 +365,12 @@ class Frame:
         dx, dy = int(dx), int(dy)
         if not dx and not dy:
             return self
-        return Frame({y + dy: tuple((a + dx, b + dx) for a, b in runs)
-                      for y, runs in self.rows.items()})
+        f = Frame({y + dy: tuple((a + dx, b + dx) for a, b in runs)
+                   for y, runs in self.rows.items()})
+        if self._claim is not None:
+            c = self._claim
+            f = f.boxed((c[0] + dx, c[1] + dy, c[2] + dx, c[3] + dy))
+        return f
 
     def turn(self, rot, size=None):
         """The frame turned ``rot`` quarter turns clockwise about the origin, as ``compose.turn``
