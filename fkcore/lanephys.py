@@ -32,10 +32,12 @@ from __future__ import annotations
 
 __all__ = ["LANES", "RULES", "left", "right", "near", "moves", "carry", "drop_lane",
            "turn_drop_lane", "mine_lane", "KEEP", "SIDE_RANK", "DROP_RANK", "CARRIERS", "fed",
-           "tile_mask", "mask_bit"]
+           "tile_mask", "mask_bit", "entry", "VIAS", "table"]
 
 LANES = ("L", "R")
 KEEP = ("straight", "turn", "tunnel", "splitter")
+#: Every move kind, in the order ``table`` numbers them (the kernel's via codes).
+VIAS = KEEP + ("side", "ug_side")
 SIDE_RANK = (1, 2)       # side-load: the lane entering further upstream first, then the other
 DROP_RANK = 3            # an inserter's or a drill's drop onto a belt: after every belt feed
 
@@ -131,24 +133,32 @@ CARRIERS = ("belt", "ug_in", "ug_out", "splitter")
 _EMPTY = frozenset()
 
 
+def entry(carrier, d, src, feeds):
+    """How a feed moving ``src`` enters a ``carrier`` heading ``d`` whose feeds are ``feeds``
+    [(heading, ...)] (the feed itself among them): a move kind of ``VIAS``, or None where
+    nothing goes in (head-on, a splitter's side, an exit's back, which is its tunnel). A belt fed
+    from one side with nothing behind turns; with something behind, or from both sides, the side
+    feed side-loads; an underground end takes a side feed as ``ug_side``."""
+    if src == d:
+        return None if carrier == "ug_out" else "straight"
+    if near(src, d) is None:
+        return None
+    if carrier == "belt":
+        behind = any(f[0] == d for f in feeds)
+        sides = sum(near(f[0], d) is not None for f in feeds)
+        return "turn" if sides == 1 and not behind else "side"
+    if carrier in ("ug_in", "ug_out"):
+        return "ug_side"
+    return None
+
+
 def fed(carrier, d, feeds):
     """({lane: nets}, lost nets) of a ``carrier`` heading ``d`` on a tile fed by ``feeds``
     [(the feeder's heading, {lane: nets})]: what each of its lanes holds, and the nets a feed
     loses (a blocked lane, a head-on belt, a splitter's side)."""
-    behind = any(src == d for src, _h in feeds)
-    sides = sum(near(src, d) is not None for src, _h in feeds)
     out, lost = {}, _EMPTY
     for src, held in feeds:
-        if src == d:
-            via = None if carrier == "ug_out" else "straight"     # an exit's back is the tunnel
-        elif near(src, d) is None:
-            via = None                                             # head-on
-        elif carrier == "belt":
-            via = "turn" if sides == 1 and not behind else "side"
-        elif carrier in ("ug_in", "ug_out"):
-            via = "ug_side"
-        else:
-            via = None                                             # a splitter's side
+        via = entry(carrier, d, src, feeds)
         if via is None:
             for nets in held.values():
                 lost |= frozenset(nets)
@@ -185,3 +195,32 @@ def mine_lane(drill_dir, belt_dir):
     of the tile towards the drill (in line: the right lane)."""
     side = (drill_dir + 8) % 16
     return "L" if side == left(belt_dir) else "R"
+
+
+def table():
+    """The table enumerated as data, for a kernel that must not state a rule (PLAN-4.0 K1/N1):
+    headings 0 N, 1 E, 2 S, 3 W (the router's), lanes 0 L, 1 R, vias ``VIAS.index``, ``ug`` 0
+    for an entrance and 1 for an exit.
+
+    - ``moves``: [(via, src, dst, ug, ((src lane, dst lane), ...), blocked lane or -1)], every
+      via for every heading pair and underground end (a keep move's edges are the identity);
+    - ``drop``: [(drop heading, belt heading, lane)] (``drop_lane``);
+    - ``turn_drop``: [(come, go, side, lane)] for every turn (``turn_drop_lane``);
+    - ``mine``: [(drill heading, belt heading, lane)] (``mine_lane``)."""
+    li = {"L": 0, "R": 1}
+    out = {"moves": [], "drop": [], "turn_drop": [], "mine": []}
+    for vi, via in enumerate(VIAS):
+        for s in range(4):
+            for d in range(4):
+                for ug in (0, 1):
+                    edges, blocked = moves(via, s * 4, d * 4, "in" if ug == 0 else "out")
+                    out["moves"].append((vi, s, d, ug, tuple((li[a], li[b]) for a, b, _r in edges),
+                                         -1 if blocked is None else li[blocked]))
+    for a in range(4):
+        for b in range(4):
+            out["drop"].append((a, b, li[drop_lane(a * 4, b * 4)]))
+            out["mine"].append((a, b, li[mine_lane(a * 4, b * 4)]))
+            if (a - b) % 2 == 1:                    # a turn: come a, go b
+                for side in range(4):
+                    out["turn_drop"].append((a, b, side, li[turn_drop_lane(a * 4, b * 4, side * 4)]))
+    return out
