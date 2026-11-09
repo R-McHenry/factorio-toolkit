@@ -7,8 +7,8 @@ import random
 import unittest
 from unittest import mock
 
-from fkcore import lanephys, steiner
-from fkcore.steiner import FixedSink, Grid, TapSink
+from fkcore import arms, lanephys, steiner
+from fkcore.steiner import DropSink, FixedSink, Grid, TapSink
 
 
 def _case(seed):
@@ -63,6 +63,26 @@ def _reversed_case(seed):
     return grid, root, sinks
 
 
+def _taps_case(seed):
+    """_case with 3.0's taps: k 1-3, the force's arms (range 1-2) on some, a long-handed hand
+    first on some, and a drill's drop tile for a sink or two (PLAN-4.0 K2)."""
+    grid, root, sinks = _case(seed)
+    rnd = random.Random(seed + 31)
+    for i, s in enumerate(sinks):
+        if isinstance(s, TapSink):
+            s.k = rnd.randrange(1, 4)
+            if rnd.random() < 0.5:
+                s.arms = arms.Arms(rnd.randrange(1, 3))
+            if rnd.random() < 0.3:
+                s.inserters = ("long-handed-inserter", "inserter")
+        elif rnd.random() < 0.3:
+            sinks[i] = DropSink(f"d{i}", s.tile)
+    if rnd.random() < 0.5:
+        grid.drop_taps = True
+        grid.keep_clear = {(rnd.randrange(24), rnd.randrange(18)) for _ in range(15)}
+    return grid, root, sinks
+
+
 @unittest.skipUnless(steiner._native is not None, "fkroute not installed")
 class NativeParity(unittest.TestCase):
     def test_random_fields(self):
@@ -90,6 +110,38 @@ class NativeParity(unittest.TestCase):
             with self.subTest(seed=seed):
                 self.assertEqual(_run("1", grid, root, sinks, order),
                                  _run("0", grid, root, sinks, order))
+
+    def test_taps_30(self):
+        """PLAN-4.0 K2: k > 1 taps (counted in the search state), the force's arms, a long hand
+        first, DropSink, forward and laid reversed: the same trees both ways."""
+        kinds = {"k>1": 0, "arms": 0, "drop": 0, "armtap": 0}
+        for seed in range(200):
+            grid, root, sinks = _taps_case(seed)
+            if not sinks:
+                continue
+            with self.subTest(seed=seed):
+                a = _run("1", grid, root, sinks)
+                self.assertEqual(a, _run("0", grid, root, sinks))
+                kinds["k>1"] += any(isinstance(s, TapSink) and s.k > 1 for s in sinks)
+                kinds["arms"] += any(isinstance(s, TapSink) and s.arms for s in sinks)
+                kinds["drop"] += any(isinstance(s, DropSink) for s in sinks)
+                kinds["armtap"] += any(t[4] is not None for t in a[2])
+        for k, n in kinds.items():
+            self.assertGreater(n, 5, k)
+
+    def test_taps_30_run_native(self):
+        """A forward tree with k > 1, arms and a drop sink grows in the kernel, no Python grow
+        and no A* callback."""
+        grid, root, sinks = _case(2)
+        sinks = [TapSink("m", (12, 6, 15, 9), 2, ("inserter",), arms=arms.Arms(2)), DropSink("d", (20, 3))]
+        grid.occ |= {(x, y) for x in range(12, 15) for y in range(6, 9)}
+        grid.occ.discard((20, 3))
+        with mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")), \
+                mock.patch.object(steiner, "_astar_py", side_effect=AssertionError("python astar ran")):
+            with mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
+                out = steiner.grow(grid, root, sinks, limit=20000)
+        self.assertEqual(out["problems"], [], out["log"])
+        self.assertEqual(len(out["tree"].taps), 2)
 
     def test_soft_ground(self):
         """Negotiated ground: belts pay to step on soft tiles, splitters and taps keep off them;

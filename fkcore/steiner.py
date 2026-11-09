@@ -704,6 +704,60 @@ def _native_grid(grid):
     return ng
 
 
+class _Inserters:
+    """The inserter kinds a native call names, as the kernel's table: (name, reach, the cost of a
+    tap by it). The kernel keeps no inserter name: reach is ``fkcore.arms.REACH``'s, the cost
+    ``COSTS``' (a long-handed tap costs ``long_tap``), both looked up here."""
+
+    def __init__(self, costs):
+        self.costs, self.rows, self.idx = costs, [], {}
+
+    def of(self, name):
+        if name not in self.idx:
+            if not isinstance(name, str):
+                raise TypeError("an inserter name")
+            cost = self.costs["long_tap"] if name == "long-handed-inserter" else self.costs["tap"]
+            self.idx[name] = len(self.rows)
+            self.rows.append((name, int(armsmod.REACH.get(name, 1)), float(cost)))
+        return self.idx[name]
+
+
+def _arms_spec(arms):
+    """A TapSink's arms for the kernel: (range, [(pick dx, dy, drop dx, dy, heading)]) in
+    ``taps_at``'s order (``fkcore.arms.pairs`` without the straight range-1 swings), or None."""
+    if arms is None:
+        return None
+    pairs = [(p[0], p[1], d[0], d[1], armsmod.heading(p)) for p, d in armsmod.pairs(arms, straight=False)]
+    if any(h is None for *_v, h in pairs):
+        raise TypeError("a diagonal arm")       # the router lays cardinal vectors only
+    return int(arms.range), pairs
+
+
+def _sink_spec(s, ins, callback=False):
+    """A sink for the kernel, or None for one it does not know: (kind, a, b, c, d, k, inserters,
+    arms); kind 0 a plain FixedSink (x, y, edir), 1 a plain TapSink (its rect, k, inserter ids,
+    arms), 2 a TapSink subclass whose goal stays Python's (``callback``: the A* calls it back),
+    3 a plain DropSink (x, y)."""
+    t = type(s)
+    if t is FixedSink or (isinstance(s, FixedSink) and t.goal is FixedSink.goal and t.h is FixedSink.h):
+        if not s.terminal:
+            return None
+        return (0, s.tile[0], s.tile[1], int(s.edir), 0, 0, [], None)
+    if t is TapSink:
+        if s.terminal:
+            return None
+        x0, y0, x1, y1 = s.rect
+        return (1, x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms))
+    if callback and isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
+        x0, y0, x1, y1 = s.rect
+        arms = getattr(s, "arms", None)
+        return (2, x0, y0, x1, y1, int(getattr(s, "k", 1)), [],
+                (int(arms.range), []) if arms is not None else None)
+    if t is DropSink and not s.terminal:
+        return (3, s.tile[0], s.tile[1], 0, 0, 0, [], None)
+    return None
+
+
 def _astar_native(tree, starts, sinks, targets, limit):
     grid = tree.grid
     if not targets:
@@ -711,20 +765,15 @@ def _astar_native(tree, starts, sinks, targets, limit):
     ng = _native_grid(grid)
     if ng is None:
         return _UNSUPPORTED
+    ins = _Inserters(tree.costs)
     spec = []
     for i, s in enumerate(sinks):
-        t = type(s)
-        if isinstance(s, FixedSink) and t.goal is FixedSink.goal and t.h is FixedSink.h:
-            spec.append((0, s.tile[0], s.tile[1], int(s.edir), 0))
-        elif isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
-            # 3.0: the kernel knows plain taps only: a sink with adjustable arms (its own h) or
-            # one that wants k > 1 taps (states that count them) is searched in Python
-            if s.arms is not None or (i in targets and getattr(s, "k", 1) > 1):
-                return _UNSUPPORTED
-            x0, y0, x1, y1 = s.rect
-            spec.append((1, x0, y0, x1, y1))
-        else:
+        sp = _sink_spec(s, ins, callback=True)
+        if sp is None:
             return _UNSUPPORTED
+        if sp[0] == 2 and i in targets and sp[5] > 1:
+            return _UNSUPPORTED      # k > 1 counts the Python pick in the state: searched in Python
+        spec.append(sp)
     k = tree.costs
     tiles, res, spare = tree.tiles(), tree.reserved, tree.spare()
     spans = tree.spans()
@@ -734,10 +783,11 @@ def _astar_native(tree, starts, sinks, targets, limit):
             r, g0 = (2 if name == "long-handed-inserter" else 1), int(direction) // 4
             tapped.append((q[0] + arm[0][0], q[1] + arm[0][1]) if arm else
                           (q[0] + DX[g0] * r, q[1] + DY[g0] * r))
-    st_list, st_spare, how_of, taken_of, g_of = [], [], {}, {}, {}
+    st_list, st_spare, st_taken, how_of, taken_of, g_of = [], [], [], {}, {}, {}
     for st, g0, how, *taken in starts:
         st_list.append((st, float(g0)))
         st_spare.append(Tree.spare_tile(how[1], how[2]) if grid.drop_taps and how[0] == "split" else None)
+        st_taken.append(list(taken[0]) if taken else [])
         if g0 < g_of.get(st, INF):
             g_of[st] = g0
             how_of[st] = how
@@ -748,9 +798,10 @@ def _astar_native(tree, starts, sinks, targets, limit):
         return sinks[i].goal(path[-1], tree, path, taken_of[path[0]])
 
     extra = set(tiles) | set(res) | set(spare)
-    got = _native.astar(ng, list(extra), list(spans[0]), list(spans[1]), st_list, st_spare, spec,
-                        list(targets), tapped, float(k["belt"]), float(k["turn"]), float(k["ug"]),
-                        int(k["max_ug"]), int(limit), tap_goal, _lane_list(grid))
+    got = _native.astar(ng, list(extra), list(spans[0]), list(spans[1]), st_list, st_spare, st_taken,
+                        spec, ins.rows, list(targets), tapped, bool(grid.drop_taps), float(k["belt"]),
+                        float(k["turn"]), float(k["ug"]), int(k["max_ug"]), int(limit), tap_goal,
+                        _lane_list(grid))
     if got is None:
         return None
     path, i, gs = got
@@ -1020,47 +1071,35 @@ def _tree_key(t):
 _MOVES = ("step", "jump", "split")
 
 
-def _grow_native(grid, root, sinks, costs, improve, order, limit):
-    ng = _native_grid(grid)
-    if ng is None:
-        return _UNSUPPORTED
-    # 3.0 changed how taps are picked (an underground exit takes a drop, k taps take a longer
-    # tail, adjustable arms): the kernel's grow picks taps the 2.1 way, so those trees grow in
-    # Python (whose A* steps still run in the kernel where it can)
-    if grid.drop_taps or any(type(s) is TapSink and (s.arms is not None or int(s.k) > 1)
-                             for s in sinks):
-        return _UNSUPPORTED
-    spec, ks, ins = [], [], []
-    for s in sinks:
-        if type(s) is FixedSink:
-            spec.append((0, s.tile[0], s.tile[1], int(s.edir), 0))
-            ks.append(0)
-            ins.append([])
-        elif type(s) is TapSink:
-            x0, y0, x1, y1 = s.rect
-            spec.append((1, x0, y0, x1, y1))
-            ks.append(int(s.k))
-            ins.append([str(n) for n in s.inserters])
-        else:
-            return _UNSUPPORTED        # a sink of its own (m2m's): _grow_py, on the native A*
+def _grow_specs(sinks, ins):
+    """(specs, names) of ``sinks`` for the kernel's grow, or None where one is not a plain
+    FixedSink / TapSink / DropSink with a str name (m2m's sinks: ``_grow_py``, on the native A*)."""
     if not sinks:
-        return _UNSUPPORTED
+        return None
+    spec = [_sink_spec(s, ins) for s in sinks]
     names = [s.name for s in sinks]
-    if any(not isinstance(n, str) for n in names):
-        return _UNSUPPORTED
+    if any(sp is None for sp in spec) or any(not isinstance(n, str) for n in names):
+        return None
+    return spec, names
+
+
+def _native_costs(k):
+    return (float(k["belt"]), float(k["turn"]), float(k["ug"]), float(k["split"]), int(k["max_ug"]))
+
+
+def _tree_from_native(grid, root, sinks, costs, out):
+    """A Tree from the kernel's (succ, sink_at, taps, reserved, last_end, log), with the log as
+    grow's text: -> (tree, log)."""
+    succ, sink_at, taps, reserved, last, log = out
+    names = [s.name for s in sinks]
     tree = Tree(grid, root, costs)
-    k = tree.costs
-    kk = (float(k["belt"]), float(k["turn"]), float(k["ug"]), float(k["split"]), float(k["tap"]),
-          float(k["long_tap"]), int(k["max_ug"]))
-    succ, sink_at, taps, reserved, last, log = _native.grow(
-        ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names, ks, ins, kk,
-        int(improve), None if order is None else [int(i) for i in order], int(limit),
-        _lane_list(grid))
     for s, (kind, side, c1, c2) in succ:
         tree.succ[tuple(s)] = ("split", side, tuple(c1), tuple(c2)) if kind == 2 else \
             (_MOVES[kind], tuple(c1))
     tree.sink_at = {tuple(s): i for s, i in sink_at}
-    tree.taps = [(tuple(q), name, direction, names[si], None) for q, name, direction, si in taps]
+    tree.taps = [(tuple(q), name, direction, names[si],
+                  None if arm is None else (tuple(arm[0]), tuple(arm[1])))
+                 for q, name, direction, si, arm in taps]
     tree.reserved = {tuple(t) for t in reserved}
     tree.sink_terminal = {tuple(last[0]): last[1]} if last else {}
     tree.touch()
@@ -1072,6 +1111,25 @@ def _grow_native(grid, root, sinks, costs, improve, order, limit):
             text.append(f"+{sinks[i].name} via {('leaf', 'split')[how]} ({a:.1f})")
         else:
             text.append(f"reroute {sinks[i].name}: {a:.1f} -> {b:.1f}")
+    return tree, text
+
+
+def _grow_native(grid, root, sinks, costs, improve, order, limit):
+    ng = _native_grid(grid)
+    if ng is None:
+        return _UNSUPPORTED
+    if grid.drop_taps:
+        return _UNSUPPORTED        # laid reversed: K3
+    k = dict(COSTS, **(costs or {}))
+    ins = _Inserters(k)
+    got = _grow_specs(sinks, ins)
+    if got is None:
+        return _UNSUPPORTED
+    spec, names = got
+    out = _native.grow(ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names,
+                       ins.rows, _native_costs(k), int(improve),
+                       None if order is None else [int(i) for i in order], int(limit), _lane_list(grid))
+    tree, text = _tree_from_native(grid, root, sinks, costs, out)
     return {"tree": tree, "cost": tree.cost(), "counts": tree.counts(),
             "problems": tree.problems(sinks), "seconds": 0.0, "log": text}
 
