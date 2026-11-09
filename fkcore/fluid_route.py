@@ -179,16 +179,24 @@ def _direct(flat, lay, cat, net):
     stand (a boiler straight onto its engine; fen's ``rx/f5_gas3``, two boxes on one edge): it is
     connected and lays nothing, the fluid analogue of a belt job's ``direct``. Until now it was
     routed each build (``0 pipes, 1 direct join``), laid nothing, so nothing pinned it, and the
-    next build routed it again: the one "routed" net of fen's no-op. A port end is ``_abut``'s."""
+    next build routed it again: the one "routed" net of fen's no-op (a column's out port onto
+    a Pump just outside it). A net of port ends alone is ``_abut``'s."""
     try:
         ends = _ends(flat, lay, cat, net)
     except _Skip:
         return False
     ports = getattr(flat, "ports", {})
-    keys = sorted({k for k, _i, _s, _b in ends}, key=fkpmod.natural_key)
-    if len(ends) < 2 or any(k in ports or k not in lay.entities for k in keys):
+    pkeys = sorted({k for k, _i, _s, _b in ends if k in ports}, key=fkpmod.natural_key)
+    ekeys = sorted({k for k, _i, _s, _b in ends if k not in ports}, key=fkpmod.natural_key)
+    if len(ends) < 2 or not ekeys or any(k not in lay.entities for k in ekeys):
         return False
-    g = connectmod.graph([lay.entities[k] for k in keys], cat, None)
+    edges = None
+    if pkeys:
+        every = port_edges(flat, lay, cat)
+        if any(k not in every for k in pkeys):
+            return False
+        edges = {k: every[k] for k in pkeys}
+    g = connectmod.graph([lay.entities[k] for k in ekeys], cat, edges)
     nids = {(k, b.box) for k, _i, _s, b in ends}
     parent = {n: n for n in nids}
 

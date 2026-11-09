@@ -849,6 +849,38 @@ The kernel runs it in a second (`took 1.0 s (fkroute)`); without the native kern
 runs in Python, about a minute for this file. A sealed module is laid out inside its own frame
 with its ports fixed: `fk layout grove.fk Grove`; a Stack inside it moves as one body.
 
+**Two rounds.** The estimate is a relaxation; the router's count is the truth, and the second
+round starts from it. `fk layout layout.fk --from out --write` reads the last build's output
+(the net files the route step wrote, `out\design\layout\nets`): every routed net's real carrier
+count stands for the relaxed `before`, and a build run with `FK_NEGOTIATE=1` leaves the tiles its
+nets fought over in `out\design\layout\pressure.json`, which seeds the price field. The loop is by
+hand, each tool consuming the one before: round 1 is `fk layout layout.fk --write` (`estimated
+belts 62 -> 4 over 8 nets`) and `fk build --to report_checks` (52 belt pieces, 40 of them the
+nets' own; the other 12 are the AsmRow's belt); round 2:
+
+```
+fk layout layout.fk --from out --write
+```
+
+```
+layout layout: 11 instances, 0 placed now, 11 kept, 0 fixed; 8 nets; frame 34x44 (--plot)
+  from out/design/layout/nets: 8 of 8 nets routed by the last build; no negotiation record (a build with FK_NEGOTIATE=1 writes design/layout/pressure.json): the price field starts at zero
+  per net, real -> estimated: belts 15 -> 0, cab 0 -> 0, circs 10 -> 0, cu 0 -> 0, fe 11 -> 3, gears 2 -> 0, inss 0 -> 0, pipes 2 -> 1
+  real belts 40 -> estimated 4 over 8 nets; every net reaches its consumers; 0 hot tiles; 4 sweeps
+  took 0.2 s (fkroute)
+  nothing to write
+```
+
+`0 placed now, 11 kept`: the real costs rank the layout as the estimate did, nothing moves, and
+the second build keeps every route (`layout: 0 routed, 7 kept, 1 patched (8 pinned from the
+committed .fkp), 0 failed, 1 pass`; `circs` is patched from 12 carriers to 11, one belt no end
+needed) at 51 belt pieces: `layout: 8 nets: 8 connected, 0 open, 0 unrouted; 0 SPILL; 90
+entities, 86 edges, 2 underground pairs`. A round pays where the real router disagrees with the
+relaxation: on grove.fk the pairs cost 10 real belts against 12 to 14 estimated, and the `--from
+out` round reads `real 68 -> estimated 71` for Grove's 8 nets and nudges its four Stacks by a
+tile. A net the build did not route keeps its estimate and is named (`fe (unrouted) keeps its
+estimate`); with no build of the file in `out`, the line says `no net of layout was built there`.
+
 **territory.fk** (plot 40x40) is two sealed modules with no positions. Sealed modules without an
 `@` are placed as **territories**: each is a seed with an area need (its declared frame's area; a
 module without a `size` needs three times its instances' footprints), its territory is its cell in
@@ -1043,9 +1075,14 @@ one's layout:
 
 ```
 red-chain: compiled  stored chain, chain/cu2/0, chain/fea/0, chain/ga/0, chain/pl, chain/pl/p1, chain/rp, chain/rp/red/0 (out/compiled): laid from there wherever each stands next
-red-chain: 118 routed, 0 kept (0 pinned from the committed .fkp), 0 failed, 1 pass
+red-chain: 85 routed, 0 kept, 33 pass-through (0 pinned from the committed .fkp), 0 failed, 1 pass
   routed    chain/cu2/1/o: 1 -> 2, laid as chain/cu2/0 laid it (compiled once, PLAN-3.0 §4)
 ```
+
+The 33 `pass-through` nets are counted apart from the routed ones: a Stack's cells meet port to
+port on one edge, a drill drops straight onto a belt, two fluid boxes join as they stand; such a
+net is connected and lays nothing, and a build that says `0 routed, 85 kept, 33 pass-through`
+searched nothing.
 
 ```
 red-chain: 127 nets: 127 connected, 0 open, 0 unrouted; 0 SPILL; 1003 entities, 904 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs
@@ -1076,6 +1113,31 @@ next build starts from them. `fk route NET` lays one net again now and keeps eve
 MODULE` routes a module's inside now and stores it, which a build does anyway for every sealed
 inside that routed whole.
 
+**Two rounds: a change inside reroutes only itself.** Move the plastic pair's left cell down a
+tile, `p1 = Plas2 @(0, 1)` in `PlasPair`, and build again:
+
+```
+red-chain: compiled  chain/pl: not in the store; PlasPair's last entry (faca6bf7) differs in instances, net coal_/goals, net gas/reserved, net plastic_a_/starts, standing
+red-chain: compiled  chain/pl/p1: 3 nets laid from the store (Plas2 2e368b5a3e23fea7f27b)
+red-chain: compiled  stored chain, chain/pl (out/compiled): laid from there wherever each stands next
+red-chain: 6 routed, 79 kept, 33 pass-through (83 pinned from the committed .fkp, 3 laid from the compiled store), 0 failed, 1 pass
+```
+
+`PlasPair` misses the store and the line says why: its `instances` changed, and the ends of
+three of its nets with them. It routes those three (`gas`, `coal_`, `plastic_a_`) in its own
+frame; `p1` did not change inside, so its three nets are laid from the store where it stands now;
+`PlasPair`'s fourth net and every other route stand (`79 kept`). `RedMod` and `PlasPair` get new
+store entries (a key holds its children's keys), and none of `RedMod`'s own eleven nets is
+touched. The build ends `red-chain: 127 nets: 127 connected, 0 open, 0 unrouted; 0 SPILL; 1004
+entities, 905 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs`.
+That is the warning's claim, measured: the change reached exactly the module it was made in. Had
+the cell moved to where its plastic belt has no column left (`p2 = Plas2 @(13, 0)` does it), the
+failure would have been `PlasPair`'s too, a `no-route` line naming its net, and the fix inside
+`PlasPair`. Move the whole module instead, `chain = RedMod @(3, 4)`, and the build reads `80
+routed, 0 kept, 5 patched, 33 pass-through (80 pinned from the committed .fkp, 79 laid from the
+compiled store)`: the 79 inner nets laid from the store where the module stands now, and only the
+six trunks outside it patched or routed.
+
 **What goes wrong here.** `CLOG net chain/rp/gp: electronic-circuit, plastic-bar share one belt:
 ...`: the one check line this file has. `RedPair` carries green circuits and plastic on one net
 into its two stacks; the cell inside (`RedB`) writes them as two nets with `lanes g | p`, and
@@ -1085,15 +1147,22 @@ at about 85% for it`: eleven beaconed copper furnaces eat more than 12 ore/s. `n
 X: ...` with the reason follows a net that found no way; a net inside a sealed module is tried
 again with that module's nets, never the whole design's. `crosses-frame`: a net crosses a sealed
 frame outside a port. `overlap`: two sealed frames share tiles. A stored entry holding an entity
-the force can't build yet is not taken (`not researched here: routed again`).
+the force can't build yet is not taken (`not researched here: routed again`). Two lines from the
+lab's rules for sealed cells: `no-pole-spot NAME` (cover power) names an entity inside a sealed
+module that no free tile inside the module's frame can hold a pole for, with the frame; a sealed
+module powers its own frame, so move the entity into the parent or leave a tile free beside it.
+`port-not-in-line port NAME` names a pair port (`a | b`) whose straight run inside the frame (the
+stem the side-load needs, three tiles) something of the module stands in, with the tiles: put the
+port in line with the column it feeds (blue6.fk below prints four).
 
 **Aside: blue6.fk.** `docs\examples\blue6.fk` (plot 60x40) is an older sealed cell written before
 cells had parameters: `BlueCell6`, 18x6, two units of an engine assembler and an advanced circuit
 assembler handing into a blue science assembler, with a pinned `Pole` where no other tile reaches
 the inserters, and `Stack<cell=BlueCell6, n=2>`. It still builds (`blue6: 33 nets: 33 connected,
 0 open, 0 unrouted; 0 SPILL; 235 entities, 231 edges, 4 underground pairs`; the route lays
-`blue/1` as `blue/0` laid it), and its `fk check` prints 26 lines, which is why new cells are
-written as the library's are: `two-nets blue6 blue/0/t_in: sulfur (out) is on 2 nets: blue/0/ts,
+`blue/1` as `blue/0` laid it), and its `fk check` prints 30 lines, which is why new cells are
+written as the library's are: `port-not-in-line` on each cell's `t_in` and `t_out` (the pinned
+pole at 11,2 stands in the line of the paired belt), `two-nets blue6 blue/0/t_in: sulfur (out) is on 2 nets: blue/0/ts,
 blue/0/tp. Name each net's items (`net blue/0/ts items sulfur: ...`) so one carries it`,
 `SUSHI_SINK net blue/0/ts: blue/0/blue0 does not take chemical-science-pack`, `CLOG` on each
 paired port's nets, and `could-pair net blue/0/ad0 and blue/0/en0`. `set packs.in:

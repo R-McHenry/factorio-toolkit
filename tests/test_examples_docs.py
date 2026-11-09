@@ -158,6 +158,89 @@ class ExamplesBuildTest(unittest.TestCase):
                          ["gate-open", "gate-open"])
 
 
+class TwoRoundsTest(unittest.TestCase):
+    """43-hierarchy (PLAN-ORGANIC D4, R3): the two-round stories are real builds, quoted exactly.
+    Chapter 11: red-chain.fk built, `p1` moved a tile inside `PlasPair`, built again: PlasPair
+    misses the store and says why, p1's nets come from the store, the rest stands. Chapter 9:
+    layout.fk's round 2, `fk layout --from out`, reads the real carriers and moves nothing."""
+
+    def test_a_change_inside_a_module_reroutes_only_itself(self):
+        docs = squash(read(DOCS, "EXAMPLES.md"))
+        code, summary1, _c, d = paper_build("red-chain")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertEqual(code, 0)
+        route1 = read(d, "out", "route.txt")
+        self.assertIn(squash("red-chain: 85 routed, 0 kept, 33 pass-through (0 pinned from the "
+                             "committed .fkp), 0 failed, 1 pass"), squash(route1))
+        self.assertIn(squash("red-chain: 85 routed, 0 kept, 33 pass-through"), docs)
+        src = os.path.join(d, "red-chain.fk")
+        text = read(src)
+        self.assertIn("  p1 = Plas2 @(0, 0)\n", text)
+        with open(src, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text.replace("  p1 = Plas2 @(0, 0)\n", "  p1 = Plas2 @(0, 1)\n"))
+        code, _ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        route2 = read(d, "out", "route.txt")
+        for line in (
+                "red-chain: compiled  chain/pl: not in the store; PlasPair's last entry (faca6bf7) "
+                "differs in instances, net coal_/goals, net gas/reserved, net plastic_a_/starts, "
+                "standing",
+                "red-chain: compiled  chain/pl/p1: 3 nets laid from the store (Plas2 "
+                "2e368b5a3e23fea7f27b)",
+                "red-chain: compiled  stored chain, chain/pl (out/compiled): laid from there "
+                "wherever each stands next",
+                "red-chain: 6 routed, 79 kept, 33 pass-through (83 pinned from the committed .fkp, "
+                "3 laid from the compiled store), 0 failed, 1 pass"):
+            self.assertIn(squash(line), squash(route2), line)
+            self.assertIn(squash(line), docs, line)
+        summary2 = next(l for l in read(d, "out", "report_checks.txt").splitlines()
+                        if l.startswith("red-chain: "))
+        self.assertIn(" 0 unrouted", summary2)
+        self.assertIn(squash(summary2), docs, summary2)
+
+    def test_the_layout_loop_reads_the_real_carriers(self):
+        from fkcore import layout as layoutmod
+        from fkcore.elaborate import elaborate_file
+        from tests.test_layout import net_carriers, stripped_mall
+        docs = squash(read(DOCS, "EXAMPLES.md"))
+        d = tempfile.mkdtemp(prefix="fkdocs-loop-")
+        self.addCleanup(shutil.rmtree, d, True)
+        path = stripped_mall(d)
+        with open(os.path.join(d, "nauvis.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(SCRIPT)
+        with open(os.path.join(d, "nauvis.surface"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("surface nauvis\nterrain none\nplace layout = layout plot 0,0 34x44\n")
+        lines1, code = layoutmod.layout_file(path, elaborate_file(path, CAT), CAT, write=True,
+                                             plot=(34, 44))
+        self.assertEqual(code, 0)
+        self.assertIn("estimated belts 62 -> 4 over 8 nets", "\n".join(lines1))
+        code, _ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        self.assertEqual(net_carriers(d, "layout"), 40)
+        lines2, code = layoutmod.layout_file(path, elaborate_file(path, CAT), CAT, write=True,
+                                             plot=(34, 44), from_out=os.path.join(d, "out"))
+        self.assertEqual(code, 0)
+        text2 = squash("\n".join(lines2))
+        for line in ("layout layout: 11 instances, 0 placed now, 11 kept, 0 fixed; 8 nets; "
+                     "frame 34x44 (--plot)",
+                     "per net, real -> estimated: belts 15 -> 0, cab 0 -> 0, circs 10 -> 0, "
+                     "cu 0 -> 0, fe 11 -> 3, gears 2 -> 0, inss 0 -> 0, pipes 2 -> 1",
+                     "real belts 40 -> estimated 4 over 8 nets; every net reaches its consumers; "
+                     "0 hot tiles; 4 sweeps"):
+            self.assertIn(squash(line), text2, line)
+            self.assertIn(squash(line), docs, line)
+        code, _ctx = flow.run(os.path.join(d, "nauvis.build.fkb"), cat=CAT, echo=lambda _l: None)
+        self.assertEqual(code, 0)
+        self.assertEqual(net_carriers(d, "layout"), 39)
+        route2 = squash(read(d, "out", "route.txt"))
+        line = "layout: 0 routed, 7 kept, 1 patched (8 pinned from the committed .fkp), 0 failed, 1 pass"
+        self.assertIn(line, route2)
+        self.assertIn(line, docs)
+        summary2 = next(l for l in read(d, "out", "report_checks.txt").splitlines()
+                        if l.startswith("layout: "))
+        self.assertIn(squash(summary2), docs, summary2)
+
+
 class LibraryTableTest(unittest.TestCase):
     """Chapter 7's table lists exactly the modules and kinds of examples/cells.fk."""
 
