@@ -121,6 +121,30 @@ The plan's "Wave 1 outcome" and "Wave 2 outcome" tables hold the measurements.
 - **Pairs on one belt** (`45-pairports`): a pair already on one belt with no machine on the way
   routes as one plain net (every tap of the flower failed on the stack cell's straight rule).
 
+## 3.2.1: the flower's lab columns and its paste (2026-11-09, midday; 46-pairbox)
+
+Found pasting the T6 flower (`lab-session\fk-t6`, the open flower laid out by `fk layout` on the
+lab's stand-in ground; `docs\notes-46-pairbox.md`):
+
+- **The pair router's cost grew with the layout, not with the pair.** Its ground read every net's
+  ends of the whole layout per part route (`pairs.py`, the `box` 2.1.33 gave `_route_in`), each
+  copy of the jobs dict it routes a trunk or a part with rebuilt the ends index over every net
+  (`_ends_index`: a copy with a few jobs changed now reads the one index with them laid over it),
+  and the tail judge `_serving_only` built a connect graph of the whole layout for every pair it
+  trimmed (now of what stands within `_CLIP` tiles of the laid carriers). The core's eight lab
+  columns (`LabCol5`, a tight 11x44) failed in every flower build because their group retry ran
+  out of its 3 s where the core alone took 0.8; they route now, and a column's pair search costs
+  in the flower what it costs alone.
+- **`read_output` waits for the game's answer file**: the game writes it after the RCON reply, on
+  its own thread, and the flower's paste answer (8.8 MB, 48,560 ghosts) landed a second after the
+  read, so the apply died there and the ghosts were never revived. Up to `FILE_WAIT` (180 s,
+  `FK_FILE_WAIT`).
+- Measured, not changed: the route step's fixed cost on a 6500-net flower is `seal_checks`
+  (278 of 406 s: every entity's tiles against every sealed frame), the design database's reads
+  and writes (64 s) and `connect.graph` (44 s); the searching itself was 45 s.
+
+No ROUTER bump.
+
 ## Not in this release
 
 - The flower on the lab ground beside the corridor flower (T6's paste), `fk look` drawing the

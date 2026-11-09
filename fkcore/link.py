@@ -76,8 +76,8 @@ OUT_DIR = os.environ.get("FK_SCRIPT_OUTPUT") or _GAME.get("script_output") \
 #: 45k-entity snapshot took longer than 5 s)
 TIMEOUT = float(os.environ.get("FK_RCON_TIMEOUT", "5.0"))
 #: how long read_output waits for the game's answer file (written after the reply, on the game's
-#: own thread; a big one over a network share lands seconds later)
-FILE_WAIT = float(os.environ.get("FK_FILE_WAIT", "30.0"))
+#: own thread; the T6 flower's 10 MB paste answer took 30 s to land on the WSL share)
+FILE_WAIT = float(os.environ.get("FK_FILE_WAIT", "180.0"))
 
 _FORBIDDEN = re.compile(r"\b(script\s*\.\s*on_\w+|commands\s*\.\s*add_command|remote\s*\.\s*add_interface"
                         r"|script\s*\.\s*register_\w+)")

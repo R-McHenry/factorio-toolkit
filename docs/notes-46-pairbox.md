@@ -47,7 +47,7 @@ Also `fkcore/link.py` `read_output`: the game writes its answer file after the R
 its own thread, and the flower's paste answer (8.8 MB, 48,560 ghosts) landed a second after the
 toolkit tried to read it, so the apply step died at the read and the ghosts were never revived
 (the diff's snapshot of the same area the same). The read now waits for the file, and for its
-JSON to be whole, up to `FILE_WAIT` (30 s, `FK_FILE_WAIT`).
+JSON to be whole, up to `FILE_WAIT` (180 s, `FK_FILE_WAIT`; the 10 MB answer took 30 s to land).
 
 No ROUTER bump: the ground is the same set of tiles and the judge the same verdict; only the
 time changes.
