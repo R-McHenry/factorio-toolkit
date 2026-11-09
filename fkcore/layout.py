@@ -999,6 +999,10 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
     params = Params() if sweeps is None else Params(sweeps=int(sweeps))
     if from_out is not None:
         all_ = True              # a round of the loop moves what the last round placed
+    # 43-hull (H5): module mode lays the inside out in the declared or assigned frame, never in
+    # the hull it achieved last (fkcore.hull: the scope being laid out skips its hull)
+    from .hull import laying_out
+    laying_out(flat, module)
     try:
         built = build_spec(flat, cat, module, all_, plot, params)
     except ValueError as exc:

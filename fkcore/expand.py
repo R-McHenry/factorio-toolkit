@@ -44,6 +44,7 @@ from . import placer
 from .codec import config_text
 from .compose import turn
 from .frame import Frame
+from . import hull as hullmod
 from .fragments import E, N, S, W, FEnt, Fragment, FragmentError, Role, _finish, fragment
 from .templates import CONTACT, SINGLE
 from .terrain import fmt_amount
@@ -70,10 +71,30 @@ _POLYGONS = {}          # shape vertices -> Frame (a polygon rasterises once per
 
 
 def own_frame(obj):
-    """The declared frame of a sealed module instance or of a port's module (41-hull, PLAN-ORGANIC
-    H1-H4), in the module's own coordinates: its ``shape`` polygon as a Frame, else its ``size``
-    box; None when it declares neither. ``obj`` is an ``elaborate.Inst``, a ``PortInst`` or a
-    (w, h) pair. The box is the fast path: every rectangle reads as before."""
+    """The frame of a sealed module instance or of a port's module (41-hull, PLAN-ORGANIC H1-H5),
+    in the module's own coordinates. 43-hull: resolved **hull, then territory, then declaration**
+    (``fkcore.hull``): the achieved hull in ``out/frames.json`` when the module's inside is as it
+    was built, else the territory ``fk layout`` assigned the instance (``out/territories.json``),
+    else its ``shape`` polygon as a Frame or its ``size`` box; None when it declares neither. The
+    scope ``fk layout FILE MODULE`` lays out, and a port, read territory then declaration (a used
+    port lies on the hull by construction). ``obj`` is an ``elaborate.Inst``, a ``PortInst`` or a
+    (w, h) pair; the overlay needs the Inst bound to its Flat (``hull.bind``, which every reader
+    that has the Flat does). The box is the fast path: every rectangle reads as before."""
+    if obj is None:
+        return None
+    if isinstance(obj, tuple):
+        return Frame.from_box(int(obj[0]), int(obj[1]))
+    res = obj.__dict__.get("_hull") if hasattr(obj, "__dict__") else None
+    if res is not None:
+        f = res.frame_of(obj)
+        if f is not None:
+            return f
+    return _declared_frame(obj)
+
+
+def _declared_frame(obj):
+    """The declared frame alone: the ``shape`` polygon as a Frame (rasterised once per polygon),
+    else the ``size`` box, else None."""
     if obj is None:
         return None
     if isinstance(obj, tuple):
@@ -990,7 +1011,12 @@ def _module_frame(flat, path, cat, frames=None):
 
 
 def _own_frame(flat, path, cat, frames):
-    """An instance's unturned frame (x0, y0, x1, y1) in its own coordinates, or None."""
+    """An instance's unturned frame (x0, y0, x1, y1) in its own coordinates, or None: the
+    reference box every turn is about (a declared module's ``(0, 0, W, H)``; the hull and the
+    territory live inside the same coordinates and turn about the same origin). 43-hull: binds
+    the Flat's frame overlay on the way, so ``own_frame(inst)`` resolves it afterwards."""
+    if flat.__dict__.get("_hull") is None:
+        hullmod.bind(flat)
     inst = flat.insts[path]
     if inst.module is not None:
         return _module_frame(flat, path, cat, frames)
@@ -1307,13 +1333,22 @@ def planned_shape(flat, path, cat, frames=None):
     (an ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
     fails. ``frames`` caches the module frames, as for ``_origin``."""
     inst = flat.insts[path]
-    if inst.module is not None or "at" not in inst.hints:
+    if "at" not in inst.hints:
         return None
     own = _own_frame(flat, path, cat, frames)
     if own is None:
         return None
     size = (own[2] - own[0], own[3] - own[1])
     x0, y0, rot = _origin(flat, path, cat, size, frames)
+    if inst.module is not None:
+        # 43-hull (H5): a module's frame as the parent sees it, hull then territory then the
+        # declaration, turned about its declared reference box (the frame a hull or territory
+        # may not fill, or may exceed)
+        shape = own_frame(inst)
+        if shape is None:
+            return None
+        return shape.moved(-own[0], -own[1]).turn(rot, (int(size[0]), int(size[1]))) \
+            .moved(int(x0), int(y0))
     return Frame.from_box(int(size[0]), int(size[1])).turn(rot).moved(int(x0), int(y0))
 
 
@@ -1321,7 +1356,12 @@ def planned_frame(flat, path, cat, frames=None):
     """(x0, y0, x1, y1): where instance ``path``'s turned frame lands in the factory frame by its
     ``@(x, y)`` hint, before anything is placed (the size step's does-not-fit); None without a hint (an
     ``@patch`` row, an unplaced one), for a module or a pinned Literal, and when its fragment
-    fails. ``frames`` caches the module frames, as for ``_origin``."""
+    fails. ``frames`` caches the module frames, as for ``_origin``. 43-hull: a module instance
+    answers through ``planned_shape`` (its tiles: the hull, the territory or the polygon) and
+    stays None here, because this box is what ``size.py``'s does-not-fit judges by and a polygon
+    or a hull judged by its box would flag the rows standing in what it left free."""
+    if flat.insts[path].module is not None:
+        return None
     f = planned_shape(flat, path, cat, frames)
     return None if f is None else f.box
 
@@ -1334,11 +1374,17 @@ def frame_shape_of(flat, lay, path, cat):
     overlap line, the placer's taken tiles, ``fk explain``) reads this."""
     rec = lay.insts[path]
     inst = flat.insts[path]
+    if flat.__dict__.get("_hull") is None:
+        hullmod.bind(flat)
     own = own_frame(inst) if inst.module is not None else None
     if own is None:
         frag, _binding = fragment_of(flat, path, cat)
         own = Frame.from_box(int(frag.size[0]), int(frag.size[1]))
-    return own.turn(rec.rot).moved(int(rec.x), int(rec.y))
+        return own.turn(rec.rot).moved(int(rec.x), int(rec.y))
+    # 43-hull: a hull or a territory turns about the declared reference box (0, 0, W, H), as the
+    # record's corner was placed by it; a declared frame fills it and reads as before
+    ref = (int(inst.size[0]), int(inst.size[1])) if inst.size is not None else None
+    return own.turn(rec.rot, ref).moved(int(rec.x), int(rec.y))
 
 
 def frame_of(flat, lay, path, cat):
@@ -1427,13 +1473,31 @@ def explain(flat, lay, path, cat) -> str:
         lines.append(f"  {role.side:<4} {name:<4} net {net:<14} items {', '.join(role.items):<30} "
                      f"attach {where:<11} carriers {_span(carriers)}")
     lines.append(f"  size      {frag.size[0]}x{frag.size[1]} (its own frame)")
-    own = own_frame(inst) if inst.module is not None else None
+    own = _declared_frame(inst) if inst.module is not None else None
     if own is not None and not own.is_box:
         # 41-hull (H4): a polygon frame printed as rows of `#` (the frame) and `.` (the parent's
         # ground inside the box), in the module's own frame; a box prints no rows
         lines.append(f"  frame     {own.area} tiles of the {frag.size[0]}x{frag.size[1]} box "
                      f"(shape, its own frame):")
         lines += ["            " + row for row in own.rows_text()]
+    if own is not None:
+        # 43-hull (H5): the territory the instance was assigned and the hull it achieved when it
+        # was built alone, each as rows of `#` over the declared box (and beyond it, for a
+        # territory larger than the claim); `.` is what the module left free
+        hullmod.bind(flat)
+        cell = hullmod.assigned(flat, path)
+        if cell is not None and cell != own:
+            box = (min(cell.box[0], own.box[0]), min(cell.box[1], own.box[1]),
+                   max(cell.box[2], own.box[2]), max(cell.box[3], own.box[3]))
+            lines.append(f"  territory {cell.area} tiles (out/territories.json; the declared frame "
+                         f"is {own.area}):")
+            lines += ["            " + row for row in cell.rows_text(box)]
+        ach = hullmod.achieved(flat, path)
+        if ach is not None:
+            base = cell if cell is not None else own
+            lines.append(f"  hull      {ach.area} tiles of the {base.area} (built alone, "
+                         f"out/frames.json; {base.minus(ach).area} left free):")
+            lines += ["            " + row for row in ach.rows_text(base.box)]
     return "\n".join(lines + _limited_lines(flat, inst))
 
 

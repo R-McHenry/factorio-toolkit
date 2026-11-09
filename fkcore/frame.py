@@ -376,6 +376,39 @@ class Frame:
                         rows.setdefault(w - 1 - x, []).append((y, y + 1))
         return Frame(rows)
 
+    def unturn(self, rot, size):
+        """The inverse of ``turn(rot, size)``: ``f.turn(r, s).unturn(r, s) == f`` for any tile set,
+        tiles outside the box included (43-hull: an achieved hull read back into the module's
+        own frame). ``size`` is the unturned frame's (w, h), as ``turn`` took it."""
+        rot = int(rot) % 4
+        if not rot or self.box is None:
+            return self
+        w, h = size
+        return self.turn((4 - rot) % 4, (h, w) if rot % 2 else (w, h))
+
+    def minus(self, other):
+        """The tiles of this frame that ``other`` does not hold (what a module left free)."""
+        rows = {}
+        for y, mine in self.rows.items():
+            theirs = other.rows.get(y)
+            if not theirs:
+                rows[y] = list(mine)
+                continue
+            got = []
+            for a, b in mine:
+                cur = a
+                for c, d in theirs:
+                    if d <= cur or c >= b:
+                        continue
+                    if c > cur:
+                        got.append((cur, c))
+                    cur = max(cur, d)
+                if cur < b:
+                    got.append((cur, b))
+            if got:
+                rows[y] = got
+        return Frame(rows)
+
     def grow(self, n):
         """The frame grown by ``n`` tiles on every side (a square neighbourhood); ``n`` 0 is the
         frame itself."""
