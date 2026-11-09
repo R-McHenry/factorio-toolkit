@@ -736,26 +736,35 @@ def _arms_spec(arms):
 
 def _sink_spec(s, ins, callback=False):
     """A sink for the kernel, or None for one it does not know: (kind, a, b, c, d, k, inserters,
-    arms); kind 0 a plain FixedSink (x, y, edir), 1 a plain TapSink (its rect, k, inserter ids,
-    arms), 2 a TapSink subclass whose goal stays Python's (``callback``: the A* calls it back),
-    3 a plain DropSink (x, y)."""
+    arms, lane, avoid); kind 0 a plain FixedSink (x, y, edir), 1 a plain TapSink (its rect, k,
+    inserter ids, arms), 2 a TapSink subclass whose goal stays Python's (``callback``: the A*
+    calls it back), 3 a plain DropSink (x, y), and (PLAN-4.0 K4) a TapSink subclass the kernel
+    mirrors as a kind of its own: it declares ``native_kind`` (m2m's LeftTap 4, _EndTap 5) and
+    gives its data as ``native_extra()`` -> (the lane its drop fills or None, the tiles its run
+    may not point into or None)."""
     t = type(s)
     if t is FixedSink or (isinstance(s, FixedSink) and t.goal is FixedSink.goal and t.h is FixedSink.h):
         if not s.terminal:
             return None
-        return (0, s.tile[0], s.tile[1], int(s.edir), 0, 0, [], None)
+        return (0, s.tile[0], s.tile[1], int(s.edir), 0, 0, [], None, None, None)
     if t is TapSink:
         if s.terminal:
             return None
         x0, y0, x1, y1 = s.rect
-        return (1, x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms))
+        return (1, x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms), None, None)
+    kind = getattr(t, "native_kind", None)
+    if kind is not None and isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
+        x0, y0, x1, y1 = s.rect
+        lane, avoid = s.native_extra()
+        return (int(kind), x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms),
+                lane, None if avoid is None else list(avoid))
     if callback and isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
         x0, y0, x1, y1 = s.rect
         arms = getattr(s, "arms", None)
         return (2, x0, y0, x1, y1, int(getattr(s, "k", 1)), [],
-                (int(arms.range), []) if arms is not None else None)
+                (int(arms.range), []) if arms is not None else None, None, None)
     if t is DropSink and not s.terminal:
-        return (3, s.tile[0], s.tile[1], 0, 0, 0, [], None)
+        return (3, s.tile[0], s.tile[1], 0, 0, 0, [], None, None, None)
     return None
 
 
@@ -1073,8 +1082,9 @@ _MOVES = ("step", "jump", "split")
 
 
 def _grow_specs(sinks, ins):
-    """(specs, names) of ``sinks`` for the kernel's grow, or None where one is not a plain
-    FixedSink / TapSink / DropSink with a str name (m2m's sinks: ``_grow_py``, on the native A*)."""
+    """(specs, names) of ``sinks`` for the kernel's grow, or None where one is not a sink the
+    kernel knows (a plain FixedSink / TapSink / DropSink, m2m's LeftTap and _EndTap) with a str
+    name (then ``_grow_py``, on the native A*)."""
     if not sinks:
         return None
     spec = [_sink_spec(s, ins) for s in sinks]

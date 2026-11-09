@@ -2,13 +2,17 @@
 //! `(f, -g, state)` does, and costs are summed in the same order), with 3.0's tap goal native:
 //! TapSink.pick (the tail `6 + 4(k-1)`, arms as data, inserter reach by name) and the taps a
 //! state's own path has counted in the search key where a target wants k > 1 (Python's fifth
-//! state element). A TapSink subclass (m2m's) keeps its Python goal as a callback.
+//! state element), and m2m's two sinks as kinds of their own (K4): `LeftTap`, whose inserter
+//! stands on the side of the belt the physics table's `drop_lane` gives for the lane it names,
+//! and `_EndTap`, whose run may not end pointing into a belt. Any other TapSink subclass keeps
+//! its Python goal as a callback.
 use pyo3::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::grid::NativeGrid;
+use crate::physics;
 use crate::{St, DX, DY, T};
 
 /// A search key: the state and, near a sink that wants k > 1 taps, how many taps the state's
@@ -33,8 +37,19 @@ pub(crate) struct ArmPair {
     pub(crate) heading: i64,
 }
 
-/// A plain TapSink: the machine's rectangle, how many taps it wants, its inserters (into the
-/// call's table), those of reach 1 (``short``), and the force's arms (range, pairs) or None.
+/// How a TapSink picks its taps: `TapSink.pick` (3.0), or m2m's `LeftTap.pick`: a tail of 6, no
+/// tap off the tile before a tunnel when laid reversed, and the inserter on one fixed side of
+/// the belt: ``side[d]`` for a state heading d, the side whose drop fills the lane the sink named
+/// (read from the physics table's `drop_lane` in `to_sinks`; nothing here says which side).
+#[derive(Clone, Debug)]
+pub(crate) enum Rule {
+    Plain,
+    Left { side: [usize; 4] },
+}
+
+/// A TapSink: the machine's rectangle, how many taps it wants, its inserters (into the call's
+/// table), those of reach 1 (``short``), the force's arms (range, pairs) or None, its pick rule,
+/// and (m2m's `_EndTap`) the belt tiles its path's last state may not point into.
 #[derive(Clone, Debug)]
 pub(crate) struct TapSpec {
     pub(crate) rect: (i64, i64, i64, i64),
@@ -42,6 +57,8 @@ pub(crate) struct TapSpec {
     pub(crate) inserters: Vec<usize>,
     pub(crate) short: Vec<usize>,
     pub(crate) arms: Option<(i64, Vec<ArmPair>)>,
+    pub(crate) rule: Rule,
+    pub(crate) avoid: Option<FxHashSet<T>>,
 }
 
 impl TapSpec {
@@ -69,8 +86,10 @@ pub(crate) enum Sink {
     Drop { x: i64, y: i64 },
 }
 
-/// A sink as Python passes it: (kind, a, b, c, d, k, inserters, arms); kind 0 fixed (x, y, edir),
-/// 1 tap (the rectangle), 2 tap with a Python goal (the rectangle), 3 drop (x, y); ``arms``: the
+/// A sink as Python passes it: (kind, a, b, c, d, k, inserters, arms, lane, avoid); kind 0 fixed
+/// (x, y, edir), 1 tap (the rectangle), 2 tap with a Python goal (the rectangle), 3 drop (x, y),
+/// 4 m2m's LeftTap (the rectangle; ``lane`` the lane its drop fills, "L" or "R"), 5 m2m's
+/// _EndTap (the rectangle; ``avoid`` the belt tiles its run may not point into); ``arms``: the
 /// range and the pairs (pick dx, dy, drop dx, dy, heading).
 #[derive(FromPyObject)]
 pub(crate) struct SinkIn(
@@ -82,18 +101,43 @@ pub(crate) struct SinkIn(
     pub usize,
     pub Vec<usize>,
     pub Option<(i64, Vec<(i64, i64, i64, i64, i64)>)>,
+    pub Option<String>,
+    pub Option<Vec<T>>,
 );
 
 pub(crate) fn to_ins(rows: Vec<(String, i64, f64)>) -> Vec<Ins> {
     rows.into_iter().map(|(name, reach, cost)| Ins { name, reach, cost }).collect()
 }
 
+/// LeftTap's side per state heading: a state heading d laid reversed is a belt running d + 2;
+/// of the two sides of that belt, the one whose inserter (dropping towards the belt) fills
+/// ``lane`` by the physics table's `drop_lane`.
+fn left_sides(lane: &str) -> PyResult<[usize; 4]> {
+    let p = physics::table()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("sinks: a LeftTap needs the physics table (fkroute.physics)"))?;
+    let want = physics::lane_of(lane)?;
+    let mut side = [0usize; 4];
+    for (d, out) in side.iter_mut().enumerate() {
+        let belt = ((d + 2) % 4) as u8;
+        let mut found = None;
+        for h in [(d + 1) % 4, (d + 3) % 4] {
+            let drop = ((h + 2) % 4) as u8;
+            if p.drop_lane(drop, belt) == want {
+                found = Some(h);
+                break;
+            }
+        }
+        *out = found.ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("sinks: no side drops on lane {lane:?}")))?;
+    }
+    Ok(side)
+}
+
 pub(crate) fn to_sinks(sinks: Vec<SinkIn>, ins: &[Ins]) -> PyResult<Vec<Sink>> {
     let mut out = Vec::with_capacity(sinks.len());
-    for SinkIn(kind, a, b, c, d, k, inserters, arms) in sinks {
+    for SinkIn(kind, a, b, c, d, k, inserters, arms, lane, avoid) in sinks {
         out.push(match kind {
             0 => Sink::Fixed { x: a, y: b, edir: c },
-            1 => {
+            1 | 4 | 5 => {
                 if inserters.iter().any(|&i| i >= ins.len()) {
                     return Err(pyo3::exceptions::PyValueError::new_err("sinks: an inserter index out of range"));
                 }
@@ -103,7 +147,18 @@ pub(crate) fn to_sinks(sinks: Vec<SinkIn>, ins: &[Ins]) -> PyResult<Vec<Sink>> {
                         .map(|(px, py, dx, dy, h)| ArmPair { pick: (px, py), drop: (dx, dy), heading: h })
                         .collect())
                 });
-                Sink::Tap(TapSpec { rect: (a, b, c, d), k, inserters, short, arms })
+                let rule = match kind {
+                    4 => {
+                        let lane = lane.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("sinks: a LeftTap names its lane"))?;
+                        Rule::Left { side: left_sides(&lane)? }
+                    }
+                    _ => Rule::Plain,
+                };
+                let avoid = match kind {
+                    5 => Some(avoid.unwrap_or_default().into_iter().collect()),
+                    _ => None,
+                };
+                Sink::Tap(TapSpec { rect: (a, b, c, d), k, inserters, short, arms, rule, avoid })
             }
             2 => Sink::TapCb { rect: (a, b, c, d), k, range: arms.map_or(0, |a| a.0) },
             3 => Sink::Drop { x: a, y: b },
@@ -225,21 +280,55 @@ fn first_tap_at(ins: &[Ins], sp: &TapSpec, tile: T, ok: impl Fn(T) -> bool) -> O
     None
 }
 
-/// TapSink.pick: taps off the last tiles of ``path`` (one per belt tile, newest first, a tail of
-/// `6 + 4(k-1)` tiles), up to k; none on the path, on another tap of this pick, or on ``taken``.
-pub(crate) fn pick(ins: &[Ins], g: &Ground, sp: &TapSpec, path: &[St], taken: &[T], sink: usize) -> Vec<Tap> {
+/// The sink's pick: `TapSink.pick`, taps off the last tiles of ``path`` (one per belt tile,
+/// newest first, a tail of `6 + 4(k-1)` tiles), up to k; none on the path, on another tap of
+/// this pick, or on ``taken``. Or `LeftTap.pick` (`Rule::Left`): a tail of 6, no tap off the
+/// tile before a tunnel when laid reversed (``drop_taps``), the inserter on the rule's side.
+pub(crate) fn pick(ins: &[Ins], g: &Ground, sp: &TapSpec, path: &[St], taken: &[T], sink: usize, drop_taps: bool) -> Vec<Tap> {
     let on: FxHashSet<T> = path.iter().map(|s| (s.0, s.1)).collect();
-    let tail = 6 + 4 * (sp.k as i64 - 1);
-    let lo = path.len().saturating_sub(tail.max(0) as usize);
     let mut got: Vec<Tap> = Vec::new();
-    for s in path[lo..].iter().rev() {
-        let tile = (s.0, s.1);
-        let ok = |q: T| g.free(q) && !on.contains(&q) && !got.iter().any(|t| t.q == q) && !taken.contains(&q);
-        if let Some((q, nm, dir, arm)) = first_tap_at(ins, sp, tile, ok) {
-            got.push(Tap { q, tile, ins: nm, dir, arm, sink });
+    match &sp.rule {
+        Rule::Plain => {
+            let tail = 6 + 4 * (sp.k as i64 - 1);
+            let lo = path.len().saturating_sub(tail.max(0) as usize);
+            for s in path[lo..].iter().rev() {
+                let tile = (s.0, s.1);
+                let ok = |q: T| g.free(q) && !on.contains(&q) && !got.iter().any(|t| t.q == q) && !taken.contains(&q);
+                if let Some((q, nm, dir, arm)) = first_tap_at(ins, sp, tile, ok) {
+                    got.push(Tap { q, tile, ins: nm, dir, arm, sink });
+                }
+                if got.len() >= sp.k {
+                    break;
+                }
+            }
         }
-        if got.len() >= sp.k {
-            break;
+        Rule::Left { side } => {
+            let tunnels: FxHashSet<St> = if drop_taps {
+                path.windows(2).filter(|w| w[1].3 != 0).map(|w| w[0]).collect()
+            } else {
+                FxHashSet::default()
+            };
+            let lo = path.len().saturating_sub(6);
+            for s in path[lo..].iter().rev() {
+                if tunnels.contains(s) {
+                    continue;
+                }
+                let tile = (s.0, s.1);
+                let h = side[s.2 as usize];
+                for &nm in &sp.inserters {
+                    let r = ins[nm].reach;
+                    let q = (tile.0 + DX[h] * r, tile.1 + DY[h] * r);
+                    if g.free(q) && !on.contains(&q) && !got.iter().any(|t| t.q == q) && !taken.contains(&q)
+                        && sp.inside((q.0 + DX[h] * r, q.1 + DY[h] * r))
+                    {
+                        got.push(Tap { q, tile, ins: nm, dir: (((h + 2) % 4) * 4) as i64, arm: None, sink });
+                        break;
+                    }
+                }
+                if got.len() >= sp.k {
+                    break;
+                }
+            }
         }
     }
     got
@@ -323,7 +412,7 @@ fn key(s: &Search, multi: &[usize], parent: &FxHashMap<Sk, Option<Sk>>, prev: Op
         .iter()
         .map(|&i| {
             let sp = s.sinks[i].tap().unwrap();
-            pick(s.ins, &s.ground, sp, &path, &[], i).len().min(sp.k)
+            pick(s.ins, &s.ground, sp, &path, &[], i, s.drop_taps).len().min(sp.k)
         })
         .max()
         .unwrap();
@@ -405,13 +494,17 @@ where
                         let from = start_of[&ks[0]];
                         match &sinks[i] {
                             Sink::Tap(sp) => {
+                                // _EndTap.goal: the run's last belt points into no belt; then
                                 // TapSink.goal: an exit can't turn (unless laid reversed), then
                                 // enough taps
                                 let du = here.2 as usize;
-                                if here.3 != 0 && !s.drop_taps && grid.blocked((here.0 + DX[du], here.1 + DY[du])) {
+                                let ahead = (here.0 + DX[du], here.1 + DY[du]);
+                                if sp.avoid.as_ref().is_some_and(|a| a.contains(&ahead)) {
+                                    false
+                                } else if here.3 != 0 && !s.drop_taps && grid.blocked(ahead) {
                                     false
                                 } else {
-                                    pick(s.ins, g_, sp, p, taken_of(from), i).len() >= sp.k
+                                    pick(s.ins, g_, sp, p, taken_of(from), i, s.drop_taps).len() >= sp.k
                                 }
                             }
                             _ => tap_cb(i, p, from)?,

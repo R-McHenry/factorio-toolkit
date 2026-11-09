@@ -1,6 +1,8 @@
 //! The lane physics as data: `fkcore.lanephys` enumerated by Python and handed over once at
 //! import (`physics(table)`), kept in a OnceLock. Nothing here states a lane rule: every entry is
-//! a lookup of what the table said. `physics_lookup` reads it back for the parity test.
+//! a lookup of what the table said. `physics_lookup` reads it back for the parity test; the
+//! search reads `drop_lane` for m2m's LeftTap (which side of its belt an inserter filling the
+//! lane it names stands on).
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
@@ -34,7 +36,6 @@ pub(crate) struct Physics {
 static PHYSICS: OnceLock<Physics> = OnceLock::new();
 
 /// The table, once `physics` has been called.
-#[allow(dead_code)]
 pub(crate) fn table() -> Option<&'static Physics> {
     PHYSICS.get()
 }
@@ -61,7 +62,7 @@ impl Physics {
     }
 }
 
-fn lane_of(s: &str) -> PyResult<Lane> {
+pub(crate) fn lane_of(s: &str) -> PyResult<Lane> {
     match s {
         "L" => Ok(0),
         "R" => Ok(1),

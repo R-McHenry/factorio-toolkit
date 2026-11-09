@@ -1385,19 +1385,18 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
 
 def _hub_search(cat, job, blocked, spans, clear, box, limit, tap=TapSink):
     """The hub search proper: a trunk from every driver, split to every consumer. ``tap``: the
-    driver machines' sink kind (2.1 m2m: on the left lane). Runs in fkroute when it can (plain
-    sinks, int tiles; PLAN-4.0 K3), else in Python (``_hub_search_py``); FK_NATIVE=check runs both
-    and raises if the plans differ."""
+    driver machines' sink kind (2.1 m2m: on the left lane). Runs in fkroute when it can (sinks it
+    knows, m2m's LeftTap included since PLAN-4.0 K4, int tiles; K3), else in Python
+    (``_hub_search_py``); FK_NATIVE=check runs both and raises if the plans differ."""
     grid = _Bounded(blocked, box, spans)
-    if tap is TapSink:
-        got = _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit)
-        if got is not _UNSUPPORTED:
-            if os.environ.get("FK_NATIVE") == "check":
-                py = _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap)
-                if py != got:
-                    raise AssertionError(f"fkroute.hub_search differs from _hub_search_py: {got!r} "
-                                         f"!= {py!r}")
-            return got
+    got = _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit, tap)
+    if got is not _UNSUPPORTED:
+        if os.environ.get("FK_NATIVE") == "check":
+            py = _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap)
+            if py != got:
+                raise AssertionError(f"fkroute.hub_search differs from _hub_search_py: {got!r} "
+                                     f"!= {py!r}")
+        return got
     return _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap)
 
 
@@ -1431,11 +1430,11 @@ def _hub_search_py(cat, job, grid, blocked, spans, clear, box, limit, tap=TapSin
     return plan, _hub_how(cr, cf, hub, f)
 
 
-def _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit):
+def _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit, tap=TapSink):
     """_hub_search in the kernel: the candidates and, per candidate, the reversed and the forward
     tree over ``_grow_attempts``' sink lists, in one call (``fkroute.hub_search``); the trees come
-    back and the plan is laid here. _UNSUPPORTED where the kernel can't: no kernel, a sink it
-    does not know, a tile that is no int."""
+    back and the plan is laid here. ``tap``: the driver machines' sink kind. _UNSUPPORTED where
+    the kernel can't: no kernel, a sink it does not know, a tile that is no int."""
     if not steinermod.native_on():
         return _UNSUPPORTED
     ng = _native_box_grid(grid)
@@ -1447,7 +1446,8 @@ def _hub_search_native(cat, job, grid, blocked, spans, clear, box, limit):
     ne, nclear = _int_tiles(ends), _int_tiles(clear)
     if ne is None or nclear is None or any(s is None for s in nd + nc):
         return _UNSUPPORTED
-    ratt = _grow_attempts(_driver_sinks(job), job.sources, sources=True, drops=job.drops, net=job.net)
+    ratt = _grow_attempts(_driver_sinks(job), job.sources, sources=True, tap=tap, drops=job.drops,
+                          net=job.net)
     fatt = _grow_attempts(_consumer_sinks(job), job.taps, net=job.net)
     ins = steinermod._Inserters(COSTS)
     try:

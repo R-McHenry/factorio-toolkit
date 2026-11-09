@@ -1,6 +1,6 @@
 //! steiner.grow: the whole tree search (starts, A*, attach, the reroute rounds), forward or laid
 //! reversed (drop_taps, keep_clear, the merges' spare tiles), for FixedSink, TapSink (3.0's taps:
-//! k > 1, arms) and DropSink sinks.
+//! k > 1, arms; m2m's LeftTap and _EndTap) and DropSink sinks.
 use pyo3::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -422,7 +422,7 @@ fn attach(cx: &Ctx, tree: &Tree, path: &[St], how: How, i: usize) -> Tree {
     if let Some(sp) = cx.sinks[i].tap() {
         let tl = t.tiles(cx); // the same choice the goal test made (before the path lands)
         let extra = t.extra(&tl);
-        let got = pick(cx.ins, &Ground { grid: cx.grid, extra: &extra }, sp, path, &[], cx.sname[i]);
+        let got = pick(cx.ins, &Ground { grid: cx.grid, extra: &extra }, sp, path, &[], cx.sname[i], cx.drop_taps);
         for g in &got {
             t.reserved.insert(g.q);
         }
