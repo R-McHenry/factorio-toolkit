@@ -1,7 +1,10 @@
 //! steiner.grow: the whole tree search (starts, A*, attach, the reroute rounds), forward or laid
 //! reversed (drop_taps, keep_clear, the merges' spare tiles), for FixedSink, TapSink (3.0's taps:
-//! k > 1, arms) and DropSink sinks.
+//! k > 1, arms; m2m's LeftTap and _EndTap) and DropSink sinks. The tree comes back as plan
+//! entities (K5): the forward view and the reversed view as `Tree.entities` /
+//! `Tree._entities_reversed` lay them, with its counts and its problem strings.
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::grid::NativeGrid;
@@ -92,6 +95,7 @@ pub(crate) struct Ctx<'a> {
     pub(crate) ins: &'a [Ins],
     pub(crate) sinks: Vec<Sink>,
     pub(crate) sname: Vec<usize>, // per sink: the id of its name (equal names, one id)
+    pub(crate) names: Vec<String>, // per sink: its name (the report and the entities' links)
 }
 
 /// (belt, turn, ug, split, max_ug): steiner.COSTS less the tap costs, which ride on the inserters.
@@ -116,7 +120,7 @@ impl<'a> Ctx<'a> {
         let (belt, turn, ug, split, max_ug) = costs;
         Ok(Ctx {
             grid, keep_clear: keep_clear.iter().copied().collect(), drop_taps, belt, turn, ug, split, max_ug,
-            limit, lane_ok: lane_ok.iter().copied().collect(), ins, sinks, sname,
+            limit, lane_ok: lane_ok.iter().copied().collect(), ins, sinks, sname, names: snames.to_vec(),
         })
     }
 }
@@ -240,7 +244,8 @@ impl Tree {
         }
     }
 
-    pub(crate) fn cost(&self, cx: &Ctx) -> f64 {
+    /// Tree.counts: (belts, turns, undergrounds, splitters, taps).
+    pub(crate) fn counts(&self) -> Counts {
         let (mut belts, mut turns, mut ugs, mut splitters) = (0i64, 0i64, 0i64, 0i64);
         for s in self.states() {
             let mv = self.succ.get(&s);
@@ -270,6 +275,11 @@ impl Tree {
                 }
             }
         }
+        (belts, turns, ugs, splitters, self.taps.len() as i64)
+    }
+
+    pub(crate) fn cost(&self, cx: &Ctx) -> f64 {
+        let (belts, turns, ugs, splitters, _) = self.counts();
         let mut taps = 0.0f64;
         for t in &self.taps {
             taps += cx.ins[t.ins].cost;
@@ -277,6 +287,49 @@ impl Tree {
         let raw = belts as f64 * cx.belt + turns as f64 * cx.turn + ugs as f64 / 2.0 * cx.ug
             + splitters as f64 * cx.split + taps;
         py_round3(raw)
+    }
+
+    /// Tree.problems, string for string: shared tiles, blocked tiles, a merge's spare output at
+    /// the tree's own belt, unreached and under-tapped sinks, tunnels crossing a same-axis one.
+    pub(crate) fn problems(&self, cx: &Ctx) -> Vec<String> {
+        let mut out = Vec::new();
+        let tl = self.tiles(cx);
+        let mut own: Vec<(T, u32)> = tl.own.iter().map(|(t, n)| (*t, *n)).collect();
+        own.sort();
+        for (t, n) in own {
+            if n > 1 {
+                out.push(format!("TILE_SHARED {}: {} pieces", py_tile(t), n));
+            }
+            if cx.grid.blocked(t) {
+                out.push(format!("BLOCKED {}", py_tile(t)));
+            }
+        }
+        let mut feeds: Vec<T> = tl.spare.iter().filter(|t| tl.own.contains_key(t)).copied().collect();
+        feeds.sort();
+        for t in feeds {
+            out.push(format!("SPARE_FEEDS {}: a merge's spare output points at the tree's own belt", py_tile(t)));
+        }
+        let reached: FxHashSet<usize> = self.sink_at.iter().map(|(_, i)| i).collect();
+        for (i, sink) in cx.sinks.iter().enumerate() {
+            if !reached.contains(&i) {
+                out.push(format!("UNREACHED {}", cx.names[i]));
+            } else if let Some(sp) = sink.tap() {
+                let got = self.taps.iter().filter(|t| t.sink == cx.sname[i]).count();
+                if got < sp.k {
+                    out.push(format!("UNTAPPED {}: {} of {} inserters", cx.names[i], got, sp.k));
+                }
+            }
+        }
+        let mine = self.spans();
+        for ax in 0..2 {
+            let mut cross: Vec<T> = mine[ax].iter().filter(|t| cx.grid.spans[ax].contains(t)).copied().collect();
+            if !cross.is_empty() {
+                cross.sort();
+                let shown: Vec<String> = cross.iter().take(3).map(|t| py_tile(*t)).collect();
+                out.push(format!("UG_INTERLEAVE axis {}: [{}]", ax, shown.join(", ")));
+            }
+        }
+        out
     }
 
     pub(crate) fn has_problems(&self, cx: &Ctx) -> bool {
@@ -325,6 +378,139 @@ impl Tree {
 /// Python's round(x, 3): the nearest 3-decimal value of x's exact binary value.
 fn py_round3(x: f64) -> f64 {
     format!("{:.3}", x).parse().unwrap()
+}
+
+/// A tile as Python prints the tuple.
+fn py_tile(t: T) -> String {
+    format!("({}, {})", t.0, t.1)
+}
+
+/// (belts, turns, undergrounds, splitters, taps): Tree.counts' values in its key order.
+pub(crate) type Counts = (i64, i64, i64, i64, i64);
+
+/// arms.heading: the direction (0, 4, 8, 12) a cardinal vector points.
+fn heading(v: T) -> i64 {
+    match (v.0.signum(), v.1.signum()) {
+        (0, -1) => 0,
+        (1, 0) => 4,
+        (0, 1) => 8,
+        (-1, 0) => 12,
+        _ => unreachable!("the router lays cardinal vectors only"),
+    }
+}
+
+/// steiner._ent: a belt piece's plan entity.
+fn ent<'py>(py: Python<'py>, name: &str, x: i64, y: i64, h: i64, net: &str, ug: Option<&str>) -> PyResult<Bound<'py, PyDict>> {
+    let e = PyDict::new(py);
+    e.set_item("name", name)?;
+    e.set_item("x", x as f64 + 0.5)?;
+    e.set_item("y", y as f64 + 0.5)?;
+    e.set_item("direction", h * 4)?;
+    e.set_item("role", "spine")?;
+    e.set_item("net", net)?;
+    if let Some(u) = ug {
+        e.set_item("belt_to_ground_type", u)?;
+    }
+    Ok(e)
+}
+
+/// Tree.entities' splitter: at the half-tile centre of its two tiles, heading h.
+fn splitter_ent<'py>(py: Python<'py>, n: T, m: T, h: i64, net: &str) -> PyResult<Bound<'py, PyDict>> {
+    let e = PyDict::new(py);
+    e.set_item("name", "splitter")?;
+    e.set_item("x", (n.0 + m.0) as f64 / 2.0 + 0.5)?;
+    e.set_item("y", (n.1 + m.1) as f64 / 2.0 + 0.5)?;
+    e.set_item("direction", h * 4)?;
+    e.set_item("role", "spine")?;
+    e.set_item("net", net)?;
+    Ok(e)
+}
+
+/// steiner._tap_ent: a tap's plan entity; with its own vectors it faces its pickup and keeps
+/// the vectors that are not its direction's own (arms.canon: the default pair of an inserter of
+/// reach r facing d is r tiles towards d and r tiles away, arms.default).
+fn tap_ent<'py>(py: Python<'py>, ins: &Ins, q: T, direction: i64, arm: Option<(T, T)>, link: &str) -> PyResult<Bound<'py, PyDict>> {
+    let e = PyDict::new(py);
+    e.set_item("name", ins.name.as_str())?;
+    e.set_item("x", q.0 as f64 + 0.5)?;
+    e.set_item("y", q.1 as f64 + 0.5)?;
+    e.set_item("direction", direction)?;
+    e.set_item("role", "ins")?;
+    e.set_item("link", link)?;
+    if let Some((pick, drop)) = arm {
+        let h = heading(pick);
+        e.set_item("direction", h)?;
+        let hu = (h / 4) as usize;
+        let dpick = (DX[hu] * ins.reach, DY[hu] * ins.reach);
+        let ddrop = (-dpick.0, -dpick.1);
+        if (pick, drop) != (dpick, ddrop) {
+            e.set_item("pick", format!("{},{}", pick.0, pick.1))?;
+            e.set_item("drop", format!("{},{}", drop.0, drop.1))?;
+        }
+    }
+    Ok(e)
+}
+
+/// Tree.entities (``reverse`` false) / Tree._entities_reversed (true), entity for entity in the
+/// same order: the states as `states()` walks them, then the taps.
+pub(crate) fn entities(py: Python<'_>, tree: &Tree, cx: &Ctx, net: &str, reverse: bool) -> PyResult<Vec<PyObject>> {
+    let mut out: Vec<PyObject> = Vec::new();
+    for s in tree.states() {
+        let (x, y, d, ex) = s;
+        let mv = tree.succ.get(&s);
+        if reverse {
+            let back = (d + 2) % 4;
+            if let Some(Mv::Jump(_)) = mv {
+                out.push(ent(py, "underground-belt", x, y, back, net, Some("output"))?.into_any().unbind());
+                continue;
+            }
+            if let Some(Mv::Split(side, _, _)) = mv {
+                let (n, m) = split_tiles(s, side);
+                out.push(splitter_ent(py, n, m, back, net)?.into_any().unbind());
+            }
+            if ex != 0 {
+                out.push(ent(py, "underground-belt", x, y, back, net, Some("input"))?.into_any().unbind());
+            } else {
+                out.push(ent(py, "transport-belt", x, y, back, net, None)?.into_any().unbind());
+            }
+            continue;
+        }
+        let heading_out = match mv {
+            None => match tree.sink_at.get(&s) {
+                Some(i) => match cx.sinks[i] {
+                    Sink::Fixed { edir, .. } => edir,
+                    _ => d,
+                },
+                None => d,
+            },
+            Some(Mv::Jump(_)) => {
+                out.push(ent(py, "underground-belt", x, y, d, net, Some("input"))?.into_any().unbind());
+                continue;
+            }
+            Some(Mv::Split(side, _, _)) => {
+                let (n, m) = split_tiles(s, side);
+                out.push(splitter_ent(py, n, m, d, net)?.into_any().unbind());
+                d
+            }
+            Some(Mv::Step(c)) => c.2,
+        };
+        if ex != 0 {
+            out.push(ent(py, "underground-belt", x, y, d, net, Some("output"))?.into_any().unbind());
+        } else {
+            out.push(ent(py, "transport-belt", x, y, heading_out, net, None)?.into_any().unbind());
+        }
+    }
+    for t in &tree.taps {
+        let name = &cx.names[t.sink];
+        let e = if reverse {
+            // laid reversed, the tap picks from the machine and drops onto the belt
+            tap_ent(py, &cx.ins[t.ins], t.q, (t.dir + 8) % 16, t.arm.map(|(p, d)| (d, p)), &format!("{name}->{net}"))?
+        } else {
+            tap_ent(py, &cx.ins[t.ins], t.q, t.dir, t.arm, &format!("{net}~{name}"))?
+        };
+        out.push(e.into_any().unbind());
+    }
+    Ok(out)
 }
 
 #[derive(Clone, Copy)]
@@ -422,7 +608,7 @@ fn attach(cx: &Ctx, tree: &Tree, path: &[St], how: How, i: usize) -> Tree {
     if let Some(sp) = cx.sinks[i].tap() {
         let tl = t.tiles(cx); // the same choice the goal test made (before the path lands)
         let extra = t.extra(&tl);
-        let got = pick(cx.ins, &Ground { grid: cx.grid, extra: &extra }, sp, path, &[], cx.sname[i]);
+        let got = pick(cx.ins, &Ground { grid: cx.grid, extra: &extra }, sp, path, &[], cx.sname[i], cx.drop_taps);
         for g in &got {
             t.reserved.insert(g.q);
         }
@@ -588,14 +774,30 @@ pub(crate) fn tree_out(tree: &Tree, ins: &[Ins], log: Vec<LogOut>) -> TreeOut {
     )
 }
 
-/// steiner.grow for FixedSink / TapSink / DropSink sinks -> a `TreeOut`. ``sinks``: see
+/// What a grow hands back (K5): the tree (for Python's Tree where one is still needed), its plan
+/// entities forward and reversed, its counts, its problem strings and its cost.
+pub(crate) type GrowOut = (TreeOut, Vec<PyObject>, Vec<PyObject>, Counts, Vec<String>, f64);
+
+pub(crate) fn grow_out(py: Python<'_>, tree: &Tree, cx: &Ctx, net: &str, log: Vec<LogOut>) -> PyResult<GrowOut> {
+    Ok((
+        tree_out(tree, cx.ins, log),
+        entities(py, tree, cx, net, false)?,
+        entities(py, tree, cx, net, true)?,
+        tree.counts(),
+        tree.problems(cx),
+        tree.cost(cx),
+    ))
+}
+
+/// steiner.grow for FixedSink / TapSink / DropSink sinks -> a `GrowOut`. ``sinks``: see
 /// `search::SinkIn` (no kind 2: the goal runs here); ``inserters``: (name, reach, tap cost);
-/// ``costs``: (belt, turn, ug, split, max_ug).
+/// ``costs``: (belt, turn, ug, split, max_ug); ``net``: the entities' net name.
 #[pyfunction]
 #[pyo3(signature = (grid, keep_clear, drop_taps, root, sinks, snames, inserters, costs, improve, order,
-                    limit, lane_ok=None))]
+                    limit, lane_ok=None, net="net"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn grow(
+    py: Python<'_>,
     grid: &Bound<'_, NativeGrid>,
     keep_clear: Vec<T>,
     drop_taps: bool,
@@ -608,7 +810,8 @@ pub(crate) fn grow(
     order: Option<Vec<usize>>,
     limit: usize,
     lane_ok: Option<Vec<(T, u16)>>,
-) -> PyResult<TreeOut> {
+    net: &str,
+) -> PyResult<GrowOut> {
     let ins = to_ins(inserters);
     let sinks = to_sinks(sinks, &ins)?;
     if sinks.iter().any(|s| matches!(s, Sink::TapCb { .. })) {
@@ -617,5 +820,5 @@ pub(crate) fn grow(
     let cx = Ctx::new(grid.get(), &keep_clear, drop_taps, sinks, &snames, &ins, costs, limit,
                       &lane_ok.unwrap_or_default())?;
     let (tree, log) = run_grow(&cx, root, improve, order)?;
-    Ok(tree_out(&tree, &ins, log))
+    grow_out(py, &tree, &cx, net, log)
 }

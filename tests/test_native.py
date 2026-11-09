@@ -83,6 +83,20 @@ def _taps_case(seed):
     return grid, root, sinks
 
 
+def _m2m_case(seed):
+    """A hub's driver side as m2m lays it (PLAN-4.0 K4): _reversed_case with LeftTap drivers
+    (k 1-2, a fast hand or a fast and a long one), as route._hub_search(tap=m2m.LeftTap) grows
+    them."""
+    from fkcore.m2m import LeftTap
+    grid, root, sinks = _reversed_case(seed)
+    rnd = random.Random(seed + 77)
+    for i, s in enumerate(sinks):
+        if isinstance(s, TapSink):
+            hands = ("fast-inserter",) if rnd.random() < 0.5 else ("fast-inserter", "long-handed-inserter")
+            sinks[i] = LeftTap(s.name, s.rect, s.k, hands)
+    return grid, root, sinks
+
+
 @unittest.skipUnless(steiner._native is not None, "fkroute not installed")
 class NativeParity(unittest.TestCase):
     def test_random_fields(self):
@@ -157,6 +171,132 @@ class NativeParity(unittest.TestCase):
             grown += 1
         self.assertGreater(grown, 20)
 
+    def test_m2m_left_taps(self):
+        """PLAN-4.0 K4: m2m's LeftTap as a native sink kind: a tree laid reversed with LeftTap
+        drivers grows in the kernel, no Python grow and no Python pick, to the Python tree; every
+        tap it lays fills the left lane by lanephys.drop_lane (the side comes from the physics
+        table, the kernel states none)."""
+        from fkcore import m2m
+        tapped = tunnels = 0
+        for seed in range(150):
+            grid, root, sinks = _m2m_case(seed)
+            if not any(isinstance(s, m2m.LeftTap) for s in sinks):
+                continue
+            with self.subTest(seed=seed):
+                py = _run("0", grid, root, sinks)
+                with mock.patch.object(m2m.LeftTap, "pick", side_effect=AssertionError("python pick ran")), \
+                        mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")):
+                    nat = _run("1", grid, root, sinks)
+                self.assertEqual(nat, py)
+                heads = {(s[0], s[1]): s[2] for s, _mv in nat[0]} | {(c[0], c[1]): c[2] for _s, mv in nat[0]
+                                                                    for c in mv[1:] if isinstance(c, tuple)}
+                for s, mv in nat[0]:
+                    if mv[0] == "split":            # a tap may drop onto a splitter's half
+                        heads.update({t: s[2] for t in steiner.Tree.split_tiles(s, mv[1])})
+                for q, name, direction, _sink, arm in nat[2]:
+                    self.assertIsNone(arm)
+                    r, g = arms.REACH.get(name, 1), direction // 4
+                    tile = (q[0] + steiner.DX[g] * r, q[1] + steiner.DY[g] * r)
+                    belt = (heads[tile] + 2) % 4                 # laid reversed: the belt runs back
+                    self.assertEqual(lanephys.drop_lane(direction, belt * 4), "L", (seed, q))
+                    tapped += 1
+                tunnels += any(mv[0] == "jump" for _s, mv in nat[0])
+        self.assertGreater(tapped, 40)
+        self.assertGreater(tunnels, 5)
+
+    def test_m2m_end_taps(self):
+        """PLAN-4.0 K4: m2m's _EndTap (a consumer at the end of a new run, whose last belt points
+        into no belt) as a native sink kind: the augment loop's A* (many starts, FixedSink and
+        _EndTap targets) finds the same path, start and sink both ways, with no Python goal."""
+        from fkcore import m2m
+        found = ended = 0
+        for seed in range(150):
+            grid, root, sinks = _case(seed)
+            rnd = random.Random(seed + 91)
+            belts = {(rnd.randrange(24), rnd.randrange(18)) for _ in range(60)}
+            sinks = [m2m._EndTap(s.name, s.rect, ("fast-inserter",), belts) if isinstance(s, TapSink)
+                     else s for s in sinks]
+            if not any(isinstance(s, m2m._EndTap) for s in sinks):
+                continue
+            tree = steiner.Tree(grid, root)
+            tree.sink_terminal = {}
+            starts = [(root, 0.0, ("src", 0), ())]
+            for j in range(1, rnd.randrange(2, 5)):
+                st = (rnd.randrange(1, 6), rnd.randrange(18), rnd.randrange(4), 0)
+                if grid.blocked(st[:2]):
+                    continue
+                taken = ((st[0] - steiner.DX[st[2]], st[1] - steiner.DY[st[2]]),)
+                starts.append((st, 2.0, ("split", j), taken))
+            targets = list(range(len(sinks)))
+            with self.subTest(seed=seed):
+                py = steiner._astar_py(tree, starts, sinks, targets, 20000)
+                with mock.patch.object(m2m._EndTap, "goal", side_effect=AssertionError("python goal ran")):
+                    nat = steiner._astar_native(tree, starts, sinks, targets, 20000)
+                self.assertIsNot(nat, steiner._UNSUPPORTED)
+                self.assertEqual(nat, py)
+                if nat is not None:
+                    found += 1
+                    path, _how, i, _cost = nat
+                    if isinstance(sinks[i], m2m._EndTap):
+                        ended += 1
+                        x, y, d, _ex = path[-1]
+                        self.assertNotIn((x + steiner.DX[d], y + steiner.DY[d]), belts)
+        self.assertGreater(found, 60)
+        self.assertGreater(ended, 15)
+
+    def test_entities_out(self):
+        """PLAN-4.0 K5: the kernel hands back the plan entities (the forward view and the reversed
+        view as Tree.entities lays them: belts with their out heading, underground halves,
+        splitters, inserters with their arms canonicalised), the counts, the problem strings and
+        the cost; Python builds no Tree for them."""
+        kinds = {"arm": 0, "split": 0, "ug": 0, "problem": 0, "fixed_leaf": 0}
+        for seed in range(120):
+            for mk in (_case, _reversed_case, _taps_case, _m2m_case):
+                grid, root, sinks = mk(seed)
+                if not sinks:
+                    continue
+                with self.subTest(seed=seed, kind=mk.__name__):
+                    with mock.patch.dict(os.environ, {"FK_NATIVE": "0"}):
+                        py = steiner.grow(grid, root, sinks, limit=20000, net=f"n{seed}")
+                    with mock.patch.dict(os.environ, {"FK_NATIVE": "1"}), \
+                            mock.patch.object(steiner, "_tree_from_native", side_effect=AssertionError("a Tree was built")):
+                        nat = steiner.grow(grid, root, sinks, limit=20000, net=f"n{seed}")
+                        for k in ("entities", "reversed", "counts", "problems", "cost", "log"):
+                            self.assertEqual(nat[k], py[k], k)
+                        self.assertNotIn("tree", nat)
+                    for e in nat["entities"]:
+                        self.assertEqual(list(e), list(next(p for p in py["entities"] if p == e)))  # key order too
+                    kinds["arm"] += any("pick" in e for e in nat["entities"])
+                    kinds["split"] += any(e["name"] == "splitter" for e in nat["entities"])
+                    kinds["ug"] += any(e["name"] == "underground-belt" for e in nat["reversed"])
+                    kinds["problem"] += bool(nat["problems"])
+                    kinds["fixed_leaf"] += any(isinstance(s, FixedSink) for s in sinks) and not nat["problems"]
+        for k, n in kinds.items():
+            self.assertGreater(n, 5, k)
+
+    def test_m2m_hub_runs_native(self):
+        """PLAN-4.0 K4: route._hub_search with tap=m2m.LeftTap (m2m's hub) runs in the kernel, no
+        Python hub search and no Python grow, and gives the Python composite's plan and report on
+        random hub jobs with machine drivers."""
+        from fkcore import m2m, route
+        from fkcore.catalog import Catalog
+        cat = Catalog.load()
+        routed = 0
+        for seed in range(40):
+            job, occ, spans, clear, box = self._hub_case(seed)
+            if job.mode != "hub" or not job.sources:
+                continue
+            grid = route._Bounded(occ, box, spans)
+            with self.subTest(seed=seed), mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
+                with mock.patch.object(route, "_hub_search_py", side_effect=AssertionError("python hub ran")), \
+                        mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")), \
+                        mock.patch.object(m2m.LeftTap, "pick", side_effect=AssertionError("python pick ran")):
+                    got = route._hub_search(cat, job, occ, spans, clear, box, 20000, tap=m2m.LeftTap)
+                py = route._hub_search_py(cat, job, grid, occ, spans, clear, box, 20000, tap=m2m.LeftTap)
+                self.assertEqual(got, py)
+                routed += got[0] is not None
+        self.assertGreater(routed, 5)
+
     def _hub_case(self, seed):
         from fkcore import route
         rnd = random.Random(seed + 500)
@@ -213,6 +353,7 @@ class NativeParity(unittest.TestCase):
         job, occ, spans, clear, box = self._hub_case(1)
         with mock.patch.object(route, "_hub_search_py", side_effect=AssertionError("python hub ran")), \
                 mock.patch.object(steiner, "_grow_py", side_effect=AssertionError("python grow ran")), \
+                mock.patch.object(steiner, "_tree_from_native", side_effect=AssertionError("a Tree was built")), \
                 mock.patch.dict(os.environ, {"FK_NATIVE": "1"}):
             plan, how = route._hub_search(Catalog.load(), job, occ, spans, clear, box, 20000)
         self.assertIsNotNone(plan, how)

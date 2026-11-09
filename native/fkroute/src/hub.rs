@@ -3,12 +3,14 @@
 //! their belt, the merges' spare outputs stay clear of what stands) and the forward tree from the
 //! tile ahead of it to every consumer on what is left, until `wins` candidates route; the
 //! cheapest wins. Each side tries its sink lists (route._grow's passes) in order and keeps the
-//! first that routes, else the last.
+//! first that routes, else the last. The winner comes back as plan entities (the reversed view
+//! of the drivers' tree, the forward view of the consumers') with their counts; a failure as
+//! its problem strings (K5).
 use pyo3::prelude::*;
 use rustc_hash::FxHashSet;
 
 use crate::grid::{run_hubs, NativeGrid};
-use crate::grow::{run_grow, tree_out, Costs, Ctx, Mv, Tree, TreeOut};
+use crate::grow::{entities, run_grow, Costs, Counts, Ctx, Mv, Tree};
 use crate::search::{to_ins, to_sinks, Ins, Sink, SinkIn};
 use crate::{St, DX, DY, T};
 
@@ -85,21 +87,23 @@ fn reversed_fronts(tree: &Tree) -> FxHashSet<T> {
     out
 }
 
-type Best = (T, i64, usize, TreeOut, usize, TreeOut);
-type Fail = (T, i64, u8, usize, TreeOut, Option<(usize, TreeOut)>);
+type Best = (T, i64, usize, Vec<PyObject>, Counts, usize, Vec<PyObject>, Counts);
+type Fail = (T, i64, u8, Vec<String>);
 
 /// route._hub_search over route._hub_trees -> (the best candidate, the first that failed, how
-/// many candidates there were). The best: (hub, f, the drivers' attempt, its tree, the consumers'
-/// attempt, its tree); the first failure: (hub, f, 0 drivers | 1 consumers, attempt, its tree,
-/// and for a consumers' failure the drivers' (attempt, tree) that stood). ``grid``: the hub's
-/// bounded ground (blocked, box, spans, the negotiated soft tiles); ``near_d`` / ``near_c`` /
-/// ``ends``: as `hubs`; ``keep_clear``: the standing belts, for the reversed tree; the attempts
-/// as `grow`'s sinks, with their names; ``inserters`` and ``costs`` as `grow`'s.
+/// many candidates there were). The best: (hub, f, the drivers' attempt, its tree's reversed
+/// entities, its counts, the consumers' attempt, its tree's forward entities, its counts); the
+/// first failure: (hub, f, 0 drivers | 1 consumers, the failing tree's problems). ``grid``: the
+/// hub's bounded ground (blocked, box, spans, the negotiated soft tiles); ``near_d`` / ``near_c``
+/// / ``ends``: as `hubs`; ``keep_clear``: the standing belts, for the reversed tree; the attempts
+/// as `grow`'s sinks, with their names; ``inserters`` and ``costs`` as `grow`'s; ``net``: the
+/// entities' net name.
 #[pyfunction]
 #[pyo3(signature = (grid, near_d, near_c, ends, most, keep_clear, r_attempts, r_names, f_attempts,
-                    f_names, inserters, costs, improve, limit, wins, reach=5))]
+                    f_names, inserters, costs, improve, limit, wins, reach=5, net="net"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn hub_search(
+    py: Python<'_>,
     grid: &Bound<'_, NativeGrid>,
     near_d: Vec<Vec<T>>,
     near_c: Vec<Vec<T>>,
@@ -116,6 +120,7 @@ pub(crate) fn hub_search(
     limit: usize,
     wins: usize,
     reach: i64,
+    net: &str,
 ) -> PyResult<(Option<Best>, Option<Fail>, usize)> {
     let base = grid.get();
     if base.bbox.is_none() {
@@ -138,10 +143,10 @@ pub(crate) fn hub_search(
         rocc.insert(front);
         let rgrid = base.derived(rocc, base.spans.clone());
         let rroot = (hub.0, hub.1, (f + 2) % 4, 0);
-        let (ri, rtree, rcx, rlog, rok) = try_attempts(&rgrid, &keep_clear, true, rroot, &ra, &ins, costs, improve, limit)?;
+        let (ri, rtree, rcx, _rlog, rok) = try_attempts(&rgrid, &keep_clear, true, rroot, &ra, &ins, costs, improve, limit)?;
         if !rok {
             if first_fail.is_none() {
-                first_fail = Some((hub, f, 0, ri, tree_out(&rtree, &ins, rlog), None));
+                first_fail = Some((hub, f, 0, rtree.problems(&rcx)));
             }
             continue;
         }
@@ -161,16 +166,17 @@ pub(crate) fn hub_search(
         }
         let fgrid = base.derived(focc, fspans);
         let froot = (front.0, front.1, f, 0);
-        let (fi, ftree, fcx, flog, fok) = try_attempts(&fgrid, &[], false, froot, &fa, &ins, costs, improve, limit)?;
+        let (fi, ftree, fcx, _flog, fok) = try_attempts(&fgrid, &[], false, froot, &fa, &ins, costs, improve, limit)?;
         if !fok {
             if first_fail.is_none() {
-                first_fail = Some((hub, f, 1, fi, tree_out(&ftree, &ins, flog), Some((ri, tree_out(&rtree, &ins, rlog)))));
+                first_fail = Some((hub, f, 1, ftree.problems(&fcx)));
             }
             continue;
         }
         let cost = rtree.cost(&rcx) + ftree.cost(&fcx);
         if best.as_ref().map_or(true, |(c, _)| cost < c - 1e-9) {
-            best = Some((cost, (hub, f, ri, tree_out(&rtree, &ins, rlog), fi, tree_out(&ftree, &ins, flog))));
+            best = Some((cost, (hub, f, ri, entities(py, &rtree, &rcx, net, true)?, rtree.counts(), fi,
+                               entities(py, &ftree, &fcx, net, false)?, ftree.counts())));
         }
         won += 1;
         if won >= wins {

@@ -654,7 +654,7 @@ except ImportError:          # stdlib only: the native kernel is a speed-up, nev
 
 #: the kernel this module drives: an older fkroute (another grow/astar signature, no physics
 #: table) is left alone and the Python search runs, as without one
-_NATIVE_NEEDS = (0, 3)
+_NATIVE_NEEDS = (0, 4)
 
 
 def _kernel_fits(mod):
@@ -736,26 +736,35 @@ def _arms_spec(arms):
 
 def _sink_spec(s, ins, callback=False):
     """A sink for the kernel, or None for one it does not know: (kind, a, b, c, d, k, inserters,
-    arms); kind 0 a plain FixedSink (x, y, edir), 1 a plain TapSink (its rect, k, inserter ids,
-    arms), 2 a TapSink subclass whose goal stays Python's (``callback``: the A* calls it back),
-    3 a plain DropSink (x, y)."""
+    arms, lane, avoid); kind 0 a plain FixedSink (x, y, edir), 1 a plain TapSink (its rect, k,
+    inserter ids, arms), 2 a TapSink subclass whose goal stays Python's (``callback``: the A*
+    calls it back), 3 a plain DropSink (x, y), and (PLAN-4.0 K4) a TapSink subclass the kernel
+    mirrors as a kind of its own: it declares ``native_kind`` (m2m's LeftTap 4, _EndTap 5) and
+    gives its data as ``native_extra()`` -> (the lane its drop fills or None, the tiles its run
+    may not point into or None)."""
     t = type(s)
     if t is FixedSink or (isinstance(s, FixedSink) and t.goal is FixedSink.goal and t.h is FixedSink.h):
         if not s.terminal:
             return None
-        return (0, s.tile[0], s.tile[1], int(s.edir), 0, 0, [], None)
+        return (0, s.tile[0], s.tile[1], int(s.edir), 0, 0, [], None, None, None)
     if t is TapSink:
         if s.terminal:
             return None
         x0, y0, x1, y1 = s.rect
-        return (1, x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms))
+        return (1, x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms), None, None)
+    kind = getattr(t, "native_kind", None)
+    if kind is not None and isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
+        x0, y0, x1, y1 = s.rect
+        lane, avoid = s.native_extra()
+        return (int(kind), x0, y0, x1, y1, int(s.k), [ins.of(n) for n in s.inserters], _arms_spec(s.arms),
+                lane, None if avoid is None else list(avoid))
     if callback and isinstance(s, TapSink) and t.h is TapSink.h and not s.terminal:
         x0, y0, x1, y1 = s.rect
         arms = getattr(s, "arms", None)
         return (2, x0, y0, x1, y1, int(getattr(s, "k", 1)), [],
-                (int(arms.range), []) if arms is not None else None)
+                (int(arms.range), []) if arms is not None else None, None, None)
     if t is DropSink and not s.terminal:
-        return (3, s.tile[0], s.tile[1], 0, 0, 0, [], None)
+        return (3, s.tile[0], s.tile[1], 0, 0, 0, [], None, None, None)
     return None
 
 
@@ -1040,28 +1049,51 @@ def _detach(tree, sink_i, sinks):
     return tree
 
 
-def grow(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=60000):
-    """Forward tree search; {"tree", "cost", "counts", "problems", "seconds", "log"}.
-    Runs whole in fkroute when it can (plain FixedSink / TapSink sinks on a Grid it knows), else
-    in Python (``_grow_py``, whose steps still use the native A*). FK_NATIVE=check runs both and
-    raises if the trees differ."""
+class _Grown(dict):
+    """grow's result: {"cost", "counts", "problems", "seconds", "log", "entities", "reversed",
+    "tree"}. A view not built yet is built on first access: the ``Tree`` of a native result
+    (the kernel hands back the entities, PLAN-4.0 K5; Python needs a Tree only where it lays the
+    hub's forward ground), the two entity views of a Python one."""
+
+    def __init__(self, items, lazy):
+        super().__init__(items)
+        self._lazy = lazy
+
+    def __missing__(self, key):
+        if key not in self._lazy:
+            raise KeyError(key)
+        self[key] = value = self._lazy.pop(key)()
+        return value
+
+
+def grow(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=60000, net="net"):
+    """Forward tree search; {"tree", "cost", "counts", "problems", "seconds", "log", "entities",
+    "reversed"} (``_Grown``): the plan entities of the tree forward and laid reversed
+    (``Tree.entities`` with ``net``), and the Tree itself.
+    Runs whole in fkroute when it can (sinks it knows, on a Grid it knows), else in Python
+    (``_grow_py``, whose steps still use the native A*). FK_NATIVE=check runs both and raises if
+    the trees, the entities, the counts, the problems or the cost differ."""
     mode = os.environ.get("FK_NATIVE", "1")
     if _native is not None and mode != "0":
         t0 = time.time()
         try:
-            got = _grow_native(grid, root, sinks, costs, improve, order, limit)
+            got = _grow_native(grid, root, sinks, costs, improve, order, limit, net)
         except (TypeError, OverflowError):     # a non-integer tile: the kernel takes ints only
             got = _UNSUPPORTED
         if got is not _UNSUPPORTED:
             if mode == "check":
-                py = _grow_py(grid, root, sinks, costs, improve, order, limit)
+                py = _grow_py(grid, root, sinks, costs, improve, order, limit, net)
                 a, b = _tree_key(got["tree"]), _tree_key(py["tree"])
                 if a != b or got["log"] != py["log"]:
                     raise AssertionError(f"fkroute.grow differs from _grow_py: {a!r} {got['log']} "
                                          f"!= {b!r} {py['log']}")
+                for k in ("entities", "reversed", "counts", "problems", "cost"):
+                    if got[k] != py[k]:
+                        raise AssertionError(f"fkroute.grow's {k} differs from the Tree's: {got[k]!r} "
+                                             f"!= {py[k]!r}")
             got["seconds"] = round(time.time() - t0, 2)
             return got
-    return _grow_py(grid, root, sinks, costs, improve, order, limit)
+    return _grow_py(grid, root, sinks, costs, improve, order, limit, net)
 
 
 def _tree_key(t):
@@ -1073,8 +1105,9 @@ _MOVES = ("step", "jump", "split")
 
 
 def _grow_specs(sinks, ins):
-    """(specs, names) of ``sinks`` for the kernel's grow, or None where one is not a plain
-    FixedSink / TapSink / DropSink with a str name (m2m's sinks: ``_grow_py``, on the native A*)."""
+    """(specs, names) of ``sinks`` for the kernel's grow, or None where one is not a sink the
+    kernel knows (a plain FixedSink / TapSink / DropSink, m2m's LeftTap and _EndTap) with a str
+    name (then ``_grow_py``, on the native A*)."""
     if not sinks:
         return None
     spec = [_sink_spec(s, ins) for s in sinks]
@@ -1086,6 +1119,19 @@ def _grow_specs(sinks, ins):
 
 def _native_costs(k):
     return (float(k["belt"]), float(k["turn"]), float(k["ug"]), float(k["split"]), int(k["max_ug"]))
+
+
+def _log_text(sinks, log):
+    """The kernel's grow log as grow's text."""
+    text = []
+    for kind, targets, i, how, a, b in log:
+        if kind == 0:
+            text.append(f"cannot reach {[sinks[t].name for t in targets]}")
+        elif kind == 1:
+            text.append(f"+{sinks[i].name} via {('leaf', 'split')[how]} ({a:.1f})")
+        else:
+            text.append(f"reroute {sinks[i].name}: {a:.1f} -> {b:.1f}")
+    return text
 
 
 def _tree_from_native(grid, root, sinks, costs, out):
@@ -1104,18 +1150,15 @@ def _tree_from_native(grid, root, sinks, costs, out):
     tree.reserved = {tuple(t) for t in reserved}
     tree.sink_terminal = {tuple(last[0]): last[1]} if last else {}
     tree.touch()
-    text = []
-    for kind, targets, i, how, a, b in log:
-        if kind == 0:
-            text.append(f"cannot reach {[sinks[t].name for t in targets]}")
-        elif kind == 1:
-            text.append(f"+{sinks[i].name} via {('leaf', 'split')[how]} ({a:.1f})")
-        else:
-            text.append(f"reroute {sinks[i].name}: {a:.1f} -> {b:.1f}")
-    return tree, text
+    return tree, _log_text(sinks, log)
 
 
-def _grow_native(grid, root, sinks, costs, improve, order, limit):
+_COUNTS = ("belts", "turns", "undergrounds", "splitters", "taps")
+
+
+def _grow_native(grid, root, sinks, costs, improve, order, limit, net="net"):
+    """grow in the kernel: the plan entities (both views), counts, problems and cost come back
+    with the tree (PLAN-4.0 K5); the Tree is built only when asked for."""
     ng = _native_grid(grid)
     if ng is None:
         return _UNSUPPORTED
@@ -1125,15 +1168,16 @@ def _grow_native(grid, root, sinks, costs, improve, order, limit):
     if got is None:
         return _UNSUPPORTED
     spec, names = got
-    out = _native.grow(ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names,
-                       ins.rows, _native_costs(k), int(improve),
-                       None if order is None else [int(i) for i in order], int(limit), _lane_list(grid))
-    tree, text = _tree_from_native(grid, root, sinks, costs, out)
-    return {"tree": tree, "cost": tree.cost(), "counts": tree.counts(),
-            "problems": tree.problems(sinks), "seconds": 0.0, "log": text}
+    out, fwd, rev, counts, problems, cost = _native.grow(
+        ng, list(grid.keep_clear), bool(grid.drop_taps), tuple(root), spec, names, ins.rows,
+        _native_costs(k), int(improve), None if order is None else [int(i) for i in order], int(limit),
+        _lane_list(grid), str(net))
+    return _Grown({"cost": cost, "counts": dict(zip(_COUNTS, counts)), "problems": list(problems),
+                   "seconds": 0.0, "log": _log_text(sinks, out[5]), "entities": fwd, "reversed": rev},
+                  {"tree": lambda: _tree_from_native(grid, root, sinks, costs, out)[0]})
 
 
-def _grow_py(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=60000):
+def _grow_py(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=60000, net="net"):
     """The Python grow: grow's original, and its fallback."""
     t0 = time.time()
     tree = Tree(grid, root, costs)
@@ -1165,8 +1209,10 @@ def _grow_py(grid, root, sinks, costs=None, improve=IMPROVE, order=None, limit=6
                 tree, better = new, True
         if not better:
             break
-    return {"tree": tree, "cost": tree.cost(), "counts": tree.counts(), "problems": tree.problems(sinks),
-            "seconds": round(time.time() - t0, 2), "log": log}
+    return _Grown({"tree": tree, "cost": tree.cost(), "counts": tree.counts(), "problems": tree.problems(sinks),
+                   "seconds": round(time.time() - t0, 2), "log": log},
+                  {"entities": lambda: tree.entities(sinks, net=net),
+                   "reversed": lambda: tree.entities(sinks, net=net, reverse=True)})
 
 
 # -- reverse: Dreyfus-Wagner over the state graph -----------------------------------------------

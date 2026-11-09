@@ -5,9 +5,12 @@
 Wraps ``steiner``'s four search entry points (the native and the Python grow, the native and the
 Python A*) and ``route``'s two hub searches, runs the named test modules, and prints calls and
 seconds per side plus why each grow fell back to Python (a sink of its own, a grid the kernel
-does not know, a tile that is no int). A native hub search runs its grows inside the kernel, so
-they are not counted as grows. The measure PLAN-4.0 part K is judged by: the router modules at 0
-Python grows, 0 Python A* and 0 Python hub searches. Stdlib only; run from the v5 tree.
+does not know, a tile that is no int), and how many native A*s had a target whose goal is called
+back into Python (``astar_callback``: a TapSink subclass the kernel has no kind for). A native hub
+search runs its grows inside the kernel, so they are not counted as grows. m2m's searches (its
+augment loop's A*, its hub) go through the same entry points and are counted. The measure
+PLAN-4.0 part K is judged by: the router modules at 0 Python grows, 0 Python A*, 0 Python hub
+searches and 0 callbacks. Stdlib only; run from the v5 tree.
 """
 from __future__ import annotations
 
@@ -19,7 +22,8 @@ import unittest
 sys.path.insert(0, os.getcwd())
 from fkcore import route, steiner  # noqa: E402
 
-counts = {"grow_native": 0, "grow_py": 0, "astar_native": 0, "astar_py": 0, "hub_native": 0, "hub_py": 0}
+counts = {"grow_native": 0, "grow_py": 0, "astar_native": 0, "astar_py": 0, "hub_native": 0, "hub_py": 0,
+          "astar_callback": 0}
 times = {k: 0.0 for k in counts}
 why = {}
 
@@ -43,8 +47,13 @@ def _grow_native(grid, root, sinks, *a, **k):
     if out is steiner._UNSUPPORTED:
         counts["grow_native"] -= 1
         reasons = []
+        ins = steiner._Inserters(steiner.COSTS)
         for s in sinks:
-            if type(s) not in (steiner.TapSink, steiner.FixedSink, steiner.DropSink):
+            try:
+                known = steiner._sink_spec(s, ins) is not None
+            except TypeError:
+                known = False
+            if not known:
                 reasons.append(type(s).__name__)
         if not sinks:
             reasons.append("no-sinks")
@@ -53,6 +62,17 @@ def _grow_native(grid, root, sinks, *a, **k):
         key = ",".join(sorted(set(reasons))) or "other"
         why[key] = why.get(key, 0) + 1
     return out
+
+
+def _astar_native(tree, starts, sinks, targets, limit):
+    ins = steiner._Inserters(tree.costs)
+    try:
+        kinds = [(steiner._sink_spec(sinks[i], ins, callback=True) or (None,))[0] for i in targets]
+    except TypeError:
+        kinds = []
+    if 2 in kinds:
+        counts["astar_callback"] += 1
+    return _an(tree, starts, sinks, targets, limit)
 
 
 def _hub_native(*a, **k):
@@ -65,7 +85,7 @@ def _hub_native(*a, **k):
 def main(names):
     steiner._grow_native = _wrap("grow_native", _grow_native)
     steiner._grow_py = _wrap("grow_py", _gp)
-    steiner._astar_native = _wrap("astar_native", _an)
+    steiner._astar_native = _wrap("astar_native", _astar_native)
     steiner._astar_py = _wrap("astar_py", _ap)
     route._hub_search_native = _wrap("hub_native", _hub_native)
     route._hub_search_py = _wrap("hub_py", _hp)
@@ -75,7 +95,10 @@ def main(names):
     print(f"wall {time.perf_counter() - t0:.1f}s  tests {res.testsRun} failures "
           f"{len(res.failures)} errors {len(res.errors)}")
     for k in counts:
-        print(f"{k:14s} calls {counts[k]:5d}  time {times[k]:7.2f}s")
+        if k == "astar_callback":
+            print(f"{k:14s} calls {counts[k]:5d}  (native A*s with a Python goal among their targets)")
+        else:
+            print(f"{k:14s} calls {counts[k]:5d}  time {times[k]:7.2f}s")
     print("grow fallbacks by reason:", why or "none")
     return 1 if (res.failures or res.errors) else 0
 

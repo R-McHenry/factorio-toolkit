@@ -66,6 +66,7 @@ import math
 import time
 
 from . import fkp as fkpmod
+from . import lanephys
 from . import lanes as lanesmod
 from . import maxflow as mfmod
 from . import throughput as tp
@@ -84,8 +85,15 @@ _ITEM = "item"     # the one item of the net, for the game's rules (its lanes do
 
 class LeftTap(TapSink):
     """A driver machine's tap on a tree laid reversed (the hub's merge tree): the inserter stands
-    on the belt's right, looking downstream, so it drops on the left lane. Reversed, a state
-    heading ``d`` is a belt running ``d + 2``, whose right is ``d + 3``."""
+    on the side of the belt where its drop fills the left lane (``lanephys.drop_lane``: the belt's
+    right, looking downstream). Reversed, a state heading ``d`` is a belt running ``d + 2``.
+    The native kernel (fkroute, PLAN-4.0 K4) mirrors ``pick`` as sink kind ``native_kind``: it is
+    handed ``lane`` and reads the side from the same physics table."""
+    lane = "L"          # the lane its drop fills
+    native_kind = 4
+
+    def native_extra(self):
+        return self.lane, None
 
     def pick(self, path, tree, taken=()):
         on = {(s[0], s[1]) for s in path}
@@ -95,7 +103,7 @@ class LeftTap(TapSink):
         for s in reversed(path[-6:]):
             if s in tunnels:
                 continue
-            h = (s[2] + 3) % 4
+            h = _drop_side(s[2], self.lane)
             used = {g[0] for g in got}
             for name in self.inserters:
                 r = 2 if name == "long-handed-inserter" else 1
@@ -109,13 +117,35 @@ class LeftTap(TapSink):
         return got
 
 
+_SIDE = {}
+
+
+def _drop_side(d, lane):
+    """The side of a belt laid reversed (a state heading ``d`` is a belt running ``d + 2``) an
+    inserter stands on to fill ``lane``: the side whose drop ``lanephys.drop_lane`` puts there."""
+    if (d, lane) not in _SIDE:
+        belt = (d + 2) % 4
+        for h in ((d + 1) % 4, (d + 3) % 4):
+            if lanephys.drop_lane(((h + 2) % 4) * 4, belt * 4) == lane:
+                _SIDE[d, lane] = h
+                break
+        else:
+            raise ValueError(f"no side drops on lane {lane!r}")
+    return _SIDE[d, lane]
+
+
 class _EndTap(TapSink):
     """A consumer at the end of a new run: an inserter picks from it, and the run's last belt
-    points into no belt (it would side-load its items there)."""
+    points into no belt (it would side-load its items there). The native kernel mirrors ``goal``
+    as sink kind ``native_kind`` (PLAN-4.0 K4), handed ``belts``."""
+    native_kind = 5
 
     def __init__(self, name, rect, inserters, belts):
         super().__init__(name, rect, 1, inserters)
         self.belts = belts
+
+    def native_extra(self):
+        return None, self.belts
 
     def goal(self, state, tree, path=None, taken=()):
         x, y, d, _ex = state

@@ -318,13 +318,13 @@ def lay_balancer(flat, lay, cat, bounds, blocked, mid, limit=60000):
             clear = route._belt_tiles(cat, ents)
             grid = route._Bounded(occ, bounds, spans, clear if reverse else None)
             root = (tile[0], tile[1], 3 if reverse else 1, 0)
-            res, sinks = route._grow(grid, root, [], machines, limit, sources=reverse,
-                                     tap=m2mmod.LeftTap if reverse else route.TapSink)
+            res, _sinks = route._grow(grid, root, [], machines, limit, sources=reverse,
+                                      tap=m2mmod.LeftTap if reverse else route.TapSink, net=NET)
             if res["problems"]:
                 failed[NET] = f"{side} {k}: " + "; ".join(res["problems"][:2])
                 jobs = [job] + [j for j in jobs if j is not job]
                 break
-            ents += keyed(res["tree"].entities(sinks, net=NET, reverse=reverse))
+            ents += keyed(res["reversed" if reverse else "entities"])
         if not failed:
             break
     new = lay.copy()
