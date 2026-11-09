@@ -1173,8 +1173,8 @@ def _on_patch(flat, lay, path, cat, ground):
             line += f"; {len(touched)} filtered to {res} (mixed-patch)"
         else:
             more["skip"] = frozenset(touched)
-            tail = (f"{drill} has no resource filter (its prototype sets no filter_count), so "
-                    f"they are left out: {n - len(touched)} of {n} drills placed")
+            tail = (f"{drill} has no resource filter slots in facts.json, so they are left "
+                    f"out: {n - len(touched)} of {n} drills placed")
             line += f"; {len(touched)} left out (mixed-patch)"
         more["check"] = ("mixed-patch", path, head + tail)
     return (spot.x, spot.y, spot.rot), line, frag, binding, more

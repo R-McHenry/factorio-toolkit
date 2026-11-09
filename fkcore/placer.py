@@ -121,9 +121,10 @@ def others(drill, resource, ore):
 
 
 def filter_slots(drill):
-    """How many resource filters a drill prototype has (``MiningDrillPrototype::filter_count``,
-    Factorio 2.0.7+, in facts.json when the reader recorded it): 0 for the base game's drills,
-    whose prototypes set none; a modded drill may have some."""
+    """How many resource filter slots a drill has: its facts.json row's ``filter_count``
+    (``MiningDrillPrototype::filter_count``, which ``tools/read_facts.py`` records for drills
+    since 3.1, M1), 0 when the row has none. The 2.0.77 facts predate that read, so every drill
+    is 0 until facts.json is re-read on a laptop server (docs/notes-41-mines.md)."""
     return int(_facts.entity(drill).get("filter_count") or 0)
 
 

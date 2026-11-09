@@ -25,6 +25,9 @@ IRON = strip(0, 30, 10, 17)
 COPPER_SOUTH = {(x, 17): 500 for x in range(0, 30)}
 #: a copper streak at the west end only: a row of 8 fits east of it, clean
 COPPER_WEST = {(x, 17): 500 for x in range(0, 6)}
+#: copper along both long edges: whichever way a row turns, every drill's area reaches one (a
+#: 4-drill row turned N-S, 7x6, keeps clear of the south edge alone)
+COPPER_BOTH = {**COPPER_SOUTH, **{(x, 9): 500 for x in range(0, 30)}}
 
 
 def ground(ore, box=(0, 0, 60, 60)):
@@ -90,8 +93,8 @@ class MixedPatchTest(unittest.TestCase):
         self.assertEqual(check[2],
                          "4 of 8 drills' mining areas reach copper-ore (m4, m5, m6, m7) at 1,10 "
                          "rot 0, the spot where the fewest do; electric-mining-drill has no "
-                         "resource filter (its prototype sets no filter_count), so they are left "
-                         "out: 4 of 8 drills placed")
+                         "resource filter slots in facts.json, so they are left out: 4 of 8 "
+                         "drills placed")
         self.assertTrue(log[0].endswith("; 4 left out (mixed-patch)"), log[0])
         self.assertEqual(fkp.invariants(lay, CAT), [])
 
@@ -170,8 +173,14 @@ class CoverTest(unittest.TestCase):
         self.assertTrue(spot.clean and spot.x >= 7, spot)
         other = placer.others("electric-mining-drill", "iron-ore",
                               {"iron-ore": IRON, "copper-ore": COPPER_SOUTH})
-        self.assertEqual(placer.cover(make, 1, 100, CAT, IRON, frozenset(), set(), box, other),
-                         (0, None))                                # no clean spot at all
+        k, spot = placer.cover(make, 1, 100, CAT, IRON, frozenset(), set(), box, other)
+        self.assertEqual((k, spot.rot % 2, spot.size, spot.clean), (4, 1, (7, 6), True))
+        other = placer.others("electric-mining-drill", "iron-ore",
+                              {"iron-ore": IRON, "copper-ore": COPPER_BOTH})
+        self.assertEqual(placer.cover(make, 3, 100, CAT, IRON, frozenset(), set(), box, other),
+                         (0, None))                    # no clean spot for 3 or more drills
+        k, spot = placer.cover(make, 1, 100, CAT, IRON, frozenset(), set(), box, other)
+        self.assertEqual((k, spot.size, spot.y), (2, (7, 3), 11))  # two, in the middle row
         self.assertEqual(placer.cover(make, 30, 40, CAT, IRON, frozenset(), set(), box),
                          (0, None))                                # the low bound does not fit
 
@@ -248,7 +257,7 @@ class SizeFromPatchTest(unittest.TestCase):
         self.write("t.fk", AUTO)
         maker = size.maker(os.path.join(self.dir, "t.fk"), CAT, "t")
         sz = size.size({"t": maker}, cat=CAT,
-                       grounds={"t": ground({"iron-ore": IRON, "copper-ore": COPPER_SOUTH})})
+                       grounds={"t": ground({"iron-ore": IRON, "copper-ore": COPPER_BOTH})})
         (row,) = sz.rows
         self.assertEqual((row.n, row.covered), (4, False))
         self.assertIn("not even n=4 has a spot in the plot with every drill on iron-ore and no "
