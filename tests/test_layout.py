@@ -323,6 +323,19 @@ class CommandTest(unittest.TestCase):
         self.assertIn(" 0 unrouted", summary)
         self.assertIn(" 0 open", summary)
         self.assertGreater(carriers, 0)
+        # R2's reading side: --from reads the built layout's carriers per net (the top level has
+        # no compiled unit) and the report starts from them
+        lines3, _c = layout.layout_file(path, flat2, CAT, plot=(34, 44),
+                                        from_out=os.path.join(d, "out"))
+        text = "\n".join(lines3)
+        self.assertIn("real -> estimated per net:", text)
+        m = re.search(r"real belts (\d+) \(layout\.fkp, (\d+) of (\d+) nets\) -> estimated \d+",
+                      text)
+        self.assertIsNotNone(m, text)
+        self.assertEqual(int(m.group(1)), carriers, "every carrier of the build is some net's")
+        self.assertEqual(m.group(2), m.group(3), "every net was routed")
+        lines4, _c = layout.layout_file(path, flat2, CAT, plot=(34, 44), from_out=os.path.join(d, "nowhere"))
+        self.assertTrue(any(l.startswith("  estimated belts ") for l in lines4), lines4)
 
     def test_cli_prints_source_lines(self):
         from fkcore import __main__ as cli
@@ -378,6 +391,13 @@ class GroveTest(unittest.TestCase):
         self.assertIn(" 0 unrouted", summary)
         self.assertIn(" 0 open", summary)
         self.assertLessEqual(carriers, 256, "no more carriers than the hand layout")
+        # R2's reading side: a module's real carriers come from its compiled unit
+        lines2, _c = layout.layout_file(path, flat2, CAT, module="Grove",
+                                        from_out=os.path.join(d, "out"))
+        text = "\n".join(lines2)
+        self.assertRegex(text, r"real belts \d+ \(out/compiled/Grove/[0-9a-f]{8}, 8 of 8 nets\) -> "
+                               r"estimated \d+ over 8 nets")
+        self.assertRegex(text, r"real -> estimated per net: g/cu0_\|g/fe0_ \d+->\d+")
 
 
 class ExampleTest(unittest.TestCase):

@@ -874,6 +874,51 @@ def _module_file(path, module):
     return None
 
 
+# -- real costs from the last build (PLAN-ORGANIC R2, the reading side) ------------------------
+_CARRIERS = ("transport-belt", "underground-belt", "splitter")
+
+
+def real_costs(path, built, out, module=None):
+    """{spec net index: carriers} the last build laid for the spec's nets, and where they were
+    read: a sealed ``module``'s unit from the compile store under ``out`` (``compiled.current``, the
+    key the last build wrote or laid from; its net names are relative to the unit), the file's
+    top level from the committed layout beside the file (``<name>.fkp``, its carriers keyed
+    ``~NET/...``). Carriers are belts, underground ends and splitters, as the notes count them.
+    Nothing is run: the build's output is read as it stands. -> (real, source) with real empty
+    and the reason as ``source`` when there is nothing to read."""
+    from . import compiled, fkp as fkpmod
+    from .route import _renamed
+    real = {}
+    if built.scope and module:
+        key = compiled.current(out, module)
+        if key is None:
+            return real, f"no compiled unit of {module} under {out}"
+        nets = compiled.Store(compiled.store_dir(out)).load(module, key)
+        if nets is None:
+            return real, f"the stored unit {module}/{key} is not readable (another ROUTER?)"
+        count = {n: sum(1 for row in rows if row[1].endswith(_CARRIERS))
+                 for n, rows in nets.items()}
+        for k, net in enumerate(built.spec.nets):
+            rel = _renamed(net.name, built.scope, "")
+            if rel in count:
+                real[k] = count[rel]
+        near = os.path.relpath(out, os.path.dirname(os.path.abspath(path))).replace(os.sep, "/")
+        return real, f"{near}/compiled/{module}/{key[:8]}"
+    lay_path = os.path.splitext(os.path.abspath(path))[0] + ".fkp"
+    if not os.path.exists(lay_path):
+        return real, f"no layout {os.path.basename(lay_path)} beside the file"
+    lay = fkpmod.load(lay_path)
+    count = {}
+    for key, e in lay.entities.items():
+        if key.startswith("~") and "/" in key and e.name.endswith(_CARRIERS):
+            net = key[1:].rsplit("/", 1)[0]
+            count[net] = count.get(net, 0) + 1
+    for k, net in enumerate(built.spec.nets):
+        if net.name in count:
+            real[k] = count[net.name]
+    return real, os.path.basename(lay_path)
+
+
 # -- the command ----------------------------------------------------------------------------------
 def _plot_of(path, flat):
     """(w, h) of this module's plot from the surface file beside the design, or None."""
@@ -890,9 +935,12 @@ def _plot_of(path, flat):
     return None
 
 
-def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=None, plot=None):
+def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=None, plot=None,
+                from_out=None):
     """-> (the report lines, exit code). The report: a head line, one source line per instance
-    placed, the check lines, the routability report, the timing line."""
+    placed, the check lines, the routability report, the timing line. ``from_out`` (an ``out``
+    folder): the last build's real carriers per net stand for the relaxed ``before`` in the
+    report (real -> estimated); a net the build did not route keeps its estimate."""
     if plot is None and not module:
         plot = _plot_of(path, flat)
     params = Params() if sweeps is None else Params(sweeps=int(sweeps))
@@ -947,7 +995,21 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
     if res.hot:
         hot = ": " + ", ".join(f"{x},{y} x{u}" for (x, y), u in res.hot[:8]) \
             + (" ..." if len(res.hot) > 8 else "")
-    out.append(f"  estimated belts {before // MILLI} -> {after // MILLI} over {len(spec.nets)} "
+    head = f"estimated belts {before // MILLI} -> {after // MILLI}"
+    if from_out is not None:
+        real, source = real_costs(path, built, from_out, module)
+        if real:
+            start = sum(real.get(n, max(0, res.before[n]) // MILLI) for n in range(len(spec.nets)))
+            kept = len(spec.nets) - len(real)
+            head = (f"real belts {start} ({source}, {len(real)} of {len(spec.nets)} nets"
+                    + (f"; {kept} without a route keep their estimate" if kept else "")
+                    + f") -> estimated {after // MILLI}")
+            per = ", ".join(f"{spec.nets[n].name} {real[n]}->{max(0, res.after[n]) // MILLI}"
+                            for n in sorted(real))
+            out.append(f"  real -> estimated per net: {per}")
+        else:
+            out.append(f"  from {from_out}: {source}")
+    out.append(f"  {head} over {len(spec.nets)} "
                f"nets; {reach}; {len(res.hot)} hot tiles{hot}; {res.sweeps} sweeps")
     out.append(f"  took {took:.1f} s ({which()})")
     if write and changes:
@@ -962,7 +1024,7 @@ def layout_file(path, flat, cat, module=None, all_=False, write=False, sweeps=No
 
 
 def main(a, flat, cat):
-    """``fk layout FILE [MODULE] [--all] [--write] [--sweeps N] [--plot WxH]``."""
+    """``fk layout FILE [MODULE] [--all] [--write] [--sweeps N] [--plot WxH] [--from [OUT]]``."""
     plot = None
     if getattr(a, "plot", None):
         try:
@@ -970,6 +1032,10 @@ def main(a, flat, cat):
             plot = (int(w), int(h))
         except ValueError:
             raise SystemExit("error: --plot WxH")
-    lines, code = layout_file(a.file, flat, cat, a.module, a.all, a.write, a.sweeps, plot)
+    from_out = getattr(a, "from_out", None)
+    if from_out is not None and not os.path.isabs(from_out):
+        from_out = os.path.join(os.path.dirname(os.path.abspath(a.file)), from_out)
+    lines, code = layout_file(a.file, flat, cat, a.module, a.all, a.write, a.sweeps, plot,
+                              from_out)
     print("\n".join(lines))
     return code

@@ -1998,6 +1998,10 @@ def main(argv=None):
     ly.add_argument("--sweeps", type=int, default=None, help="the cap on sweeps (default 150)")
     ly.add_argument("--plot", default=None, metavar="WxH",
                     help="the top level's frame (default: the surface file's plot, else room)")
+    ly.add_argument("--from", dest="from_out", nargs="?", const="out", default=None, metavar="OUT",
+                    help="read the last build's real carriers per net (a module's unit from "
+                         "OUT/compiled, the top level from the .fkp beside the file; default "
+                         "OUT = out beside the file) and report real -> estimated")
     ct = sub.add_parser("contract", description="every sealed module's contract: each port's "
                         "direction, item, rate at full speed, where it crosses and what it got "
                         "(fkcore.contract)")
