@@ -245,7 +245,11 @@ def route_lanes(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), sp
     """Lay a pair's job by the lane goal: -> (carriers, report text) or (None, the reason)."""
     left, right, pair = job.parts
     net = job.net
-    blocked = routemod._ground(cat, ents, frames, js, net, terrain) | \
+    # 46-pairbox: the ground inside the box only (2.1.33 did this for _route_in; here every part
+    # route still read every net's ends of the whole layout, and in a 6500-net flower the group
+    # pass that lays a tight column's pairs in another order ran out of its 3 s where alone it
+    # took 0.8)
+    blocked = routemod._ground(cat, ents, frames, js, net, terrain, box) | \
         (set(avoid) - set(job.ends()))
     grid = routemod._Bounded(blocked, box, routemod._ug_spans(cat, ents) if spans is None
                              else spans)
@@ -322,7 +326,7 @@ def _laid_lanes(cat, job, hub, h, ents, frames, js, box, limit, terrain, avoid, 
     stem = _stem(g, root, {e.key for e in trunk})
     if not stem:
         return "the trunk has no plain belt before its first consumer"
-    gb = routemod._ground(cat, now, frames, js, job.net, terrain) | (set(avoid) - set(job.ends()))
+    gb = routemod._ground(cat, now, frames, js, job.net, terrain, box) | (set(avoid) - set(job.ends()))
     sgrid = routemod._Bounded(gb, box)
     parts = [(left, "l", True), (right, "r", False)]
     why, best = None, None
