@@ -70,10 +70,20 @@ with the starter base still running beside it until the new one carries the load
 > where it happened. The fix is always the same and always the designer's: seal the sub-unit
 > (`module NAME size WxH { port ... }`), build it alone on the lab, then compose, so that a change
 > inside one module can never touch another. Router options and effort levels do not fix a design.
+> Each level routes a handful of nets: `fk check` says `flat` for a level past 60, and the build's
+> `level` lines give every level's nets, seconds and frame (a minute at one level is too long).
 > The checks name the module and the cause; the rules below are how to build it right.
 
 - **A module is a frame with ports.** Its belts stay inside; a change inside it never moves its
   neighbours. Ports go where the trunks come from, on the edge facing them.
+- **Each level routes a handful of nets.** The router is handed one level at a time (the top of a
+  file, or one sealed module) in its frame, and its time grows with the nets and the frame
+  together, never with the base. `fk check` says `flat` for a level past 60 nets; the build's
+  `level` lines in `out\route.txt` give every level that searched, its nets, seconds and frame,
+  slowest first, and one past 60 s is `flat` in the report (`stop_on flat` holds the paste on it).
+  The megabelt's flower had ten levels of 62 to 118 nets and took 35 minutes a build while every
+  report read "all connected"; a module whose own level routes that many is not yet a module of
+  modules. Read the `level` lines before you look at anything else in a slow build.
 - **Regions nest.** A region (the iron smelting, the red-green block) is a sealed module of sealed
   modules: a Stack inside, a module or two beside it, its own trunks. The last run's LabArea, 72
   nets, routed in 12 s on its own; its flat world of 1,000 nets took minutes a build and pasted
