@@ -134,6 +134,8 @@ class ApplyReport:
     placed_alone: int = 0              # refused by the paste, placed as single ghosts
     alone_missed: dict = field(default_factory=dict)  # settings those ghosts would not take
     landfill: int = 0                  # landfill tile ghosts laid under them on water (a pack)
+    unmarked: int = 0                  # free (47-cleanpaste): deconstruction marks cancelled after the revive
+    filled: int = 0                    # free (47-cleanpaste): item-request proxies filled in place (modules)
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
@@ -504,6 +506,19 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
             else:
                 rep.written.append((d.key, "set back from a hand edit"))
         rep.own = ownmod.update(own, s, cat, None if given is None else area, keys, standing)
+    elif free:
+        # 47-cleanpaste: where things are free the toolkit's own entities that the design dropped
+        # are destroyed where they stand (no robots to order), and the record is kept up to
+        # date. Before this the free path never set ``rep.own``: a lab surface's record stayed
+        # the seed, and a re-routed column's old belts stood on, "kept in the plot until its
+        # owner decides" (the T6 flower, 2026-11-09)
+        gone = [row for row in ownmod.dropped(own, s)
+                if ownmod.in_scope(row, cat, None if given is None else area, keys)]
+        if gone:
+            rep.dropped = _destroy(r, s.name, [(row.name, row.x, row.y) for row in gone])
+            rep.notes.append(f"free: {rep.dropped} of the toolkit's own that the design dropped "
+                             f"destroyed where they stood ({len(gone)} in the record)")
+        rep.own = ownmod.update(own, s, cat, None if given is None else area, keys)
     if not rows:
         rep.notes.append("nothing designed in this scope" if not rep.refused else
                          "nothing pasted: every designed tile in this scope is a mismatch")
@@ -581,6 +596,22 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
             got = []
         rep.revived = int(got[0]) if got else 0
         rep.revive_failed = int(got[1]) if len(got) > 1 else 0
+        # 47-cleanpaste: what stood in a ghost's way was marked for deconstruction by the
+        # superforced paste; no robots come here, so the mark is cancelled (the diff names what
+        # stands there), and nothing looks stuck
+        rep.unmarked = _int(r.lua(link.lua_unmark(s.name, area)))
+        # 47-cleanpaste: a revived machine's modules stand as an item-request proxy that no
+        # robot answers here (a player sees module ghosts): the plan goes into its slots
+        said = r.lua(link.lua_fulfil(s.name, area)).split()
+        rep.filled = int(said[0]) if said and said[0].isdigit() else 0
+        if rep.filled:
+            missed = int(said[2]) if len(said) > 2 and said[2].isdigit() else 0
+            rep.notes.append(f"free: {rep.filled} item requests filled in place ({said[1]} items: "
+                             "the machines' modules)" + (f", {missed} stacks refused" if missed else ""))
+        if rep.unmarked:
+            rep.notes.append(f"free: {rep.unmarked} deconstruction marks the paste left on what "
+                             "stands cancelled (nothing takes them up here; the diff says what "
+                             "stands in a ghost's way)")
     # 2.1: the wires as the design has them, quietly (the hand edits above named any made by hand)
     rep.wires = wiresmod.run(r, s, cat, area, poles, tag=f"{tag}-wires")
     rep.seconds = time.time() - t0
@@ -787,6 +818,14 @@ def _decon(r, surface, force, things):
     n = 0
     for i in range(0, len(things), DECON_BATCH):
         n += _int(r.lua(link.lua_decon_list(surface, force, things[i:i + DECON_BATCH])))
+    return n
+
+
+def _destroy(r, surface, things):
+    """Where things are free: destroy ``things`` [(name, x, y)] in batches; -> how many."""
+    n = 0
+    for i in range(0, len(things), DECON_BATCH):
+        n += _int(r.lua(link.lua_destroy_list(surface, things[i:i + DECON_BATCH])))
     return n
 
 

@@ -29,7 +29,7 @@ STANDS = """\
 # placer pins on the ore (its seed the patch's centroid, its cell the patch grown to its need)
 module Stand<res> size 40x40 {
   port o : out $res | $res @s20
-  src = Chest<requester, item=$res, rate=45/s> @(1, 1)
+  src = Chest<infinity, item=$res, rate=45/s> @(1, 1)     # a god-mode source: the lab has no network to feed a requester
   net g: src -> o
 }
 # a stand-in well: a pumpjack on a crude patch

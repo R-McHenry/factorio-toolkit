@@ -787,6 +787,15 @@ def _machine_attrs(m):
                                       m.extra.get("max")))
         if m.extra.get("trash"):
             fields["request_filters"]["trash_not_requested"] = True
+    elif m.extra.get("role") == "infinity" and m.makes:
+        # 47-cleanpaste: an infinity chest holds its items at a count (the game's
+        # infinity_settings), where things are free
+        items = list(m.makes)
+        attrs["item"] = items[0]
+        fields["infinity_settings"] = {
+            "remove_unfiltered_items": True,
+            "filters": [{"index": k + 1, "name": it, "count": INFINITY_COUNT, "mode": "exactly"}
+                        for k, it in enumerate(items)]}
     if m.extra.get("limit") is not None:
         fields["bar"] = int(m.extra["limit"])    # the chest's inventory bar: its usable slots
     if fields:
@@ -797,6 +806,9 @@ def _machine_attrs(m):
 #: logistic chests that ask the network for their item: the request has to be in the paste, or
 #: the chest asks for nothing (the V1 rehearsal's gear factory got no plates, 2026-10-20)
 _REQUESTS = ("requester", "buffer")
+#: what an infinity chest keeps of each of its items (``Chest<infinity>``, 47-cleanpaste): a
+#: few stacks, refilled by the game every tick
+INFINITY_COUNT = 1000
 
 
 def _request_fields(item, request, rate, most=None):

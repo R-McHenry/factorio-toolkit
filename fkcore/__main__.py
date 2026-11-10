@@ -87,6 +87,8 @@ use the game link, and only with FK_LINK=on)
     alone GAME_DIR NAME [--surface S] [--from DIR] [--size WxH] [--keep] | NAME --measure SECS
           | NAME --clear | --list         a module built alone on a slot of a surface (3.1;
                                           default lab); then what it really makes there
+    clear GAME_DIR AREA [--surface S]       empty an area of a free surface (the lab): all but
+                                          characters and resources destroyed, for a clean paste
     standin GAME_DIR NAME supply|feed|ore [--surface S] [ore: --ore R --area A | --copy-ore A
           [--to X,Y] | --clear-ore]       a god-mode stand-in on it, by name: power, stock and
                                           fuel; a source or sink at each open port; ore (free
@@ -1371,6 +1373,38 @@ def _alone(a, cat):
     return 0
 
 
+def _clear(a):
+    """fk clear (3.2.2, 47-cleanpaste): empty an area of a free surface (the lab): everything
+    there but characters and resources destroyed, so a paste lands on clean ground
+    (``alone.lua_clear``, what ``fk alone`` does to its slot). Refused where things are not free."""
+    from . import alone
+    surface = a.surface or alone.LAB
+    try:
+        area = tuple(int(float(v)) for v in a.area.split(","))
+        if len(area) != 4 or area[0] >= area[2] or area[1] >= area[3]:
+            raise ValueError(area)
+    except ValueError:
+        print(f"clear AREA: X0,Y0,X1,Y1 in map tiles (x0 < x1, y0 < y1), got {a.area!r}")
+        return 2
+    free = surface == alone.LAB
+    path = os.path.join(os.path.abspath(a.game), f"{surface}.surface")
+    if os.path.exists(path):
+        from . import surface as surfacemod
+        free = surfacemod.load(path, derive=False).free
+    if not free:
+        print(f"clear: {surface} is not free, nothing destroyed (where robots build, fk decon "
+              "--area orders things out)")
+        return 2
+    r = _game_link("clear")
+    if r is None:
+        return 2
+    with r:
+        got = r.lua(alone.lua_clear(surface, area)).strip()
+    print(f"clear {surface} area {','.join(str(v) for v in area)}: {got} entities destroyed "
+          "(characters and resources kept)")
+    return 0
+
+
 def _standin(a, cat):
     """fk standin (3.1): a god-mode stand-in on a module built alone, by name (fkcore.standin)."""
     from . import alone, standin
@@ -2204,6 +2238,13 @@ def main(argv=None):
     al.add_argument("--keep", action="store_true",
                     help="build over what stands (the slot not emptied)")
     al.add_argument("--list", action="store_true")
+    cl = sub.add_parser("clear", description="3.2.2: empty an area of a free surface (the lab): "
+                        "everything there but characters and resources destroyed, so a paste "
+                        "lands on clean ground (fkcore.alone.lua_clear); refused where things "
+                        "are not free")
+    cl.add_argument("game")
+    cl.add_argument("area", help="X0,Y0,X1,Y1 in map tiles")
+    cl.add_argument("--surface", help="the surface (default lab)")
     si = sub.add_parser("standin", description="3.1: a god-mode stand-in on a module built alone "
                         "(fkcore.standin): supply (power, stock, fuel), feed (a source or sink at "
                         "each open port), ore. Only where things are free")
@@ -2412,6 +2453,8 @@ def main(argv=None):
         return _alone(a, cat)
     if a.cmd == "standin":
         return _standin(a, cat)
+    if a.cmd == "clear":
+        return _clear(a)
     if a.cmd == "capture":
         return _capture(a, cat)
     if a.cmd == "walk":

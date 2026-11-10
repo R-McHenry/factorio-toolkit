@@ -561,7 +561,8 @@ def lab(params, cat):
 
 
 _CHEST = {"provider": "passive-provider-chest", "storage": "storage-chest",
-          "requester": "requester-chest", "buffer": "buffer-chest", "plain": "iron-chest"}
+          "requester": "requester-chest", "buffer": "buffer-chest", "plain": "iron-chest",
+          "infinity": "infinity-chest"}
 
 
 def chest(params, cat):
@@ -606,7 +607,10 @@ def chest(params, cat):
     proto = _word(params, "chest", _CHEST[role])
     rate = _rate(params, "rate")
     limit = _int(params, "limit") if params.get("limit") is not None else None
-    if role == "requester":
+    if role in ("requester", "infinity"):
+        # infinity (47-cleanpaste, 3.2.2): a god-mode source where things are free (the lab): the
+        # stand-in mine or feed the design itself declares, so a paste lays it and a diff knows
+        # it (the T6 flower's stands were requesters swapped by Lua after every apply)
         items = [i.strip() for i in str(params.get("item", "")).split(",") if i.strip()]
         if not items:
             items = [_word(params, "item")]
@@ -838,6 +842,17 @@ def with_modules(specs, modules):
         mods = words * slots if len(words) == 1 else words
         if len(mods) > slots:
             raise TemplateError(f"modules={'|'.join(words)}: {s.prototype} has {slots} slots")
+        # 47-cleanpaste: the game refuses a productivity module on a recipe that takes no
+        # productivity (rail, a machine, a module): the paste's request for it stood unfilled
+        # and the model counted its bonus. Left out, with a check (never a gate)
+        refused = [m for m in mods if MODULE_EFFECTS[m][1] > 0] \
+            if s.recipe and s.recipe not in PRODUCTIVE else []
+        if refused:
+            mods = [m for m in mods if MODULE_EFFECTS[m][1] <= 0]
+            s.extra = dict(s.extra, checks=list(s.extra.get("checks") or ()) + [(
+                "module-refused", f"{s.prototype} on {s.recipe}: the game takes no productivity "
+                f"there, so its {len(refused)} {refused[0]} are left out (speed or efficiency "
+                "modules go in)")])
         speed = max(0.2, 1 + sum(MODULE_EFFECTS[m][0] for m in mods))
         prod = 1 + sum(MODULE_EFFECTS[m][1] for m in mods)
         s.needs = {i: r * speed for i, r in s.needs.items()}

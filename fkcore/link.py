@@ -558,6 +558,69 @@ rcon.print(n .. ' ' .. failed)
 """
 
 
+def lua_destroy_list(surface, things):
+    """Where things are free (47-cleanpaste): destroy ``things`` [(name, x, y)] where they stand,
+    a ghost of the name on that position too; -> how many. The free path's answer to
+    ``lua_decon_list``: nothing orders robots there."""
+    rows = ",".join(f"{{{_q(n)},{float(x)},{float(y)}}}" for n, x, y in things)
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for _, t in pairs({{{rows}}}) do
+  for _, e in pairs(s.find_entities_filtered{{position = {{t[2], t[3]}}}}) do
+    if e.valid and (e.name == t[1] or (e.name == 'entity-ghost' and e.ghost_name == t[1])) then
+      e.destroy() n = n + 1
+    end
+  end
+end
+rcon.print(n)
+"""
+
+
+def lua_unmark(surface, area):
+    """Where things are free (47-cleanpaste): the deconstruction marks a superforced paste left
+    on what stood in a ghost's way are noise (no robots come), and a marked pump or pipe looks
+    stuck to a player: cancel them in ``area``; -> how many."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n = 0
+for _, e in pairs(s.find_entities_filtered{{area = {_area(area)}, to_be_deconstructed = true}}) do
+  if e.valid and e.cancel_deconstruction(e.force) then n = n + 1 end
+end
+rcon.print(n)
+"""
+
+
+def lua_fulfil(surface, area):
+    """Where things are free (47-cleanpaste): a revived ghost's item requests (a machine's
+    modules, a blueprint's insert plan) stand as an item-request proxy that robots would answer;
+    none come here, so each proxy's plan is put into its target's inventories as the plan names
+    them and the proxy destroyed; -> "proxies items missed" (missed: a stack the target's
+    inventory refused)."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n, k, missed = 0, 0, 0
+for _, p in pairs(s.find_entities_filtered{{area = {_area(area)}, type = 'item-request-proxy'}}) do
+  local e = p.valid and p.proxy_target
+  if e and e.valid then
+    for _, plan in pairs(p.insert_plan or {{}}) do
+      local id = plan.id
+      local name = type(id) == 'table' and id.name or id
+      local q = type(id) == 'table' and id.quality or nil
+      for _, at in pairs((plan.items or {{}}).in_inventory or {{}}) do
+        local inv = e.get_inventory(at.inventory)
+        local st = inv and inv[(at.stack or 0) + 1]
+        if st and st.set_stack{{name = name, quality = q, count = at.count or 1}} then k = k + (at.count or 1)
+        else missed = missed + 1 end
+      end
+    end
+    p.destroy() n = n + 1
+  end
+end
+rcon.print(n .. ' ' .. k .. ' ' .. missed)
+"""
+
+
 def lua_decon(surface, force, area):
     return f"""
 local s = game.get_surface({_q(surface)})
