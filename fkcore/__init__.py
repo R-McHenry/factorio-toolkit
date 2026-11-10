@@ -2,4 +2,4 @@
 Pure, stdlib only."""
 
 #: the release (docs/RELEASE-3.1.md); a run's run.json names the commit it plays
-__version__ = "3.2.2"
+__version__ = "3.2.3"

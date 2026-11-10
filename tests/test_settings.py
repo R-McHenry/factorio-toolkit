@@ -88,6 +88,25 @@ class SettingsTest(unittest.TestCase):
                           "red wire to inserter at 5.5,5.5 (the design has none: the build "
                           "cuts them)"])
 
+    def test_an_idle_furnace_has_no_recipe_and_no_hand_edit(self):
+        # 48-furnacediff: the paste names the furnace's recipe, the game reports none until it
+        # is fed; an assembler without its recipe is still a hand edit
+        want = settings.design([
+            {"src": "m/f0", "name": "electric-furnace", "x": 1.5, "y": 1.5, "direction": None,
+             "attrs": {"recipe": "iron-plate"}},
+            {"src": "m/a0", "name": "assembling-machine-2", "x": 5.5, "y": 1.5, "direction": None,
+             "attrs": {"recipe": "iron-gear-wheel"}}], None)
+        have = settings.live({"rows": [
+            {"n": 1, "name": "electric-furnace", "x": 1.5, "y": 1.5,
+             "e": {"entity_number": 1, "name": "electric-furnace"}},
+            {"n": 2, "name": "assembling-machine-2", "x": 5.5, "y": 1.5,
+             "e": {"entity_number": 2, "name": "assembling-machine-2"}}]})
+        self.assertIn("recipe", want[settings._at("electric-furnace", 1.5, 1.5)][0])
+        got = settings.drifts(want, have, [
+            Verdict("ok", "electric-furnace", 1.5, 1.5, "nauvis:s/m/f0"),
+            Verdict("ok", "assembling-machine-2", 5.5, 1.5, "nauvis:s/m/a0")], {})
+        self.assertEqual([d.name for d in got], ["assembling-machine-2"])
+
     def test_only_what_stands_where_the_design_has_it(self):
         ghost = [Verdict("ghost", "inserter", 5.5, 5.5, "nauvis:mall/m/i0")] + VERDICTS[1:]
         got = settings.drifts(settings.design(rows(), None), settings.live(game(request=REQUEST)),
