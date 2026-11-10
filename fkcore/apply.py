@@ -358,14 +358,15 @@ def turned_rows(rows, cap, cat, built_first=False):
     way or as the other underground end, in a snapshot ``cap`` taken after the paste: the paste
     was refused there, so nothing will turn it. A ghost an earlier build left of an older design
     is one too (ordered out, the game removes it at once). ``built_first`` (3.2.5, where things
-    are free): the built entity is judged even under a ghost; a superforced paste lays the
-    design's ghost over a belt facing another way, and the revive then fails on it."""
+    are free): the built entity is judged even under a ghost or marked for deconstruction; a
+    superforced paste marks a belt facing another way (no robot comes) and the revive then
+    fails on it (3.2.6: the mark hid it from 3.2.5)."""
     built, ghosts = {}, {}
     for t in cap["things"]:
         k = (t["n"], float(t["x"]), float(t["y"]))
         if t.get("g"):
             ghosts[k] = t
-        elif not t.get("dc"):
+        elif built_first or not t.get("dc"):
             built[k] = t
     out = []
     for i, row in enumerate(rows):

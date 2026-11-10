@@ -237,3 +237,9 @@ the belt under it. The revive then failed on the belt (the T6 flower after the b
 
 - **`turned_rows(..., built_first=True)`** (apply, where things are free): the built entity is
   judged even under a ghost; the turned ones are destroyed with their ghost and laid fresh.
+
+## 3.2.6: a marked turned belt is turned too (2026-11-09, night; 51-freeturned-marked)
+
+3.2.5 still left the T6 flower's 20 turned belts: the superforced paste also marks a belt in
+the design's way for deconstruction, and `turned_rows` skips a marked entity (robots take it up).
+Where things are free no robot comes, so `built_first` judges a marked one as well.
