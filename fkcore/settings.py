@@ -245,6 +245,11 @@ def design(rows, s):
     return out
 
 
+def _is_furnace(name):
+    from . import facts
+    return (facts.entity(name) or {}).get("type") == "furnace"
+
+
 def drifts(want, have, verdicts, users):
     """The design's entities that stand (a diff's ok or settings-changed verdicts) with other settings than
     ``want`` (``design``) has, in ``have`` (``live``): [Drift]. ``users``: {at: last_user}. Wires
@@ -259,6 +264,11 @@ def drifts(want, have, verdicts, users):
         # 2.1: the design's bp. fields too, where it sets them
         keys = [f for f in list(KEYS) + sorted(set(wf) - set(KEYS)) if wf.get(f) != hf.get(f)]
         v = judged[k]
+        # 48-furnacediff: a furnace picks its recipe from what it is fed, and the game reports
+        # none while it is idle (sense judges it so too): the blueprint's recipe is no setting a
+        # hand changed (1284 idle electric furnaces on the T6 flower's paste)
+        if "recipe" in keys and not hf.get("recipe") and _is_furnace(v.name):
+            keys.remove("recipe")
         if keys:
             w = describe({f: wf[f] for f in keys if f in wf})
             # 2.1: the codec writes every setting (codec.RESET_CB), so a paste clears what the
