@@ -172,6 +172,14 @@ have the base paste in cleanly" (`docs\notes-47-cleanpaste.md`):
 
 No ROUTER bump.
 
+## 3.2.3: an idle furnace is no hand edit (2026-11-09, evening; 48-furnacediff)
+
+The T6 flower's paste with real mines (50,948 entities, `diff ... ok 50948`) also listed 642 hand
+edits, all electric furnaces: "nothing set (the paste sets recipe copper-plate)". A furnace picks
+its recipe from what it is fed and the game reports none while it is idle; `settings.drifts` now
+leaves the recipe out for a furnace that reports none (sense already judged it so). An assembler
+without its recipe is still a hand edit. No ROUTER bump.
+
 ## Not in this release
 
 - The flower on the lab ground beside the corridor flower (T6's paste), `fk look` drawing the
