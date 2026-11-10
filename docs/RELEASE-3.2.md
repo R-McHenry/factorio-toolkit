@@ -244,6 +244,27 @@ the belt under it. The revive then failed on the belt (the T6 flower after the b
 the design's way for deconstruction, and `turned_rows` skips a marked entity (robots take it up).
 Where things are free no robot comes, so `built_first` judges a marked one as well.
 
+## 3.2.8: the route step's fixed cost no longer grows with the layout (2026-11-10; 54-presearch)
+
+Found rebuilding the compact T6 flower (6478 nets, 43,755 entities) after its modules moved: the
+route step spent 3651 s (3.2.6: 4603 s) before its first search, and a no-op rebuild 197 s.
+
+- **A faulty committed net's patch is judged on the ground around it.** After a move, 2819
+  committed routes "would SPILL" and each one's patch built `connect.graph` over the whole layout.
+  `_Near`/`_Cells` give the judge only the 8-tile cells around the net (its old carriers, ends,
+  port edges, member nets, the patch, and a margin past the longest underground or pipe-to-ground
+  reach). It asks only local questions, so its answers are the same. The patch's search ground is
+  built on first use.
+- **`seal_checks` by place:** entities are indexed by place, key prefix and net instead of walking
+  every entity for each of the 1284 sealed frames (125 s of the no-op's 197 s). Same lines, same
+  order.
+- Smaller cuts: the first-leak lookup is indexed, and `_ends_of` no longer copies the ports per call.
+
+The flower's route step: moved placement **3651 -> 223 s** (first search 3404 -> 72 s in), no-op
+**197 -> 52 s**. `route.txt` and all 3374 net files are identical before and after. What is left
+is mostly the design database's file I/O (~40 s no-op, ~80 s moved). New `tests/test_presearch.py`.
+Notes: `docs/notes-54-presearch.md`.
+
 ## 3.2.7: what rides on a lane is traced (2026-11-10; 53-lanetrace)
 
 Rory: a pair of belts side-loading onto another belt "blatantly" mixes nets onto one lane. The
