@@ -2282,10 +2282,19 @@ def _ends_of(flat, table, job, g, routed=True, net=None):
     """(drivers, consumers): the net's endpoint keys that stand in graph ``g``; ``routed``: only
     those of the instances the router lays the net to (a Literal's are laid by hand); ``net``: one
     member of a lane pair's job (its ends are the member's, the pair's name has none)."""
-    placed = _placed(flat, job) if routed else None
     drivers, consumers = table.get(net or job.net, ((), ()))
+    if routed:
+        # 54-presearch: ``_placed``'s test, with no copy of every port of the layout for each call
+        # (thousands on the T6 flower, twice a net per judgement)
+        ports = getattr(flat, "ports", None) or ()
+        mine = set()
+        for owner in job.owners:
+            mine |= set(flat.insts[owner.rsplit(".", 1)[0]].machines)
+        placed = lambda k: k in ports or k in mine
+    else:
+        placed = None
     pick = lambda ends: sorted({k for k, _i in ends if k in g.nodes
-                                and (placed is None or k in placed)}, key=fkpmod.natural_key)
+                                and (placed is None or placed(k))}, key=fkpmod.natural_key)
     return pick(drivers), pick(consumers)
 
 
@@ -2453,31 +2462,150 @@ def _branch_words(laid):
     return ", ".join(words)
 
 
+class _Cells:
+    """54-presearch: entities (and port keys) by ``S``-tile cell, for ``_Near``."""
+    S = 8
+
+    def __init__(self):
+        self.ents, self.ports = {}, {}
+
+    @classmethod
+    def of(cls, x, y):
+        return (math.floor(x) // cls.S, math.floor(y) // cls.S)
+
+    def add(self, ents):
+        for e in ents:
+            self.ents.setdefault(self.of(e.x, e.y), []).append(e)
+
+    def add_port(self, key, pe):
+        for t in {tuple(pe.src), tuple(pe.dst)}:
+            self.ports.setdefault(self.of(*t), []).append(key)
+
+    def __iter__(self):
+        for ents in self.ents.values():
+            yield from ents
+
+
+class _Near:
+    """54-presearch: the ground around one net, for the graphs its patch judges on. ``cells``: a
+    ``_Cells`` of every entity that is or was on the ground, and of the port edges; ``live(e)``:
+    e is on it now; ``fixed``: the points the net's graph must hold whatever its route is (its
+    ends, the ground's carriers of its member nets, its ends' port edges); ``margin``: past the
+    farthest any edge reaches (an underground's or a pipe-to-ground's max_distance, a big
+    machine, a hand). The graph holds every entity within ``margin`` of one of those points or of
+    the route's carriers (and some more: whole cells), so every edge at the net's own carriers and
+    ends, and the via of each, is as the whole layout's graph has it. That graph is all
+    ``_patch_net`` reads: each patched net built the graph of the whole layout (43,755 entities on
+    the T6 flower) and judged every edge of it, 1.5 s a net, and a rebuild after a placement
+    change patched 2,819 nets (4,200 s of a 4,603 s route step)."""
+
+    def __init__(self, cat, flat, cells, live, fixed, margin):
+        self.cat, self.flat, self.cells, self.live = cat, flat, cells, live
+        self.k = margin // _Cells.S + 1       # cells within reach of a point's cell
+        self.fixed = self._around({_Cells.of(x, y) for x, y in fixed})
+
+    def _around(self, at):
+        k = self.k
+        return {(cx + i, cy + j) for cx, cy in at for i in range(-k, k + 1)
+                for j in range(-k, k + 1)}
+
+    def window(self, route):
+        """The cells around ``route`` (carriers) and the fixed points, or None when there is
+        nothing to centre them on."""
+        got = self.fixed | self._around({_Cells.of(e.x, e.y) for e in route})
+        return got or None
+
+    def ports(self, cells):
+        """The port edges with a tile in ``cells`` (all of them with no cells)."""
+        every = _ports(self.flat)
+        if cells is None:
+            return every
+        by = self.cells.ports
+        return {k: every[k] for c in cells for k in by.get(c, ())}
+
+    def graph(self, route, ground=None):
+        """The carrier graph of the ground around ``route`` and ``route`` itself, with the ports
+        whose edge is there (``ground``: the whole ground, a callable, for when no window can be
+        had)."""
+        cells = self.window(route)
+        if cells is None:
+            near = list(ground() if callable(ground) else ground or ())
+            return connectmod.graph(near + list(route), self.cat, _ports(self.flat))
+        live, by = self.live, self.cells.ents
+        near = [e for c in cells for e in by.get(c, ()) if live(e)]
+        return connectmod.graph(near + list(route), self.cat, self.ports(cells))
+
+
+def _reach_margin(cat, names):
+    """How far past a net's carriers its graph must reach (``_Near``): the longest underground or
+    pipe-to-ground among ``names`` (and the plain ones a patch lays), plus a machine's half and a
+    hand, at least ``_CLIP``."""
+    reach = 0
+    for name in set(names) | {"underground-belt", "pipe-to-ground"}:
+        try:
+            if cat.has_entity(name) and cat.kind(name) in ("underground-belt", "pipe-to-ground"):
+                reach = max(reach, int(cat.entity(name).get("max_distance") or 10))
+        except (KeyError, ValueError, TypeError):
+            continue
+    return max(_CLIP, reach + 8)
+
+
 class _Patch:
     """One net's patch in the making: its standing carriers, what it adds, and the ground. A lane
     pair (``A|B``, 2.0) is patched by its two member nets: each has its own drivers, consumers and
     reach, and a new carrier's ``net=`` says which lanes it carries."""
 
     def __init__(self, cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid,
-                 g=None):
+                 g=None, near=None):
         self.cat, self.flat, self.table, self.job, self.net = cat, flat, table, job, job.net
         self.members = fkpmod.net_names(job.net) or [job.net]
-        self.ents, self.kept, self.added, self.replaced = list(ents), list(kept), [], []
+        # 54-presearch: ``ents`` may be a callable that builds the ground (a list) when a search
+        # first needs it, and ``near`` a ``_Near``: the graph is then of what stands around the
+        # net only (``_Near.graph``), and the ground's tile sets are worked out on first use, so a
+        # patch that ends before any search never walks the whole layout
+        self._ents = ents if callable(ents) else list(ents)
+        self.kept, self.added, self.replaced = list(kept), [], []
         self.frames, self.js, self.box, self.limit = frames, js, box, limit
         self.terrain, self.avoid = terrain, set(avoid)
+        self.near = near
         self.used = {e.key for e in kept}
         self.refresh(g)
+
+    @property
+    def ents(self):
+        if callable(self._ents):
+            self._ents = list(self._ents())
+        return self._ents
 
     def refresh(self, g=None):
         """The graph, each member's ends and flows, and the ground with what stands now. ``g``:
         the graph of exactly what stands now, when the caller has it (2.1.30)."""
-        cat, net = self.cat, self.net
-        allents = self.ents + self.kept + self.added
-        self.g = g if g is not None else connectmod.graph(allents, cat, _ports(self.flat))
+        cat = self.cat
+        if g is None:
+            if self.near is not None:
+                g = self.near.graph(self.kept + self.added, lambda: self.ents)
+            else:
+                g = connectmod.graph(self.ents + self.kept + self.added, cat, _ports(self.flat))
+        self.g = g
         self.ends, self.fwd, self.bwd = {}, {}, {}
         for m in self.members:
             self.ends[m] = _ends_of(self.flat, self.table, self.job, self.g, net=m)
             self.fwd[m], self.bwd[m] = _flows(self.g, m, *self.ends[m])
+        for name in self._GROUND:
+            self.__dict__.pop(name, None)            # worked out again on first use
+
+    _GROUND = ("base", "fronts", "blocked", "spans", "clear")
+
+    def __getattr__(self, name):
+        # the search ground, worked out on first use (only for an attribute not set yet)
+        if name in _Patch._GROUND:
+            self._make_ground()
+            return self.__dict__[name]
+        raise AttributeError(name)
+
+    def _make_ground(self):
+        cat, net = self.cat, self.net
+        allents = self.ents + self.kept + self.added
         ends = set(self.job.ends())
         self.base = (_ground(cat, allents, self.frames, self.js, net, self.terrain)
                      | (self.avoid - ends))
@@ -2809,7 +2937,8 @@ def _role_ends(flat, job, machines, side):
     return out
 
 
-def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain=(), avoid=()):
+def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain=(), avoid=(),
+               near=None):
     """Patch one net's committed route ``old`` (carriers) on the layout ``ents``, whose ends all
     still stand where they stood: keep what still serves, take up what serves no end any more (a
     dropped end's branch), and route only each new end into it. -> (carriers, report text, None),
@@ -2837,7 +2966,13 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     members = fkpmod.net_names(job.net) or [job.net]
     sub = {m: table.get(m, ((), ())) for m in members}
     mine = {e.key for e in old}
-    g = connectmod.graph(list(ents) + list(old), cat, _ports(flat))
+    # 54-presearch: ``ents`` may be a callable giving the ground, and ``near`` a ``_Near``: every
+    # graph here is then of the ground around the net, which each judgement below reads alike
+    if near is not None:
+        g = near.graph(old, ents)
+    else:
+        ents = list(ents() if callable(ents) else ents)
+        g = connectmod.graph(ents + list(old), cat, _ports(flat))
     serve, trunked = set(), False
     for m in members:
         ends = _ends_of(flat, table, job, g, routed=False, net=m)
@@ -2855,7 +2990,7 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     # 2.1.30: a patch that keeps every carrier stands on the graph just built (the same entities)
     same = {e.key for e in kept} == mine
     p = _Patch(cat, flat, table, job, ents, kept, frames, js, box, limit, terrain, avoid,
-               g if same else None)
+               g if same else None, near)
     p.used |= mine
     new_c, new_d = set(), set()
     for m in members:
@@ -2938,11 +3073,16 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
             new.add(fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
     g = connectmod.graph(new, cat, _ports(flat))
     rep = connectmod.connect(g, cat, table)
+    first_leak = {}                  # 54-presearch: carrier key -> its first leak (report order)
+    for i, lk in enumerate(rep.leaks):
+        first_leak.setdefault(lk.src, i)
+        first_leak.setdefault(lk.dst, i)
     faulty = {}
     for net in sorted(patch):
         by_key = {e.key: e for e in patch[net]}
         keys = set(by_key)
-        leak = next((lk for lk in rep.leaks if lk.src in keys or lk.dst in keys), None)
+        at = [first_leak[k] for k in keys if k in first_leak]
+        leak = rep.leaks[min(at)] if at else None
         # a lane pair (``A|B``, merged with route patching 2026-10-22) is judged by its two nets:
         # the ends and the connect report are theirs, its own name has none
         apart, served = [], set()
@@ -2977,23 +3117,62 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
     standing = sorted(n for n in patch if n not in faulty)
     patched, again, held = {}, {}, {}
     pending = {n: patch[n] for n in faulty}
+    # 54-presearch: each patch judges on the graph of the ground around its net (``_Near``), not
+    # of the whole layout. The ground is the layout with what stands, plus the routes still
+    # waiting for their patch: every entity that is or was on it goes into one index by place,
+    # and ``live`` says which are on it now.
+    idx = _Cells()
+    idx.add(list(new.entities.values()) + [e for n in sorted(faulty) for e in patch[n]])
+    waiting = {id(e) for n in faulty for e in patch[n]}
+    carriers_of = {}                 # member net -> every carrier of it the ground had
+
+    def index(ents):
+        for e in ents:
+            for m in fkpmod.net_names(e.attrs.get("net")) or ():
+                carriers_of.setdefault(m, []).append((e.x, e.y))
+    index(idx)
+
+    def live(e):
+        return id(e) in waiting or new.entities.get(e.key) is e
+    margin = _reach_margin(cat, {e.name for e in idx})
+    edges = _ports(flat)
+    for k, pe in edges.items():
+        idx.add_port(k, pe)
+
+    def fixed_of(job):
+        pts = []
+        for m in fkpmod.net_names(job.net) or [job.net]:
+            pts += carriers_of.get(m, ())
+            for k, _i in [*table.get(m, ((), ()))[0], *table.get(m, ((), ()))[1]]:
+                e = new.entities.get(k)
+                if e is not None:
+                    pts.append((e.x, e.y))
+                pe = edges.get(k)
+                if pe is not None:
+                    pts += [tuple(pe.src), tuple(pe.dst)]
+        return pts
     for net in sorted(faulty):
         old = pending.pop(net)
+        waiting -= {id(e) for e in old}
         if js[net].fluid or js[net].skip:
             again[net] = faulty[net]
             continue
         # the routes still waiting for their patch stand in the way, as their carriers may stay
-        ground = list(new.entities.values()) + [e for ents in pending.values() for e in ents]
+        ground = (lambda: list(new.entities.values())
+                  + [e for ents in pending.values() for e in ents])
+        near = _Near(cat, flat, idx, live, fixed_of(js[net]), margin)
         fnet, bnet = net_frames(net) if net_frames else (frames, box)
         try:
             got, how, hold = _patch_net(flat, cat, table, js[net], old, ground, fnet, js, bnet,
-                                        limit, terrain, avoid)
+                                        limit, terrain, avoid, near)
         except Exception as exc:         # noqa: BLE001 - the net is routed again, as before 2.0
             got, how, hold = None, f"{type(exc).__name__}: {exc}", None
         # a route of inserters alone (direct insertion) is laid again whole: nothing to tear up
         if got is None and hold is not None and any(e.name in _HELD for e in hold):
             for e in hold:
                 new.add(e)
+            idx.add(hold)
+            index(hold)
             held[net] = (f"its standing route is kept as it is ({len(hold)} of {len(old)} "
                          f"carriers), the new end is not joined: {how}; to lay the net again "
                          f"whole: fk build --reroute {net}")
@@ -3003,6 +3182,8 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
             continue
         for e in got:
             new.add(e)
+        idx.add(got)
+        index(got)
         patched[net] = how
     return standing, patched, again, held
 
@@ -4664,6 +4845,29 @@ def seal_checks(flat, lay, cat):
         return not q.startswith(path + "/") and not path.startswith(q + "/") \
             and all(t in shapes[q] for t in tiles)
 
+    # 54-presearch: each module judges only the entities that can be at fault in it: those with a
+    # tile in its box (only they can stand inside), its own (their key under it) and its nets'
+    # carriers. Every module walked every entity and worked out its tiles again: on the T6
+    # flower (43,755 entities, 1284 sealed modules) 115 s of a no-op's 156 s route step (278 s
+    # of 406 on the open flower, 3.2.1). Same lines, in the same order (the layout's).
+    rows = list(lay.entities.items())
+    tiles_at, by_bucket, by_prefix, by_net = [], {}, {}, {}
+    S = 32
+    for i, (key, e) in enumerate(rows):
+        tiles = fkpmod.tiles_of(cat, e)
+        tiles_at.append(tiles)
+        for b in {(t[0] // S, t[1] // S) for t in tiles} or {None}:
+            by_bucket.setdefault(b, []).append(i)        # None: no tiles, inside every frame
+        for j, ch in enumerate(key):
+            if ch == "/":
+                by_prefix.setdefault(key[:j], []).append(i)
+        net = e.attrs.get("net")
+        if net:
+            by_net.setdefault(net, []).append(i)
+            for j, ch in enumerate(net):
+                if ch == "/":
+                    by_net.setdefault(net[:j], []).append(i)
+
     for path, rec in sorted(lay.insts.items()):
         if path not in boxes:
             continue
@@ -4671,9 +4875,15 @@ def seal_checks(flat, lay, cat):
         frame = shapes[path]
         where = f"{x0},{y0}..{x1 - 1},{y1 - 1}" if frame.is_box else \
             f"{x0},{y0}..{x1 - 1},{y1 - 1} ({frame.area} tiles of the box: its shape)"
-        for key, e in lay.entities.items():
+        near = (set(by_prefix.get(path, ())) | set(by_net.get(path, ()))
+                | set(by_bucket.get(None, ())))
+        for bx in range(math.floor(x0) // S, math.floor(x1 - 1) // S + 1):
+            for by in range(math.floor(y0) // S, math.floor(y1 - 1) // S + 1):
+                near.update(by_bucket.get((bx, by), ()))
+        for i in sorted(near):
+            key, e = rows[i]
             net = e.attrs.get("net")
-            tiles = fkpmod.tiles_of(cat, e)
+            tiles = tiles_at[i]
             inside = all(t in frame for t in tiles)
             if key.startswith(path + "/") and not inside:
                 # FRAME (2.0.40): the module's own contents past its declared size (2.0.37's rib:
