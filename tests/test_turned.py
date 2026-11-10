@@ -210,6 +210,10 @@ class TurnedTest(unittest.TestCase):
                  "direction": 4, "attrs": {}} for i in range(2)]
         self.assertEqual(applymod.turned_rows(rows, cap, CAT), [])
         self.assertEqual(applymod.turned_rows(rows, cap, CAT, built_first=True), [0])
+        # 51: the superforced paste marks it for deconstruction too (the lab, 3.2.5 missed all 20)
+        cap["things"][0]["dc"] = True
+        self.assertEqual(applymod.turned_rows(rows, cap, CAT), [])
+        self.assertEqual(applymod.turned_rows(rows, cap, CAT, built_first=True), [0])
 
     def test_where_the_paste_lands_it_turns_them_itself(self):
         # charted ground (a laptop test server, 2.0.77): a belt, an inserter or a splitter is
