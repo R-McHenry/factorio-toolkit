@@ -58,6 +58,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import arms as armsmod
+from . import lanes as lanesmod
 from . import avail as availmod
 from . import compiled as compiledmod
 from . import compose, connect, design, expand, fkp, placer, rates, route, snapshot
@@ -1989,6 +1990,85 @@ def _bootstrap_checks(ctx, factory, flat, lay):
     return out
 
 
+def _lane_mix_checks(ctx, factory, flat, lay, rep, ports):
+    """``LANE-MIX`` (53-lanetrace, Rory 11-10: "the lane model should only have one way to know
+    what nets are on lanes and it's by tracing all of it"): the lane trace of the whole layout
+    (``lanes.contents``: items from where they are made, along the lane physics, wanted or not)
+    against what each lane's nets carry. One line per net and lane where a foreign item first
+    gets on, naming the belt it comes off; the nets it rides on into after that are listed on
+    the same line, not as lines of their own. Items enter only at machines (the netlist's
+    ``makes``) and at an ``in`` port nothing laid feeds (its declared lanes)."""
+    cat = ctx.cat
+    # the layout's own carriers, port to port (connect's graph puts a node at every sealed port,
+    # which no lane edge crosses)
+    lg = lanesmod.build(list(lay.entities.values()), cat)
+    g = lg.graph
+    makes = {k: [i for i in m.makes if not cat.is_fluid(i)] for k, m in flat.machines.items()
+             if m.makes and not m.extra.get("port") and k in g.nodes}
+    seeds = []
+    for key, pe in (ports or {}).items():
+        port = flat.ports.get(key)
+        if port is None or port.dir != "in" or pe.fluid or g.at.get(tuple(pe.outside)):
+            continue
+        inside = g.at.get(tuple(pe.inside))
+        if inside is None:
+            continue
+        left = list(port.items)
+        right = list(port.right) if port.right else left
+        seeds += [((inside, "L"), left), ((inside, "R"), right)]
+    have = lanesmod.contents(lg, cat, makes=makes, seeds=seeds,
+                             filters=lanesmod.filters_of(lay.entities))
+    items_of = {n: set(net.items) for n, net in flat.nets.items()}
+    bad = {}                      # (lane node) -> (net label, lane, extra items)
+    for nid, node in lg.nodes.items():
+        if node.kind not in ("lane", "splitter"):
+            continue
+        e = lay.entities.get(nid[0])
+        net = e.attrs.get("net") if e is not None else None
+        if not net:
+            continue
+        lanes_ = fkp.net_lanes(net)
+        nets = lanes_[nid[1]] if lanes_ else fkp.net_names(net)
+        if not nets or any(n not in items_of for n in nets):
+            continue
+        extra = have.get(nid, frozenset()) - set().union(*(items_of[n] for n in nets))
+        if extra:
+            bad[nid] = ("|".join(nets), nid[1] if lanes_ else "", extra)
+    groups = {}
+    for nid, (label, lane, extra) in bad.items():
+        for item in extra:
+            grp = groups.setdefault((label, lane, item), {"n": 0, "from": []})
+            grp["n"] += 1
+            for ed in lg.inn.get(nid, ()):
+                src = ed.src
+                if item in have.get(src, ()) and item not in bad.get(src, ("", "", ()))[2]:
+                    srcnet = None
+                    if src[0] in lay.entities:
+                        srcnet = lay.entities[src[0]].attrs.get("net")
+                    grp["from"].append((nid[0], src[0], srcnet))
+    out = []
+    rides = {}
+    for (label, lane, item), grp in sorted(groups.items()):
+        if not grp["from"]:
+            rides.setdefault(item, []).append(f"{label} ({grp['n']})")
+    for (label, lane, item), grp in sorted(groups.items()):
+        if not grp["from"]:
+            continue
+        at, src, srcnet = sorted(grp["from"])[0]
+        side = {"L": "its left lane", "R": "its right lane"}.get(lane, "its belt")
+        whose = f"{srcnet}'s carrier {src}" if srcnet else src
+        msg = (f"{item} reaches {side} ({grp['n']} carrier lanes, first at {at}), which {label} "
+               f"does not carry: it comes off {whose}. A belt carries on whatever nothing picks "
+               "up, and a side-load puts both lanes of a belt onto one: end that item's lane "
+               "where it is used, or give the belt end a paired port")
+        more = [r for r in rides.get(item, ()) if not r.startswith(label + " ")]
+        if more:
+            msg += (f"; it rides on into {len(more)} more nets' lanes: {', '.join(more[:6])}"
+                    + (" ..." if len(more) > 6 else ""))
+        out.append(Check("LANE-MIX", f"{factory} net {label}", msg))
+    return out
+
+
 def s_report_checks(ctx, args):
     """Connectivity of every net and the invariants, now; then every check line of the run."""
     lines, checks = [], []
@@ -2004,6 +2084,7 @@ def s_report_checks(ctx, args):
         lines += sink_lines
         checks += sink_checks
         checks += _invariant_checks(factory, fkp.invariants(lay, ctx.cat, nets=flat.nets))
+        checks += _lane_mix_checks(ctx, factory, flat, lay, rep, ports)      # 53-lanetrace
         seen = {c.where for _step, c in ctx.checks if c.code == "bootstrap"}
         checks += [c for c in _bootstrap_checks(ctx, factory, flat, lay) if c.where not in seen]
     if ctx.composed is not None:

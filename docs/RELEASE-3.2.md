@@ -243,3 +243,36 @@ the belt under it. The revive then failed on the belt (the T6 flower after the b
 3.2.5 still left the T6 flower's 20 turned belts: the superforced paste also marks a belt in
 the design's way for deconstruction, and `turned_rows` skips a marked entity (robots take it up).
 Where things are free no robot comes, so `built_first` judges a marked one as well.
+
+## 3.2.7: what rides on a lane is traced (2026-11-10; 53-lanetrace)
+
+Rory: a pair of belts side-loading onto another belt "blatantly" mixes nets onto one lane. The
+pair router (`pairs.route_lanes`, PLAN-LANES 3-5) judged its trunk by part labels: each part's
+belt end was stamped with its part, so a feed that also carried another item looked clean. On
+the T6 flower a column's paired pass-through handed its leftovers out of a one-item port
+(`ridge/ea/mo` got advanced circuits), and the pair after it side-loaded them onto one lane.
+Rory: "the lane model should only have one way to know what nets are on lanes and it's by
+tracing all of it".
+
+- **`lanes.contents(lg, cat, makes, seeds, filters)`**: every item that can physically reach each
+  lane, traced from where it is made (a machine's products, a drill's ore, an infinity chest's
+  item, a chest passing on what it is given) along the lane physics, wanted or not. A belt passes
+  on whatever nothing picks up. No net label and no declared item goes in, except at an in-port
+  nothing laid feeds. `lanes.filters_of` gives the inserters' filters.
+- **`LANE-MIX`** (report_checks, loud): one line per net where a foreign item first gets onto its
+  lane, naming the belt it comes off and the nets it rides on into. On the T6 flower: 5 lines in
+  the 43 s step (`ridge/ea/mo`, `ridge/bka`, `fen/ab0/fe`, `meadow/gi1/0/f`,
+  `meadow/gi2/0/f`). `ridge/bka`'s trunk starts where the left part's belt turns into it, which
+  puts steel on both lanes; the label judge passed it.
+- **The pair judge traces items** (`pairs._lanes_hold`): a consumer's lane may hold only its
+  part's items. A part that starts at a sealed unit's out-port takes what the unit's own trace
+  puts there (`NetJob.feeds`, traced once per unit in its frame, 2.6 s for the flower's 453
+  units). The pair's own loading inserters count as filtered to their part, as the router filters
+  them after routing. Parts of one item (a wide net's two groups, a pinned net) are traced by
+  their drivers as well, since the items can't tell them apart.
+- **Pairs are laid after the nets that feed them** (`route._feed_order`): within a unit, a pair
+  waits for the nets into the machine or unit it draws from, so the judge sees what is on its
+  feed.
+- Still taken at its net's items: a part that starts at a port nothing traced (a unit's own
+  in-port, judged at its parent's level by LANE-MIX).
+

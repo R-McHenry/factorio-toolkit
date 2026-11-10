@@ -49,10 +49,11 @@ from dataclasses import dataclass, field
 
 from . import arms as armsmod
 from . import connect as connectmod
+from . import fkp as fkpmod
 from . import lanephys as phys
 
 __all__ = ["Node", "Edge", "LaneGraph", "build", "lane_rate", "inserter_rate", "ROTATION",
-           "HOLDERS", "INF", "reach"]
+           "contents", "filters_of", "HOLDERS", "INF", "reach"]
 
 INF = float("inf")
 _BELTS = frozenset({"transport-belt", "underground-belt", "splitter"})
@@ -69,7 +70,10 @@ _BULK = frozenset({"bulk-inserter", "stack-inserter"})
 #: yellow: fast hand 3 0.75, bulk hand 4 0.60; hands 1 and 2 lose nothing worth counting).
 _ONTO_BELT = {1: 1.0, 2: 1.0, 3: 0.75, 4: 0.6}
 #: Entity types an inserter or a drill reaches: the machines (connect's endpoints, and drills).
-HOLDERS = connectmod.HOLDER_TYPES | {"mining-drill"}
+HOLDERS = connectmod.HOLDER_TYPES | {"mining-drill", "infinity-container"}
+#: Holders connect leaves out that an inserter still picks from (53-lanetrace: the lab's
+#: ``Chest<infinity>`` stand-in source, whose items the lane trace starts from).
+_PICK_TOO = frozenset({"infinity-container"})
 
 
 def lane_rate(cat, name):
@@ -271,6 +275,9 @@ def build(ents, cat, hand=1, bulk_hand=1) -> LaneGraph:
         if b is not None and (key, b) not in drops and b in belts \
                 and g.nodes[b].kind == "underground-belt" and g.nodes[b].ug == "out":
             _drop(lg, g, belts, key, b)
+        a = g.at.get(hand_tiles[0])
+        if a is not None and g.nodes[a].kind in _PICK_TOO:
+            lg.add((a, ""), (key, ""), "pickup", 0)
     return lg
 
 
@@ -295,6 +302,111 @@ def reach(lg, seeds):
             if label not in got:
                 got.add(label)
                 todo.append((e.dst, label))
+    return out
+
+
+#: Holders that hand on what they are given, unchanged: a chest one inserter fills and another
+#: empties (a buffer, an arm chest).
+PASS_THROUGH = frozenset({"container", "logistic-container", "cargo-bay", "cargo-landing-pad",
+                          "space-platform-hub"})
+
+
+def contents(lg, cat, makes=None, seeds=(), filters=None):
+    """{node: frozenset(items)}: every item that can physically reach each node of the lane graph
+    (53-lanetrace, Rory 11-10: "the lane model should only have one way to know what nets are on
+    lanes and it's by tracing all of it"). Items start only where they really get onto belts:
+
+    - a machine's products, picked by an inserter or dropped by a drill: ``makes`` {graph key:
+      items} where the netlist knows them (an infinity chest's item, a stand-in source), else its
+      recipe's products, a drill's ore, a furnace's smelting of what reaches it; a chest hands on
+      what it is given (``PASS_THROUGH``); anything else (a lab, a turret) takes and gives nothing;
+    - ``seeds`` [(node, items)]: where items come from outside the layout (a port nothing laid
+      feeds: its declared lane items).
+
+    An inserter in ``filters`` {key: items} (``filters_of``) moves only those items.
+
+    From there they move along every edge by the lane physics (``build``): a side-load puts both
+    of a belt's lanes onto the near lane, a closed underground lane passes nothing, a splitter
+    keeps lanes. A machine takes what reaches it and passes on only what it makes, but a belt
+    passes on everything: what no inserter picks rides on to the belt's end, wanted there or
+    not. No net, no label and no declared item of a belt goes in: only what is made upstream.
+    Fluids are left out. Pure."""
+    g = lg.graph
+    makes = makes or {}
+    filters = filters or {}
+    have, taken, todo = {}, {}, []
+
+    def made(key):
+        if key in makes:
+            got = set(makes[key])
+        else:
+            n = g.nodes.get(key) if g is not None else None
+            got = set()
+            if n is None:
+                pass
+            elif n.kind in PASS_THROUGH:
+                got = set(taken.get(key, ()))
+            elif n.recipe and cat is not None and cat.has_recipe(n.recipe):
+                got = {p["name"] for p in cat.recipe(n.recipe).get("products", ())}
+            elif n.kind == "mining-drill" and n.resource:
+                got = {n.resource}
+            elif n.kind == "furnace" and cat is not None:
+                for item in taken.get(key, ()):
+                    try:
+                        rec = cat.recipe(cat.smelting_recipe(item))
+                    except KeyError:
+                        continue
+                    got |= {p["name"] for p in rec.get("products", ())}
+        return {i for i in got if cat is None or not cat.is_fluid(i)}
+
+    def put(node, items):
+        got = have.setdefault(node, set())
+        new = set(items) - got
+        if new:
+            got |= new
+            todo.append(node)
+
+    for node, n in lg.nodes.items():
+        if n.kind == "machine":
+            put(node, made(n.key))
+    for node, items in seeds:
+        if node in lg.nodes:
+            put(node, items)
+    while todo:
+        node = todo.pop()
+        items = have[node]
+        for e in lg.out.get(node, ()):
+            dst = lg.nodes[e.dst]
+            if dst.kind == "machine":
+                t = taken.setdefault(dst.key, set())
+                if items - t:
+                    t |= items
+                    put(e.dst, made(dst.key))
+                continue
+            if dst.kind == "inserter" and dst.key in filters:
+                put(e.dst, items & filters[dst.key])
+                continue
+            put(e.dst, items)
+    return {k: frozenset(v) for k, v in have.items()}
+
+
+def filters_of(ents, items_of=None):
+    """{inserter key: items} for ``contents``: an inserter's own ``filter=``, and with
+    ``items_of`` {net: items}, a route inserter that has none yet gets its net's items (the
+    router filters every route inserter that loads from a chest of more items to its net's,
+    after routing: ``route._filter_loads``; a pair judged while routing must count on it)."""
+    out = {}
+    for e in (ents.values() if isinstance(ents, dict) else ents):
+        if "inserter" not in e.name:
+            continue
+        flt = e.attrs.get("filter")
+        if flt:
+            out[e.key] = frozenset(x.strip() for x in str(flt).replace(",", "|").split("|")
+                                   if x.strip())
+        elif items_of is not None and e.owner.startswith("~"):
+            names = fkpmod.net_names(e.attrs.get("net") or "")
+            if names and all(n in items_of for n in names):
+                out[e.key] = frozenset(i for n in names for i in items_of[n])
     return out
 
 

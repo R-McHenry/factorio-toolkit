@@ -394,10 +394,11 @@ will stop working. The chapters quote each where it first appears; this is the l
 chapter 9), `SHARED_SINK` (a chest on a net with machines: whoever stands first gets its fill),
 `SUSHI_SINK` (a sushi net reaches a machine that doesn't take every item), `SUSHI_LIMIT` (a
 `limit=` on a mixed belt's chest), `SPILL` (a net's route touches another net), `WRONG-LANE`
-(chapter 4), `NO_POWER` (chapter 1), `no-source` / `power-short` / `switch-never` /
-`domain-overlap` / `copper` (chapter 10), `TILE_SHARED` (two pieces of one net on one tile),
-`UNREACHED` (diff: ghosts no powered roboport's construction area reaches), `REACH` (report_bom:
-the same per item; `stop_on reach`).
+(chapter 4), `LANE-MIX` (an item no net of a lane carries reaches it; names the belt it comes
+off), `NO_POWER` (chapter 1), `no-source` / `power-short` / `switch-never` / `domain-overlap`
+/ `copper` (chapter 10), `TILE_SHARED` (two pieces of one net on one tile), `UNREACHED` (diff:
+ghosts no powered roboport's construction area reaches), `REACH` (report_bom: the same per item;
+`stop_on reach`).
 
 **What is where:** `no-feed` / `no-taker` (an input with no net; an output going nowhere),
 `short-feed` (chapter 1), `cannot-carry` (a net names a machine with no endpoint for its items;
