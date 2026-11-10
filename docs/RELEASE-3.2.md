@@ -194,6 +194,10 @@ column side-loaded the two-item belt onto one lane, and so on down the field.
   that end and says what goes there too; the fix is a paired pass-through (`port bp_in : in
   chemical-science-pack | production-science-pack`) and one pair of nets through it, as the cell
   has. On the flower it fires on the eight lab columns only (16 lines).
+- **Turned rows on a free surface** (apply): the 2.0.5 turned step ran only where robots work, so
+  on a free surface a belt standing where the plan wants it facing another way stayed (the game
+  neither ghosts over it nor rotates it; 9 mesa belts after the LDS fix). A free apply now destroys
+  each turned one and lays it fresh with the rest of the paste.
 
 No ROUTER bump: the router's rule is unchanged; the elaborator says what it can't.
 

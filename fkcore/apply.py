@@ -564,12 +564,17 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
     if not free:
         rep.misplaced = len(stray)
     placed = _placed(cap) | up_now
-    if not free and not rep.misplaced:
-        # what the paste left turned goes, and its single ghost takes its place (2.0.5)
+    if not rep.misplaced:
+        # what the paste left turned goes, and its single ghost takes its place (2.0.5); where
+        # things are free it is destroyed where it stands (49-pairleak: no robot takes it up, and
+        # every build left the T6 flower's re-routed mesa belts facing their old ways)
         bad = turned_rows(rows, cap, cat)
         if bad:
             out = [(rows[i]["name"], float(rows[i]["x"]), float(rows[i]["y"])) for i in bad]
-            _decon(r, s.name, force, out)
+            if free:
+                _destroy(r, s.name, out)
+            else:
+                _decon(r, s.name, force, out)
             rep.turned = [rows[i]["src"] for i in bad]
             rep.fresh += [(k, "stood turned, or as the other underground end")
                           for k in rep.turned]
