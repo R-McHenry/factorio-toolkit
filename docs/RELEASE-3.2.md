@@ -180,6 +180,27 @@ its recipe from what it is fed and the game reports none while it is idle; `sett
 leaves the recipe out for a furnace that reports none (sense already judged it so). An assembler
 without its recipe is still a hand edit. No ROUTER bump.
 
+## 3.2.4: a pair that leaks onto a one-item belt is named (2026-11-09, evening; 49-pairleak)
+
+Rory, watching the T6 lab field: "the science still has the iterated sideloading issue ... the
+different materials are getting mixed onto one lane". Each `LabCol5` took blue and purple on two
+one-item pass-throughs (`b_in -> b_out`, `p_in -> p_out`) and both nets also fed the lab cell's
+paired `pb_in`. `elaborate._port_pairs` (2.1.3) then implies `lanes b | p`: one belt wherever the
+two nets go. The router serves a consumer when its item arrives and asks nothing of the other
+lane, so `b_out` and `p_out` were each fed from that belt by a splitter, both lanes; the next
+column side-loaded the two-item belt onto one lane, and so on down the field.
+
+- **`pair-leak`** (elaborate): a net of an implied pair that also ends at a one-item belt end names
+  that end and says what goes there too; the fix is a paired pass-through (`port bp_in : in
+  chemical-science-pack | production-science-pack`) and one pair of nets through it, as the cell
+  has. On the flower it fires on the eight lab columns only (16 lines).
+- **Turned rows on a free surface** (apply): the 2.0.5 turned step ran only where robots work, so
+  on a free surface a belt standing where the plan wants it facing another way stayed (the game
+  neither ghosts over it nor rotates it; 9 mesa belts after the LDS fix). A free apply now destroys
+  each turned one and lays it fresh with the rest of the paste.
+
+No ROUTER bump: the router's rule is unchanged; the elaborator says what it can't.
+
 ## Not in this release
 
 - The flower on the lab ground beside the corridor flower (T6's paste), `fk look` drawing the

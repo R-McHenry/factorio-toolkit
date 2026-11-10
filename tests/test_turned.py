@@ -170,6 +170,34 @@ class TurnedTest(unittest.TestCase):
         self.assertEqual([v.key for v in after.verdicts if v.turned], [])
         self.assertEqual(self.run_apply(world, rep.own).turned, [])
 
+    def test_where_things_are_free_the_turned_ones_are_destroyed_and_laid_fresh(self):
+        # 49-pairleak: the T6 flower's re-routed mesa belts stood facing their old ways through
+        # every free apply (the 2.0.5 step ran for robots only)
+        world = World(self.old, OLD_ITEMS)
+        gone = []
+
+        def destroy(r, surface, things):
+            gone.append(list(things))
+            for name, x, y in things:
+                world.things = [t for t in world.things
+                                if (t["n"], t["x"], t["y"]) != (name, float(x), float(y))]
+            return len(things)
+        with mock.patch.object(link, "snapshot", world.snapshot), \
+                mock.patch.object(link, "paste", world.paste), \
+                mock.patch.object(link, "ghosts", world.ghosts), \
+                mock.patch.object(applymod, "_decon", world.decon), \
+                mock.patch.object(applymod, "_destroy", destroy):
+            rep = applymod.apply(world, self.new, CAT, policy=WATCH, net_items=NEW_ITEMS,
+                                 own=self.own, free=True, force="lab")
+        # all 43 at once: the robots' 1.2 step (the 17 with old items, ordered out before the
+        # paste) is the policy path's; here every turned one goes in the one batch
+        self.assertTrue(LIVE_TURNED <= {local(k) for k in rep.turned})
+        self.assertEqual(len(rep.turned), 43)
+        turned = next(g for g in gone if ("transport-belt", 23.5, 104.5) in g)   # iore/outb0
+        self.assertEqual(len(turned), 43)
+        alone = {(e["name"], e["position"]["x"], e["position"]["y"]) for e in world.alone}
+        self.assertTrue(set(turned) <= alone)                  # each gets its single ghost
+
     def test_where_the_paste_lands_it_turns_them_itself(self):
         # charted ground (a laptop test server, 2.0.77): a belt, an inserter or a splitter is
         # turned in place, one a quarter turn off gets a ghost and is ordered out

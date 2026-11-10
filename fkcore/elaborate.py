@@ -2708,6 +2708,31 @@ def _port_pairs(flat, cat):
         pk = f"{a}|{b}"
         flat.pairs[pk] = (a, b)
         flat.lane_of[a] = flat.lane_of[b] = pk
+        _pair_leaks(flat, key, a, b)
+
+
+def _pair_leaks(flat, key, a, b):
+    """49-pairleak (Rory, 11-09, the T6 lab field: "the different materials are getting mixed
+    onto one lane"): an implied pair is one belt wherever its nets go, and a net of it that also
+    ends at a belt end of one item (a column's pass-through ``b_out``) is served from that belt by
+    a splitter, which hands it both lanes: the other net's item reaches a belt that takes one, and
+    the next cell side-loads both onto one lane. The router serves a consumer when its item
+    arrives and asks nothing of the other lane, so this is the elaborator's to say."""
+    for mine, other in ((a, b), (b, a)):
+        theirs = flat.nets[other].items[0]
+        for k, item in flat.nets[mine].consumers:
+            p = flat.ports.get(k)
+            if k == key or p is None or p.right is not None or theirs in p.items:
+                continue
+            flat.checks.append(Check(
+                "pair-leak", f"net {mine}",
+                f"nets {a} and {b} share a belt to the paired port {key.replace('/', '.')} "
+                f"(an implied `lanes {a} | {b}`), and {mine} also ends at "
+                f"{k.replace('/', '.')}, which takes {item} alone: the shared belt reaches it "
+                f"through a splitter with both lanes, so {theirs} goes there too and mixes on "
+                f"the next side-load. Give that end a paired port (`{p.name} : "
+                f"{p.dir} {flat.nets[a].items[0]} | {flat.nets[b].items[0]}`) and one pair "
+                "of nets through it, as the cell's", flat.nets[mine].line))
 
 
 def _both_port_checks(flat):
