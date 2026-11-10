@@ -20,12 +20,12 @@ Two cases, both on 3.2.7 (04be9ae). Samples every 5 s; seconds are samples x 5.
   routes are faulty ("would SPILL", "patching it failed") and each faulty net's `_patch_net` built
   `connect.graph` over the whole layout (43,755 entities + every port) to judge its patch: 2819
   whole-layout graphs before the first search. 3.2.6 spent 4603 s there (`fk-t6\game\compact2.out`);
-  3.2.7 still does (old code on fk-t6r: over 1970 s in `_standing` / `_patch_net` and no search yet when this was written; see Numbers). 3.2.7's change did not touch it: the
+  3.2.7 still does (old code on fk-t6r: route step 3651 s, first search 3404 s in). 3.2.7's change did not touch it: the
   23-kind-line build was fast only because nothing moved.
 
 After the change, the moved rebuild's 223 s route step: standing/patch 50 s, design database 80 s
 (`_write_nets` 45, `read_all` 35), search 30 s, repair/judge 20 s, store keys 10 s; the first search
-starts about 70 s in (it was 4,200-4,500 s on 3.2.6). These runs shared the CPU with other
+starts 72 s in (it was 4,200-4,500 s on 3.2.6). These runs shared the CPU with other
 builds, so seconds are high, not low.
 
 ## The changes (fkcore/route.py)
@@ -63,10 +63,10 @@ Route step seconds (`out\timings.txt`), same snapshot, old code (54-base worktre
 | case | 3.2.6 | 3.2.7 (old) | 54-presearch |
 |---|---|---|---|
 | no-op rebuild (fk-t6q) | - | 197.0 s | 51.6 s |
-| moved placement (fk-t6r/s) | 4603 s (compact2) | over 1970 s, still patching (run going) | 222.6 s (first search ~70 s in) |
+| moved placement (fk-t6r/s) | 4603 s (compact2) | 3651.2 s (first search 3404 s in) | 222.6 s (first search 72 s in) |
 
 Routes: no-op, `route.txt` and every net file identical old vs new (timing lines aside). Moved:
-the old-code run had not finished when this was committed; its route.txt is compared in a follow-up. Two new runs (bbox window, cell window) gave identical `route.txt`.
+`route.txt` identical old vs new (timing figures aside), and all 3374 net files identical (`# took` lines aside). Two new runs (bbox window, cell window) gave identical `route.txt`.
 
 ## Tests
 
