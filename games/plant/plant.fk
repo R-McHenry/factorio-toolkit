@@ -32,7 +32,7 @@ net water:       pump -> hx
 net steam:       hx -> t1, t2
 net heat items heat: reactor -> hx                # by contact: no route
 net fuel:        cells -> reactor   when fuel_ctl.temp < 550        # gated: the fuel saver
-net spent_cells items used-up-uranium-fuel-cell: reactor -> spent   # its burnt result
+net spent_cells items depleted-uranium-fuel-cell: reactor -> spent   # its burnt result
 
 wire fuel_ctl red: reactor -> fuel                # T from the reactor drives the fuel net's gate
 
