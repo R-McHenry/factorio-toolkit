@@ -158,6 +158,17 @@ have the base paste in cleanly" (`docs\notes-47-cleanpaste.md`):
   by Lua after every apply, and every apply put a requester ghost back).
 - **`fk clear GAME AREA [--surface S]`**: an area of a free surface emptied (everything but
   characters and resources), what `fk alone` does to its slot, for a surface-level design.
+- **After the revive on a free surface**, the deconstruction marks the superforced paste left are
+  cancelled (`ApplyReport.unmarked`; Rory: "stuck objects marked for deconstruction on the water
+  pipe"), and every item-request proxy's plan goes into its machine's slots and the proxy is
+  destroyed (`ApplyReport.filled`; Rory: "it still leaves ghosts for the modules": 3,127 proxies
+  on the T6 flower, 6,964 modules).
+- **A productivity module on a recipe that takes no productivity** (rail, a machine, a module) is
+  left out with a `module-refused` check: the game refused it at paste (28 stacks on the flower)
+  and the rate model counted its bonus.
+- **The tests no longer sit out the answer-file wait**: `tests/__init__.py` sets `FK_FILE_WAIT=0`
+  (3.2.1's 180 s wait made each test that fakes a missing file take 3 minutes; the merge set had
+  grown from about 2 minutes to hours).
 
 No ROUTER bump.
 

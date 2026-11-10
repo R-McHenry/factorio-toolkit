@@ -591,6 +591,36 @@ rcon.print(n)
 """
 
 
+def lua_fulfil(surface, area):
+    """Where things are free (47-cleanpaste): a revived ghost's item requests (a machine's
+    modules, a blueprint's insert plan) stand as an item-request proxy that robots would answer;
+    none come here, so each proxy's plan is put into its target's inventories as the plan names
+    them and the proxy destroyed; -> "proxies items missed" (missed: a stack the target's
+    inventory refused)."""
+    return f"""
+local s = game.get_surface({_q(surface)})
+local n, k, missed = 0, 0, 0
+for _, p in pairs(s.find_entities_filtered{{area = {_area(area)}, type = 'item-request-proxy'}}) do
+  local e = p.valid and p.proxy_target
+  if e and e.valid then
+    for _, plan in pairs(p.insert_plan or {{}}) do
+      local id = plan.id
+      local name = type(id) == 'table' and id.name or id
+      local q = type(id) == 'table' and id.quality or nil
+      for _, at in pairs((plan.items or {{}}).in_inventory or {{}}) do
+        local inv = e.get_inventory(at.inventory)
+        local st = inv and inv[(at.stack or 0) + 1]
+        if st and st.set_stack{{name = name, quality = q, count = at.count or 1}} then k = k + (at.count or 1)
+        else missed = missed + 1 end
+      end
+    end
+    p.destroy() n = n + 1
+  end
+end
+rcon.print(n .. ' ' .. k .. ' ' .. missed)
+"""
+
+
 def lua_decon(surface, force, area):
     return f"""
 local s = game.get_surface({_q(surface)})

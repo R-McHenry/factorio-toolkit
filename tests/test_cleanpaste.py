@@ -71,6 +71,29 @@ class FreeApplyTest(unittest.TestCase):
         # and the marks a superforced paste leaves are cancelled after the revive (no robots here)
         self.assertTrue(any("cancel_deconstruction" in c for c in r.calls))
         self.assertEqual(rep.unmarked, 0)                         # the fake game marked nothing
+        # and the revived machines' item requests (modules) are filled in place, not left as proxies
+        self.assertTrue(any("item-request-proxy" in c and "set_stack" in c for c in r.calls))
+
+    def test_the_fulfil_lua_fills_each_plan_and_destroys_the_proxy(self):
+        lua = link.lua_fulfil("lab", (0, 0, 10, 10))
+        self.assertIn("type = 'item-request-proxy'", lua)
+        self.assertIn("p.insert_plan", lua)
+        self.assertIn("e.get_inventory(at.inventory)", lua)
+        self.assertIn("(at.stack or 0) + 1", lua)             # the plan's stacks count from 0
+        self.assertIn("p.destroy()", lua)
+
+    def test_productivity_modules_on_a_recipe_without_productivity_are_left_out(self):
+        f = lang.parse(
+            "rails = AsmRow<n=1, recipe=rail, machine=assembling-machine-3, "
+            "modules=productivity-module-2> @(2, 2)\n"
+            "gears = AsmRow<n=1, recipe=iron-gear-wheel, machine=assembling-machine-3, "
+            "modules=productivity-module-2> @(2, 8)\n")
+        flat = elaborate(f, dict(f.modules), CAT, "t")
+        rail = next(m for m in flat.machines.values() if m.recipe == "rail")
+        gear = next(m for m in flat.machines.values() if m.recipe == "iron-gear-wheel")
+        self.assertEqual(rail.extra.get("modules"), [])           # the game refuses them there
+        self.assertEqual(gear.extra.get("modules"), ["productivity-module-2"] * 4)
+        self.assertTrue(any(c.code == "module-refused" for c in flat.checks))
 
     def test_the_destroy_lua_names_each_thing_and_its_ghost(self):
         lua = link.lua_destroy_list("lab", [("transport-belt", 16.5, 1.5), ("pipe", 3.5, 4.5)])

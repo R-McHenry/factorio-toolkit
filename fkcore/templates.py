@@ -842,6 +842,17 @@ def with_modules(specs, modules):
         mods = words * slots if len(words) == 1 else words
         if len(mods) > slots:
             raise TemplateError(f"modules={'|'.join(words)}: {s.prototype} has {slots} slots")
+        # 47-cleanpaste: the game refuses a productivity module on a recipe that takes no
+        # productivity (rail, a machine, a module): the paste's request for it stood unfilled
+        # and the model counted its bonus. Left out, with a check (never a gate)
+        refused = [m for m in mods if MODULE_EFFECTS[m][1] > 0] \
+            if s.recipe and s.recipe not in PRODUCTIVE else []
+        if refused:
+            mods = [m for m in mods if MODULE_EFFECTS[m][1] <= 0]
+            s.extra = dict(s.extra, checks=list(s.extra.get("checks") or ()) + [(
+                "module-refused", f"{s.prototype} on {s.recipe}: the game takes no productivity "
+                f"there, so its {len(refused)} {refused[0]} are left out (speed or efficiency "
+                "modules go in)")])
         speed = max(0.2, 1 + sum(MODULE_EFFECTS[m][0] for m in mods))
         prod = 1 + sum(MODULE_EFFECTS[m][1] for m in mods)
         s.needs = {i: r * speed for i, r in s.needs.items()}

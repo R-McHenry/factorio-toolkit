@@ -135,6 +135,7 @@ class ApplyReport:
     alone_missed: dict = field(default_factory=dict)  # settings those ghosts would not take
     landfill: int = 0                  # landfill tile ghosts laid under them on water (a pack)
     unmarked: int = 0                  # free (47-cleanpaste): deconstruction marks cancelled after the revive
+    filled: int = 0                    # free (47-cleanpaste): item-request proxies filled in place (modules)
     decon: int = 0                     # NOBODY entities ordered for deconstruction (play)
     dropped: int = 0                   # of them, the toolkit's own that the design dropped
     held: int = 0                      # NOBODY poles and roboports left up as scaffolding (1.7)
@@ -599,6 +600,14 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
         # superforced paste; no robots come here, so the mark is cancelled (the diff names what
         # stands there), and nothing looks stuck
         rep.unmarked = _int(r.lua(link.lua_unmark(s.name, area)))
+        # 47-cleanpaste: a revived machine's modules stand as an item-request proxy that no
+        # robot answers here (a player sees module ghosts): the plan goes into its slots
+        said = r.lua(link.lua_fulfil(s.name, area)).split()
+        rep.filled = int(said[0]) if said and said[0].isdigit() else 0
+        if rep.filled:
+            missed = int(said[2]) if len(said) > 2 and said[2].isdigit() else 0
+            rep.notes.append(f"free: {rep.filled} item requests filled in place ({said[1]} items: "
+                             "the machines' modules)" + (f", {missed} stacks refused" if missed else ""))
         if rep.unmarked:
             rep.notes.append(f"free: {rep.unmarked} deconstruction marks the paste left on what "
                              "stands cancelled (nothing takes them up here; the diff says what "

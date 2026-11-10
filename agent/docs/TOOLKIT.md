@@ -289,7 +289,9 @@ free: `fk standin NAME supply | feed | ore` (`ore --copy-ore AREA --to X,Y`, `or
 --area A [--amount N]`, `--clear-ore`). `fk lab NAME --from stages\4` builds from a stage's folder. `fk clear GAME AREA [--surface S]`
 empties an area of a free surface (everything but characters and resources), so a surface-level
 design pastes on clean ground; an apply on a free surface destroys the toolkit's own entities the
-design has dropped (a re-routed net's old belts) where they stand. `Chest<infinity, item=, rate=>`
+design has dropped (a re-routed net's old belts) where they stand, cancels the deconstruction marks
+the paste left, and puts each machine's modules straight into its slots (no robot comes to fill
+an item request there). `Chest<infinity, item=, rate=>`
 is the stand-in source a design declares itself (LANGUAGE.md), pasted and diffed like any chest.
 
 ## Bounds and obstacles

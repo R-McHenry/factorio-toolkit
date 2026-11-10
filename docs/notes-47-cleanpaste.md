@@ -61,3 +61,14 @@ can clear out an area consistently and have the base paste in cleanly."
 - The clean sequence, end to end: `fk clear . 2100,-600,3100,600 --surface lab` (49,116
   entities destroyed, resources and characters kept) then `fk build --from apply`: 48,826 ghosts
   placed and revived, 0 not revivable, `diff ... ok 48826`, nothing marked, nothing unowned.
+
+## Module ghosts (evening)
+
+Rory: "the pasting is not completely worked out, it still leaves ghosts for the modules". The
+revive builds each machine, but its `modules=` stand as an item-request proxy (the blueprint's
+insert plan) that robots would answer; none come on a free surface. On the standing flower:
+`proxies=3127`. `link.lua_fulfil` puts each plan's stacks into the target's inventories and
+destroys the proxy; run once on the lab by hand it answered `3127 6964 28` (proxies, modules
+placed, stacks refused), then `proxies=0`. The 28 refused were productivity modules on recipes the
+game takes no productivity on (rail, electric-furnace and the like in the mall rows); the template
+now leaves them out with a `module-refused` check, so the model stops counting their bonus.
