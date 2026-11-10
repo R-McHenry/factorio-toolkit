@@ -208,6 +208,11 @@ class NetJob:
     # need {lane: labels} what its carrier must hold, feeds [(heading 0-3, {lane: labels})] what
     # comes in; lanephys says which carriers the search may put there (was 2.1.31's no_bend)
     lanes: dict = field(default_factory=dict)
+    # 53-lanetrace: the items the netlist gives the net (its lane's goal: a lane of it holds
+    # these and nothing else); not part of the signature
+    items: tuple = ()
+    feeds: dict = field(default_factory=dict)   # 53-lanetrace: {tile: {"L", "R": items}} a
+    #                                          sealed unit's out-port puts on the belt there
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved) \
@@ -372,6 +377,9 @@ def jobs(flat, lay, cat) -> dict:
             job.owners.append(f"{path}.{role}")
     _literal_ends(flat, lay, cat, out, fluids)
     _drill_drops(lay, cat, out)
+    for net, job in out.items():
+        if net in flat.nets:
+            job.items = tuple(flat.nets[net].items)
     if getattr(flat, "pairs", None):
         from . import pairs
         pairs.merge(flat, out)
@@ -682,6 +690,68 @@ def _ends_index(js):
 #: 2.1.33 (lab FRICTION 35): how far past a net's search box an entity can still matter (its
 #: tiles, a belt's front, a long hand's reach, an underground's far end: turbo reaches 11)
 _CLIP = 16
+
+
+def _inst_of(owner):
+    """The instance an owner ("<inst>.<role>", "!" for a port seen from outside) or a machine key
+    ("<inst>/c0") names."""
+    owner = owner.rstrip("!")
+    return owner.rsplit(".", 1)[0] if "." in owner else owner.rsplit("/", 1)[0]
+
+
+def _feed_order(js, keys):
+    """53-lanetrace: ``keys`` with every pair laid after the nets that feed what it draws from
+    (a machine, or a sealed unit whose out-port it starts at), so the pair router's lane trace
+    sees what really rides on its feeds; every other net keeps its place. A feed loop keeps the
+    order it has."""
+    def ins(job):
+        return {_inst_of(o) for o, a in job.anchors.items() if any(x[0] == "in" for x in a)} \
+            | {_inst_of(k) for k, _r in job.taps}
+
+    def outs(job):
+        return {_inst_of(o) for o, a in job.anchors.items() if any(x[0] == "out" for x in a)} \
+            | {_inst_of(k) for k, _r in job.sources}
+    jobs = {k: js[k] for k in keys if k in js}
+    if not any(j.parts for j in jobs.values()):
+        return list(keys)
+    into = {}
+    for k, j in jobs.items():
+        for inst in ins(j):
+            into.setdefault(inst, set()).add(k)
+
+    def feeders(k):
+        seen, todo = set(), [k]
+        while todo:
+            j = jobs.get(todo.pop())
+            if j is None:
+                continue
+            for inst in outs(j):
+                for f in into.get(inst, ()):
+                    if f not in seen and f != k:
+                        seen.add(f)
+                        todo.append(f)
+        return seen
+    here = set(keys)
+    need = {k: feeders(k) & here for k, j in jobs.items() if j.parts}
+
+    def ready(w, wait):
+        """``w`` may be laid now: every feeder of it is laid, or is a waiting pair that waits on
+        ``w`` too (a loop)."""
+        left = need.get(w, set()) - done
+        return not left or left <= {x for x in wait if w in need.get(x, ())}
+    out, done, wait = [], set(), []
+    for k in keys:
+        wait.append(k)
+        moved = True
+        while moved:
+            moved = False
+            for w in list(wait):
+                if ready(w, wait):
+                    wait.remove(w)
+                    out.append(w)
+                    done.add(w)
+                    moved = True
+    return out + wait
 
 
 def _clipped(ents, frames, box):
@@ -1665,18 +1735,20 @@ def _widen(flat, cat, js):
         if halves is None:
             continue
         parts = []
+        its = job.items or (tuple(flat.nets[net].items) if net in flat.nets else ())
         for side, group in zip("lr", halves):
-            part = NetJob(f"{net}.{side}")
+            part = NetJob(f"{net}.{side}", items=its)    # 53-lanetrace: the pair judge's items
             for entry in group:
                 (part.sources if isinstance(entry[0], str) else part.starts).append(entry)
                 if isinstance(entry[0], str) and entry[0] in job.drops:
                     part.drops[entry[0]] = job.drops[entry[0]]
             parts.append(part)
-        both = NetJob(net, goals=list(job.goals), taps=list(job.taps), owners=list(job.owners))
+        both = NetJob(net, goals=list(job.goals), taps=list(job.taps), owners=list(job.owners),
+                      items=its)
         wide = NetJob(net, starts=list(job.starts), goals=list(job.goals), taps=list(job.taps),
                       sources=list(job.sources), drops=dict(job.drops), owners=list(job.owners),
                       anchors=dict(job.anchors), parts=(parts[0], parts[1], both),
-                      wide=pin is None, pin=pin, drv=list(job.drv))
+                      wide=pin is None, pin=pin, drv=list(job.drv), items=its)
         js[net] = wide
 
 
@@ -4218,6 +4290,65 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
                 last_key[net] = fluid_key(net, ents)
             landed(net, took)
 
+    # 53-lanetrace: the items a sealed unit's out-ports put on their belts, traced once the unit
+    # is laid (its in-ports at their declared lanes: what feeds them is laid later), so a pair
+    # that starts at one is judged by what rides on it even while that belt is lifted
+    feed_at, unit_feed = {}, {}
+    if any(j.parts for j in js.values()):
+        try:
+            pe_all = port_edges(flat, lay, cat)
+        except Exception:                       # a frame that can't place its ports: no feeds
+            pe_all = {}
+        for pkey, pe in pe_all.items():
+            port = flat.ports.get(pkey)
+            if port is not None and not pe.fluid and port.dir == "out":
+                feed_at[tuple(pe.inside)] = pkey.rsplit("/", 1)[0]
+
+    def feeds_of(v):
+        """{inside tile: {"L": items, "R": items}} of unit ``v``'s out-ports, traced on its frame."""
+        if v in unit_feed:
+            return unit_feed[v]
+        from . import lanes as lanesmod
+        x0, y0, x1, y1, _t = sealed[v]
+        near = [e for e in gidx.near(x0, y0, x1, y1) if x0 <= e.x < x1 and y0 <= e.y < y1]
+        lg = lanesmod.build(near, cat)
+        g = lg.graph
+        makes = {k: [i for i in m.makes if not cat.is_fluid(i)] for k, m in flat.machines.items()
+                 if m.makes and not m.extra.get("port") and k in g.nodes}
+        seeds, outs = [], []
+        for pkey, pe in pe_all.items():
+            port = flat.ports.get(pkey)
+            if port is None or pe.fluid or pkey.rsplit("/", 1)[0] != v:
+                continue
+            node = g.at.get(tuple(pe.inside))
+            if node is None:
+                continue
+            if port.dir == "in":
+                left = list(port.items)
+                right = list(port.right) if port.right else left
+                seeds += [((node, "L"), left), ((node, "R"), right)]
+            else:
+                outs.append((tuple(pe.inside), node))
+        items_of = {n: tuple(net.items) for n, net in flat.nets.items()}
+        got = lanesmod.contents(lg, cat, makes=makes, seeds=seeds,
+                                filters=lanesmod.filters_of(near, items_of))
+        unit_feed[v] = {t: {ln: frozenset(got.get((node, ln), ())) for ln in ("L", "R")}
+                        for t, node in outs}
+        return unit_feed[v]
+
+    def mark_feeds(u, keys):
+        """Give the pairs among ``keys`` the feeds of the sealed units they start at."""
+        for k in keys:
+            j = js.get(k)
+            if j is None or not j.parts:
+                continue
+            for part in j.parts:
+                for t, h in part.starts:
+                    back = (int(t[0]) - _DX[h], int(t[1]) - _DY[h])
+                    v = feed_at.get(back)
+                    if v is not None and v != u and v in sealed:
+                        part.feeds[back] = feeds_of(v).get(back, {})
+
     levels = {}                                      # PLAN-ORGANIC D5: unit -> what it searched
     for u in units:
         mine = list(nets_of.get(u, ()))              # the belt nets laid this run
@@ -4301,7 +4432,9 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             cinfo[u]["from"] = "standing"
             continue
         t_level = time.monotonic()
-        keys = ranked(unit_keys.get(u, []))
+        keys = _feed_order(js, ranked(unit_keys.get(u, [])))   # 53-lanetrace
+        if feed_at:
+            mark_feeds(u, keys)
         swaps_before = len(swaps)
         if negotiate_on():
             plain = [n for n in keys if n not in ribs and n not in seeds

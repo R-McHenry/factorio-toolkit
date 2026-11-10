@@ -181,25 +181,58 @@ def _clip(ents, laid, cat, margin=4):
 
 
 def _lanes_hold(cat, ents, laid_a, laid_b, trunk, part_a, part_b, need, goals=()):
-    """Does the lane graph put A's items on the left lane and B's on the right at every place the
-    trunk hands to a consumer, losing none? -> (ok, reason)."""
+    """Does the lane trace put A's items, and only A's, on the left lane and B's on the right at
+    every place the trunk hands to a consumer? -> (ok, reason).
+
+    53-lanetrace (Rory 11-10: the lane model has "one way to know what nets are on lanes and it's
+    by tracing all of it"): items are traced from where they are made (``lanes.contents``) over
+    the pair's neighbourhood, and never stamped on a part's belt end as its own. A part that
+    starts at a sealed unit's out-port gets what the unit's own trace puts there
+    (``NetJob.feeds``): a paired pass-through's leftovers ride on and the side-load puts them on
+    its lane, and the layout fails. The pair's own loading inserters move only their part's items
+    (the router filters them after routing). Only a part that starts at a port no unit traced is
+    taken at its net's items (report_checks' LANE-MIX judges the whole layout once it is laid)."""
     from . import lanes as lanesmod
     near = _clip(ents, trunk + laid_a + laid_b, cat)
     lg = lanesmod.build(near, cat)
     g = lg.graph
-    seeds = []
-    for label, laid, part in (("l", laid_a, part_a), ("r", laid_b, part_b)):
-        for e in laid:
-            if cat.has_entity(e.name) and cat.kind(e.name) == "inserter":
-                seeds.append(((e.key, ""), label))
-        for t, _h in part.starts:           # a belt end the part starts from: both its lanes
-            key = g.at.get((int(t[0]), int(t[1])))
-            if key is not None:
-                seeds += [((key, "L"), label), ((key, "R"), label)]
-    got = lanesmod.reach(lg, seeds)
+    new = {e.key for e in trunk + laid_a + laid_b}
+    filters0 = lanesmod.filters_of(near)
+
+    def trace(what):
+        """The lane trace with ``what(part)`` as each part's items: its drivers make them, its
+        loading inserters move only them, a port it starts at puts them on (or what the unit
+        behind the port was traced to put there)."""
+        seeds, makes, filters = [], {}, dict(filters0)
+        for part in (part_a, part_b):
+            mine = frozenset(what(part))
+            for t, h in part.starts:        # the belt end that feeds the part's first tile
+                back = (int(t[0]) - routemod._DX[h], int(t[1]) - routemod._DY[h])
+                feed = getattr(part, "feeds", {}).get(back)
+                key = g.at.get(back)
+                if (key, "L") not in lg.nodes:  # no belt behind it: seed its own first belt
+                    key = g.at.get((int(t[0]), int(t[1])))
+                if key is None:
+                    continue
+                if feed and mine == frozenset(part.items):
+                    # a sealed unit's out-port, as traced in its frame
+                    seeds += [((key, "L"), feed["L"]), ((key, "R"), feed["R"])]
+                else:                       # a port no unit traced: its net's items
+                    seeds += [((key, "L"), mine), ((key, "R"), mine)]
+            # a part's driver machines make its items (the netlist says so: a stand-in chest has
+            # no recipe the trace could read); one chest that drives both parts makes both
+            for key, _r in part.sources:
+                makes.setdefault(key, set()).update(mine)
+        for laid, part in ((laid_a, part_a), (laid_b, part_b)):
+            for e in laid:
+                if "inserter" in e.name and e.key not in filters0:
+                    filters[e.key] = frozenset(what(part))
+        return lanesmod.contents(lg, cat, makes=makes, seeds=seeds, filters=filters)
+    got = trace(lambda part: part.items)
     for node, _ug in lg.closed:
-        if got.get(node, set()) & {"l", "r"}:
-            return False, "a side-load into an underground drops a lane"
+        if got.get(node) and node[0] in new:
+            return False, (f"{', '.join(sorted(got[node]))} side-load into an underground from "
+                           "its closed side and stop")
     mine = {e.key for e in trunk}
     ends = []
     for e in trunk:
@@ -212,12 +245,26 @@ def _lanes_hold(cat, ents, laid_a, laid_b, trunk, part_a, part_b, need, goals=()
             ends += [(key, "L"), (key, "R")]
     if not ends:
         return False, "no consumer picks from the trunk"
-    for node in set(ends):
-        has = got.get(node, set()) & {"l", "r"}
-        want = need["L"] if node[1] == "L" else need["R"]
-        if has != want:
-            return False, (f"{node[0]}'s {'left' if node[1] == 'L' else 'right'} lane holds "
-                           f"{sorted(has) or 'nothing'}, not {sorted(want) or 'nothing'}")
+    # parts of one item (a wide net's two groups, a pinned net): the items can't tell them apart,
+    # so each part's own drivers are traced too, as a token of their own
+    same = bool(set(part_a.items) & set(part_b.items))
+    tok = {part_a.net: "#" + part_a.net, part_b.net: "#" + part_b.net}
+    toks = trace(lambda part: (tok[part.net],)) if same else {}
+    for node in sorted(set(ends)):
+        side, part = ("left", part_a) if node[1] == "L" else ("right", part_b)
+        other = part_b if part is part_a else part_a
+        driven = need["L"] if node[1] == "L" else need["R"]
+        has = set(got.get(node, ()))
+        want = set(part.items) if driven else set()
+        if has - want:
+            return False, (f"{node[0]}'s {side} lane holds {', '.join(sorted(has - want))}, "
+                           + (f"which {part.net} does not carry" if driven else
+                              f"and nothing of {part.net} drives it"))
+        if same and tok[other.net] in toks.get(node, ()):
+            return False, f"{node[0]}'s {side} lane gets {other.net}'s drivers too"
+        if driven and not (has & want if not same else tok[part.net] in toks.get(node, ())):
+            return False, (f"{node[0]}'s {side} lane gets nothing of {part.net} "
+                           f"({', '.join(sorted(part.items)) or 'no items'})")
     return True, ""
 
 
@@ -264,6 +311,9 @@ def route_lanes(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), sp
         return None, (f"no free tile roots the trunk of {left.net} and {right.net}, reached from "
                       "both nets' drivers and every consumer")
     need = {"L": {"l"} if left.drivers() else set(), "R": {"r"} if right.drivers() else set()}
+    for p in (left, right):                     # a wide net's or a pin's groups: the net's items
+        if not p.items:
+            p.items = job.items
     one = job.wide or job.pin
     why, best, budget = None, None, [_BUDGET]
     for hub, h in cands[:len(cands) if one else _TRIES]:
