@@ -266,7 +266,6 @@ def read(rcon, surface, area, tag="terrain", block=BLOCK, out_dir=None) -> dict:
     """Read ``area`` of ``surface`` block by block; -> the terrain file's dict (see the module
     docstring). Only reads; one RCON command per block."""
     from . import link
-    out_dir = out_dir or link.OUT_DIR
     x0, y0, x1, y1 = (int(v) for v in area)
     parts = []
     for by in range(y0, y1, block):
@@ -276,10 +275,15 @@ def read(rcon, surface, area, tag="terrain", block=BLOCK, out_dir=None) -> dict:
             reply = rcon.lua(lua_block(surface, sub, name)).strip()
             if not reply.startswith("ok"):
                 raise link.LinkError(f"terrain read of {sub} failed: {reply[:200]}")
-            path = os.path.join(out_dir, "fk5", f"{name}.json")
-            with open(path, encoding="utf-8") as fh:
-                parts.append(json.load(fh))
-            os.remove(path)
+            if out_dir:
+                path = os.path.join(out_dir, "fk5", f"{name}.json")
+                with open(path, encoding="utf-8") as fh:
+                    parts.append(json.load(fh))
+                os.remove(path)
+            else:
+                # 3.3: OUT_DIR, or the gateway's answer file for a Relay
+                parts.append(link.read_answer(rcon, f"fk5/{name}.json", "terrain read",
+                                              keep=False, wait=30.0))
     return merge(surface, (x0, y0, x1, y1), parts).to_dict()
 
 

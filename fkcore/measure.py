@@ -39,8 +39,7 @@ def read(r, surface, area, tag="measure"):
     n = r.lua(lua_read(surface, area, tag)).strip()
     if not n.isdigit():
         raise link.LinkError(f"measure read failed: {n}")
-    with open(os.path.join(link.OUT_DIR, "fk5", f"{tag}.json"), encoding="utf-8") as fh:
-        got = json.load(fh)
+    got = link.read_answer(r, f"fk5/{tag}.json", "measure read", wait=30.0)
     rows = got.get("machines") or []
     got["machines"] = list(rows.values()) if isinstance(rows, dict) else rows
     return got
