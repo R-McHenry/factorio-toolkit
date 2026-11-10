@@ -461,7 +461,9 @@ def reactor(params, cat):
     if params.get("read") not in (None, "temperature"):
         raise TemplateError(f"read={params['read']}: a reactor reads its temperature")
     per = 1.0 / REACTOR_FUEL_S[fuel]
-    spent = "used-up-" + fuel
+    # the game's own burnt result (2.0: depleted-uranium-fuel-cell; the 1.1 name, used-up-, left the
+    # spent cells' nets with no item a port could take, so nothing emptied the reactors)
+    spent = _facts.load()["fuels"][fuel].get("burnt_result") or ("depleted-" + fuel)
     return [MSpec("m0", "nuclear-reactor", None, {fuel: per},
                   {spent: per, "heat": HEAT_W["nuclear-reactor"] / 1e6}, frozenset({fuel}),
                   extra={"fuel": fuel})]
