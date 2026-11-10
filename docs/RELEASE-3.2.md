@@ -227,3 +227,13 @@ No ROUTER bump: the router's rule is unchanged; the elaborator says what it can'
   `test_placer_mixed`, `test_connect`, `test_pair_ports`.
 - The Rust kernel (`fkroute` 0.4.0, `native/fkroute`) gains `voronoi` and `place_seeds`; a tree
   without the kernel runs the Python reference (slow on a world, exact).
+
+## 3.2.5: a turned belt under the design's ghost is turned (2026-11-09, night; 50-freeturned)
+
+3.2.4's free turned step found nothing on the lab: there a superforced paste lays the design's
+ghost over a belt facing another way, and `turned_rows` judged the ghost (facing right) before
+the belt under it. The revive then failed on the belt (the T6 flower after the blue|purple fix:
+20 not revivable, 20 `settings-changed`).
+
+- **`turned_rows(..., built_first=True)`** (apply, where things are free): the built entity is
+  judged even under a ghost; the turned ones are destroyed with their ghost and laid fresh.

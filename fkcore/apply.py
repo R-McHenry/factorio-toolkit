@@ -352,12 +352,14 @@ def _placed(cap):
             if t["g"] or not t.get("dc")}
 
 
-def turned_rows(rows, cap, cat):
+def turned_rows(rows, cap, cat, built_first=False):
     """The indices of ``rows`` (one of ``sense.TURN_KINDS``) whose ghost, or with no ghost their
     entity built and not ordered out, stands on the row's position under its name facing another
     way or as the other underground end, in a snapshot ``cap`` taken after the paste: the paste
     was refused there, so nothing will turn it. A ghost an earlier build left of an older design
-    is one too (ordered out, the game removes it at once)."""
+    is one too (ordered out, the game removes it at once). ``built_first`` (3.2.5, where things
+    are free): the built entity is judged even under a ghost; a superforced paste lays the
+    design's ghost over a belt facing another way, and the revive then fails on it."""
     built, ghosts = {}, {}
     for t in cap["things"]:
         k = (t["n"], float(t["x"]), float(t["y"]))
@@ -368,7 +370,7 @@ def turned_rows(rows, cap, cat):
     out = []
     for i, row in enumerate(rows):
         k = (row["name"], float(row["x"]), float(row["y"]))
-        t = ghosts.get(k) or built.get(k)
+        t = (built.get(k) or ghosts.get(k)) if built_first else (ghosts.get(k) or built.get(k))
         if t is None or not cat.has_entity(row["name"]) \
                 or cat.kind(row["name"]) not in sense.TURN_KINDS:
             continue
@@ -568,7 +570,7 @@ def apply(r, s, cat, area=None, free=False, force=None, label=None, policy=None,
         # what the paste left turned goes, and its single ghost takes its place (2.0.5); where
         # things are free it is destroyed where it stands (49-pairleak: no robot takes it up, and
         # every build left the T6 flower's re-routed mesa belts facing their old ways)
-        bad = turned_rows(rows, cap, cat)
+        bad = turned_rows(rows, cap, cat, built_first=free)
         if bad:
             out = [(rows[i]["name"], float(rows[i]["x"]), float(rows[i]["y"])) for i in bad]
             if free:

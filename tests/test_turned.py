@@ -198,6 +198,19 @@ class TurnedTest(unittest.TestCase):
         alone = {(e["name"], e["position"]["x"], e["position"]["y"]) for e in world.alone}
         self.assertTrue(set(turned) <= alone)                  # each gets its single ghost
 
+    def test_where_things_are_free_the_belt_under_the_designs_ghost_is_judged(self):
+        # 50-freeturned: on the lab a superforced paste lays the design's ghost over a belt
+        # facing another way; the ghost faces right, the belt does not, and the revive fails
+        # on it (the T6 flower: 20 not revivable, 20 settings-changed)
+        cap = {"things": [
+            {"n": "transport-belt", "x": 0.5, "y": 0.5, "d": 0, "g": False, "dc": False},
+            {"n": "transport-belt", "x": 0.5, "y": 0.5, "d": 4, "g": True},
+            {"n": "transport-belt", "x": 1.5, "y": 0.5, "d": 4, "g": True}]}
+        rows = [{"src": f"t/b{i}", "name": "transport-belt", "x": i + 0.5, "y": 0.5,
+                 "direction": 4, "attrs": {}} for i in range(2)]
+        self.assertEqual(applymod.turned_rows(rows, cap, CAT), [])
+        self.assertEqual(applymod.turned_rows(rows, cap, CAT, built_first=True), [0])
+
     def test_where_the_paste_lands_it_turns_them_itself(self):
         # charted ground (a laptop test server, 2.0.77): a belt, an inserter or a splitter is
         # turned in place, one a quarter turn off gets a ghost and is ordered out
