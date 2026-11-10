@@ -244,6 +244,17 @@ the belt under it. The revive then failed on the belt (the T6 flower after the b
 the design's way for deconstruction, and `turned_rows` skips a marked entity (robots take it up).
 Where things are free no robot comes, so `built_first` judges a marked one as well.
 
+## 3.2.9: a reactor's spent cells are the game's own item (2026-11-10; 55-reactor)
+
+Found on the lab's nuclear corner (16 reactors in the T6 flower): no reactor's spent cells were ever
+taken out, so each would stop after its first cell.
+
+- **`Reactor` reads its burnt result from the game data** (`facts.json`'s `burnt_result`:
+  `depleted-uranium-fuel-cell` in 2.0). It said `used-up-uranium-fuel-cell`, the 1.1 name, so a
+  design whose ports carried the 2.0 item had spent-cell nets with no consumer the router could place
+  ("no consumer role is placed"), and they were never routed. `games/plant/plant.fk` says the 2.0
+  name.
+
 ## 3.2.8: the route step's fixed cost no longer grows with the layout (2026-11-10; 54-presearch)
 
 Found rebuilding the compact T6 flower (6478 nets, 43,755 entities) after its modules moved: the
