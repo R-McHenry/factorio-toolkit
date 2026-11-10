@@ -106,13 +106,22 @@ def _alive(pid):
 class Sim:
     """The planner of the run folder ``run`` (its server under ``run\\sim``)."""
 
-    def __init__(self, run, exe=EXE):
+    def __init__(self, run, exe=None):
         self.root = os.path.join(os.path.abspath(run), "sim")
         self.write = os.path.join(self.root, "write")
         self.saves = os.path.join(self.write, "saves")
         self.state_file = os.path.join(self.root, "state.json")
         self.pw_file = os.path.join(self.root, "rcon.pw")
-        self.exe = exe
+        # 3.3: FK_LAPTOP_FACTORIO, else the headless server fk replica installed for this run
+        # (sim\factorio.json), else the laptop's Steam Factorio
+        self.exe = exe or os.environ.get("FK_LAPTOP_FACTORIO") or self._installed() or EXE
+
+    def _installed(self):
+        try:
+            with open(os.path.join(self.root, "factorio.json"), encoding="utf-8") as fh:
+                return json.load(fh).get("exe")
+        except (OSError, ValueError):
+            return None
 
     # -- files and the server ---------------------------------------------------------------------
     def _files(self, spectate=False):

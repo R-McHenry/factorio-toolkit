@@ -1549,6 +1549,28 @@ def _sim(a, cat):
     return 0
 
 
+def _replica(a):
+    """fk replica GAME [start|setup|pull] (3.3, fkcore.replica)."""
+    from . import link, replica
+    from . import sim as simmod
+    s = simmod.Sim(os.path.dirname(os.path.abspath(a.game)))
+    try:
+        if a.verb in ("start", "setup") and (a.verb == "setup" or not os.path.exists(s.exe)):
+            print(f"replica: Factorio at {replica.setup(s, a.version)}")
+        if a.verb in ("start", "pull"):
+            if a.verb == "start" and s.state() is not None:
+                raise simmod.SimError("the planner is running (fk sim stop first, or fk replica "
+                                      "GAME pull then fk sim load live)")
+            print(replica.pull(s, a.name))
+        if a.verb == "start":
+            print(s.start(a.name))
+            print("\n".join(replica.env_lines(s)))
+    except (replica.ReplicaError, simmod.SimError, OSError, link.LinkError) as exc:
+        print(f"replica: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _explore(s, rest):
     """fk sim explore on|next|status|off|archive|best|reset (2.0.64, fkcore.explore)."""
     from . import explore
@@ -1824,7 +1846,7 @@ def _adopt(a, cat):
 def _read_terrain(a):
     """Read the bare world through the game link (FK_LINK=on) into <name>.terrain.json."""
     from . import link, terrain
-    if os.environ.get("FK_LINK", "off").lower() != "on":
+    if not link.enabled():
         print("read-terrain: skipped, FK_LINK is not on (FK_LINK=on uses the game link)",
               file=sys.stderr)
         return 2
@@ -1848,7 +1870,7 @@ def _read_terrain(a):
                   "there is an obstacle", file=sys.stderr)
             owned = set()
     try:
-        with link.Rcon() as r:
+        with link.connect() as r:
             data = terrain.read(r, a.surface, area)
             ents = terrain.read_entities(r, a.surface, area, owned) if a.entities else None
     except (OSError, link.LinkError) as exc:
@@ -2218,6 +2240,13 @@ def main(argv=None):
     sm.add_argument("game")
     sm.add_argument("verb")
     sm.add_argument("rest", nargs=argparse.REMAINDER)
+    rp = sub.add_parser("replica", description="3.3: a private copy of the shared save on this "
+                        "machine (fkcore.replica): Factorio's headless server, the save from "
+                        "FK_GATEWAY, run as the planner (fk sim) with full RCON")
+    rp.add_argument("game")
+    rp.add_argument("verb", nargs="?", default="start", choices=("start", "setup", "pull"))
+    rp.add_argument("--name", default="live", help="the save state it becomes (default live)")
+    rp.add_argument("--version", help="the Factorio version (default: the gateway's)")
     mp = sub.add_parser("map")
     mp.add_argument("game")
     mp.add_argument("verb")
@@ -2445,6 +2474,8 @@ def main(argv=None):
         return _measure(a, cat)
     if a.cmd == "sim":
         return _sim(a, cat)
+    if a.cmd == "replica":
+        return _replica(a)
     if a.cmd == "map":
         return _map(a)
     if a.cmd == "lab":

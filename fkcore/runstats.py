@@ -427,9 +427,13 @@ def sample(r, game, cat, force, surface, now=False, out_dir=None):
     if len(got) != 2 or not got[0].isdigit():
         raise link.LinkError(f"stats: no tick: {' '.join(got)[:200]}")
     tick, seed = int(got[0]), int(float(got[1]))
-    path = os.path.join(out_dir or link.OUT_DIR, *RECORDER.split("/"))
-    raw, state["offset"] = recorder(path, int(state.get("offset") or 0), "offset" not in state,
-                                    seed)
+    if isinstance(r, link.Relay) and out_dir is None:
+        # 3.3: through a gateway there is no recorder file to tail; the RCON sample below does
+        raw = []
+    else:
+        path = os.path.join(out_dir or link.OUT_DIR, *RECORDER.split("/"))
+        raw, state["offset"] = recorder(path, int(state.get("offset") or 0),
+                                        "offset" not in state, seed)
     rows = [x for x in (norm(x, "recorder") for x in raw) if x["tick"] <= tick]
     if rows:
         state["recorder"] = {"tick": rows[-1]["tick"], "seed": seed}

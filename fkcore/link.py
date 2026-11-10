@@ -33,6 +33,12 @@ script-output (``read_output``): an RCON reply is one packet. The link is used o
 ``FK_LINK=on`` (``enabled``, ``open_from_env``), so a paper run on the game host never touches the
 game by accident. The RCON protocol is copied from C:\\fk-lead\\repo\\fk\\rcon.py (d6018d3), with a
 timeout. Stdlib only.
+
+3.3 (PLAN-COMMONS): ``FK_LINK=gateway`` sends the same calls to a shared save through its
+fk-gateway (``Relay``): ``FK_GATEWAY`` is the save's URL (``https://HOST/v1/saves/commons``), and
+``FK_GATEWAY_KEY`` or ``FK_GATEWAY_KEY_FILE`` the agent's key. The gateway holds the save's RCON,
+passes the Lua on, journals it and serves the game's answer files (``read_answer``), so every
+tool works unchanged. ``connect()`` opens whichever link the env names.
 """
 from __future__ import annotations
 
@@ -44,10 +50,13 @@ import re
 import socket
 import struct
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from . import pack as _pack
 
-__all__ = ["LinkError", "Rcon", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
+__all__ = ["LinkError", "Rcon", "Relay", "connect", "read_answer", "gateway_get", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_rip_load", "lua_stuck_hands", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
            "lua_seed", "lua_ghosts", "ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
@@ -87,17 +96,28 @@ class LinkError(RuntimeError):
     pass
 
 
+def mode():
+    """``FK_LINK``: ``on`` (RCON to the game), ``gateway`` (a shared save's fk-gateway), or off."""
+    return os.environ.get("FK_LINK", "off").strip().lower()
+
+
 def enabled():
-    """True when ``FK_LINK=on``: the only way any tool here talks to the game."""
-    return os.environ.get("FK_LINK", "off").lower() == "on"
+    """True when ``FK_LINK=on`` or ``gateway``: the only way any tool here talks to the game."""
+    return mode() in ("on", "gateway")
+
+
+def connect():
+    """The link the env names: a ``Relay`` for ``FK_LINK=gateway``, else an ``Rcon``."""
+    return Relay() if mode() == "gateway" else Rcon()
 
 
 def open_from_env():
-    """-> (Rcon, None), or (None, why) when the link is off or the game can't be reached."""
+    """-> (Rcon or Relay, None), or (None, why) when the link is off or the game can't be
+    reached."""
     if not enabled():
-        return None, "FK_LINK is not on (FK_LINK=on uses the game link)"
+        return None, "FK_LINK is not on (FK_LINK=on uses the game link, gateway a shared save)"
     try:
-        return Rcon(), None
+        return connect(), None
     except (OSError, LinkError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
 
@@ -191,6 +211,137 @@ class Rcon:
 
     def __exit__(self, *exc):
         self.close()
+
+
+def _gateway_key():
+    key = os.environ.get("FK_GATEWAY_KEY", "").strip()
+    path = os.environ.get("FK_GATEWAY_KEY_FILE")
+    if not key and path:
+        with open(path, encoding="utf-8") as fh:
+            key = fh.read().strip()
+    return key
+
+
+def gateway_get(path, url=None, key=None, timeout=TIMEOUT, query=None):
+    """GET ``<FK_GATEWAY>/<path>`` -> (status, bytes); 404 is (404, b""), other HTTP errors raise
+    ``LinkError`` with the gateway's own words."""
+    url = (url or os.environ.get("FK_GATEWAY") or "").rstrip("/")
+    if not url:
+        raise LinkError("no gateway: FK_GATEWAY names a shared save's URL "
+                        "(https://HOST/v1/saves/NAME)")
+    full = f"{url}/{path}" + (f"?{urllib.parse.urlencode(query)}" if query else "")
+    return _http(urllib.request.Request(full, headers=_headers(key)), timeout)
+
+
+def _headers(key=None):
+    from . import __version__
+    key = key if key is not None else _gateway_key()
+    h = {"X-FK-Toolkit": __version__, "User-Agent": f"fkcore/{__version__}"}
+    if key:
+        h["Authorization"] = f"Bearer {key}"
+    return h
+
+
+def _http(req, timeout):
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return 404, b""
+        body = exc.read().decode("utf-8", "replace").strip()
+        raise LinkError(f"gateway {exc.code}: {body[:300] or exc.reason}") from None
+
+
+class Relay:
+    """3.3: a shared save through its fk-gateway (``FK_LINK=gateway``), with ``Rcon``'s calls.
+
+    The protocol (one save per base URL; the key as ``Authorization: Bearer``; the toolkit's
+    version as ``X-FK-Toolkit``, so a gateway can name the release it wants):
+
+    - ``GET hello`` -> ``{"save", "factorio", "toolkit"}``;
+    - ``POST rcon`` ``{"cmd": ...}`` -> ``{"reply": ...}``: the command, journaled;
+    - ``GET out/<path>[?remove=1]`` -> an answer file under script-output (404: not there yet);
+    - ``GET save`` -> the save as it stands (a zip), for ``fk replica``.
+    """
+
+    def __init__(self, url=None, key=None, timeout=TIMEOUT):
+        self.url = (url or os.environ.get("FK_GATEWAY") or "").rstrip("/")
+        if not self.url:
+            raise LinkError("FK_LINK=gateway needs FK_GATEWAY, the shared save's URL "
+                            "(https://HOST/v1/saves/NAME)")
+        self.key = key if key is not None else _gateway_key()
+        self.timeout = timeout
+        status, body = gateway_get("hello", self.url, self.key, timeout)
+        if status != 200:
+            raise LinkError(f"gateway {self.url}: no hello ({status})")
+        self.hello = json.loads(body.decode("utf-8") or "{}")
+
+    def call(self, cmd):
+        if cmd.startswith("/sc ") or cmd.startswith("/silent-command "):
+            assert_safe(cmd)
+        headers = dict(_headers(self.key), **{"Content-Type": "application/json"})
+        req = urllib.request.Request(f"{self.url}/rcon", data=json.dumps({"cmd": cmd}).encode(),
+                                     headers=headers, method="POST")
+        status, body = _http(req, self.timeout)
+        if status != 200:
+            raise LinkError(f"gateway {self.url}: rcon answered {status}")
+        return json.loads(body.decode("utf-8")).get("reply", "")
+
+    def lua(self, body):
+        """Run Lua silently; its rcon.print output is the reply."""
+        return self.call("/sc " + lua_one_line(body))
+
+    def answer(self, rel, remove=False):
+        """An answer file (``fk5/<tag>.json``) as bytes, or None when it isn't there."""
+        status, body = gateway_get("out/" + urllib.parse.quote(rel.replace(os.sep, "/")),
+                                   self.url, self.key, max(self.timeout, 60.0),
+                                   {"remove": 1} if remove else None)
+        return body if status == 200 else None
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def read_answer(r, rel, what, keep=True, wait=None):
+    """The game's answer file ``rel`` (under script-output, e.g. ``fk5/snap.json``) as JSON: from
+    the gateway for a ``Relay``, else from ``OUT_DIR``. The game writes it on its own thread
+    after the reply, so wait for it, and for its JSON to be whole, up to ``wait`` seconds
+    (``FILE_WAIT``). ``keep=False`` removes it once read (best effort)."""
+    deadline = time.monotonic() + (FILE_WAIT if wait is None else wait)
+    relay = isinstance(r, Relay)
+    path = None if relay else os.path.join(OUT_DIR, *rel.split("/"))
+    while True:
+        try:
+            if relay:
+                raw = r.answer(rel)
+                if raw is None:
+                    raise OSError(f"{rel} not on the gateway yet")
+                data = json.loads(raw.decode("utf-8"))
+            else:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            break
+        except (OSError, ValueError) as e:
+            if time.monotonic() >= deadline:
+                raise LinkError(f"{what}: the game's answer {path or rel} is not there or not "
+                                f"whole after {FILE_WAIT if wait is None else wait:.0f} s ({e})")
+            time.sleep(0.2)
+    if not keep:
+        try:
+            if relay:
+                r.answer(rel, remove=True)
+            else:
+                os.remove(path)
+        except (OSError, LinkError):
+            pass
+    return data
 
 
 def _q(s):
@@ -1380,27 +1531,10 @@ def read_output(rcon, lua, tag, what, keep=True):
     n = rcon.lua(lua)
     if not n.strip().isdigit():
         raise LinkError(f"{what} failed: {n.strip()[:300]}")
-    path = os.path.join(OUT_DIR, "fk5", f"{tag}.json")
     # 46-pairbox: the game writes the file on its own thread after the reply, and a big one over
     # a network share (the T6 flower's paste answer, 8.8 MB, 48000 ghosts) lands a second or two
-    # later: wait for it, and for its JSON to be whole, up to FILE_WAIT seconds
-    deadline = time.monotonic() + FILE_WAIT
-    while True:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-            break
-        except (OSError, ValueError) as e:
-            if time.monotonic() >= deadline:
-                raise LinkError(f"{what}: the game's answer {path} is not there or not whole "
-                                f"after {FILE_WAIT:.0f} s ({e})")
-            time.sleep(0.2)
-    if not keep:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-    return data
+    # later: read_answer waits for it (3.3: through the gateway for a Relay)
+    return read_answer(rcon, f"fk5/{tag}.json", what, keep=keep)
 
 
 def snapshot(rcon, surface, area, tag="snap", keep=True):
