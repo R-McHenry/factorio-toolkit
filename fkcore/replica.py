@@ -68,15 +68,18 @@ def installed(ver):
     return _find_exe(os.path.join(home(), "factorio", ver))
 
 
-def version():
-    """The Factorio version the shared save runs (the gateway's hello), else ``stable``."""
+def hello():
+    """The gateway's hello for the shared save ({} when it can't be asked)."""
     try:
         status, body = link.gateway_get("hello")
     except (OSError, link.LinkError):
-        return "stable"
-    if status != 200:
-        return "stable"
-    return json.loads(body.decode("utf-8") or "{}").get("factorio") or "stable"
+        return {}
+    return json.loads(body.decode("utf-8") or "{}") if status == 200 else {}
+
+
+def version():
+    """The Factorio version the shared save runs (the gateway's hello), else ``stable``."""
+    return hello().get("factorio") or "stable"
 
 
 def install(ver, log=print, opener=urllib.request.urlopen):
@@ -153,6 +156,10 @@ def pull(sim, name="live", opener=urllib.request.urlopen):
         os.remove(tmp)
         raise ReplicaError(f"the gateway at {url} gave an empty save")
     os.replace(tmp, sim.save_path(name))
+    mods = hello().get("mods")
+    if mods is not None:                   # 3.4: the replica's mods are the shared save's
+        with open(os.path.join(sim.root, "mods.json"), "w", encoding="utf-8") as fh:
+            json.dump({"mods": mods}, fh)
     return f"replica: the shared save as save state {name} ({size / 1e6:.1f} MB)"
 
 

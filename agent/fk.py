@@ -272,8 +272,24 @@ def pull(cfg, stats=False):
         _save_synced(cfg, files)
 
 
-def local(cfg, args):
+def _link_env(cfg):
+    """A local run's link settings (``run.json``'s ``env``): FK_LINK=on unless it says otherwise
+    (3.4: a run on a shared save says ``gateway``, with FK_GATEWAY and its key file; a key file
+    given relative is the run folder's)."""
+    env = {"FK_LINK": "on"}
+    env.update({k: v for k, v in cfg.get("env", {}).items() if v})
+    key = env.get("FK_GATEWAY_KEY_FILE")
+    if key and not os.path.isabs(key):
+        env["FK_GATEWAY_KEY_FILE"] = os.path.join(RUN, key)
+    return env
+
+
+def local(cfg, args, link=False):
+    """``fkcore ARGS`` here, with no game link; ``link``: with the run's gateway settings but
+    the link off (fk replica and fk commons talk to the gateway themselves)."""
     env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"), PYTHONDONTWRITEBYTECODE="1")
+    if link:
+        env.update(_link_env(cfg))
     env.pop("FK_LINK", None)
     return subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env).returncode
 
@@ -295,8 +311,8 @@ def _avail_first(cfg):
 def remote(cfg, args, footer=True, data=None):
     """``fkcore ARGS`` on the host (``data``: bytes for its stdin)."""
     if cfg["host"] == "local":
-        env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"), FK_LINK="on",
-                   PYTHONDONTWRITEBYTECODE="1", **{k: v for k, v in cfg.get("env", {}).items() if v})
+        env = dict(os.environ, PYTHONPATH=os.path.join(RUN, ".toolkit"),
+                   PYTHONDONTWRITEBYTECODE="1", **_link_env(cfg))
         code = subprocess.run([sys.executable, "-m", "fkcore"] + args, cwd=GAME, env=env,
                               input=data).returncode
         if footer:
@@ -640,6 +656,14 @@ def main(argv):
         return code
     if cmd == "sim":
         return sim(cfg, rest)
+    if cmd in ("replica", "commons"):
+        # 3.4: a shared save. fk replica: a private copy of it here (then fk sim ...); fk commons:
+        # its board, claims and journal
+        if cfg["host"] != "local" or "FK_GATEWAY" not in cfg.get("env", {}):
+            print(f"fk {cmd}: this run is not on a shared save (kickoff/join.py makes one)",
+                  file=sys.stderr)
+            return 2
+        return local(cfg, [cmd, "."] + rest, link=True)
     if cmd == "map" and (not rest or rest[0] in ("-h", "--help")):
         print("fk map save NAME | saves | load NAME | restart | pause | resume: the live map. "
               "load saves the map as it stands first (before-load-STAMP), then restarts the "

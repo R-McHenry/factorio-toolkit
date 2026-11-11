@@ -658,6 +658,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         s = gw.saves[save]
         if method == "GET" and verb == "hello":
             return self._send(200, {"save": save, "factorio": s.cfg.get("factorio"),
+                                    "mods": s.cfg.get("mods", ["base"]),
                                     "toolkit": __version__, "you": name, "role": role,
                                     "about": s.cfg.get("about", "")})
         if method == "POST" and verb == "rcon":

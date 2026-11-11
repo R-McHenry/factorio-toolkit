@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -100,9 +101,30 @@ def claims():
     return _json(link.gateway_get("claims", timeout=30), "claims")
 
 
-def claim(plot, area, note=""):
+def claim(plot, area, note="", url=None, key=None):
     return _json(link.gateway_post("claims", {"plot": plot, "area": area, "note": note},
-                                   timeout=30), "claim")
+                                   url=url, key=key, timeout=30), "claim")
+
+
+PLOT_LINE = re.compile(r"^world\s*=\s*World\s*@\(.*$", re.M)
+
+
+def set_plot(game, area):
+    """Put the plot ``area`` in the run's world design (``nauvis.fk``'s ``world = World @(...)``
+    line). -> the new line, or None when the file has no such line."""
+    path = os.path.join(game, "nauvis.fk")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    if not PLOT_LINE.search(text):
+        return None
+    x0, y0, x1, y1 = area
+    line = f"world = World @({x0}, {y0}) size {x1 - x0}x{y1 - y0}"
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(PLOT_LINE.sub(line, text, count=1))
+    return line
 
 
 def journal(n=30):
@@ -171,6 +193,12 @@ def main(game, verb, rest):
                     raise CommonsError(f"an area is X0,Y0,X1,Y1, got {rest[1]}") from None
             claim(rest[0], area, " ".join(rest[2:]))
             print(f"{verb}: {rest[0]}" + (f" {rest[1]}" if area else ""))
+            if area and rest[0] == "main":
+                line = set_plot(game, area)
+                if line:
+                    print(f"nauvis.fk: {line}  (your design's x,y start at that corner; "
+                          f"next: fk read-terrain --surface nauvis --area={rest[1]} --name map "
+                          "--replace --entities)")
         elif verb == "journal":
             for r in journal(int(rest[0]) if rest else 30):
                 what = r.get("cmd") or r.get("event") or ""
