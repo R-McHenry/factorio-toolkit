@@ -119,6 +119,7 @@ class Ctx:
     echo: object = None                              # the run's echo, for a long step's progress
     models: dict = field(default_factory=dict)       # factory -> (flat, its rates.solve), reused
     compiled: str | None = None                      # the compiled-module store (PLAN-3.0 §4)
+    fresh: bool = False                              # fk build --fresh: nothing read of before
 
     def model(self, factory):
         """The nominal rate model of ``flats[factory]``, solved once per flat (2.1.27: hands, tier
@@ -363,7 +364,7 @@ def s_read_surface(ctx, args):
                     note.split(": ", 1)[-1]) for note in sf.design_notes]
     for p in sf.places.values():
         prev = os.path.join(ctx.root, f"{p.module}.fkp")
-        if os.path.exists(prev):
+        if os.path.exists(prev) and not ctx.fresh:     # fk build --fresh: as if none were there
             ctx.previous[p.factory] = fkp.load(prev)
     return lines, checks
 
@@ -1036,7 +1037,7 @@ def s_route(ctx, args):
     # its game's); --store DIR elsewhere, --store none (or --compiled no) to lay every module
     # afresh; --reuse-lab reads the lab builds' own stores too
     store = str(o["store"]) or ctx.compiled or os.path.join(ctx.out, "compiled")
-    if store.lower() in ("none", "no", "off") or str(o["compiled"]) == "no":
+    if store.lower() in ("none", "no", "off") or str(o["compiled"]) == "no" or ctx.fresh:
         store = None
     else:
         if not os.path.isabs(store):
@@ -1060,9 +1061,14 @@ def s_route(ctx, args):
                                                o["module"])
         elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
-            pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
-        # 3.0, the design database: the net files the last route step left (fkcore.design)
-        recs = design.read_all(ctx.out, factory)
+            if not ctx.fresh:
+                pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
+        # 3.0, the design database: the net files the last route step left (fkcore.design);
+        # none for fk build --fresh (Rory 11-11: a module's test from a clean slate, one flag)
+        recs = {} if ctx.fresh else design.read_all(ctx.out, factory)
+        if ctx.fresh:
+            lines.append(f"{factory}: fresh (fk build --fresh): no committed .fkp, last route, "
+                         "failure memo or compiled module read; every net laid anew")
         for net, rec in sorted(recs.items()):
             if rec["status"] == "unrouted" and rec["why"].startswith(design.UNROUTED_BY_YOU):
                 pinned.pop(net, None)
@@ -2811,18 +2817,22 @@ def with_options(lines, extra):
 
 
 def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None,
-        compiled=None) -> tuple:
+        compiled=None, fresh=False) -> tuple:
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
     stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
     steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes.
     ``extra``: options for this build only (``with_options``). ``compiled``: the compiled-module
     store the route step uses when its line names none (``fkcore.lab``: the game folder's).
+    ``fresh`` (``fk build --fresh``, Rory 11-11): the build reads nothing of the builds before it
+    (the committed .fkp, the last route step's nets, the failure memo, the compiled store), so a
+    module is tested as if from a clean slate: the route is path-dependent, and a module that
+    routed on top of its own last routes could fail built anew (the bootstrap's Oil2).
 
     2.1.19: the whole build reads the source as it began (``fkcore.snapshot``). A file edited
     while it runs is left for the next build, and the build says which ones were."""
     with snapshot.held() as snap:
         try:
-            return _run(script, frm, to, cat, echo, link, extra, compiled)
+            return _run(script, frm, to, cat, echo, link, extra, compiled, fresh)
         finally:
             moved = snapshot.changed(snap)
             if moved:
@@ -2832,12 +2842,13 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None,
                      "build began; build again to lay the new source")
 
 
-def _run(script, frm, to, cat, echo, link, extra, compiled=None):
+def _run(script, frm, to, cat, echo, link, extra, compiled=None, fresh=False):
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
         lines = with_options(parse(fh.read(), script), extra)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
     ctx.compiled = compiled
+    ctx.fresh = bool(fresh)
     ctx.echo = echo
     availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:
@@ -2849,6 +2860,9 @@ def _run(script, frm, to, cat, echo, link, extra, compiled=None):
     names = [ln.cmd for ln in lines]
     first = _at(names, frm) if frm else 0
     last = _at(names, to) if to else len(lines) - 1
+    if ctx.fresh and first > 0:
+        raise FlowError("fk build --fresh lays everything anew: it takes no --from but the first "
+                        "step")
     os.makedirs(ctx.out, exist_ok=True)
     # the source as the run begins, before any step reads it: a file edited while the run goes
     # on makes its checkpoints stale, never the other way round

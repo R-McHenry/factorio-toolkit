@@ -2110,6 +2110,9 @@ def main(argv=None):
                         "--with 'route --again NET'")
     b.add_argument("--confirm", action="store_true",
                    help="take up what stands built on DNP pieces (diff and apply --confirm)")
+    b.add_argument("--fresh", action="store_true",
+                   help="read nothing of the builds before (committed .fkp, last routes, failure "
+                        "memo, compiled store): a module's test from a clean slate")
     sp = sub.add_parser("step", help="3.0: one step of the build script alone, on what the steps "
                                        "before it left (fk route NET, fk place)")
     sp.add_argument("script")
@@ -2535,7 +2538,7 @@ def main(argv=None):
                 with open(a.script, encoding="utf-8") as fh:
                     have = {ln.cmd for ln in flow.parse(fh.read(), a.script)}
                 extra += [f"{s} --confirm" for s in ("diff", "apply") if s in have]
-            code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra)
+            code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra, fresh=a.fresh)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

@@ -91,6 +91,52 @@ class NoMakerBomTest(unittest.TestCase):
         self.assertTrue(short and "nothing built in the design makes it" in short[0])
 
 
+class FreshBuildTest(unittest.TestCase):
+    """Rory 11-11, "build fresh sounds very good": the route is path-dependent (the bootstrap's
+    Oil2 routed 11/11 over its own last routes and failed two nets from a clean slate), so one flag
+    builds a module as if nothing stood before."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="fkfresh-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        files = {
+            "t.fk": "mine = MinerRow<n=1, resource=iron-ore> @(0, 0)\n"
+                    "dst  = Chest<provider>                  @(20, 3)\n"
+                    "net p: mine -> dst\n",
+            "nauvis.surface": "surface nauvis\nterrain none\nplace t = t plot 0,0 30x12\n",
+            "nauvis.build.fkb": "read_surface nauvis\nread_terrain none\nelaborate\n"
+                                "place --keep pinned\nroute --only stale\nfloorplan\n"
+                                "report_checks\nwrite_layout\n"}
+        for name, text in files.items():
+            with open(os.path.join(self.dir, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+
+    def build(self, **kw):
+        code, ctx = flow.run(os.path.join(self.dir, "nauvis.build.fkb"), cat=CAT,
+                             echo=lambda _l: None, **kw)
+        self.assertEqual(code, 0, ctx.log)
+        with open(os.path.join(self.dir, "out", "route.txt"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_fresh_reads_nothing_of_before(self):
+        self.build()
+        self.assertIn("kept      p: its carriers are already laid (pinned)", self.build())
+        txt = self.build(fresh=True)
+        self.assertIn("fresh (fk build --fresh)", txt)
+        self.assertIn("t: 1 routed, 0 kept", txt)
+        with self.assertRaises(flow.FlowError):
+            self.build(fresh=True, frm="route")
+        self.build(fresh=True, frm="read_surface")      # the first step: agent/fk.py passes it
+
+    def test_the_command_has_the_flag(self):
+        from fkcore.__main__ import main
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["build", os.path.join(self.dir, "nauvis.build.fkb"),
+                                   "--fresh"]), 0)
+
+
 class PortFeedTest(unittest.TestCase):
     """A route's last belt beside a port's belt, facing the way it came, is no feed (Sci's cu port:
     ``~w_cu/b271`` E under ``~sci/s_cu/b0`` N, counted connected, and Sci never saw copper)."""

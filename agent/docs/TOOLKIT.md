@@ -27,7 +27,7 @@ The build and its steps:
 
 | command | example | chapter |
 |---|---|---|
-| `fk build [--to STEP] [--from STEP] [--with 'STEP OPTS'] [--reroute NET] [--confirm] [--yes] [--wait]` | `fk build --to report_checks`: the build script in the background (`game\out\build.log`), design only up to that step; `fk build` pastes | 1 |
+| `fk build [--to STEP] [--from STEP] [--with 'STEP OPTS'] [--reroute NET] [--fresh] [--confirm] [--yes] [--wait]` | `fk build --to report_checks`: the build script in the background (`game\out\build.log`), design only up to that step; `fk build` pastes | 1 |
 | `fk status [NET]` | `fk status`: the nets as the router left them, the unrouted with reasons, the compiled store, the log's last lines | 11 |
 | `fk route NET[,NET] [--with ...]` | `fk route coal`: lay those nets again now, every other route kept; nothing pasted. `fk route --try X,Y X,Y`: how a belt would go from tile A to B | 11 |
 | `fk place`, `fk report KIND` | `fk report checks`: one step of the script alone | |
@@ -112,7 +112,10 @@ patched when a machine or port is added to it, taken off it or moved (`out\route
 `patched` with how many carriers it kept), and the poles and roboports a build laid stay wherever
 the new design leaves their spot free. When no branch fits, a net with belts is never laid anew by
 itself: its belts stand, the new end alone fails (`no-route`), and `fk build --reroute NET` lays
-the net anew when you want that (`--reroute mall1`: every net inside mall1). `--with 'STEP OPTS'`
+the net anew when you want that (`--reroute mall1`: every net inside mall1). The route depends on
+what stood before it, so a module that routes over its own last routes can fail built anew:
+`fk build --fresh` designs from a clean slate (no committed .fkp, last routes, failure memo or
+compiled modules read), the way to test a module before you trust it. `--with 'STEP OPTS'`
 adds options to a step for one build without editing the script (`--with 'cover power --fresh'`,
 `--with 'route --effort high'`, repeatable).
 

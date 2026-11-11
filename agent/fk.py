@@ -532,8 +532,11 @@ def build(cfg, args):
     code = 0
     if i < split:
         _avail_first(cfg)
+        # Rory 11-11: --fresh, the design from a clean slate (only the design steps read the
+        # builds before; the game steps compare with what stands, as ever)
+        fresh = ["--fresh"] if "--fresh" in args else []
         code = local(cfg, ["build", script, "--from", _spec(names, i),
-                           "--to", _spec(names, min(j, split - 1))] + extra)
+                           "--to", _spec(names, min(j, split - 1))] + extra + fresh)
     if code == 0 and j >= split and i < after:
         push(cfg)
         code = remote(cfg, ["build", script, "--from", _spec(names, max(i, split)),
@@ -586,7 +589,7 @@ def main(argv):
             # the help, not a build (the first lead run's worker, 2026-10-21: `fk build --help`
             # ran all 19 steps, the paste included)
             print("fk build [--wait] [--from STEP] [--to STEP] [--with 'STEP OPTS'] "
-                  "[--reroute NET[,NET]] [--confirm] [--yes]: "
+                  "[--reroute NET[,NET]] [--fresh] [--confirm] [--yes]: "
                   "runs in the background (its lines in game\\out\\build.log, fk status for "
                   "progress) unless --wait; "
                   "--confirm takes up what stands built on DNP pieces; "
@@ -594,7 +597,9 @@ def main(argv):
                   "the steps of game\\<surface>.build.fkb in order, design here and the game "
                   "steps on the host; STEP is a step's name, or NAME:K for its K-th time. --with "
                   "adds options to a step for this build only (--with 'cover robots --fresh'); "
-                  "--reroute lays these nets (or every net inside an instance) again "
+                  "--reroute lays these nets (or every net inside an instance) again; "
+                  "--fresh designs from a clean slate (no committed .fkp, last routes or "
+                  "compiled modules read: a module's test) "
                   "(docs\\TOOLKIT.md, \"The build script\")")
             return 0
         if "--wait" not in rest:
