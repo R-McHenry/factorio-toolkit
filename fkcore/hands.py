@@ -93,8 +93,16 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
         onto[key] = any(g.nodes[b].kind in lanesmod._BELTS
                         for b, via in g.succ.get(key, ()) if via == "drop")
         need[key] = sum(res.required.get((key, ""), {}).values())
-    mine = {}
+    mine, pinned, thin = {}, 0, []
     for key, e in lay.entities.items():
+        if key in need and key in fixed and e.name in short and cat.has_entity(e.name):
+            # FRICTION 11-11: `route --hand inserter` fixes every tap, and this step then said "0
+            # short hands" while one plain hand held a whole blue line at 12/min. It still
+            # leaves them alone, and says which carry less than their connector needs
+            pinned += 1
+            rate = _rate(e.name, hand, bulk_hand, onto[key], cat, lanesmod._turn_of(g.nodes[key]))
+            if rate is not None and rate < need[key] - _EPS:
+                thin.append((key, need[key], rate, e.name))
         if key not in need or key in fixed or not cat.has_entity(e.name):
             continue
         if cat.kind(e.name) != "inserter":
@@ -171,6 +179,13 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
             + (f", {kept} kept from the committed .fkp" if kept else "")
             + (f", {filtered} kept at a rung that filters" if filtered else ""))
     lines = [head]
+    if pinned:
+        lines.append(f"  {_many(pinned, 'hand')} left as the design or `route --hand` named them"
+                     + (f"; {len(thin)} carry less than their connector needs: "
+                        + ", ".join(f"{k} ({name} {r:.2f}/s, needs {n:.2f}/s)" for k, n, r, name
+                                    in sorted(thin, key=lambda o: o[2] - o[1])[:_SHOW])
+                        + (f" and {len(thin) - _SHOW} more" if len(thin) > _SHOW else "")
+                        + " (`route --hand any` lets this step raise them)" if thin else ""))
     for (name, lower), keys in sorted(skipped.items()):
         speed = rates[next(iter(keys))].get(name)
         lines.append(f"  {name} is not buildable now ({len(keys)} hands would take it): they stay "
