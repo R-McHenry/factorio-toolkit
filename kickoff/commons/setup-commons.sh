@@ -53,13 +53,14 @@ run ln -sfn toolkit-$SHA $C/toolkit
 run chown -R computah:computah $C
 
 say "2. a new map from fk-play (world-3 map-gen), started by hand"
-MAPSET=""
-[ -f $F/instance/map-settings.json ] && MAPSET="--map-settings $F/instance/map-settings.json"
-run "su computah -c 'cd $I && setsid $BIN -c $I/config.ini --port 34201 --start-server-load-scenario fk-play --map-gen-settings $K/map-gen-w3.json $MAPSET --server-settings $I/server-settings.json --rcon-bind 127.0.0.1:27121 --rcon-password \$(cat $I/rcon.pw) > $I/first-start.log 2>&1 < /dev/null &'"
+# no --map-settings: the live instance's file is 2.0's defaults, and 2.1 refuses it (it wants
+# enemy_expansion.evolution_group_size_factor); 2.1's own defaults stand
+run "su computah -c 'cd $I && setsid $BIN -c $I/config.ini --port 34201 --start-server-load-scenario fk-play --map-gen-settings $K/map-gen-w3.json --server-settings $I/server-settings.json --rcon-bind 127.0.0.1:27121 --rcon-password \$(cat $I/rcon.pw) > $I/first-start.log 2>&1 < /dev/null &'"
 if [ "$DRY" != "--dry" ]; then
   SECONDS=0
   until su computah -c "$AS timeout 4 python3 $TK/kickoff/setup_v1.py --dry" > /dev/null 2>&1; do
     [ $SECONDS -lt 60 ] || { say "the server did not answer RCON within 60 s: $I/first-start.log"; exit 1; }
+    [ $SECONDS -lt 5 ] || pgrep -u computah -f -- '[-]-port 34201' > /dev/null || { say "the server exited: $(grep -m1 Error $I/first-start.log)"; exit 1; }
     sleep 1
   done
 fi
