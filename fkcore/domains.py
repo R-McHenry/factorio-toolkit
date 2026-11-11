@@ -164,14 +164,21 @@ def _watts(w):
     return f"{w / 1e6:.2f} MW" if w >= 1e6 else f"{w / 1e3:.0f} kW"
 
 
-def cover_domains(flat, lay, cat, doms, pole, keep_out=(), pinned_of=None):
+def cover_domains(flat, lay, cat, doms, pole, keep_out=(), pinned_of=None, more=(), roots=()):
     """Cover each domain apart, then lay the copper lines. -> (new layout, report lines, checks).
-    ``pinned_of(owner)``: the committed poles of a cover owner."""
+    ``pinned_of(owner)``: the committed poles of a cover owner.
+
+    3.5 (Rory 11-11): ``more``, the step's later allowed pole kinds, for a domain that takes the
+    step's kind (one with ``pole=`` on its line keeps that one alone); the ladder keeps the deny
+    set, so a later kind never reaches another domain's machines either. ``roots``, the world
+    grid's poles (``power.Root``), for the ``cover all`` domain only: it is the one that joins
+    the world's grid, every other domain is its own network."""
     checks = assign(flat, lay, cat, doms)
     lines = []
     out = lay
     for d in doms:
         dpole = d.pole or pole
+        dmore = () if d.pole else tuple(more)
         others = [_rect(cat, out.entities[k]) for o in doms if o is not d for k in sorted(o.keys)
                   if k in out.entities and _electric(cat, out.entities[k])
                   and _kind(cat, out.entities[k].name) != "electric-pole"]
@@ -179,8 +186,9 @@ def cover_domains(flat, lay, cat, doms, pole, keep_out=(), pinned_of=None):
         keys = set(d.keys)
         poles, rep = covermod.cover_power(out, cat, pole=dpole, owner=d.owner, keep_out=keep_out,
                                           pinned=pinned, only=keys,
-                                          deny=others, attrs=d.attrs)
-        out = covermod.apply_cover(out, cat, pole=dpole, owner=d.owner, poles=poles)
+                                          deny=others, attrs=d.attrs, more=dmore,
+                                          roots=roots if d.all else ())
+        out = covermod.apply_cover(out, cat, pole=dpole, owner=d.owner, poles=poles, more=dmore)
         d.keys |= {p.key for p in poles}
         lines.append(f"domain {d.name}" + (" (cover all)" if d.all else "") + f": {rep.summary()}")
         checks += rep.checks

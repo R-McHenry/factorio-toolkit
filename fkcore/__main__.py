@@ -1864,7 +1864,7 @@ def _read_terrain(a):
     if len(area) != 4 or area[2] <= area[0] or area[3] <= area[1]:
         print(f"error: --area X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0, got {a.area}", file=sys.stderr)
         return 2
-    owned, force = None, "player"
+    owned, force, grid_at = None, "player", None
     if a.entities:
         # 3.1: the design's tiles (the diff's business) and the toolkit's own record are not
         # obstacles; everything else built in the area is
@@ -1873,6 +1873,8 @@ def _read_terrain(a):
         try:
             sf, _lay, _path, composed = look.composed(a.game, cat)
             force = sf.force_name or force
+            # 3.5 (PLAN-POWER P1, Rory 11-11): the surface's ``power grid X,Y`` names the grid
+            grid_at = sf.power_grid if sf.name == a.surface else None
             record = own.load(a.game, sf.name) if sf.name == a.surface else None
             owned = terrain.owned_tiles(composed if sf.name == a.surface else None,
                                         (record or {}).values(), cat)
@@ -1883,7 +1885,8 @@ def _read_terrain(a):
     try:
         with link.connect() as r:
             data = terrain.read(r, a.surface, area)
-            ents = (terrain.read_entities(r, a.surface, area, owned, force=force)
+            ents = (terrain.read_entities(r, a.surface, area, owned, force=force,
+                                          grid_at=grid_at)
                     if a.entities else None)
     except (OSError, link.LinkError) as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)

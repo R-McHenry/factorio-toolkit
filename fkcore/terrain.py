@@ -68,7 +68,7 @@ __all__ = ["BLOCK", "REFERENCE", "Cliff", "Patch", "Terrain", "FrameGround", "lu
            "merge", "cliff_tiles", "patches", "from_dict", "load", "save", "to_frame",
            "from_frame", "frame_size", "frame_blocked", "frame_ground", "summary",
            "fmt_amount", "NOT_OBSTACLES", "obstacles", "owned_tiles", "read_entities",
-           "with_entities"]
+           "with_entities", "roboports", "grid"]
 
 #: entity types a ``--entities`` read never takes as obstacles: the terrain has cliffs, a paste
 #: steamrolls trees and rocks, and the rest stands nowhere for long
@@ -419,12 +419,18 @@ def obstacles(things, owned, area=None):
     return frozenset(tiles), names
 
 
-def read_entities(rcon, surface, area, owned, tag="terrain-entities", force="player"):
+def read_entities(rcon, surface, area, owned, tag="terrain-entities", force="player",
+                  grid_at=None):
     """One snapshot of ``area`` (``link.snapshot``) -> (tiles, {"tick", "area", "count",
     "names", "roboports"}): the obstacles there, and every roboport of ``force`` on the surface
     ([name, x, y, logistic radius, construction radius, powered], ``robots.lua_standing``), so
     the build judges robot reach without the game (Rory 2026-11-11: "why wouldn't they just know
-    where all the roboports are?"). Only reads."""
+    where all the roboports are?"). Only reads.
+
+    3.5 (PLAN-POWER P1, Rory 11-11: "we could indicate power network id from the pole, and then
+    look at that grid as the global power stat"): ``grid_at``, the surface file's ``power grid
+    X,Y``. The pole there names the grid; its network's poles and stats go in ``"grid"``
+    (``power.read_grid``), or why none was found."""
     from . import link, robots
     cap = link.snapshot(rcon, surface, area, tag, keep=False)
     tiles, names = obstacles(cap.get("things"), owned, area)
@@ -439,6 +445,9 @@ def read_entities(rcon, surface, area, owned, tag="terrain-entities", force="pla
            "count": sum(names.values()), "names": dict(sorted(names.items()))}
     if ports is not None:
         out["roboports"] = ports
+    if grid_at is not None:
+        from . import power
+        out["grid"] = power.read_grid(rcon, surface, force, grid_at, f"{tag}-grid")
     return tiles, out
 
 
@@ -449,6 +458,17 @@ def roboports(t):
     if not er or not isinstance(er.get("roboports"), list):
         return None
     return er["roboports"]
+
+
+def grid(t):
+    """The world's grid the last ``read-terrain --entities`` recorded (3.5, P1): {"at", "id",
+    "pole", "poles" [[name, x, y]], "stats"}; None when the file has no such read, or the read
+    found no network there (its ``why`` is in the summary)."""
+    er = t.entities_read if t is not None else None
+    g = er.get("grid") if er else None
+    if not isinstance(g, dict) or g.get("id") is None or not isinstance(g.get("poles"), list):
+        return None
+    return g
 
 
 def with_entities(t, tiles, read):
@@ -653,6 +673,11 @@ def frame_ground(t: Terrain, plot, size=None, margin=8, patch=None) -> FrameGrou
 
 
 # -- report ---------------------------------------------------------------------------------------
+def _fmt(v):
+    v = float(v)
+    return str(int(v)) if v.is_integer() else repr(v)
+
+
 def fmt_amount(a):
     a = float(a)
     if a >= 1e6:
@@ -700,6 +725,16 @@ def summary(t: Terrain, name="map", show=3) -> list:
             on = sum(1 for p in ports if len(p) >= 6 and p[5])
             lines.append(f"  roboports (the whole surface, same read): {len(ports)} stand, {on} "
                          "with power: floorplan judges robot reach against them")
+        g = er.get("grid")
+        if isinstance(g, dict):
+            at = ",".join(_fmt(v) for v in g.get("at") or ())
+            if grid(t) is not None:
+                from . import power
+                lines.append(f"  power grid (the pole at {at}, same read): "
+                             f"{power.grid_text(g)}: cover power bridges to its poles")
+            else:
+                lines.append(f"  power grid (the pole at {at}, same read): none recorded, "
+                             f"{g.get('why') or 'no network'}")
     if t.enemies:
         lines.append("  enemies: " + ", ".join(f"{n} {k}" for k, n in sorted(t.enemies.items())))
     return lines
