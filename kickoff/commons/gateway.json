@@ -13,7 +13,7 @@
    "pw_file": "/home/computah/commons/instance/rcon.pw",
    "script_output": "/home/computah/commons/instance/script-output",
    "saves": "/home/computah/commons/instance/saves",
-   "restart": ["sudo", "-n", "systemctl", "restart", "fk-commons"],
+   "restart": ["sh", "-c", "date > /home/computah/commons/gateway/data/restart/commons"],
    "idle_pause_s": 21600
   }
  }

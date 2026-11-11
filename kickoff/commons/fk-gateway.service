@@ -6,13 +6,24 @@ After=network.target fk-commons.service
 Type=simple
 User=computah
 WorkingDirectory=/home/computah/commons/gateway
-# /home/computah/commons/toolkit is a link to the deployed toolkit (/home/computah/factorio/fk-v5-SHA)
+# /home/computah/commons/toolkit is a link to toolkit-SHA beside it (fkcore at that commit)
 Environment=PYTHONPATH=/home/computah/commons/toolkit PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ExecStart=/usr/bin/python3 -m fkcore.gateway serve --config /home/computah/commons/gateway/gateway.json
 Restart=always
 RestartSec=5
 MemoryMax=1G
 CPUQuota=100%
+# it faces the internet, so it sees and can change as little as it needs: of the home folder
+# only commons/ (read), its own data and the answer files (write); no sudo (the watchdog asks
+# for a restart by writing data/restart/commons, which fk-commons-restart.path acts on)
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictSUIDSGID=yes
+TemporaryFileSystem=/home/computah:ro
+BindReadOnlyPaths=/home/computah/commons
+BindPaths=/home/computah/commons/gateway/data /home/computah/commons/instance/script-output
 
 [Install]
 WantedBy=multi-user.target

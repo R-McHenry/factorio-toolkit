@@ -11,9 +11,10 @@
 #                                     its one build lays the reactor and its pole line, the shared
 #                                     start's furniture, as kickoff-v1.sh does
 #   /home/computah/commons/gateway    gateway.json, docs/ (skill.md, heartbeat.md), data/
-#   /home/computah/commons/toolkit    a link to fk-v5-SHA (a later toolkit: move the link,
-#                                     systemctl restart fk-gateway)
-#   fk-commons.service, fk-gateway.service
+#   /home/computah/commons/toolkit    a link to toolkit-SHA beside it, fkcore at SHA (a later
+#                                     toolkit: copy it in, move the link, restart fk-gateway)
+#   fk-commons.service, fk-gateway.service, fk-commons-restart.path + .service (the gateway's
+#   watchdog asks for a restart by writing gateway/data/restart/commons; it has no sudo)
 # Steps: 1. the folders and files; 2. a new map from the fk-play scenario with the kickoff's
 # world-3 map-gen, started by hand; 3. setup_v1.py (bootstrap, kit, rules); 4. the host run's
 # first build (the plant), robots build it; 5. saved as commons.zip, the hand-started server
@@ -37,7 +38,8 @@ say() { echo "setup-commons: $*"; }
 [ -e "$I/saves" ] && { say "$I/saves exists: the commons is already set up"; exit 1; }
 
 say "1. folders, config, settings, mods (base only), the scenario, the gateway's files"
-run mkdir -p $I/saves $I/mods $I/scenarios $C/gateway/docs $C/gateway/data
+run mkdir -p $I/saves $I/mods $I/scenarios $I/script-output $C/gateway/docs $C/gateway/data/restart $C/toolkit-$SHA
+run cp -r $TK/fkcore $C/toolkit-$SHA/fkcore
 run "printf '[path]\nread-data=__PATH__executable__/../../data\nwrite-data=$I\n' > $I/config.ini"
 run "[ -f $I/rcon.pw ] || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' > $I/rcon.pw"
 run chmod 600 $I/rcon.pw
@@ -47,7 +49,7 @@ run "printf '{\"mods\": [{\"name\": \"base\", \"enabled\": true}, {\"name\": \"e
 run cp -r $TK/scenario/fk-play $I/scenarios/fk-play
 run cp $K/gateway.json $C/gateway/gateway.json
 run cp $K/skill.md $K/heartbeat.md $C/gateway/docs/
-run ln -sfn $TK $C/toolkit
+run ln -sfn toolkit-$SHA $C/toolkit
 run chown -R computah:computah $C
 
 say "2. a new map from fk-play (world-3 map-gen), started by hand"
@@ -90,9 +92,9 @@ if [ "$DRY" != "--dry" ]; then
 fi
 
 say "6. the units"
-run cp $K/fk-commons.service $K/fk-gateway.service /etc/systemd/system/
+run cp $K/fk-commons.service $K/fk-gateway.service $K/fk-commons-restart.path $K/fk-commons-restart.service /etc/systemd/system/
 run systemctl daemon-reload
-run systemctl enable --now fk-commons.service
+run systemctl enable --now fk-commons.service fk-commons-restart.path
 if [ "$DRY" != "--dry" ]; then
   SECONDS=0
   until su computah -c "$AS timeout 4 python3 $TK/kickoff/setup_v1.py --dry" > /dev/null 2>&1; do
