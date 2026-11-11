@@ -180,6 +180,34 @@ class DnpCoverTest(unittest.TestCase):
         poles, _rep = cover_power(lay, CAT)
         self.assertEqual(len(poles), 1)                  # never built: a pole of the cover's
 
+    def test_a_pole_only_dnp_pieces_need_is_dnp_too(self):
+        # FRICTION 11-11 (the bootstrap stages): a 39-entity seed among 1590 DNP rows came with 94
+        # poles. The cover still lays them all, ready; only the ones the built part needs are built
+        from fkcore.cover import cover_power
+        lay = fkp.Layout("factory", "t", size=(60, 8))
+        lay.add(fkp.Entity("src/p", "medium-electric-pole", 0.5, 0.5, 0, {}))
+        lay.add(fkp.Entity("a/m0", "assembling-machine-1", 12.5, 2.5, 0, {}))
+        lay.add(fkp.Entity("b/m0", "assembling-machine-1", 40.5, 2.5, 0, {"dnp": 1}))
+        poles, rep = cover_power(lay, CAT)
+        built = [p for p in poles if not p.attrs.get("dnp")]
+        idle = [p for p in poles if p.attrs.get("dnp")]
+        self.assertTrue(built and idle)
+        self.assertEqual(rep.covered, rep.total)         # laid out for both, as before
+        self.assertEqual(rep.dnp, len(idle))
+        self.assertIn("only for DNP pieces", rep.summary())
+        # what is built powers a/m0 and wires back to src/p, and needs nothing past it
+        from fkcore.cover import _Node, _groups, _overlap
+        nodes = [_Node(0.5, 0.5, 3.5, 9)] + [_Node(p.x, p.y, 3.5, 9) for p in built]
+        self.assertEqual(len(_groups(nodes)), 1)
+        self.assertTrue(any(_overlap((11, 14, 1, 4), p.x, p.y, 3.5) for p in built))
+        self.assertTrue(all(p.x < 20 for p in built))
+        self.assertTrue(any(_overlap((39, 42, 1, 4), p.x, p.y, 3.5) for p in idle))
+        # nothing DNP: nothing changes
+        del lay.entities["b/m0"].attrs["dnp"]
+        poles, rep = cover_power(lay, CAT)
+        self.assertFalse([p for p in poles if p.attrs.get("dnp")])
+        self.assertEqual(rep.dnp, 0)
+
 
 class BuiltAutoTest(unittest.TestCase):
     def test_built_auto_sizes_the_built_cells_inside_a_fixed_n(self):

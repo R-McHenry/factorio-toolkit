@@ -87,6 +87,7 @@ class CoverReport:
     existing: int                  # poles already in the layout (wire nodes)
     checks: list = field(default_factory=list)      # [Check]: NO_POWER, POWER_SPLIT
     pinned: int = 0                # of ``poles``, the committed ones kept where they stand (1.7)
+    dnp: int = 0                   # of ``poles``, the ones only DNP pieces need: laid, not built
 
     @property
     def ok(self):
@@ -99,7 +100,9 @@ class CoverReport:
         s = "" if self.components == 1 else "s"
         kept = f"{self.pinned} kept where they stand, " if self.pinned else ""
         return (f"cover {self.owner} power pole={self.pole}: {len(self.poles)} poles "
-                f"({kept}{self.bridges} bridging, {self.existing} existing); "
+                f"({kept}{self.bridges} bridging, {self.existing} existing"
+                + (f"; {self.dnp} only for DNP pieces, laid out, not built" if self.dnp else "")
+                + "); "
                 f"{self.covered}/{self.total} electric entities covered; "
                 f"{self.components} wire component{s}")
 
@@ -467,7 +470,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     rows = [e for e in rows if not _is_own_pole(e, owner, cat)]
 
     # Tiles taken, existing poles as wire nodes, and the entities that need power.
-    taken, existing, electric = {}, [], []
+    taken, existing, electric, unbuilt = {}, [], [], set()
     for e in rows:
         try:
             tiles = fkp.tiles_of(cat, e)
@@ -480,12 +483,15 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
             continue                                 # another domain's: its tiles stay taken
         if kind == "electric-pole" and e.attrs.get("dnp"):
             # 2.0.63: a DNP pole is never built, so it powers nothing; its tiles stay taken. What
-            # a DNP piece would power still gets its poles, ready for when it is built
+            # a DNP piece would power still gets its poles, ready for when it is built (and DNP
+            # themselves while only DNP pieces need them: _dnp_poles)
             continue
         if kind == "electric-pole":
             existing.append(_Node(float(e.x), float(e.y), cat.pole_supply(e.name),
                                   cat.pole_reach(e.name), key=e.key))
         elif _needs_power(cat, e):
+            if e.attrs.get("dnp"):
+                unbuilt.add(len(electric))
             electric.append((e.key, _rect(tiles)))
     ground = _Ground(taken, {(math.floor(x), math.floor(y)) for x, y in keep_out}, lay.size,
                      cat.size(pole), deny, s)
@@ -623,6 +629,15 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     still = [n for n in nodes if n.key in keep_keys]
     poles += [Entity(n.key, names.get(n.key, pole), n.x, n.y, None, dict(attrs or {}))
               for n in still]
+    dnp_poles = 0
+    if unbuilt:
+        built = [rect for i, (_k, rect) in enumerate(electric) if i not in unbuilt]
+        idle = _dnp_poles(nodes, fixed, built, powered)
+        for e, n in [(e, n) for n, e in zip(new, poles)] + [(e, n) for n, e in
+                                                             zip(still, poles[len(new):])]:
+            if id(n) in idle:
+                e.attrs["dnp"] = 1
+                dnp_poles += 1
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
@@ -645,8 +660,66 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
                             f"{fkp.fmt(wire)} tiles apart joins them"))
     rep = CoverReport(owner, pole, [e.key for e in poles], len(electric),
                       len(electric) - len(uncovered), len(groups), uncovered, splits,
-                      sum(1 for n in new if n.bridge), pruned, fixed, checks, len(still))
+                      sum(1 for n in new if n.bridge), pruned, fixed, checks, len(still),
+                      dnp_poles)
     return poles, rep
+
+
+def _dnp_poles(nodes, fixed, built, powered):
+    """{id(node)}: the cover's poles that only DNP pieces need (FRICTION 11-11: a bootstrap stage
+    of 1590 DNP rows and a 39-entity seed came with 94 poles, 4-22 of them needed). Kept: a greedy
+    cover of the built electric entities (``built``, tile rects) the layout's own poles
+    (``nodes[:fixed]``) do not power, and the shortest wire paths that join them to those poles,
+    or to each other where a component has none. The rest stay laid out, DNP, ready for when
+    their pieces are built."""
+    roots = nodes[:fixed]
+    root_ids = {id(n) for n in roots}
+    ours = nodes[fixed:]
+    left = [r for r in built if not powered(r, roots)]
+    need = []
+    while left:
+        best = max(ours, key=lambda n: sum(_overlap(r, n.x, n.y, n.supply) for r in left),
+                   default=None)
+        if best is None or not any(_overlap(r, best.x, best.y, best.supply) for r in left):
+            break
+        need.append(best)
+        left = [r for r in left if not _overlap(r, best.x, best.y, best.supply)]
+    keep = {id(n) for n in need}
+    for group in _groups(nodes):
+        members = [nodes[i] for i in group]
+        terms = [n for n in members if id(n) in keep]
+        if not terms:
+            continue
+        tree = {id(n) for n in members if id(n) in root_ids} or {id(terms[0])}
+        for _round in range(len(terms)):
+            if all(id(t) in tree for t in terms):
+                break
+            # breadth first from the tree to the nearest terminal not on it
+            prev, frontier, hit = {}, [n for n in members if id(n) in tree], None
+            seen = {id(n) for n in frontier}
+            while frontier and hit is None:
+                nxt = []
+                for a in frontier:
+                    for b in members:
+                        if id(b) in seen or not _wired(a, b):
+                            continue
+                        seen.add(id(b))
+                        prev[id(b)] = a
+                        if id(b) in keep and id(b) not in tree:
+                            hit = b
+                            break
+                        nxt.append(b)
+                    if hit is not None:
+                        break
+                frontier = nxt
+            if hit is None:
+                break
+            n = hit
+            while id(n) not in tree:
+                tree.add(id(n))
+                n = prev[id(n)]
+        keep |= tree
+    return {id(n) for n in ours if id(n) not in keep}
 
 
 def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power", keep_out=(),
