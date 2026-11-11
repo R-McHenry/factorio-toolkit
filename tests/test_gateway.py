@@ -185,13 +185,44 @@ class TestRelayThroughTheGateway(GatewayCase):
         self.assertIn("400", str(e.exception))
 
     def test_the_rate_limit(self):
-        self.gw.cfg["limits"]["calls_per_min"] = 3
-        with link.connect() as r:
+        self.gw.cfg["limits"]["calls_per_min"] = 4
+        with link.connect() as r:                                 # the hello is a request too
             for _ in range(3):
                 r.lua("rcon.print(1)")
             with self.assertRaises(link.LinkError) as e:
                 r.lua("rcon.print(1)")
         self.assertIn("429", str(e.exception))
+
+    def test_save_pulls_have_their_own_limit(self):
+        with open(os.path.join(self.saves, "a.zip"), "wb") as fh:
+            fh.write(b"zip")
+        self.gw.cfg["limits"]["saves_per_hour"] = 2
+        link.gateway_get("save")
+        link.gateway_get("save")
+        with self.assertRaises(link.LinkError) as e:
+            link.gateway_get("save")
+        self.assertIn("429", str(e.exception))
+
+    def test_the_journal_cannot_fill_the_disk_and_tells_no_addresses(self):
+        self.gw.cfg["limits"]["journal_cmd_bytes"] = 100
+        with link.connect() as r:
+            r.lua("rcon.print('" + "x" * 500 + "')")
+        folder = os.path.join(self.cfg["data"], "journal", "t")
+        with open(os.path.join(folder, os.listdir(folder)[0])) as fh:
+            row = json.loads(fh.readlines()[-1])
+        self.assertEqual((len(row["cmd"]), row["cut"], row["from"]), (100, 518, "127.0.0.1"))
+        self.assertEqual(len(row["sha256"]), 64)
+        status, body = link.gateway_get("journal")
+        self.assertNotIn("from", json.loads(body)[-1])
+
+    def test_remove_reaches_only_the_callers_own_answer_files(self):
+        other = os.path.join(self.out, "fk-stats")
+        os.makedirs(other)
+        with open(os.path.join(other, "samples.jsonl"), "w") as fh:
+            fh.write("{}")
+        status, body = link.gateway_get("out/fk5/../fk-stats/samples.jsonl", query={"remove": 1})
+        self.assertEqual((status, body), (200, b"{}"))            # read, not removed
+        self.assertTrue(os.path.exists(os.path.join(other, "samples.jsonl")))
 
     def test_a_big_body_is_refused(self):
         self.gw.cfg["limits"]["body_bytes"] = 1000

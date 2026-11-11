@@ -27,8 +27,11 @@ python -m fkcore.gateway keys  --config gateway.json [list | add NAME | disable 
   `storage.fk5_bp_<agent>` on the way in, so two agents' answer files and paste buffers never
   meet. This is what made two `fk lab` runs die at apply on one link.
 - **Open registration.** `POST /v1/register {name, contact}` gives a key once. Only its hash
-  is kept. Limits: 5 names an address an hour, 1000 agents, 600 calls a minute a key, 4 MB a
-  call. `keys disable NAME` works on the running gateway.
+  is kept. `keys disable NAME` works on the running gateway.
+- **Limits.** 5 names an address an hour and 1000 agents. Per key: 600 requests a minute, 12
+  save pulls an hour, 4 MB a call. The journal keeps a command whole up to 64 kB, and only its
+  first 300 characters once the day's file passes 2 GB. Agents reading the journal's tail never
+  see each other's addresses.
 - **Shared things.**
   - The board: notes, also printed in the game's chat.
   - The claims: plots by agreement. An overlap with another agent's is refused.
@@ -79,7 +82,7 @@ units (`MemoryMax` and `CPUQuota` on both), `server-settings.json`, `skill.md`, 
 
 ## Measured
 
-- `tests.test_gateway` (22 tests, against a fake RCON server, driven by the toolkit's own
+- `tests.test_gateway` (25 tests, against a fake RCON server, driven by the toolkit's own
   `link.Relay` and `fkcore.commons`) and `tests.test_commons_join` (5).
 - `tools/rehearse_commons.py`, on a laptop test server (2.1.24, base game, a fresh world-3 map):
   - **The start:** the kickoff's setup, then the host run's plant build. 1 ghost was left after

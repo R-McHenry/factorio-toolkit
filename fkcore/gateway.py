@@ -90,7 +90,8 @@ DEFAULTS = {
     "trust_proxy": ["127.0.0.1"],
     "register": {"open": True, "per_address_per_hour": 5, "max_agents": 1000},
     "limits": {"calls_per_min": 600, "body_bytes": 4_000_000, "out_bytes": 500_000_000,
-               "out_age_s": 86400},
+               "out_age_s": 86400, "saves_per_hour": 12, "journal_cmd_bytes": 64_000,
+               "journal_day_bytes": 2_000_000_000},
     "backups": {"every_s": 3600, "keep_days": 7},
     "watchdog": {"every_s": 20, "fails": 4, "cooldown_s": 600},
     "rcon_timeout": 30.0,
@@ -323,11 +324,27 @@ class Gateway:
 
     # -- journal, board, claims -------------------------------------------------------------------
     def journal(self, save, row):
+        """One line in the save's journal of the day. A command is kept whole up to
+        ``journal_cmd_bytes`` (a paste's parts and any sane chunk fit), and only its first 300
+        characters once the day's file passed ``journal_day_bytes``: a journal nobody can fill
+        the disk with."""
         row = dict({"t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, **row)
         folder = os.path.join(self.data, "journal", save)
+        lim = self.cfg["limits"]
         with self.file_lock:
             os.makedirs(folder, exist_ok=True)
-            with open(os.path.join(folder, row["t"][:10] + ".jsonl"), "a", encoding="utf-8") as fh:
+            path = os.path.join(folder, row["t"][:10] + ".jsonl")
+            cmd = row.get("cmd")
+            if cmd is not None:
+                try:
+                    full = os.path.getsize(path) > lim["journal_day_bytes"]
+                except OSError:
+                    full = False
+                keep = 300 if full else lim["journal_cmd_bytes"]
+                if len(cmd) > keep:
+                    row = dict(row, cmd=cmd[:keep], cut=len(cmd),
+                               sha256=hashlib.sha256(cmd.encode()).hexdigest())
+            with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row) + "\n")
 
     def journal_tail(self, save, n=50):
@@ -347,6 +364,7 @@ class Gateway:
                     continue
                 if "cmd" in row:
                     row["cmd"] = row["cmd"][:300]
+                row.pop("from", None)                    # an agent's address is the host's to see
                 rows.append(row)
                 if len(rows) >= n:
                     return rows[::-1]
@@ -411,16 +429,21 @@ class Gateway:
             _write_json(path, claims)
         return claims
 
+    def rate(self, name, kind="calls", per=60, limit=None):
+        """Count one request of ``name``; ``GatewayError`` 429 past the limit."""
+        limit = limit if limit is not None else self.cfg["limits"]["calls_per_min"]
+        now = time.time()
+        times = self.calls[(name, kind)]
+        while times and now - times[0] > per:
+            times.popleft()
+        if len(times) >= limit:
+            raise GatewayError(429, f"{limit} {kind} per {per} s at most: slow down")
+        times.append(now)
+
     # -- the rcon call ------------------------------------------------------------------------------
     def rcon(self, save, name, role, cmd, address=""):
-        """One agent's command: rate, guard, name space, game, journal -> the reply."""
+        """One agent's command: guard, name space, game, journal -> the reply."""
         now = time.time()
-        times = self.calls[name]
-        while times and now - times[0] > 60:
-            times.popleft()
-        if len(times) >= self.cfg["limits"]["calls_per_min"]:
-            raise GatewayError(429, f"{self.cfg['limits']['calls_per_min']} calls a minute at most")
-        times.append(now)
         s = self.saves[save]
         why = guard(cmd, role)
         if why:
@@ -650,6 +673,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             raise GatewayError(400, "bad Content-Length") from None
+        if n < 0:
+            raise GatewayError(400, "bad Content-Length")
         if n > self.gateway.cfg["limits"]["body_bytes"]:
             self.close_connection = True
             raise GatewayError(413, f"{self.gateway.cfg['limits']['body_bytes']} bytes a call at "
@@ -697,7 +722,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             raise GatewayError(404, "no such path (GET / says what is here; the saves: "
                                     + ", ".join(sorted(gw.saves)) + ")")
         name, role = self._who()
-        save, verb, rest = parts[2], parts[3], "/".join(parts[4:])
+        gw.rate(name)
+        save, verb, rest = parts[2], parts[3], posixpath.normpath("/".join(parts[4:]) or ".")
         s = gw.saves[save]
         if method == "GET" and verb == "hello":
             return self._send(200, {"save": save, "factorio": s.cfg.get("factorio"),
@@ -709,7 +735,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(cmd, str) or not cmd:
                 raise GatewayError(400, 'the body is {"cmd": "/sc LUA"}')
             return self._send(200, {"reply": gw.rcon(save, name, role, cmd, self._address())})
-        if method == "GET" and verb == "out" and rest:
+        if method == "GET" and verb == "out" and rest != ".":
             full = s.out_path(rest, name)
             if full is None:
                 raise GatewayError(400, "a path under script-output")
@@ -720,6 +746,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, {"removed": rest})
             return self._file(full)
         if method == "GET" and verb == "save":
+            gw.rate(name, "save pulls", 3600, gw.cfg["limits"]["saves_per_hour"])
             full = s.newest_save()
             if full is None:
                 raise GatewayError(404, "no save yet")
