@@ -44,9 +44,9 @@ entry was open on main. Each fixed one has a test that fails on main and passes 
   (the sim's `reachmask.py`) builds on the same data.
 - **Overlap of declared frames.** Add a softer `overlap` line when two sealed modules' claims
   share tiles and their hulls don't yet.
-- **Two fluid sources, "1 of 2".** `fluid_route._judge` keeps only the counts. The unreached
-  pair, and the box its pipes stop at (`connect.fluid_reach`), are available there. Also keep the
-  best try's reason, not the first.
+- **Two fluid sources, "1 of 2".** `fluid_route._judge` now names the first unreached pair
+  (this branch, no test). Still open: the box its pipes stop at (`connect.fluid_reach`), and
+  keeping the best try's reason, not the first.
 - **cover power: "all 25 spots taken".** A fallback pole (`--fallback medium-electric-pole`,
   availability-checked) for the entities no `--pole` spot can power.
 - **Path dependence.** `build --fresh` (route everything, drop failed, retry always, clear

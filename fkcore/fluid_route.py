@@ -703,7 +703,11 @@ def _judge(cat, base, extra, flat, net, new, edges=None):
         return None
     if leaks:
         return leaks[0].text
-    return f"{r.reached} of {r.pairs} driver->consumer pairs connected"
+    # FRICTION 11-11 (the bootstrap's Oil2): "1 of 2" named neither the pair nor the cause
+    apart = list(getattr(r, "unreached", None) or ())
+    return (f"{r.reached} of {r.pairs} driver->consumer pairs connected"
+            + (f"; unreached {apart[0][0]} -> {apart[0][1]}"
+               + (f" and {len(apart) - 1} more" if len(apart) > 1 else "") if apart else ""))
 
 
 def _route_net(w, owners, g, flat, cat, net, ends, base, extra, reach, limit, edges=None):
