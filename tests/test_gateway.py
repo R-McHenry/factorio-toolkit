@@ -24,11 +24,14 @@ class FakeGame(socketserver.ThreadingTCPServer):
     def __init__(self):
         super().__init__(("127.0.0.1", 0), _Rcon)
         self.cmds, self.hang, self.script_output = [], False, None
+        self.players, self.paused = 0, False
 
     def answer(self, cmd):
         self.cmds.append(cmd)
         if "game.tick .." in cmd:
-            return "1000 0"
+            return f"1000 {self.players} {'true' if self.paused else 'false'}"
+        if "game.tick_paused = " in cmd:
+            self.paused = "= true" in cmd
         if "write_file" in cmd:                          # write_file('PATH', 'TEXT') as the game does
             path, text = cmd.split("write_file('", 1)[1].split("')", 1)[0].split("', '")
             full = os.path.join(self.script_output, *path.split("/"))
@@ -323,6 +326,31 @@ class TestKeeper(GatewayCase):
         self.gw.watch(s)
         self.assertIn("restarted from its last save", self.game.cmds[-1])
         self.assertIn("ann", self.game.cmds[-1])
+
+    def test_an_empty_save_stands_still_until_someone_comes(self):
+        s = self.gw.saves["t"]
+        s.cfg["idle_pause_s"] = 600
+        self.gw.probe(s)
+        self.gw.idle(s)
+        self.assertFalse(self.game.paused)                        # somebody was just here
+        s.touched -= 700
+        self.gw.idle(s)
+        self.assertTrue(self.game.paused)
+        with link.connect() as r:                                 # an agent's call sets it going
+            r.lua("rcon.print(1)")
+        self.assertFalse(self.game.paused)
+        s.touched -= 700
+        self.gw.probe(s)
+        self.gw.idle(s)
+        self.assertTrue(self.game.paused)
+        self.game.players = 1                                     # and so does a player joining
+        self.gw.probe(s)
+        self.gw.idle(s)
+        self.assertFalse(self.game.paused)
+        self.gw.idle(s)
+        self.assertFalse(self.game.paused)                        # nobody is paused under a player
+        events = [r["event"] for r in self.journal() if r.get("event")]
+        self.assertEqual(events, ["paused", "resumed", "paused", "resumed"])
 
     def test_a_call_that_times_out_is_a_504_and_the_next_one_works(self):
         self.game.hang = True

@@ -1,0 +1,20 @@
+{
+ "listen": ["10.77.0.2", 8911],
+ "trust_proxy": ["10.77.0.1"],
+ "data": "/home/computah/commons/gateway/data",
+ "docs": "/home/computah/commons/gateway/docs",
+ "register": {"open": true, "per_address_per_hour": 5, "max_agents": 1000},
+ "saves": {
+  "commons": {
+   "about": "survival on real ore, built together",
+   "factorio": "2.1.24",
+   "mods": ["base"],
+   "rcon_port": 27121,
+   "pw_file": "/home/computah/commons/instance/rcon.pw",
+   "script_output": "/home/computah/commons/instance/script-output",
+   "saves": "/home/computah/commons/instance/saves",
+   "restart": ["sudo", "-n", "systemctl", "restart", "fk-commons"],
+   "idle_pause_s": 21600
+  }
+ }
+}

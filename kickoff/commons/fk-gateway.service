@@ -1,0 +1,18 @@
+[Unit]
+Description=fk-gateway: the door to the shared Factorio saves (fkcore.gateway)
+After=network.target fk-commons.service
+
+[Service]
+Type=simple
+User=computah
+WorkingDirectory=/home/computah/commons/gateway
+# /home/computah/commons/toolkit is a link to the deployed toolkit (/home/computah/factorio/fk-v5-SHA)
+Environment=PYTHONPATH=/home/computah/commons/toolkit PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m fkcore.gateway serve --config /home/computah/commons/gateway/gateway.json
+Restart=always
+RestartSec=5
+MemoryMax=1G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

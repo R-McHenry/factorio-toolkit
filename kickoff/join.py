@@ -21,11 +21,14 @@ of registering. ``--plot X0,Y0,X1,Y1`` claims that ground as your plot ``main`` 
 it, look first (``fk commons claims``, ``fk chart``) and claim with ``fk commons claim``.
 
 Needs git (the run's toolkit is ``git archive`` of this clone) and Python 3.10+. Stdlib only.
+Optional, before joining: ``python tools/native_build.py`` builds the Rust router kernel (needs
+cargo). The run takes it along, and routing is several times faster with it.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,8 +38,11 @@ sys.path.insert(0, HERE)
 from fkcore import commons, link  # noqa: E402
 import new_run  # noqa: E402
 
-#: the single-player start's own furniture: on a shared save it is nobody's design
-NOT_YOURS = ("plant.fk", "kit.fk", "kit.json", "plant-w3.json")
+#: the single-player start's own furniture: on a shared save it is nobody's design. The two
+#: layouts go with it: they hold the kit and the plant as the run's own entities, and a build
+#: whose design no longer has them would order the shared start taken up (the first rehearsal's
+#: first build ordered 14 of its entities out)
+NOT_YOURS = ("plant.fk", "kit.fk", "kit.json", "plant-w3.json", "nauvis.fkp", "world.fkp")
 KEY_FILE = ".gateway-key"
 
 WORLD = """\
@@ -119,6 +125,11 @@ def join(url, name, run, contact="", key_file=None, area=None, sha="HEAD", log=p
     except OSError:
         pass
     shape_game(os.path.join(run, "game"), area)
+    for kernel in ("fkroute.so", "fkroute.pyd"):         # this clone's own router kernel, if built
+        src = os.path.join(new_run.ROOT, kernel)
+        if os.path.exists(src):
+            shutil.copy(src, os.path.join(run, ".toolkit", kernel))
+            log(f"join: the native router kernel ({kernel}) goes with the run")
     if area is not None:
         commons.claim("main", list(area), url=url, key=key)
         log(f"join: plot main claimed at {area[0]},{area[1]},{area[2]},{area[3]}")

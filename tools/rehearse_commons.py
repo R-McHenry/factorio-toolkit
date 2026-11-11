@@ -3,7 +3,9 @@
     python tools/rehearse_commons.py [--no-replica]
 
 1. A fresh map from the fk-play scenario with the kickoff's map-gen (world 3), base game only, on
-   a laptop test server (tools/laptop_server.py: killed at the end); kickoff/setup_v1.py; saved.
+   a laptop test server (tools/laptop_server.py: killed at the end); kickoff/setup_v1.py; the
+   host's own run (the single-player template) builds the reactor and its pole line, the shared
+   start's furniture, as the kickoff does; saved.
 2. An fk-gateway over it, in this process (fkcore.gateway), registration open.
 3. Two agents join with kickoff/join.py (out/rehearsal-commons/ann and bob), each with the run's
    own ``bin/fk.py`` only from there on:
@@ -31,7 +33,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "kickoff"))
 
 from tools.laptop_server import LaptopServer  # noqa: E402
-from kickoff import setup_v1  # noqa: E402
+from kickoff import new_run, setup_v1  # noqa: E402
 from fkcore import gateway  # noqa: E402
 import join  # noqa: E402
 
@@ -75,6 +77,21 @@ def main(argv):
         with srv.rcon() as r:
             got = setup_v1.run(r)
             note("setup", bootstrap=got["bootstrap"], kit=got["kit"])
+            host_run = os.path.join(BASE, "host")
+            new_run.make(host_run, local={"FK_RCON_PORT": str(srv.rcon_port),
+                                          "FK_RCON_PW_FILE": srv.pw_file,
+                                          "FK_SCRIPT_OUTPUT": os.path.join(srv.write,
+                                                                           "script-output")})
+            fk(host_run, "read-terrain", "--surface", "nauvis", "--area=-128,-128,128,128")
+            code, text, s = fk(host_run, "build", "--wait")
+            plant = (-36, -41, 8, 10)
+            t0, left = time.time(), ghosts(r, plant)
+            while left and time.time() - t0 < 300:
+                time.sleep(5)
+                left = ghosts(r, plant)
+            note("the shared start", build_exit=code, ghosts_left=left,
+                 waited_s=round(time.time() - t0), standing=built(r, (-40, -45, 40, 30)))
+            REPORT["start_standing"] = built(r, (-40, -45, 40, 30))
             r.lua("game.server_save('commons') rcon.print('saved')")
             saves = os.path.join(srv.write, "saves")
             t0 = time.time()
@@ -134,7 +151,11 @@ def rehearse(r, gw, url, ann, bob, replica):
     while left and time.time() - t0 < 240:
         time.sleep(5)
         left = ghosts(r, ANN)
-    note("robots", ghosts_left=left, waited_s=round(time.time() - t0), standing=built(r, ANN))
+    note("robots", ghosts_left=left, waited_s=round(time.time() - t0), standing=built(r, ANN),
+         start_still_standing=built(r, (-40, -45, 40, 30)) - built(r, (36, -24, 40, 8)),
+         start_marked_for_decon=int(r.lua(
+             "rcon.print(game.surfaces.nauvis.count_entities_filtered{area = {{-40,-45},{36,30}}, "
+             "to_be_deconstructed = true})").strip()))
     code, text, s = fk(ann, "look", area)
     REPORT["look_text"] = text
     note("ann looks", exit=code, first=[ln for ln in text.splitlines() if ln.strip()][:3])

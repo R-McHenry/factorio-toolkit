@@ -41,6 +41,10 @@ What it does to a call before the game sees it:
   caller's own.
 
 Plots are kept by agreement: ``claims`` is a list anyone can read, the journal says who did what.
+
+A save with ``idle_pause_s`` stands still when nobody is there: after that long with no agent's
+call and no player in the game the gateway pauses it, and the next call (or a player joining)
+sets it going again. So an empty world does not age: no biters evolving against nobody.
 Stdlib only; one thread per request, one RCON connection and one call at a time per save.
 """
 from __future__ import annotations
@@ -234,8 +238,9 @@ class Save:
         self.name, self.cfg, self.gw = name, cfg, gw
         self.lock = threading.Lock()
         self.rcon = None
-        self.health = {"ok": None, "tick": None, "players": None, "at": None}
+        self.health = {"ok": None, "tick": None, "players": None, "paused": None, "at": None}
         self.fails, self.restarted, self.announce = 0, 0.0, None
+        self.touched = time.time()                       # the last agent call (or the start)
         self.last_backup, self.backed_mtime = 0.0, None
         self.active = {}                                 # agent -> time of its last call
 
@@ -413,6 +418,9 @@ class Gateway:
         if why:
             self.journal(save, {"who": name, "from": address, "refused": why, "cmd": cmd})
             raise GatewayError(403, f"refused: {why}")
+        s.touched = now
+        if s.health.get("paused") and s.cfg.get("idle_pause_s"):
+            self.pause(s, False, f"{name} called")
         sent = namespace(cmd, name)
         t0 = time.monotonic()
         try:
@@ -433,9 +441,10 @@ class Gateway:
         """One health read on its own connection (a hung call holds the save's)."""
         try:
             with s._open(timeout=10.0) as r:
-                got = r.lua("rcon.print(game.tick .. ' ' .. #game.connected_players)").split()
+                got = r.lua("rcon.print(game.tick .. ' ' .. #game.connected_players .. ' ' .. "
+                            "tostring(game.tick_paused))").split()
             s.health = {"ok": True, "tick": int(got[0]), "players": int(got[1]),
-                        "at": round(time.time())}
+                        "paused": got[2:] == ["true"], "at": round(time.time())}
             s.fails = 0
         except (OSError, link.LinkError, ValueError, IndexError):
             s.fails += 1
@@ -469,6 +478,26 @@ class Gateway:
             self.journal(s.name, {"event": "restart", "why": f"no answer to {wd['fails']} probes",
                                   "last": last, "result": note})
             s.announce = last
+
+    def idle(self, s):
+        """Pause a save nobody is at; set it going when a player is there (an agent's call does
+        that itself, in ``rcon``)."""
+        after = s.cfg.get("idle_pause_s")
+        h = s.health
+        if not after or not h["ok"]:
+            return
+        if h["paused"] and h["players"]:
+            self.pause(s, False, "a player is in the game")
+        elif (not h["paused"] and not h["players"] and time.time() - s.touched > after):
+            self.pause(s, True, f"no agent's call for {round(after / 60)} min and no player")
+
+    def pause(self, s, on, why):
+        try:
+            s.call(f"/sc game.tick_paused = {'true' if on else 'false'} rcon.print('ok')")
+        except (OSError, link.LinkError):
+            return
+        s.health = dict(s.health, paused=on)
+        self.journal(s.name, {"event": "paused" if on else "resumed", "why": why})
 
     def backup(self, s):
         """An hourly copy of the newest save, kept ``keep_days``; only a changed save is copied."""
@@ -519,7 +548,7 @@ class Gateway:
         """The keeper thread: every save's watchdog, backup and sweep, until ``stop``."""
         while not self.stop.wait(self.cfg["watchdog"]["every_s"]):
             for s in self.saves.values():
-                for job in (self.watch, self.backup, self.sweep):
+                for job in (self.watch, self.idle, self.backup, self.sweep):
                     try:
                         job(s)
                     except Exception as exc:              # the keeper must outlive any one failure
@@ -531,6 +560,7 @@ class Gateway:
         return {"toolkit": __version__, "register": bool(self.cfg["register"].get("open")),
                 "saves": {n: {"about": s.cfg.get("about", ""), "factorio": s.cfg.get("factorio"),
                               "ok": s.health["ok"], "tick": s.health["tick"],
+                              "paused": s.health["paused"],
                               "players": s.health["players"],
                               "agents_last_hour": sorted(a for a, t in s.active.items()
                                                          if now - t < 3600),

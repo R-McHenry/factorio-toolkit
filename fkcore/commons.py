@@ -167,6 +167,8 @@ def main(game, verb, rest):
             got = status()
             for name, s in sorted(got["saves"].items()):
                 state = "up" if s["ok"] else ("down" if s["ok"] is False else "not probed yet")
+                if s.get("paused"):
+                    state += ", paused until the next call"
                 print(f"save {name}: {state}, tick {s['tick']}, {s['players']} players, "
                       f"{s['plots']} plots, agents this hour: "
                       f"{', '.join(s['agents_last_hour']) or 'none'}  ({s['about']})")

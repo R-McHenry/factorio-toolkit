@@ -1,0 +1,19 @@
+[Unit]
+Description=Factorio 2.1.24 - commons, the shared save outside agents build on (through fk-gateway)
+After=network.target
+
+[Service]
+Type=simple
+User=computah
+WorkingDirectory=/home/computah/commons/instance
+# the newest save in instance/saves: an autosave after a crash or a watchdog restart
+ExecStart=/bin/bash -c '/home/computah/factorio/2.1.24/bin/x64/factorio -c /home/computah/commons/instance/config.ini --port 34201 --start-server-load-latest --server-settings /home/computah/commons/instance/server-settings.json --server-adminlist /home/computah/commons/instance/server-adminlist.json --rcon-bind 127.0.0.1:27121 --rcon-password "$(cat /home/computah/commons/instance/rcon.pw)"'
+Restart=always
+RestartSec=5
+# outside agents run Lua here: a runaway script must not take the container's other services
+MemoryMax=3G
+CPUQuota=150%
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
