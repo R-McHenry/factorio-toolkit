@@ -92,8 +92,10 @@ def main(argv):
             note("the shared start", build_exit=code, ghosts_left=left,
                  waited_s=round(time.time() - t0), standing=built(r, (-40, -45, 40, 30)))
             REPORT["start_standing"] = built(r, (-40, -45, 40, 30))
-            r.lua("game.server_save('commons') rcon.print('saved')")
+            # a server started from a scenario has no saves folder, and server_save needs one
             saves = os.path.join(srv.write, "saves")
+            os.makedirs(saves, exist_ok=True)
+            note("saved", reply=r.lua("game.server_save('commons') rcon.print('saved')").strip())
             t0 = time.time()
             while not os.path.exists(os.path.join(saves, "commons.zip")) and time.time() - t0 < 20:
                 time.sleep(0.5)

@@ -237,7 +237,7 @@ class Save:
     def __init__(self, name, cfg, gw):
         self.name, self.cfg, self.gw = name, cfg, gw
         self.lock = threading.Lock()
-        self.rcon = None
+        self.rcon = self.probe_rcon = None
         self.health = {"ok": None, "tick": None, "players": None, "paused": None, "at": None}
         self.fails, self.restarted, self.announce = 0, 0.0, None
         self.touched = time.time()                       # the last agent call (or the start)
@@ -266,6 +266,14 @@ class Save:
             except OSError:
                 pass
             self.rcon = None
+
+    def drop_probe(self):
+        if self.probe_rcon is not None:
+            try:
+                self.probe_rcon.close()
+            except OSError:
+                pass
+            self.probe_rcon = None
 
     def out_path(self, rel, name):
         """The file ``rel`` under script-output (``fk5/...``: the caller's own), or None when
@@ -438,17 +446,20 @@ class Gateway:
 
     # -- the keeper: health, restart, backups, script-output ---------------------------------------
     def probe(self, s):
-        """One health read on its own connection (a hung call holds the save's)."""
+        """One health read, on a connection of its own that is kept (a hung call holds the
+        save's; a new one every probe filled the server's log)."""
         try:
-            with s._open(timeout=10.0) as r:
-                got = r.lua("rcon.print(game.tick .. ' ' .. #game.connected_players .. ' ' .. "
-                            "tostring(game.tick_paused))").split()
+            if s.probe_rcon is None:
+                s.probe_rcon = s._open(timeout=10.0)
+            got = s.probe_rcon.lua("rcon.print(game.tick .. ' ' .. #game.connected_players .. "
+                                   "' ' .. tostring(game.tick_paused))").split()
             s.health = {"ok": True, "tick": int(got[0]), "players": int(got[1]),
                         "paused": got[2:] == ["true"], "at": round(time.time())}
             s.fails = 0
         except (OSError, link.LinkError, ValueError, IndexError):
             s.fails += 1
             s.health = dict(s.health, ok=False)
+            s.drop_probe()
         return s.health["ok"]
 
     def watch(self, s):
@@ -470,6 +481,7 @@ class Gateway:
                 r.get("who", "?") for r in self.journal_tail(s.name, 5) if "cmd" in r)) or "nobody"
             s.restarted, s.fails = time.time(), 0
             s.drop()
+            s.drop_probe()
             try:
                 done = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 note = f"exit {done.returncode} {done.stderr.strip()[:200]}"
@@ -594,6 +606,7 @@ class Gateway:
             self.server = None
         for s in self.saves.values():
             s.drop()
+            s.drop_probe()
 
 
 def _remove(path):
