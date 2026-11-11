@@ -52,6 +52,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -327,6 +328,45 @@ def _read_roboports(ctx, r):
     return [tuple(float(v) for v in p[:4]) for p in rows if len(p) >= 4]
 
 
+def _reach_mask(t, cat, lines, checks):
+    """``read_terrain <name> --reach`` (3.4): the terrain with every tile of its area outside the
+    construction areas of the roboports that stood with power at the last ``read-terrain
+    --entities`` blocked, and every tile under a tree or rock whose box reaches out of them (no
+    robot may fly to it, so its deconstruction never runs). Routes, poles and placements then stay
+    where robots build. The bootstrap's S6 laid 94 rows north of Sci where no roboport reached,
+    and Test 3's S6 belts under two trees past the area's edge (FRICTION 11-11; its
+    reachmask.py). The design's own new roboports do not widen it: lay those first, read again.
+    -> (terrain, tiles added)."""
+    from . import robots
+    rows = terrainmod.roboports(t)
+    if rows is None:
+        checks.append(Check("no-terrain", "--reach", "the terrain has no roboports read: "
+                            "`fk read-terrain ... --entities` records them; nothing blocked"))
+        return t, 0
+    ports = [(p.x, p.y, p.cr) for p in robots.standing_rows(rows, cat) if p.powered]
+
+    def inside(x, y):
+        return any(abs(x - px) <= r and abs(y - py) <= r for px, py, r in ports)
+    x0, y0, x1, y1 = t.area
+    far = {(x, y) for x in range(x0, x1) for y in range(y0, y1)
+           if not inside(x + 0.5, y + 0.5)}
+    trees = set()
+    for r in t.removable.values():
+        for tx, ty in r["at"]:
+            h = 1.0 if r["type"] == "rock" else 0.5
+            if all(inside(tx + sx * h, ty + sy * h) for sx in (-1, 1) for sy in (-1, 1)):
+                continue
+            trees |= {(x, y) for x in range(math.floor(tx - h), math.floor(tx + h) + 1)
+                      for y in range(math.floor(ty - h), math.floor(ty + h) + 1)
+                      if x0 <= x < x1 and y0 <= y < y1}
+    add = (far | trees) - set(t.entities)
+    t = terrainmod.with_entities(t, set(t.entities) | add, t.entities_read)
+    lines.append(f"  --reach: {len(far)} tiles outside the construction areas of {len(ports)} "
+                 f"powered roboports, {len(trees - far)} more under trees and rocks that reach "
+                 "out of them: blocked")
+    return t, len(add)
+
+
 def _factories(ctx):
     if ctx.surface is None:
         raise FlowError("no surface read yet: the script needs read_surface first")
@@ -370,7 +410,8 @@ def s_read_surface(ctx, args):
 
 
 def s_read_terrain(ctx, args):
-    name = args[0] if args else "none"
+    o = _opts(args)
+    name = (o.get("_") or ["none"])[0]
     if name == "none":
         return ["terrain none: no ore, water or cliffs constrain the layout (a paper surface)"], []
     path = os.path.join(ctx.root, f"{name}.terrain.json")
@@ -378,9 +419,11 @@ def s_read_terrain(ctx, args):
         return [f"terrain {name}: no {name}.terrain.json in the game codebase"], [
             Check("no-terrain", name, "no terrain file; the layout is not checked against the ground")]
     t = terrainmod.load(path)
+    lines, checks = terrainmod.summary(t, name), []
+    if o.get("reach"):
+        t, _more = _reach_mask(t, ctx.cat, lines, checks)
     ctx.ground = t
     ctx.terrain = set(t.blocked)
-    lines, checks = terrainmod.summary(t, name), []
     if ctx.surface is None:
         return lines, checks
     if t.surface != ctx.surface.name:
@@ -1842,7 +1885,15 @@ def s_floorplan(ctx, args):
                                     "--bridge-power)"))
     _write_domains(ctx, s)
     from . import robots
-    rlines, rchecks = robots.check_surface(s, ctx.cat)
+    ports = terrainmod.roboports(ctx.ground)
+    if ports is not None:
+        # 3.4 (Rory 11-11): reach from every roboport the terrain read found, no game needed
+        er = ctx.ground.entities_read
+        rlines, rchecks = robots.check_reach(
+            s, robots.standing_rows(ports, ctx.cat), ctx.cat,
+            read=f"read-terrain --entities found at tick {er.get('tick')}")
+    else:
+        rlines, rchecks = robots.check_surface(s, ctx.cat)
     return lines + rlines, checks + rchecks + _invariant_checks(sf.name, s.problems)
 
 

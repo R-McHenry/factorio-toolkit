@@ -419,14 +419,36 @@ def obstacles(things, owned, area=None):
     return frozenset(tiles), names
 
 
-def read_entities(rcon, surface, area, owned, tag="terrain-entities"):
+def read_entities(rcon, surface, area, owned, tag="terrain-entities", force="player"):
     """One snapshot of ``area`` (``link.snapshot``) -> (tiles, {"tick", "area", "count",
-    "names"}): the obstacles there. Only reads."""
-    from . import link
+    "names", "roboports"}): the obstacles there, and every roboport of ``force`` on the surface
+    ([name, x, y, logistic radius, construction radius, powered], ``robots.lua_standing``), so
+    the build judges robot reach without the game (Rory 2026-11-11: "why wouldn't they just know
+    where all the roboports are?"). Only reads."""
+    from . import link, robots
     cap = link.snapshot(rcon, surface, area, tag, keep=False)
     tiles, names = obstacles(cap.get("things"), owned, area)
-    return tiles, {"tick": cap.get("tick"), "area": [int(v) for v in area],
-                   "count": sum(names.values()), "names": dict(sorted(names.items()))}
+    ptag = f"{tag}-roboports"
+    try:
+        got = link.read_output(rcon, robots.lua_standing(surface, force, ptag), ptag,
+                               "roboports", keep=False)
+        ports = [list(p[:6]) for p in (got if isinstance(got, list) else []) if len(p) >= 6]
+    except (link.LinkError, OSError, ValueError):
+        ports = None
+    out = {"tick": cap.get("tick"), "area": [int(v) for v in area],
+           "count": sum(names.values()), "names": dict(sorted(names.items()))}
+    if ports is not None:
+        out["roboports"] = ports
+    return tiles, out
+
+
+def roboports(t):
+    """The roboports the last ``read-terrain --entities`` found standing ([[name, x, y, lr, cr,
+    powered]], the whole surface), or None when the file has no such read."""
+    er = t.entities_read if t is not None else None
+    if not er or not isinstance(er.get("roboports"), list):
+        return None
+    return er["roboports"]
 
 
 def with_entities(t, tiles, read):
@@ -673,6 +695,11 @@ def summary(t: Terrain, name="map", show=3) -> list:
                      f"area {','.join(str(v) for v in er.get('area', t.area))}): "
                      f"{er.get('count', 0)} standing entities the design does not own, "
                      f"{len(t.entities)} tiles" + (f" ({names})" if names else ""))
+        if isinstance(er.get("roboports"), list):
+            ports = er["roboports"]
+            on = sum(1 for p in ports if len(p) >= 6 and p[5])
+            lines.append(f"  roboports (the whole surface, same read): {len(ports)} stand, {on} "
+                         "with power: floorplan judges robot reach against them")
     if t.enemies:
         lines.append("  enemies: " + ", ".join(f"{n} {k}" for k, n in sorted(t.enemies.items())))
     return lines

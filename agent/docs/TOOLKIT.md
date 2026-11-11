@@ -308,6 +308,14 @@ obstacles; without `--entities` only the bare ground (water, cliffs, ore) is mer
 drops everything first. `fk robots [AREA]` reads the standing roboports against the design's
 logistic chests and changes nothing (chapter 14).
 
+`--entities` also records every roboport on the surface, so robot reach needs no game after it.
+`floorplan` judges each plot against them, the design's own roboports joining where they reach:
+`out-of-reach` names the rows no construction area covers (`stop_on out-of-reach` holds the
+build), and `no-robots` a logistic chest or a `logistic=` gate outside every logistic area (such a
+gate never fires). `read_terrain map --reach` in the build script blocks the ground no powered
+roboport builds, and the tiles under trees and rocks that reach out of it, so route, poles and
+placements stay where robots work. Lay a new roboport first and read again to widen it.
+
 ## Placements (3.1)
 
 Chapter 14. A placement is one paste: which module (or file) stands where, in
@@ -401,7 +409,8 @@ chapter 9), `SHARED_SINK` (a chest on a net with machines: whoever stands first 
 off), `NO_POWER` (chapter 1), `no-source` / `power-short` / `switch-never` / `domain-overlap`
 / `copper` (chapter 10), `TILE_SHARED` (two pieces of one net on one tile), `UNREACHED` (diff:
 ghosts no powered roboport's construction area reaches), `REACH` (report_bom: the same per item;
-`stop_on reach`).
+`stop_on reach`), `out-of-reach` (floorplan: the same offline, from the roboports
+`read-terrain --entities` recorded).
 
 **What is where:** `no-feed` / `no-taker` (an input with no net; an output going nowhere),
 `short-feed` (chapter 1), `cannot-carry` (a net names a machine with no endpoint for its items;
