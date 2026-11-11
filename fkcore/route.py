@@ -2742,6 +2742,18 @@ class _Patch:
                                  _crossings(self.flat))
         if settled is None:
             return None
+        # FRICTION 11-11 (the bootstrap's s2c): a split start's side tile is no tile of the
+        # branch's search, and a branch that turned back through it put the splitter on a belt of
+        # its own (`~w_fe/s7: tile 175,116 is already ~w_fe/b244`): a malformed stage stopped the
+        # build. A branch that lays two pieces on one tile, or one on a standing entity it does
+        # not replace, is no branch: the patch fails and the net is held or laid again
+        mine_keys, seen = {e.key for e in settled}, set()
+        for e in settled:
+            for t in fkpmod.tiles_of(self.cat, e):
+                k = g.at.get(t)
+                if t in seen or (k is not None and k not in replaced and k not in mine_keys):
+                    return None
+                seen.add(t)
         laid = self.lay(settled, nets, replaced)
         return f"{role}: {words}, {_branch_words([e for e in laid if e.name != 'splitter'])}"
 
