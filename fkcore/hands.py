@@ -33,6 +33,9 @@ __all__ = ["hands", "assign", "choose"]
 
 #: the rungs of a short hand, lowest first: what a row or the router lays, and what this raises
 HANDS = ("inserter", "fast-inserter")
+#: the short hands that take a filter, lowest first (2.0: the fast inserter took the filter
+#: inserter's place; route._FILTERS has their slot counts)
+FILTERING = ("fast-inserter", "bulk-inserter", "stack-inserter")
 _EPS = 1e-6
 _SHOW = 4
 
@@ -140,6 +143,18 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
                     and rates[key][cur] > rates[key][want[key]] + _EPS:
                 want[key] = cur
                 kept += 1
+    # a filtered hand (route._filter_loads off a chest of several items, a gated net's
+    # filter=circuit) never goes below a rung that takes a filter: a plain inserter can't (2.0),
+    # and lowered it loaded everything the chest held onto the belt (FRICTION 11-11, the
+    # bootstrap seed pulled wood and stone onto its copper belt)
+    filtered = 0
+    for key in list(want):
+        e = lay.entities[key]
+        if not e.attrs.get("filter") or want[key] in FILTERING:
+            continue
+        up = [h for h in hands if h in FILTERING and rates[key].get(h) is not None]
+        want[key] = up[0] if up else (e.name if e.name in FILTERING else FILTERING[0])
+        filtered += 1
     new = lay.copy()
     changed, count = {}, {}
     for key, name in sorted(want.items()):
@@ -150,9 +165,11 @@ def assign(lay, flat, cat, prev=None, mode="minimize", allow=HANDS, hand=1, bulk
             e = lay.entities[key]
             new.entities[key] = fkpmod.Entity(e.key, name, e.x, e.y, e.dir, dict(e.attrs))
     head = (f"hand {mode} (allowed: {', '.join(hands)}): {len(want)} short hands on nets; "
-            + ", ".join(f"{count[n]} {n}" for n in hands if n in count)
+            + ", ".join(f"{count[n]} {n}" for n in list(hands) + sorted(set(count) - set(hands))
+                        if n in count)
             + f"; {len(changed)} changed"
-            + (f", {kept} kept from the committed .fkp" if kept else ""))
+            + (f", {kept} kept from the committed .fkp" if kept else "")
+            + (f", {filtered} kept at a rung that filters" if filtered else ""))
     lines = [head]
     for (name, lower), keys in sorted(skipped.items()):
         speed = rates[next(iter(keys))].get(name)

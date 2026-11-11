@@ -72,6 +72,19 @@ net fe: fe -> gear
         self.assertTrue(fields["use_filters"])
         self.assertEqual([f["name"] for f in fields["filters"]], ["sulfur"])
 
+    def test_hands_minimize_keeps_a_filtered_hand_at_a_rung_that_filters(self):
+        # FRICTION 11-11 (the bootstrap seed): `hands minimize --allow inserter` lowered the
+        # filtered loaders to plain inserters, which can't filter in 2.0, and the seed's chest put
+        # wood and stone on its copper belt
+        from fkcore import hands
+        flat, r = routed(PAIR)
+        new, lines, _changed = hands.assign(r.layout, flat, CAT, allow=("inserter",))
+        got = {e.attrs["net"]: (e.name, e.attrs.get("filter")) for e in new.entities.values()
+               if "inserter" in e.name and e.attrs.get("filter")}
+        self.assertEqual(got, {"eng": ("fast-inserter", "engine-unit"),
+                               "sul": ("fast-inserter", "sulfur")})
+        self.assertIn("2 kept at a rung that filters", lines[0])
+
 
 class SplitTest(unittest.TestCase):
     def test_parses(self):
