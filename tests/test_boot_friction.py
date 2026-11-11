@@ -35,7 +35,26 @@ class CrowdedEndsTest(unittest.TestCase):
         self.assertEqual(len(got), 1)
         self.assertIn("6 nets end at this 1x1 passive-provider-chest", got[0])
         self.assertIn("4 side tiles", got[0])
-        self.assertIn("Merge nets", got[0])
+        self.assertIn("one sushi belt can carry them all", got[0])
+
+    def test_the_sushi_merge_is_given_and_routes(self):
+        # Rory 11-11: check that there is an easy way to merge them into a sushi net into the chest
+        recipes = ["iron-gear-wheel", "copper-cable", "iron-stick", "iron-gear-wheel",
+                   "copper-cable", "pipe"]
+        head = "box = Chest<provider> @(14, 12)\n" + "".join(
+            f"a{i} = Assembler<recipe={r}> @({i * 5}, 0)\n" for i, r in enumerate(recipes))
+        src = head + "".join(f"net n{i}: a{i} -> box\n" for i in range(6))
+        (c,) = [c for c in flat_of(src).checks if c.code == "crowded-ends"]
+        line = str(c).split("`")[1]
+        self.assertEqual(line, "net n0 items iron-gear-wheel, copper-cable, iron-stick, pipe: "
+                               "a0, a1, a2, a3, a4, a5 -> box")
+        from fkcore import connect, expand, route
+        flat = flat_of(head + line + "\n")
+        self.assertFalse([c for c in flat.checks if c.code == "crowded-ends"])
+        lay, _notes = expand.expand_factory(flat, CAT)
+        r = route.route_layout(flat, lay, CAT)
+        rep = connect.connect(r.layout, CAT, connect.endpoints(flat))
+        self.assertEqual(rep.nets["n0"].status, "connected")
 
     def test_four_fit(self):
         self.assertFalse([c for c in flat_of(gears_into_one_chest(4)).checks

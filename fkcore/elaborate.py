@@ -3376,6 +3376,38 @@ def _child_tiles(flat, cat, path, cache):
     return cache[path]
 
 
+def _sushi_hint(flat, cat, key, m, in_hold):
+    """Rory 11-11: for crowded ends, "check that there is an easy way to merge them into a sushi
+    net so that can go into the chest". It is easy when the entity is a chest and the nets into
+    it end nowhere else: one mixed belt takes every item in, so the line to write is given, in
+    the chest's module's own names. Else the general advice."""
+    into = sorted({n for (k, _i), ns in in_hold.items() if k == key for n in ns})
+    chest = cat.kind(m.prototype) in ("container", "logistic-container")
+    nets = [flat.nets[n] for n in into if n in flat.nets]
+    alone = nets and len(nets) == len(into) and all(
+        {k for k, _i in fn.consumers} == {key} for fn in nets)
+    if not (chest and len(into) > 1 and alone):
+        return (f"Merge nets that go the same way (`net {into[0] if into else 'x'}: a, b -> "
+                f"{m.inst}`), or give it a bigger chest")
+    scope = m.inst.rsplit("/", 1)[0] + "/" if "/" in m.inst else ""
+
+    def local(path):
+        return path[len(scope):] if path.startswith(scope) else path
+
+    items, drivers = [], []
+    for fn in nets:
+        for k, item in fn.drivers:
+            src = flat.machines[k].inst if k in flat.machines else k.rsplit("/", 1)[0]
+            if local(src) not in drivers:
+                drivers.append(local(src))
+            if item not in items:
+                items.append(item)
+    name = local(into[0])
+    return (f"The {len(into)} nets into it end nowhere else, so one sushi belt can carry them "
+            f"all: `net {name} items {', '.join(items)}: {', '.join(drivers)} -> "
+            f"{local(m.inst)}` in place of {', '.join(local(n) for n in into)}")
+
+
 def _endpoint_checks(flat, cat):
     out_hold, in_hold = flat._out_hold, flat._in_hold
     for side, hold in (("out", out_hold), ("in", in_hold)):
@@ -3417,8 +3449,8 @@ def _endpoint_checks(flat, cat):
                 "crowded-ends", key,
                 f"{len(nets)} nets end at this {w}x{h} {m.prototype} ({', '.join(names[:6])}"
                 + (" ..." if len(names) > 6 else "") + f"), and it has {sides} side tiles for "
-                "their hands: the router can't reach it for some of them. Merge nets that go the "
-                f"same way (`net {names[0]}: a, b -> {m.inst}`) or give it a bigger chest"))
+                "their hands: the router can't reach it for some of them. "
+                + _sushi_hint(flat, cat, key, m, in_hold)))
     fed = {key for key, _item in in_hold}
     # 3.0: a Literal's machine behind a port its net names is on that net
     by_port = {"out": set(), "in": set()}
