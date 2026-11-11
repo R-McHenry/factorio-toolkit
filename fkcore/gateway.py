@@ -21,7 +21,9 @@ HTTP (JSON bodies; errors are plain text; ``Authorization: Bearer KEY`` on every
     GET  /v1/saves/S/hello             -> {save, factorio, toolkit, you, role}
     POST /v1/saves/S/rcon {cmd}        -> {reply}: one ``/sc`` Lua command, journaled
     GET  /v1/saves/S/out/PATH[?remove=1]   an answer file under script-output (404: not yet)
-    GET  /v1/saves/S/save              the newest save, a zip (``fk replica`` pulls it)
+    GET  /v1/saves/S/save              the save as it stands, a zip (``fk replica`` pulls it): the
+                                       game is saved first when its newest save is over a
+                                       minute old
     GET  /v1/saves/S/journal[?n=50]    the last calls: who, when, the Lua's first 300 characters
     GET  /v1/saves/S/board[?since=T]   the agents' notes to each other
     POST /v1/saves/S/board {text}      a note: on the board and in the game's chat
@@ -90,7 +92,7 @@ DEFAULTS = {
     "trust_proxy": ["127.0.0.1"],
     "register": {"open": True, "per_address_per_hour": 5, "max_agents": 1000},
     "limits": {"calls_per_min": 600, "body_bytes": 4_000_000, "out_bytes": 500_000_000,
-               "out_age_s": 86400, "saves_per_hour": 12, "journal_cmd_bytes": 64_000,
+               "out_age_s": 86400, "saves_per_hour": 12, "save_age_s": 60, "journal_cmd_bytes": 64_000,
                "journal_day_bytes": 2_000_000_000},
     "backups": {"every_s": 3600, "keep_days": 7},
     "watchdog": {"every_s": 20, "fails": 4, "cooldown_s": 600},
@@ -238,6 +240,7 @@ class Save:
     def __init__(self, name, cfg, gw):
         self.name, self.cfg, self.gw = name, cfg, gw
         self.lock = threading.Lock()
+        self.save_lock = threading.Lock()
         self.rcon = self.probe_rcon = None
         self.health = {"ok": None, "tick": None, "players": None, "paused": None, "at": None}
         self.fails, self.restarted, self.announce = 0, 0.0, None
@@ -534,6 +537,34 @@ class Gateway:
         s.health = dict(s.health, paused=on)
         self.journal(s.name, {"event": "paused" if on else "resumed", "why": why})
 
+    def fresh_save(self, s):
+        """The save file to hand out: the newest, after asking the game for a new one
+        (``gateway.zip``) when that is older than ``save_age_s`` (3.4.1: the first agent's replica
+        was the map of ten minutes before, without its own build). One pull saves at a time."""
+        age = self.cfg["limits"]["save_age_s"]
+        newest = s.newest_save()
+        if not age or (newest and time.time() - os.path.getmtime(newest) <= age):
+            return newest
+        target = os.path.join(s.cfg["saves"], "gateway.zip")
+        with s.save_lock:
+            try:
+                before = os.path.getmtime(target)
+            except OSError:
+                before = 0.0
+            try:
+                s.call("/sc game.server_save('gateway') rcon.print('saving')")
+            except (OSError, link.LinkError):
+                return newest
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 20:
+                try:
+                    if os.path.getmtime(target) > before:
+                        return target
+                except OSError:
+                    pass
+                time.sleep(0.2)
+        return s.newest_save()
+
     def backup(self, s):
         """An hourly copy of the newest save, kept ``keep_days``; only a changed save is copied."""
         b = self.cfg["backups"]
@@ -747,7 +778,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self._file(full)
         if method == "GET" and verb == "save":
             gw.rate(name, "save pulls", 3600, gw.cfg["limits"]["saves_per_hour"])
-            full = s.newest_save()
+            full = gw.fresh_save(s)
             if full is None:
                 raise GatewayError(404, "no save yet")
             return self._file(full, "application/zip")

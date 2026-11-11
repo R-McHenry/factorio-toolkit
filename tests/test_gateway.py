@@ -24,7 +24,7 @@ class FakeGame(socketserver.ThreadingTCPServer):
     def __init__(self):
         super().__init__(("127.0.0.1", 0), _Rcon)
         self.cmds, self.hang, self.script_output = [], False, None
-        self.players, self.paused = 0, False
+        self.players, self.paused, self.saves = 0, False, None
 
     def answer(self, cmd):
         self.cmds.append(cmd)
@@ -32,6 +32,11 @@ class FakeGame(socketserver.ThreadingTCPServer):
             return f"1000 {self.players} {'true' if self.paused else 'false'}"
         if "game.tick_paused = " in cmd:
             self.paused = "= true" in cmd
+        if "server_save('gateway')" in cmd and self.saves:
+            with open(os.path.join(self.saves, "gateway.tmp.zip"), "wb") as fh:
+                fh.write(b"as it stands")
+            os.replace(os.path.join(self.saves, "gateway.tmp.zip"),
+                       os.path.join(self.saves, "gateway.zip"))
         if "write_file" in cmd:                          # write_file('PATH', 'TEXT') as the game does
             path, text = cmd.split("write_file('", 1)[1].split("')", 1)[0].split("', '")
             full = os.path.join(self.script_output, *path.split("/"))
@@ -231,7 +236,21 @@ class TestRelayThroughTheGateway(GatewayCase):
                 r.lua("rcon.print('" + "x" * 2000 + "')")
         self.assertIn("413", str(e.exception))
 
+    def test_a_stale_save_is_saved_again_before_it_is_handed_out(self):
+        old = os.path.join(self.saves, "_autosave1.zip")
+        with open(old, "wb") as fh:
+            fh.write(b"ten minutes ago")
+        self.assertEqual(link.gateway_get("save")[1], b"ten minutes ago")   # fresh enough
+        os.utime(old, (time.time() - 600, time.time() - 600))
+        self.game.saves = self.saves
+        self.assertEqual(link.gateway_get("save")[1], b"as it stands")
+        self.assertIn("server_save('gateway')", self.game.cmds[-1])
+        n = len(self.game.cmds)
+        self.assertEqual(link.gateway_get("save")[1], b"as it stands")      # and not saved twice
+        self.assertEqual(len(self.game.cmds), n)
+
     def test_the_save_is_the_newest_finished_zip(self):
+        self.gw.cfg["limits"]["save_age_s"] = 0
         for i, name in enumerate(("old.zip", "new.zip", "newer.tmp.zip")):
             path = os.path.join(self.saves, name)
             with open(path, "wb") as fh:

@@ -97,3 +97,30 @@ units (`MemoryMax` and `CPUQuota` on both), `server-settings.json`, `skill.md`, 
   - **The gateway:** 46 calls, the slowest 31 ms.
   - **The replica:** `fk replica` pulled the save (0.7 MB) and started it paused with
     `mods: base` in 3.7 s. Lua on it saw the two assemblers.
+
+## 3.4.1: what the live commons found
+
+The commons went up on computah-ct on 2026-11-11 (`kickoff/commons/README.md`), and a first
+agent joined it from a fresh Linux (WSL) with the invitation's three commands.
+
+- **`GET save` saves first.** The first agent's replica was the map of ten minutes before,
+  without its own build: the newest save was the last autosave. When the newest save is over a
+  minute old (`limits.save_age_s`), the gateway now has the game save (`gateway.zip`) and hands
+  that out.
+- **`setup-commons.sh` on 2.1.**
+  - No `--map-settings`: the live instance's file is 2.0's defaults, and 2.1 refuses it (it
+    wants `enemy_expansion.evolution_group_size_factor`).
+  - `pump-21.lua`: 2.1 lays world-3's shore one tile off 2.0's, so the plant's offshore pump
+    could not stand where it was captured, and the reactor heated with nothing taking water.
+    The ghost moves to -26.5,-36.5 with one pipe to the plant's line.
+  - The single-player template still has the 2.0 spot: a 2.1 kickoff from a fresh map needs
+    `plant-w3.json` captured again.
+- **Measured, the first agent** (`claude-first`, WSL Ubuntu, Python 3.12, the public repo at
+  v3.4.0, through `https://factorio.computah.duckdns.org`):
+  - the clone, the join and a claim worked as the invitation says;
+  - `fk read-terrain` of the 32x24 plot, then `gears.fk`: 35 ghosts, 0 ordered out, built by the
+    shared robots within 30 s, `fk look` `ok 35/35 ... 0 tiles differ`;
+  - a pause was refused with 403;
+  - `fk replica` downloaded the headless server, pulled the save and started it paused with
+    `mods: base`;
+  - the test build was taken up again afterwards and the plot given back.
