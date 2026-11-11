@@ -15,6 +15,7 @@
     notify   nearby | all | off
     remind   <duration>                       # 2h, 10min, 20s: the alert reminder cadence
     target   <item> <rate>/<unit>, ...
+    power grid <x>,<y>                        # a standing pole: its network is the world's grid
 
 A ``#`` starts a comment at the start of a line or after a space. ``<module>`` is a factory file of the game codebase (``<module>.fk`` beside the surface file); its
 layout record is ``<module>.fkp``. :func:`floorplan` turns the place and claim lines into the
@@ -40,7 +41,15 @@ migrate-surface`` writes the root design from the place lines and comments them 
 
 ``remind`` is how often a persisting alert of the game's alert panel is pushed again
 (``fkcore.alerts``; CORE-V1 §6.5, decision 11). Its default, **10min, is a placeholder: the
-default is still open with Rory** (CORE-V1 §13). Pure, stdlib only.
+default is still open with Rory** (CORE-V1 §13).
+
+``power grid X,Y`` (3.5, PLAN-POWER P1; Rory 11-11: "world power is a type of global parameter,
+we could indicate power network id from the pole, and then look at that grid as the global power
+stat"): map coordinates of one standing electric pole. ``read-terrain --entities`` records that
+pole's electric network (its poles and statistics), cover power takes the network's poles near a
+plot as the roots it wires to, and floorplan judges ``NO_POWER`` and ``power-short`` against it.
+It is a property of the surface (the world's), so a module built alone on it keeps it. Pure,
+stdlib only.
 """
 from __future__ import annotations
 
@@ -64,7 +73,8 @@ DEFAULT_REMIND = "10min"
 DEFAULT_FORCE = "player"
 #: the lines that say what is true of the surface itself (what a module built alone on it
 #: copies into its own surface file, ``fkcore.alone``); the rest place things on it
-PROPERTY_LINES = ("surface", "free", "force", "terrain", "catalog", "notify", "remind", "watch")
+PROPERTY_LINES = ("surface", "free", "force", "terrain", "catalog", "notify", "remind", "watch",
+                  "power")
 _FLAGS = {"": True, "yes": True, "on": True, "true": True, "no": False, "off": False,
           "false": False}
 
@@ -107,6 +117,7 @@ class SurfaceFile:
     design: str | None = None                         # the root .fk (2.0.43): the plot list
     design_notes: list = field(default_factory=list)  # what the derivation could not make a plot
     lines_places: dict = field(default_factory=dict)  # the place lines, when a design won
+    power_grid: tuple | None = None                   # 3.5: (x, y) of the pole naming the grid
 
     @property
     def notify_mode(self):
@@ -129,6 +140,19 @@ def _pair(s, where):
         return int(x), int(y)
     except ValueError:
         raise SurfaceError(f"{where}: expected x,y, got {s!r}") from None
+
+
+def _point(s, where):
+    """``x,y`` in map coordinates (a pole stands on a tile centre, 10.5,-3.5, or on a corner)"""
+    try:
+        x, y = s.split(",")
+        return float(x), float(y)
+    except ValueError:
+        raise SurfaceError(f"{where}: expected x,y, got {s!r}") from None
+
+
+def _num(v):
+    return str(int(v)) if float(v).is_integer() else repr(float(v))
 
 
 def _strip(raw):
@@ -220,6 +244,12 @@ def loads(text, path="<surface>") -> SurfaceFile:
                 if len(t) != 2 or not duration_ticks(t[1]):
                     raise SurfaceError(f"{where}: remind <duration>, like 10min or 20s")
                 sf.remind = t[1]
+            elif head == "power":
+                if len(t) != 3 or t[1] != "grid":
+                    raise SurfaceError(f"{where}: power grid <x>,<y> (a standing pole's position)")
+                if sf.power_grid is not None:
+                    raise SurfaceError(f"{where}: one power grid line (the world has one grid)")
+                sf.power_grid = _point(t[2], where)
             elif head == "target":
                 for part in " ".join(t[1:]).split(","):
                     item, rate = part.split()
@@ -275,6 +305,8 @@ def properties(sf: SurfaceFile) -> str:
     for region, action in sf.watch.items():
         if action != {"plots": "keep", "sanctioned": "mark"}[region]:
             out.append(f"watch {region}: {action}")
+    if sf.power_grid is not None:
+        out.append(f"power grid {_num(sf.power_grid[0])},{_num(sf.power_grid[1])}")
     return "\n".join(out) + "\n"
 
 

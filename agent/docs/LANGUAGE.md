@@ -400,7 +400,9 @@ condition reads `each`.
 
 The build's `cover power` step lays the poles every factory needs and `floorplan --bridge-power`
 joins factories to the plant's grid: put no poles in the source (`Pole` pins one where a cell
-needs it).
+needs it). `cover power --pole a,b` allows several kinds, mixed where the first has no spot, and
+the surface file's `power grid X,Y` names the world's grid, whose poles the cover wires to
+(TOOLKIT.md).
 
 ```
 power main: cover all                 # everything no other domain names

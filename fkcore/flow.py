@@ -1759,12 +1759,20 @@ def s_cover_power(ctx, args):
     the committed poles stay where they still fit and new ones go only where coverage is missing;
     ``--fresh`` lays every pole anew, as before. 3.1 (Rory 11-08: the world never feeds a step):
     what the diff found built does not reach here; a pinned pole of another kind than ``--pole``
-    is laid again in the new kind, and what stands is the diff's difference."""
+    is laid again in the new kind, and what stands is the diff's difference.
+
+    3.5 (PLAN-POWER P1+P2, Rory 11-11): ``--pole`` is a comma list of the kinds allowed, first
+    preferred (``any``: the avail pick, then the other buildable kinds), mixed where the first
+    has no spot or cannot join (``power.PowerProblem``); and with a grid read (the surface's
+    ``power grid X,Y``, ``read-terrain --entities``) the grid's poles near each plot are the
+    cover's roots, so a plot's poles wire back to the world's grid."""
+    from . import power as powermod
     o = _opts(args, pole="medium-electric-pole")
-    pole, _note = availmod.choose("pole", o["pole"], need=_need(ctx, "electric-pole"))
-    if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
-        raise FlowError(f"--pole {pole}: not an electric pole (small-electric-pole, "
-                        "medium-electric-pole, big-electric-pole, substation), or any")
+    try:
+        kinds = powermod.parse_kinds(o["pole"], ctx.cat, need=_need(ctx, "electric-pole"))
+    except ValueError as exc:
+        raise FlowError(str(exc)) from None
+    pole, more = kinds[0], kinds[1:]
     try:
         from . import cover
     except ImportError:
@@ -1772,15 +1780,26 @@ def s_cover_power(ctx, args):
             Check("NO_POWER", "all factories", "no power coverage step yet")]
     from . import domains
     lines, checks = [], []
+    grid = terrainmod.grid(ctx.ground)
     for factory, lay in list(ctx.layouts.items()):
         keep_out = _frame_blocked(ctx, factory, lay.size) | _empty_slots(ctx, factory, lay)
+        roots = ()
+        if grid is not None and ctx.surface is not None and factory in ctx.surface.places:
+            p = ctx.surface.places[factory]
+            roots = powermod.grid_roots(grid, p, lay.size or terrainmod.frame_size(p), ctx.cat,
+                                        kinds)
+        prob = powermod.PowerProblem(kinds, roots, frozenset(keep_out), grid)
+        if grid is not None:
+            lines.append(f"{factory}: {powermod.grid_text(grid)}: {len(roots)} of its poles "
+                         "in reach of the plot, the cover's roots")
         doms = domains.active(ctx.flats.get(factory))
         if doms is not None:
             # 2.1: two power lines or more are domains, each its own network (fkcore.domains)
             prev = ctx.previous.get(factory)
             new, dlines, dchecks = domains.cover_domains(
                 ctx.flats[factory], lay, ctx.cat, doms, pole, keep_out=keep_out,
-                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"))
+                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"),
+                more=prob.more, roots=prob.roots)
             ctx.layouts[factory] = new
             lines += [f"{factory}: {ln}" for ln in dlines]
             checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in dchecks]
@@ -1794,13 +1813,14 @@ def s_cover_power(ctx, args):
             # unit's poles depend only on what stands in it); ``--flat`` for the one-pass cover
             pinned = []
             poles, rep = cover.cover_power_units(lay, ctx.cat, units, pole=pole,
-                                                 keep_out=keep_out)
+                                                 keep_out=keep_out, more=prob.more,
+                                                 roots=prob.roots)
         else:
             poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
-                                           pinned=pinned)
+                                           pinned=pinned, more=prob.more, roots=prob.roots)
         # 2.1.26: the poles just laid, not a second cover_power (the live world's took ~30 s each)
         new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
-                                poles=poles)
+                                poles=poles, more=prob.more)
         ctx.layouts[factory] = new
         if units:
             lines.append(f"{factory}: by unit: {rep.units[0]} sealed modules laid, "
@@ -1917,13 +1937,19 @@ def s_floorplan(ctx, args):
                            entities=ents)
     ctx.surface_lay = surfacemod.floorplan(sf, infra)
     ctx.composed = compose.compose(ctx.surface_lay, ctx.layouts, ctx.cat)
+    from . import power as powermod
+    grid = terrainmod.grid(ctx.ground)
+    # 3.5 (P1, Rory 11-11): the world grid's poles, for the wire networks below (never laid)
+    grid_rows = powermod.grid_rows(grid, ctx.cat) if grid is not None else []
     if o.get("bridge_power"):
         from . import cover
         pole = o["bridge_power"] if isinstance(o["bridge_power"], str) else "medium-electric-pole"
-        pole, _note = availmod.choose("pole", pole, need=_need(ctx, "electric-pole"))
-        if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
-            raise FlowError(f"--bridge-power {pole}: not an electric pole (small-electric-pole, "
-                            "medium-electric-pole, big-electric-pole, substation), or any")
+        try:
+            kinds = powermod.parse_kinds(pole, ctx.cat, need=_need(ctx, "electric-pole"),
+                                         flag="--bridge-power")
+        except ValueError as exc:
+            raise FlowError(str(exc)) from None
+        pole = kinds[0]
         s = ctx.composed
         keep = set()
         for p in s.plots.values():
@@ -1933,7 +1959,8 @@ def s_floorplan(ctx, args):
         for m in s.marks.values():
             keep |= {(int(x), int(y)) for x, y in m.tiles}
         keep |= ctx.terrain                          # no bridge pole on water or a cliff
-        poles, blines = cover.bridge(list(s.entities.values()), ctx.cat, keep, pole)
+        poles, blines = cover.bridge(list(s.entities.values()) + grid_rows, ctx.cat, keep, pole,
+                                     more=kinds[1:], grid={e.key for e in grid_rows})
         if poles and "bridge" not in ctx.surface_lay.covers:
             ctx.surface_lay.covers["bridge"] = fkp.Cover("bridge", "power", {"pole": pole})
         for e in poles:
@@ -1956,7 +1983,7 @@ def s_floorplan(ctx, args):
         from . import cover
     except ImportError:
         cover = None
-    if cover is not None:
+    if cover is not None and grid is None:
         nets = cover.networks(list(s.entities.values()), ctx.cat)
         lines.append(f"power: {len(nets)} wire network{'s' if len(nets) != 1 else ''}, "
                      f"{sum(1 for n in nets if n['sources'])} with generation")
@@ -1971,6 +1998,34 @@ def s_floorplan(ctx, args):
                 checks.append(Check("NO_POWER", f"{sf.name} {name}",
                                     "its grid reaches no generator (bridge it: floorplan "
                                     "--bridge-power)"))
+    elif cover is not None:
+        # 3.5 (P1, Rory 11-11: "look at that grid as the global power stat"): a plot whose poles
+        # wire to a pole of the world grid is on it, whatever generator the design holds
+        gkeys = {e.key for e in grid_rows}
+        nets = cover.networks(list(s.entities.values()) + grid_rows, ctx.cat)
+        named = powermod.grid_text(grid)
+        lines.append(f"power: {len(nets)} wire network{'s' if len(nets) != 1 else ''}, "
+                     f"{sum(1 for n in nets if n['sources'])} with generation; {named}")
+        for name in sorted(s.plots):
+            mine = {k for k in s.entities if k.startswith(f"{sf.name}:{name}/")
+                    and ctx.cat.kind(s.entities[k].name) == "electric-pole"}
+            on_grid = any(gkeys & set(n["poles"]) for n in nets if mine & set(n["poles"]))
+            powered = any(n["sources"] for n in nets if mine & set(n["poles"]))
+            lines.append(f"  {name}: {len(mine)} poles, "
+                         + (f"on {named}" if on_grid else
+                            "on a grid with generation, not the world grid's" if powered else
+                            f"NOT on the world grid #{grid.get('id')} or a grid with generation"))
+            if mine and not (on_grid or powered):
+                checks.append(Check("NO_POWER", f"{sf.name} {name}",
+                                    f"its poles reach neither a generator nor {named} (cover "
+                                    "power bridges to the grid's poles in reach of the plot; "
+                                    "else bridge it: floorplan --bridge-power)"))
+        if (grid.get("stats") or {}):
+            slines, schecks = powermod.short(
+                {n: ctx.layouts[n] for n in sorted(s.plots) if n in ctx.layouts}, ctx.cat, grid,
+                sf.name)
+            lines += slines
+            checks += schecks
     _write_domains(ctx, s)
     from . import robots
     ports = terrainmod.roboports(ctx.ground)

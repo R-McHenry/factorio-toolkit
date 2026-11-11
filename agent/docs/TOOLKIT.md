@@ -242,7 +242,20 @@ tweak it; leave `apply` out while you design.
   surface; it places no storage chest, so put one in your hub); `cover power --pole any` the
   poles, medium where the network can build them, else small (`floorplan --bridge-power any` the
   same for the bridge to the plant's grid). The choice comes from `out\avail.json`, written by
-  `report_bom --stock live`.
+  `report_bom --stock live`. `--pole` also takes a list in order of preference, `--pole
+  small-electric-pole,medium-electric-pole`, and `any` in a list is the pick above, then every
+  other kind the network can build. The cover lays the first kind; a machine no free spot of it
+  can power ("all 25 spots ... are taken") gets the next kind, that machine alone, and so does a
+  gap the first kind's wire cannot cross. The report gives the poles per kind. A small and a medium
+  pole are both 1x1, so one fits wherever the other does: the ladder matters between a 2x2 pole
+  and a 1x1 one, from a small pole's reach to a medium's, or where a medium's wider supply would
+  reach another power domain.
+- With the world's grid read (the surface's `power grid X,Y`, below), `cover power` takes that
+  grid's poles near each plot as fixed roots and wires the plot's poles to them (the grid's poles
+  are never laid or moved: they stand in the world). `floorplan` says which plots are on the
+  world grid, with its id and stats, and `NO_POWER` names it for a plot that reaches neither it nor
+  a generator; one `power-short` line per plot weighs its full-load draw against the grid's spare
+  capacity. `stop_on no-power` is how a build script makes `NO_POWER` hold the build.
 - `diff --scope stale` and `apply --scope stale` paste only what changed; `apply --area A` for
   one region. `write_layout` writes the `.fkp` files the next build keeps to (the one before is
   kept in `out\fkp-history\`, the last 8 of each).
@@ -261,14 +274,17 @@ watch plots:      keep                        # something placed by hand in a pl
 watch sanctioned: mark 2h                     # ... outside every plot: marked for two hours
 notify   nearby                               # alerts for what is built: nearby, all or off
 target automation-science-pack 10/min         # a rate the whole surface should make
+power grid 10.5,-3.5                          # a standing pole: its network is the world's grid
 ```
 
 Properties: `free` (things are free there: a paste's ghosts are revived at once, nothing is built
 by robots, a slot is emptied by a direct destroy, a look may take the whole design, `notify`
 defaults to `all`, `cover robots` places nothing; a file without `free` is a base), `force NAME`
 (whose the paste is, default `player`; the lab's is `force lab`), `terrain NAME|none`, `catalog`,
-`design`, `notify`, `remind`, `watch`, `target`, `robots`, `claim`, and the older `place` lines
-(`place iron = iron plot 40,-20 30x30`; `fk migrate-surface` writes a world design from them). A
+`design`, `notify`, `remind`, `watch`, `target`, `power grid X,Y` (one standing pole, in map
+coordinates, whose electric network is the world's grid), `robots`, `claim`, and the older `place`
+lines (`place iron = iron plot 40,-20 30x30`; `fk migrate-surface` writes a world design from
+them). A
 file written before 3.1 had `mode play|lab`: still read with a note, `fk migrate-surface
 --mode-only` rewrites it. The lab's file is `surface lab`, `free`, `force lab`; it needs none.
 
@@ -315,6 +331,13 @@ build), and `no-robots` a logistic chest or a `logistic=` gate outside every log
 gate never fires). `read_terrain map --reach` in the build script blocks the ground no powered
 roboport builds, and the tiles under trees and rocks that reach out of it, so route, poles and
 placements stay where robots work. Lay a new roboport first and read again to widen it.
+
+When the surface file names `power grid X,Y`, `--entities` also records that grid: the pole
+nearest X,Y (within 1.5 tiles), its electric network id, every pole on that network and the
+network's stats over the last minute (power made and used per entity, and the rated capacity of
+its generators, solar at noon). `read_terrain` prints it, `cover power` wires to it and
+`floorplan` judges `NO_POWER` and `power-short` against it. A read that finds no pole there says
+so. Read again after the grid has grown: the stats are the read's, not live.
 
 ## Placements (3.1)
 
