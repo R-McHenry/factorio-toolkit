@@ -345,8 +345,9 @@ def jobs(flat, lay, cat) -> dict:
             out[name] = NetJob(name, fluid=True, skip=plugin.why_not(flat, lay, cat, name),
                                reserved=plugin.reserved(flat, lay, cat, name))
     for path, rec in sorted(lay.insts.items()):
-        if rec.kind == "Literal" or path not in flat.insts:
-            continue
+        if rec.kind == "Literal" or path not in flat.insts \
+                or getattr(flat.insts[path], "kind", None) == "Literal":
+            continue                    # a Literal's ends are _literal_ends' (by either's kind)
         for role, side, net, (x, y, d) in attach_points(flat, lay, path, cat):
             if net is None or net in fluids:
                 continue

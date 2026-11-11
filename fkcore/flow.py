@@ -49,6 +49,7 @@ the game codebase and writes ``out/`` and, in write_layout, the ``.fkp`` files.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -716,7 +717,22 @@ def _pinned_routes(flat, new, prev, cat):
     replay: a chest moved a tile onto fe_pl4's trunk re-laid its 137 belts)."""
     if prev is None:
         return {}, {}
-    old = route.jobs(flat, prev, cat) if prev.insts else {}
+    # FRICTION 11-11 (the bootstrap stages): an instance whose kind changed (Seed -> Literal, a
+    # Stack's LabCell -> LabCell3) has new attach points, and its old routes lead to the old ones.
+    # The old layout's jobs are read without it (the new kind's geometry on the old layout crashed:
+    # "Literal has no fragment geometry yet"), and every net with an end on it or inside it is
+    # routed again (pinned, a cell's feeds came back partly-connected even with --reroute)
+    rekind = {p: (prev.insts[p].kind, r.kind) for p, r in new.insts.items()
+              if p in prev.insts and prev.insts[p].kind != r.kind}
+
+    def under(path):
+        return next((q for q in rekind if path == q or path.startswith(q + "/")), None)
+
+    view = prev
+    if rekind:
+        view = copy.copy(prev)
+        view.insts = {p: r for p, r in prev.insts.items() if under(p) is None}
+    old = route.jobs(flat, view, cat) if view.insts else {}
     now = route.jobs(flat, new, cat)
     taken = set()
     for e in new.entities.values():
@@ -728,6 +744,12 @@ def _pinned_routes(flat, new, prev, cat):
             by_net.setdefault(e.owner[1:], []).append(e)
     for net, ents in sorted(by_net.items()):
         if net not in now:
+            continue
+        hit = under(net) or next((under(o.rsplit(".", 1)[0]) for o in now[net].owners
+                                  if under(o.rsplit(".", 1)[0])), None)
+        if hit is not None:
+            was, kind = rekind[hit]
+            again[net] = f"{hit} changed kind since the committed .fkp ({was} -> {kind})"
             continue
         moved = now[net].moved_ends(old[net]) if net in old and now[net].fluid else []
         if moved:
