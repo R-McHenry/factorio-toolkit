@@ -339,12 +339,19 @@ def _port_joints(g, ports):
             _fluid_port_joints(g, ports, src, dst, keys, index)
             continue
         a, b = g.at.get(src), g.at.get(dst)
+        fed = True
         if a is not None and b is not None:
+            # FRICTION 11-11 (the bootstrap stages): the carrier outside a port must move its
+            # items onto the one inside, as the belt graph says it does. A route's last belt that
+            # faced the way it came, beside the port's belt (~w_cu/b271 E under Sci's cu port
+            # belt N), was threaded in all the same: counted connected, and Sci never saw copper.
+            # Not fed, the port has no feed on its side: the route is judged open and patched
+            fed = any(kv[0] == b for kv in g.succ.get(a, ()))
             g.succ[a] = [kv for kv in g.succ.get(a, []) if kv[0] != b]
             g.pred[b] = [kv for kv in g.pred.get(b, []) if kv[0] != a]
         for key in keys:
             g.nodes[key] = Node(key, "port", "port", None, dst[0] + 0.5, dst[1] + 0.5, 0, ())
-        chain = [a] + keys + [b]
+        chain = ([a] if fed else [None]) + keys + [b]
         for u, v in zip(chain, chain[1:]):
             if u is not None and v is not None:
                 _edge(g, u, v, "belt")

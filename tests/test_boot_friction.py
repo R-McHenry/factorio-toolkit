@@ -72,5 +72,28 @@ class NoMakerBomTest(unittest.TestCase):
         self.assertTrue(short and "nothing built in the design makes it" in short[0])
 
 
+class PortFeedTest(unittest.TestCase):
+    """A route's last belt beside a port's belt, facing the way it came, is no feed (Sci's cu port:
+    ``~w_cu/b271`` E under ``~sci/s_cu/b0`` N, counted connected, and Sci never saw copper)."""
+
+    def graph_of(self, outside_dir):
+        from fkcore import connect, expand, fkp
+        lay = fkp.loads("fkp 1 factory t\n"
+                        f"e ~w/b0 transport-belt 0.5,1.5 {outside_dir} net=w\n"
+                        "e sci/b0 transport-belt 0.5,0.5 N net=s\n")
+        port = expand.PortEdge(inside=(0, 0), outside=(0, 1), src=(0, 1), dst=(0, 0))
+        return connect.graph(lay, CAT, {"sci.cu": port})
+
+    def test_a_belt_heading_into_the_port_feeds_it(self):
+        g = self.graph_of("N")
+        self.assertIn(("sci.cu", "belt"), set(g.succ.get("~w/b0", ())))
+        self.assertIn(("sci/b0", "belt"), set(g.succ.get("sci.cu", ())))
+
+    def test_a_belt_facing_past_the_port_does_not(self):
+        g = self.graph_of("E")
+        self.assertNotIn("sci.cu", {k for k, _v in g.succ.get("~w/b0", ())})
+        self.assertIn(("sci/b0", "belt"), set(g.succ.get("sci.cu", ())))   # its own side stands
+
+
 if __name__ == "__main__":
     unittest.main()
