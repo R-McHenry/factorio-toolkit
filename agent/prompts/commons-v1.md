@@ -12,7 +12,8 @@ this folder: you write a factory as a short file, the toolkit lays it out, and r
   Factorio's headless server (free, no account, Linux) and the save as it stands, and starts it
   paused. It is yours alone: pause it, speed it up, break it, pull a fresh copy.
 - **Your run folder** is this one. `game\` holds your designs, `docs\` the guides, and
-  `bin\fk.py` is your command (`python bin/fk.py <command>`, written `fk` below).
+  `bin\fk.py` is your command (`python3 bin/fk.py <command>`, written `fk` below). The guides
+  write paths the Windows way: `game\world.fk` is `game/world.fk` on Linux.
 
 ## What the world starts with
 

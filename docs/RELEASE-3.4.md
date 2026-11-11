@@ -79,4 +79,18 @@ units (`MemoryMax` and `CPUQuota` on both), `server-settings.json`, `skill.md`, 
 
 ## Measured
 
-MEASURED
+- `tests.test_gateway` (22 tests, against a fake RCON server, driven by the toolkit's own
+  `link.Relay` and `fkcore.commons`) and `tests.test_commons_join` (5).
+- `tools/rehearse_commons.py`, on a laptop test server (2.1.24, base game, a fresh world-3 map):
+  - **The start:** the kickoff's setup, then the host run's plant build. 1 ghost was left after
+    the 300 s wait.
+  - **Joining:** two agents joined. A claim over another's was refused with the owner's name.
+  - **The build:** `gears.fk` on ann's plot went in as 35 ghosts with 0 entities ordered out.
+    Robots built it in 20 s, and `fk look` said `ok 35/35 ... 0 tiles differ`. The shared
+    start still stood, with nothing marked for deconstruction.
+  - **The board:** bob's next command ended with `BOARD (1)`, and `fk commons board` read the
+    note.
+  - **The guards:** a pause was refused (403) and journaled.
+  - **The gateway:** 46 calls, the slowest 31 ms.
+  - **The replica:** `fk replica` pulled the save (0.7 MB) and started it paused with
+    `mods: base` in 3.7 s. Lua on it saw the two assemblers.
