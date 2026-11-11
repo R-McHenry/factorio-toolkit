@@ -3069,6 +3069,18 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
     kept its name (``net packs: X -> lab`` to ``X -> px``): the route stood as it was, the build
     said ok, and the old inserter still fed the lab."""
     table = connectmod.endpoints(flat)
+    # FRICTION 11-11 (the bootstrap stages): a committed carrier on a tile the terrain now blocks
+    # (r2's roboport, entered in w3g1.terrain.json after the route was laid) stood on, and the
+    # next paste put an underground on the roboport. It is taken up, and its net patched
+    on_ground = {}
+    if terrain:
+        blocked = terrain if isinstance(terrain, (set, frozenset)) else set(terrain)
+        for net in sorted(patch):
+            off = [e for e in patch[net] if fkpmod.tiles_of(cat, e) & blocked]
+            if off:
+                on_ground[net] = sorted((e.key for e in off), key=fkpmod.natural_key)
+                gone = {id(e) for e in off}
+                patch[net] = [e for e in patch[net] if id(e) not in gone]
     for net in sorted(patch):
         for e in patch[net]:
             new.add(fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir, dict(e.attrs)))
@@ -3101,7 +3113,11 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
         idle = [] if js[net].fluid else sorted((k for k in keys - served
                                                 if not _is_stub(by_key[k])),
                                                key=fkpmod.natural_key)
-        if leak is not None:
+        if net in on_ground:
+            off = on_ground[net]
+            faulty[net] = (f"{len(off)} of its committed carriers stood on ground the terrain "
+                           f"blocks ({off[0]}{' ...' if len(off) > 1 else ''}): taken up")
+        elif leak is not None:
             faulty[net] = f"its committed route would SPILL: {leak.text}"
         elif apart:
             more = len(apart) - 1
