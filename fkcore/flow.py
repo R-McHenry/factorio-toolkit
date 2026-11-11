@@ -2363,13 +2363,30 @@ def s_report_bom(ctx, args):
         lines = [f"stock from {o['stock']}"]
     else:
         lines = ["stock none: needs only"]
-    checks = []
+    # FRICTION 11-11 (the bootstrap's S5): the stages ran on the kit's long-handed inserters until
+    # they ran out, and two hands stood as ghosts (one the refinery maker's): the bill now says
+    # which items nothing built in the design makes
+    made = set()
+    for flat in ctx.flats.values():
+        is_dnp = getattr(flat, "is_dnp", lambda _k: False)
+        for m in flat.machines.values():
+            if not is_dnp(m.inst):
+                made |= set(m.makes)
+    checks, unmade = [], []
     for name in sorted(need, key=lambda n: (-need[n], n)):
         have = None if stock is None else int(stock.get(name, 0))
-        lines.append(f"  {name:<28} {need[name]:>5}" + ("" if have is None else f"  have {have}"))
+        maker = name in made or not ctx.cat.is_item(name)
+        if not maker:
+            unmade.append(name)
+        lines.append(f"  {name:<28} {need[name]:>5}" + ("" if have is None else f"  have {have}")
+                     + ("" if maker else "  no maker"))
         if have is not None and have < need[name]:
-            checks.append(Check("short-stock", name, f"need {need[name]}, have {have}"))
+            checks.append(Check("short-stock", name, f"need {need[name]}, have {have}"
+                                + ("" if maker else ", and nothing built in the design makes it")))
     lines.append(f"  {'total':<28} {sum(need.values()):>5}")
+    if unmade:
+        lines.append(f"  no maker: {len(unmade)} of the {len(need)} items come only from stock or "
+                     "the network (nothing built in the design makes them)")
     return lines, checks
 
 
