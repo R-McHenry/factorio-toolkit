@@ -704,12 +704,17 @@ def _sense(a, cat):
 
 
 def _talk(a):
-    from . import chat
+    from . import chat, link
     r = _game_link(a.cmd)
     if r is None:
         return 2
     with r:
         if a.cmd == "say":
+            if isinstance(r, link.Relay):
+                # 3.4: on a shared save a line goes on the board under the agent's name (the
+                # gateway prints it in the game's chat too)
+                from . import commons
+                return commons.main(a.game if hasattr(a, "game") else ".", "say", list(a.text))
             chat.say(r, " ".join(a.text))
             return 0
         if a.cmd == "ack":
@@ -725,6 +730,9 @@ def _talk(a):
             from . import alerts
             # 2.0.25: the unanswered chat goes LAST, so `| Select-Object -Last N` keeps it
             lines = alerts.poll(r, a.game) + [_research_footer(r, a.game)] + lines
+            if isinstance(r, link.Relay):
+                from . import commons
+                lines += commons.footer(a.game, r.hello.get("you"))
         print("\n".join(lines) if lines else ("chat: nothing unanswered" if a.cmd == "chat" else ""),
               end="\n" if lines or a.cmd == "chat" else "")
     return 0
@@ -2240,6 +2248,11 @@ def main(argv=None):
     sm.add_argument("game")
     sm.add_argument("verb")
     sm.add_argument("rest", nargs=argparse.REMAINDER)
+    cm = sub.add_parser("commons", description="3.4: a shared save's board, claims and journal "
+                        "(fkcore.commons), through its gateway")
+    cm.add_argument("game")
+    cm.add_argument("verb")
+    cm.add_argument("rest", nargs=argparse.REMAINDER)
     rp = sub.add_parser("replica", description="3.3: a private copy of the shared save on this "
                         "machine (fkcore.replica): Factorio's headless server, the save from "
                         "FK_GATEWAY, run as the planner (fk sim) with full RCON")
@@ -2476,6 +2489,9 @@ def main(argv=None):
         return _sim(a, cat)
     if a.cmd == "replica":
         return _replica(a)
+    if a.cmd == "commons":
+        from . import commons
+        return commons.main(a.game, a.verb, list(a.rest))
     if a.cmd == "map":
         return _map(a)
     if a.cmd == "lab":

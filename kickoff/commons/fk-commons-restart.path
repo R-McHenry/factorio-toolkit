@@ -1,0 +1,8 @@
+[Unit]
+Description=fk-gateway's watchdog asked for fk-commons to be restarted
+
+[Path]
+PathChanged=/home/computah/commons/gateway/data/restart/commons
+
+[Install]
+WantedBy=multi-user.target

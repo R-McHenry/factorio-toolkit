@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart fk-commons (asked by fk-gateway's watchdog: the server stopped answering)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart fk-commons.service

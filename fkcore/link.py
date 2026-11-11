@@ -56,7 +56,7 @@ import urllib.request
 
 from . import pack as _pack
 
-__all__ = ["LinkError", "Rcon", "Relay", "connect", "read_answer", "gateway_get", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
+__all__ = ["LinkError", "Rcon", "Relay", "connect", "read_answer", "gateway_get", "gateway_post", "lua_snapshot", "lua_paste", "lua_revive", "lua_decon",
            "lua_decon_list", "lua_rip_load", "lua_stuck_hands", "lua_destroy", "lua_produced", "lua_generate", "lua_generate_area",
            "lua_seed", "lua_ghosts", "ghosts", "lua_say", "lua_alerts", "lua_stats", "lua_chart", "assert_safe",
            "snapshot", "paste", "alerts", "stats", "chart", "read_output", "enabled",
@@ -229,8 +229,22 @@ def gateway_get(path, url=None, key=None, timeout=TIMEOUT, query=None):
     if not url:
         raise LinkError("no gateway: FK_GATEWAY names a shared save's URL "
                         "(https://HOST/v1/saves/NAME)")
-    full = f"{url}/{path}" + (f"?{urllib.parse.urlencode(query)}" if query else "")
+    full = (f"{url}/{path}" if path else url) \
+        + (f"?{urllib.parse.urlencode(query)}" if query else "")
     return _http(urllib.request.Request(full, headers=_headers(key)), timeout)
+
+
+def gateway_post(path, body, url=None, key=None, timeout=TIMEOUT):
+    """POST the JSON ``body`` to ``<FK_GATEWAY>/<path>`` -> (status, bytes), as ``gateway_get``.
+    ``url`` may be any gateway URL (``.../v1/register`` has no save in it)."""
+    url = (url or os.environ.get("FK_GATEWAY") or "").rstrip("/")
+    if not url:
+        raise LinkError("no gateway: FK_GATEWAY names a shared save's URL "
+                        "(https://HOST/v1/saves/NAME)")
+    headers = dict(_headers(key), **{"Content-Type": "application/json"})
+    req = urllib.request.Request(f"{url}/{path}" if path else url, data=json.dumps(body).encode(),
+                                 headers=headers, method="POST")
+    return _http(req, timeout)
 
 
 def _headers(key=None):
@@ -280,10 +294,7 @@ class Relay:
     def call(self, cmd):
         if cmd.startswith("/sc ") or cmd.startswith("/silent-command "):
             assert_safe(cmd)
-        headers = dict(_headers(self.key), **{"Content-Type": "application/json"})
-        req = urllib.request.Request(f"{self.url}/rcon", data=json.dumps({"cmd": cmd}).encode(),
-                                     headers=headers, method="POST")
-        status, body = _http(req, self.timeout)
+        status, body = gateway_post("rcon", {"cmd": cmd}, self.url, self.key, self.timeout)
         if status != 200:
             raise LinkError(f"gateway {self.url}: rcon answered {status}")
         return json.loads(body.decode("utf-8")).get("reply", "")

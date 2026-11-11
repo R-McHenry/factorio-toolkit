@@ -132,7 +132,7 @@ class LaptopServer:
         if self.mods is not None or self.mod_dir:
             mods_dir = os.path.join(self.write, "mods")
             os.makedirs(mods_dir, exist_ok=True)
-            names = ["base", "space-age", "quality", "elevated-rails"]
+            names = ["base", "space-age", "quality", "elevated-rails", "recycler"]
             on = set(self.mods or ())
             for d in sorted(os.listdir(self.mod_dir)) if self.mod_dir else ():
                 src = os.path.join(self.mod_dir, d)

@@ -61,6 +61,8 @@ SPECTATE_PORT = 34199
 
 #: the mods every Factorio has (the game's own, on or off in a mod list, never in a mods folder)
 BUILT_IN = ("base", "elevated-rails", "quality", "space-age")
+#: bundled mods a 2.1 server lists besides those
+BUNDLED_21 = ("recycler",)
 
 
 class SimError(RuntimeError):
@@ -150,7 +152,19 @@ class Sim:
         mods_dir = os.path.join(self.write, "mods")
         shutil.rmtree(mods_dir, ignore_errors=True)        # links only: rmtree leaves their mods
         if not name:
-            return []
+            # 3.4: a replica runs the shared save's built-in mods (sim\mods.json, written by
+            # fk replica from the gateway's hello): a headless server's own default turns every
+            # bundled one on, and a save loaded under other mods is migrated to them
+            try:
+                with open(os.path.join(self.root, "mods.json"), encoding="utf-8") as fh:
+                    on = set(json.load(fh)["mods"])
+            except (OSError, ValueError, KeyError, TypeError):
+                return []
+            os.makedirs(mods_dir)
+            with open(os.path.join(mods_dir, "mod-list.json"), "w", encoding="utf-8") as fh:
+                json.dump({"mods": [{"name": n, "enabled": n == "base" or n in on}
+                                    for n in BUILT_IN + BUNDLED_21]}, fh)
+            return [f"mods: {', '.join(sorted(on | {'base'}))}"]
         with open(_pack.path("catalog.json"), encoding="utf-8") as fh:
             want = [m.rsplit(" ", 1) for m in json.load(fh).get("mods") or ()]
         src = os.environ.get("FK_SIM_MODS") or _pack.facts().get("mods_dir")
