@@ -320,9 +320,14 @@ class ShapeExampleTest(unittest.TestCase):
         block = text[text.index("  hull "):]
         for line in block.splitlines():
             self.assertIn(line.strip(), docs, f"EXAMPLES.md does not quote: {line}")
-        # step 2: the parent puts Side's corner into the free ground and routes gears through it
+        # step 2: the parent puts Side's corner into the free ground and routes gears through it;
+        # 3.4 (Rory 11-11): overlapping declared frames warn unless the build script names the
+        # pair, as the docs' step 2 does
         with open(src, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(whole)
+        with open(os.path.join(d, "nauvis.build.fkb"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(SCRIPT.replace("place           --keep pinned",
+                                    "place           --keep pinned --overlap m+s"))
         code, route, summary, checks = build(d, "shape")
         self.assertEqual(code, 0, summary)
         self.assertIn(" 0 unrouted", summary)

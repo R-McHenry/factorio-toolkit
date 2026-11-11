@@ -116,5 +116,61 @@ net out: pa.gear -> box
         self.assertEqual(expand.frame_overlaps(flat, lay, CAT), [])
 
 
+class OverlapLeaveTest(unittest.TestCase):
+    """3.4 (Rory 11-11): "Overlapping frames should be a warning, and placement in modules needs a
+    way to be aware of overlapped stuff. Best for the build script to define it case by case".
+    Declared frames that share tiles warn while the hulls don't; ``place --overlap a+b`` names a
+    pair that overlaps on purpose, and ``overlap-clash`` names the tiles both lay an entity on."""
+
+    def test_declared_frames_warn_while_the_hulls_do_not_meet(self):
+        flat, lay = placed(TWO)
+        real = expand.frame_overlaps
+
+        def hulls_apart(flat, lay, cat, claims=False):
+            return real(flat, lay, cat, claims) if claims else []
+        expand.frame_overlaps = hulls_apart
+        try:
+            lines, checks = flow._overlap_report("base", flat, lay, CAT)
+            self.assertEqual([c.code for c in checks], ["overlap"])
+            self.assertIn("its declared frame and pb's share 4x10 tiles at 26,10..29,19; their "
+                          "built hulls don't yet", checks[0].msg)
+            self.assertIn("`place --overlap pa+pb` when it is meant", checks[0].msg)
+            lines, checks = flow._overlap_report("base", flat, lay, CAT, {frozenset(("pa", "pb"))})
+            self.assertEqual(checks, [])
+            self.assertIn("overlap by the script's leave", lines[0])
+        finally:
+            expand.frame_overlaps = real
+
+    def test_a_named_pair_is_a_line_and_its_clashes_are_named(self):
+        flat, lay = placed(TWO)
+        lines, checks = flow._overlap_report("base", flat, lay, CAT, {frozenset(("pb", "pa"))})
+        self.assertEqual(checks, [])
+        self.assertIn("pa and pb overlap by the script's leave (place --overlap): 4x10 tiles at "
+                      "26,10..29,19, routed by both, each in the other's way; 0 tiles where both "
+                      "lay an entity", lines[0])
+        text = TWO.replace("c = Chest<requester, item=iron-plate, rate=1> @(6, 5)",
+                           "c = Chest<requester, item=iron-plate, rate=1> @(2, 5)")
+        flat, lay = placed(text)
+        _lines, checks = flow._overlap_report("base", flat, lay, CAT, {frozenset(("pa", "pb"))})
+        self.assertEqual([c.code for c in checks], ["overlap-clash"])
+        self.assertIn("pa/b/c0 and pb/c/c0 both stand on it", checks[0].msg)
+        self.assertEqual(checks[0].where, "base 28,15")
+
+    def test_a_pair_that_does_not_overlap_is_said(self):
+        flat, lay = placed(TWO.replace("pb = PB @(26, 10)", "pb = PB @(40, 10)"))
+        lines, checks = flow._overlap_report("base", flat, lay, CAT, {frozenset(("pa", "pb")),
+                                                                     frozenset(("pa", "zz"))})
+        self.assertEqual(checks, [])
+        self.assertEqual(sorted(lines), ["  place --overlap pa+pb: their frames do not overlap",
+                                         "  place --overlap pa+zz: no such pair of placed sealed "
+                                         "modules"])
+
+    def test_the_option_wants_pairs(self):
+        self.assertEqual(flow._overlap_pairs(flow._opts(["--overlap", "a+b,c/d+e"])),
+                         {frozenset(("a", "b")), frozenset(("c/d", "e"))})
+        with self.assertRaises(flow.FlowError):
+            flow._overlap_pairs(flow._opts(["--overlap", "a"]))
+
+
 if __name__ == "__main__":
     unittest.main()

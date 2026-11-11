@@ -682,8 +682,26 @@ def _pinned_covers(new, prev, cat):
     return kept
 
 
+def _overlap_pairs(o):
+    """``place --overlap a+b,c+d``: the pairs of sealed modules the build script lets overlap
+    -> {frozenset({a, b})}."""
+    v = o.get("overlap")
+    if not v:
+        return set()
+    if v is True:
+        raise FlowError("place --overlap names pairs of sealed instances: --overlap a+b[,c+d]")
+    out = set()
+    for part in str(v).split(","):
+        two = [x.strip() for x in part.split("+") if x.strip()]
+        if len(two) != 2:
+            raise FlowError(f"place --overlap {part!r}: a pair is two instance paths, a+b")
+        out.add(frozenset(two))
+    return out
+
+
 def s_place(ctx, args):
     lines, checks = [], []
+    allowed = _overlap_pairs(_opts(args))
     for p in _factories(ctx):
         flat = ctx.flats[p.factory]
         ground, placed, mixed = None, [], []
@@ -711,30 +729,95 @@ def s_place(ctx, args):
         lines += [f"  placed {line}" for line in placed]
         checks += [Check("no-position", p.factory, n) for n in notes]
         checks += [Check(code, f"{p.factory} {path}", msg) for code, path, msg in mixed]
-        checks += _overlap_checks(p.factory, flat, lay, ctx.cat)
+        olines, ochecks = _overlap_report(p.factory, flat, lay, ctx.cat, allowed)
+        lines += olines
+        checks += ochecks
         checks += _invariant_checks(p.factory, fkp.invariants(lay, ctx.cat))
     return lines, checks
 
 
-def _overlap_checks(factory, flat, lay, cat):
-    """``overlap`` (2.0.75, warn): two sealed modules whose frames share tiles. Both route there,
-    the first laid in the way of the next; only two entities on one tile stop the build."""
+def _shared_text(box, n):
+    x0, y0, x1, y1 = box
+    # 41-hull: the shared tiles' count and box; a box overlap reads as before
+    what = f"{x1 - x0}x{y1 - y0} tiles" if n == (x1 - x0) * (y1 - y0) else \
+        f"{n} tiles in {x1 - x0}x{y1 - y0}"
+    return f"{what} at {x0},{y0}..{x1 - 1},{y1 - 1}"
+
+
+def _clashes(flat, lay, cat, a, b):
+    """[(tile, a's key, b's key)]: the tiles where an entity of sealed module ``a`` and one of
+    ``b`` both stand."""
+    at = {}
+    for k, e in lay.entities.items():
+        if k.startswith(a + "/") and cat.has_entity(e.name):
+            for t in fkp.tiles_of(cat, e):
+                at[t] = k
     out = []
+    for k, e in sorted(lay.entities.items(), key=lambda kv: fkp.natural_key(kv[0])):
+        if k.startswith(b + "/") and cat.has_entity(e.name):
+            for t in sorted(fkp.tiles_of(cat, e)):
+                if t in at:
+                    out.append((t, at[t], k))
+    return out
+
+
+#: how many tiles of an allowed overlap's clash the checks name one by one
+_SHOW_CLASH = 6
+
+
+def _overlap_report(factory, flat, lay, cat, allowed=()):
+    """(lines, checks). ``overlap`` (2.0.75, warn): two sealed modules whose frames share tiles.
+    Both route there, the first laid in the way of the next; only two entities on one tile stop
+    the build. 3.4 (Rory 11-11: "Overlapping frames should be a warning, and placement in modules
+    needs a way to be aware of overlapped stuff ... best for the build script to define it case by
+    case"): two declared frames that share tiles warn too while their hulls don't yet (Blue1 on
+    Sci's top rows, FRICTION 11-11); a pair the script names (``place --overlap a+b``) overlaps on
+    purpose, for compaction: a line in place of the warning, and ``overlap-clash`` names each
+    tile where both modules' entities stand."""
+    out, lines = [], []
     pairs = expand.frame_overlaps(flat, lay, cat)
-    if not pairs:
-        return out
+    hull = {frozenset((a, b)) for a, b, _box, _n in pairs}
+    declared = [q for q in expand.frame_overlaps(flat, lay, cat, claims=True)
+                if frozenset(q[:2]) not in hull]
+    named = {frozenset(q[:2]) for q in pairs + declared}
+    for pair in sorted(allowed, key=sorted):
+        if pair not in named:
+            lines.append(f"  place --overlap {'+'.join(sorted(pair))}: "
+                         + ("no such pair of placed sealed modules"
+                            if not pair <= set(flat.sealed) else "their frames do not overlap"))
+    if not pairs and not declared:
+        return lines, out
     try:
         edges = expand.port_edges(flat, lay, cat)
     except Exception:                           # the router reports a port it can't place
         edges = {}
-    for a, b, (x0, y0, x1, y1), n in pairs:
-        # 41-hull: the shared tiles' count and box; a box overlap reads as before
-        what = f"{x1 - x0}x{y1 - y0} tiles" if n == (x1 - x0) * (y1 - y0) else \
-            f"{n} tiles in {x1 - x0}x{y1 - y0}"
+    for a, b, box, n in declared:
+        if frozenset((a, b)) in allowed:
+            lines.append(f"  {a} and {b} overlap by the script's leave (place --overlap): their "
+                         f"declared frames share {_shared_text(box, n)}")
+            continue
         out.append(Check("overlap", f"{factory} {a}",
-                         f"its frame and {b}'s share {what} at "
-                         f"{x0},{y0}..{x1 - 1},{y1 - 1}: both modules' routes may use them, and "
-                         "each is in the way of the other's"))
+                         f"its declared frame and {b}'s share {_shared_text(box, n)}; their "
+                         "built hulls don't yet, so what either grows there meets the other "
+                         f"(`place --overlap {a}+{b}` when it is meant)"))
+    for a, b, box, n in pairs:
+        if frozenset((a, b)) in allowed:
+            clash = _clashes(flat, lay, cat, a, b)
+            lines.append(f"  {a} and {b} overlap by the script's leave (place --overlap): "
+                         f"{_shared_text(box, n)}, routed by both, each in the other's way; "
+                         f"{len(clash)} tiles where both lay an entity")
+            for t, ka, kb in clash[:_SHOW_CLASH]:
+                out.append(Check("overlap-clash", f"{factory} {t[0]},{t[1]}",
+                                 f"{ka} and {kb} both stand on it: move one module, or its "
+                                 "entity inside its source"))
+            if len(clash) > _SHOW_CLASH:
+                out.append(Check("overlap-clash", f"{factory} {a}+{b}",
+                                 f"... and {len(clash) - _SHOW_CLASH} more tiles"))
+        else:
+            out.append(Check("overlap", f"{factory} {a}",
+                             f"its frame and {b}'s share {_shared_text(box, n)}: both modules' "
+                             "routes may use them, and each is in the way of the other's "
+                             f"(`place --overlap {a}+{b}` when it is meant)"))
         for mine, other in ((a, b), (b, a)):
             ob = expand.frame_shape_of(flat, lay, other, cat)
             for key, pe in sorted(edges.items()):
@@ -743,7 +826,12 @@ def _overlap_checks(factory, flat, lay, cat):
                     out.append(Check("overlap", f"{factory} {mine}",
                                      f"port {key.rsplit('/', 1)[-1]} opens at {tx},{ty}, inside "
                                      f"{other}'s frame: a net from outside both can't reach it"))
-    return out
+    return lines, out
+
+
+def _overlap_checks(factory, flat, lay, cat, allowed=()):
+    """The checks of :func:`_overlap_report` alone."""
+    return _overlap_report(factory, flat, lay, cat, allowed)[1]
 
 
 def _pinned_routes(flat, new, prev, cat):

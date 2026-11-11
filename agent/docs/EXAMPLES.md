@@ -624,9 +624,13 @@ s = Side @(10, 16)
 net gears: m.g_out -> s.i
 ```
 
-and `fk build --to report_checks` again. `s` stands inside `m`'s polygon, and `gears` runs from
-`m`'s east port down and across the polygon's free rows to `s`'s north port; there is no `overlap`
-line and no `crosses-frame`, because the frame the build reads for `m` is now its hull:
+and `--overlap m+s` to the build script's `place` line, and `fk build --to report_checks` again.
+`s` stands inside `m`'s polygon, and `gears` runs from `m`'s east port down and across the
+polygon's free rows to `s`'s north port; there is no `crosses-frame`, because the frame the build
+reads for `m` is now its hull. Two declared frames that share tiles are an `overlap` warning
+even when the hulls don't meet (a module placed by mistake on another's ground warns too);
+`place --overlap m+s` says this one is meant, and place reports it as a line, with an
+`overlap-clash` for any tile both modules lay an entity on:
 
 ```
   routed    gears: 1 -> 1, 24 belts, 0 underground ends, 0 splitters
