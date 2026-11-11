@@ -719,7 +719,47 @@ def _dnp_poles(nodes, fixed, built, powered):
                 tree.add(id(n))
                 n = prev[id(n)]
         keep |= tree
-    return {id(n) for n in ours if id(n) not in keep}
+    idle = {id(n) for n in ours if id(n) not in keep}
+    if _keeps_power(nodes, fixed, built, idle):
+        return idle
+    return _prune_safely(nodes, fixed, built)
+
+
+def _keeps_power(nodes, fixed, built, idle):
+    """Rory 11-11: "a system that automatically removes power poles needs to ensure that it never
+    causes something to de power". True when, without the ``idle`` poles: every built entity
+    (``built``, its rect: grid sources among them, so a generator stays on its grid) still stands
+    in a kept pole's supply area, and in every wire component of all the poles, the layout's own
+    poles and the kept poles that power something built are still one wire component."""
+    kept = [n for n in nodes if id(n) not in idle]
+    for r in built:
+        if not any(_overlap(r, n.x, n.y, n.supply) for n in kept) \
+                and any(_overlap(r, n.x, n.y, n.supply) for n in nodes):
+            return False                 # (one no pole powers at all is NO_POWER's, not ours)
+    root_ids = {id(n) for n in nodes[:fixed]}
+    now = {}
+    for k, group in enumerate(_groups(kept)):
+        for i in group:
+            now[id(kept[i])] = k
+    for group in _groups(nodes):
+        terms = {now[id(nodes[i])] for i in group
+                 if id(nodes[i]) in now and (id(nodes[i]) in root_ids
+                                             or any(_overlap(r, nodes[i].x, nodes[i].y,
+                                                             nodes[i].supply) for r in built))}
+        if len(terms) > 1:
+            return False
+    return True
+
+
+def _prune_safely(nodes, fixed, built):
+    """The slow road when the greedy pick fails :func:`_keeps_power`: the cover's poles one at a
+    time, newest first, each made DNP only when the check still holds without it."""
+    idle = set()
+    for n in reversed(nodes[fixed:]):
+        trial = idle | {id(n)}
+        if _keeps_power(nodes, fixed, built, trial):
+            idle = trial
+    return idle
 
 
 def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power", keep_out=(),

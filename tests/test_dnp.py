@@ -202,6 +202,17 @@ class DnpCoverTest(unittest.TestCase):
         self.assertTrue(any(_overlap((11, 14, 1, 4), p.x, p.y, 3.5) for p in built))
         self.assertTrue(all(p.x < 20 for p in built))
         self.assertTrue(any(_overlap((39, 42, 1, 4), p.x, p.y, 3.5) for p in idle))
+        # Rory 11-11: the reducer never depowers anything. Taking the bridge between a/m0's pole
+        # and the root, or a/m0's own pole, fails the check; the pick passes it
+        from fkcore.cover import _keeps_power
+        root = _Node(0.5, 0.5, 3.5, 9, key="src/p")
+        a_pole = _Node(12.5, 0.5, 3.5, 9, spot=(12, 0))
+        bridge = _Node(6.5, 0.5, 3.5, 9, spot=(6, 0))
+        far = _Node(40.5, 0.5, 3.5, 9, spot=(40, 0))
+        nodes, rects = [root, a_pole, bridge, far], [(11, 14, 1, 4)]
+        self.assertTrue(_keeps_power(nodes, 1, rects, {id(far)}))
+        self.assertFalse(_keeps_power(nodes, 1, rects, {id(far), id(bridge)}))
+        self.assertFalse(_keeps_power(nodes, 1, rects, {id(a_pole)}))
         # nothing DNP: nothing changes
         del lay.entities["b/m0"].attrs["dnp"]
         poles, rep = cover_power(lay, CAT)
