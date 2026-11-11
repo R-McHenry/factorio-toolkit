@@ -36,6 +36,11 @@ factorio.computah.duckdns.org {
 }
 ```
 
+On 2.1 the template's plant needs one fix, which the setup makes (`pump-21.lua`): world-3's shore
+lies one tile off where 2.0 put it, so the plant's offshore pump can't stand where it was
+captured. Its ghost moves to -26.5,-36.5 with one pipe to the plant's pipe line. The host run's
+design still has the old spot, so don't build from `host-run/game` again.
+
 To join the game yourself, the zybo host has to pass the game's UDP port from the LAN: add 34201
 to `lan_udp` in `/etc/computah/published.nft` and reload it.
 

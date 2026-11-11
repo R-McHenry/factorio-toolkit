@@ -78,6 +78,14 @@ run "su computah -c 'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 120 python3 
 run "su computah -c 'cd $G && PYTHONPATH=$TK $AS timeout 320 python3 $TK/kickoff/wait_built.py nauvis -36,-41,24,24 300'" \
   || say "   the plant is not finished yet: the robots keep building it"
 
+# 2.1 lays world-3's shore one tile off 2.0's, where the plant was captured: its one offshore pump
+# can't stand at -25.5,-37.5, so the reactor heats and nothing takes water (found 11-11). The
+# ghost moves to the nearest spot that takes a pump, with one pipe to the plant's own pipe line.
+say "   4b. the plant's pump, where 2.1's shore takes it (pump-21.lua: nothing to do when it stands)"
+run "su computah -c 'cd $G && FK_LINK=on PYTHONPATH=$TK $AS timeout 10 python3 -m fkcore lua . --file $K/pump-21.lua'"
+run "su computah -c 'cd $G && PYTHONPATH=$TK $AS timeout 80 python3 $TK/kickoff/wait_built.py nauvis -36,-41,24,24 60'" \
+  || say "   the pump is not built yet: the robots keep building it"
+
 say "5. saved as commons.zip; the hand-started server stopped"
 run "su computah -c '$AS timeout 10 python3 $TK/kickoff/save_map.py commons'"
 if [ "$DRY" != "--dry" ]; then
