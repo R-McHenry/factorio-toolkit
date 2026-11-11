@@ -3054,7 +3054,8 @@ def _patch_net(flat, cat, table, job, old, ents, frames, js, box, limit, terrain
     return p.kept + p.added, text, None
 
 
-def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net_frames=None):
+def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net_frames=None,
+              hold=True):
     """The committed routes of ``patch`` ({net: carriers}: nets none of whose ends moved) on
     ``new``, judged against the netlist as it is now (``fkcore.connect``). A route that joins
     every driver of its net to every consumer, leaks nowhere and has no carrier that serves no
@@ -3068,6 +3069,7 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
     2.0: the netlist decides, not the net's name. The first lead run changed a net's sink and
     kept its name (``net packs: X -> lab`` to ``X -> px``): the route stood as it was, the build
     said ok, and the old inserter still fed the lab."""
+    keep_held = hold
     table = connectmod.endpoints(flat)
     # FRICTION 11-11 (the bootstrap stages): a committed carrier on a tile the terrain now blocks
     # (r2's roboport, entered in w3g1.terrain.json after the route was laid) stood on, and the
@@ -3185,7 +3187,10 @@ def _standing(flat, new, cat, js, patch, frames, box, limit, terrain, avoid, net
         except Exception as exc:         # noqa: BLE001 - the net is routed again, as before 2.0
             got, how, hold = None, f"{type(exc).__name__}: {exc}", None
         # a route of inserters alone (direct insertion) is laid again whole: nothing to tear up
-        if got is None and hold is not None and any(e.name in _HELD for e in hold):
+        # FRICTION 11-11: under `route --retry-failed always` (``hold`` False) a route whose new
+        # end can't be patched in is laid again whole, not held: a port moved and w_cu stood
+        # half routed, 1 of 4 pairs, through every retry
+        if got is None and hold is not None and keep_held and any(e.name in _HELD for e in hold):
             for e in hold:
                 new.add(e)
             idx.add(hold)
@@ -4014,7 +4019,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         claims = _direct_claims(cat, js, todo, list(base.entities.values()), frames, box, terrain)
         standing, patched, again, held = _standing(flat, base, cat, js, patch, frames, box, limit,
                                                    terrain, set().union(*claims.values()),
-                                                   net_frames)
+                                                   net_frames, hold=retry != "always")
         todo += [n for n in again if js[n].skip is None and not js[n].fluid]
     kept = sorted(n for n in js if n in have or n in standing)
     # 3.0: the nets the build script leaves to the player (route --skip)
