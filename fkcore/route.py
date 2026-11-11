@@ -108,7 +108,7 @@ import os
 import re
 import time
 from fnmatch import fnmatchcase
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _replace
 
 from . import arms as armsmod
 from . import compiled as compiledmod
@@ -213,6 +213,10 @@ class NetJob:
     items: tuple = ()
     feeds: dict = field(default_factory=dict)   # 53-lanetrace: {tile: {"L", "R": items}} a
     #                                          sealed unit's out-port puts on the belt there
+    # Rory 11-11: {(driver, consumer): net} the pairs another net's hand (laid this run, or
+    # standing) already joins (``_ridden``): the net rides on it instead of laying its own; not
+    # part of the signature
+    shared: dict = field(default_factory=dict)
 
     def ends(self):
         return [t for t, _h in self.starts] + [t for t, _h in self.goals] + list(self.reserved) \
@@ -1402,9 +1406,18 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
     """{net: tiles} for the direct inserters of every net with one machine driver, picked before
     any route is laid, so no other net's tree is laid over them: trees are routed first (by their
     belt ends), and a mall's machine-to-machine nets have none. Greedy, net by net, one inserter
-    per tile."""
+    per tile.
+
+    Rory 11-11 ("the router being smart enough to use one inserter when a source and dest are a
+    tile apart"): a (driver machine, consumer machine) pair an earlier net claimed a hand for is
+    claimed by the later net too, on the same tiles, not on a tile of its own. A requester hub's
+    nets (one per item, iron-plate into two of its four assemblers) each wanted a hand from the
+    chest into the same assembler, and the chest has one free side per assembler: the later net
+    found no tile and failed. Whichever of them is laid first lays the hand, the others ride on
+    it (``_ridden``)."""
     taken, out = set(), {}
     shared = None
+    held = {}                        # (driver, consumer) -> the tiles of the hand claimed for it
     for net in sorted(todo):
         pairs = _direct_pairs_of(js[net])
         if not pairs:
@@ -1412,10 +1425,29 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
         if shared is None:
             shared = _GroundParts(cat, ents, frames, js, terrain)
         grid = shared.grid(net, box)
-        mine, ends = set(), set(js[net].ends())
+        mine, ends, per, own = set(), set(js[net].ends()), {}, set()
         for (sk, src), (tk, dst) in pairs:
-            mine |= _tiles_of(_direct_link(src, dst, grid, taken | mine | ends,
-                                           _link_k(net, sk, tk)))
+            if held.get((sk, tk)):
+                per[(sk, tk)] = held[(sk, tk)]
+                mine |= held[(sk, tk)]
+                continue
+            got = _tiles_of(_direct_link(src, dst, grid, taken | mine | ends,
+                                         _link_k(net, sk, tk)))
+            held[(sk, tk)] = per[(sk, tk)] = got
+            own.add((sk, tk))
+            mine |= got
+        srcs, tps = {p[0][0] for p in pairs}, {p[1][0] for p in pairs}
+        if len(srcs) > 1 and len(tps) > 1:
+            # several of each: a pair between two ends the belt joins lays no hand
+            # (``_direct_plan``), so it claims no tile
+            apart = {p for p, t in per.items() if not t}
+            rest_s = {s for s, _t in apart}
+            rest_t = {t for _s, t in apart}
+            for p in [p for p in per if p[0] in rest_s and p[1] in rest_t and per[p]]:
+                if p in own:
+                    held.pop(p)
+                per[p] = set()
+            mine = set().union(*per.values())
         if mine:
             out[net] = mine
             taken |= mine
@@ -1425,14 +1457,128 @@ def _direct_claims(cat, js, todo, ents, frames, box, terrain=()):
 def _direct_pairs_of(job):
     """[((driver, rect), (consumer, rect))] a direct inserter may join: one machine driver and each
     consumer machine, or (1.4) each of several machine drivers and one consumer machine (two
-    cable assemblers beside one circuit assembler). [] for any other net."""
+    cable assemblers beside one circuit assembler), or (Rory 11-11) every driver machine and every
+    consumer machine of a net with several of each. [] for any other net. A machine that drives
+    both nets of a lane pair (a requester's ``split:`` net) is one driver: one hand carries both."""
     if job.starts or job.goals:
         return []
-    if len(job.sources) == 1 and job.taps:
-        return [(job.sources[0], tap) for tap in job.taps]
-    if len(job.taps) == 1 and len(job.sources) > 1:
-        return [(src, job.taps[0]) for src in job.sources]
+    sources = list({k: (k, r) for k, r in job.sources}.values())
+    if len(sources) == 1 and job.taps:
+        return [(sources[0], tap) for tap in job.taps]
+    if len(job.taps) == 1 and len(sources) > 1:
+        return [(src, job.taps[0]) for src in sources]
+    if len(job.taps) > 1 and len(sources) > 1 and not job.drops:
+        return [(src, tap) for tap in job.taps for src in sources]
     return []
+
+
+def _direct_plan(job, grid, ends):
+    """The direct hands of ``job`` (a hub net of machines): -> (plan, ridden, rest) or None for a
+    net of no such shape. ``plan``: the inserters laid, ``ridden``: the (driver, consumer) pairs a
+    hand another net laid already carries (``job.shared``), ``rest``: the NetJob of what is left
+    for a belt, or None when nothing is.
+
+    Every pair of one driver machine and a consumer machine (1.3), of several drivers and one
+    consumer (1.4), or (Rory 11-11) of several of each gets a hand when one fits. The netlist
+    asks that every driver reach every consumer (``connect``), so a belt is laid for the drivers
+    and consumers any pair of which no hand joins, and a hand between two of those is not laid
+    (the belt carries it). One driver and one consumer each side: as 1.3 and 1.4 laid them."""
+    shared = job.shared
+    if len(job.sources) == 1 and not job.starts and job.taps:
+        pairs = [(job.sources[0], t) for t in job.taps]
+    elif len(job.taps) == 1 and len(job.sources) > 1 and not job.starts and not job.goals:
+        pairs = [(s, job.taps[0]) for s in job.sources]
+    elif len(job.taps) > 1 and len(job.sources) > 1 and not job.starts and not job.goals \
+            and not job.drops:
+        pairs = [(s, t) for t in job.taps for s in job.sources]
+    else:
+        return None
+    taken, hands, ridden = set(), {}, []
+    for (sk, src), (tk, dst) in pairs:
+        if (sk, tk) in shared:
+            ridden.append((sk, tk))
+            continue
+        got = _direct_link(src, dst, grid, taken | ends, _link_k(job.net, sk, tk))
+        if got:
+            hands[(sk, tk)] = got
+            taken |= _tiles_of(got)
+    if not hands and not ridden:
+        return None
+    joined = set(hands) | set(ridden)
+    rest_t = [t for t in job.taps if any((s[0], t[0]) not in joined for s in job.sources)]
+    rest_s = [s for s in job.sources if any((s[0], t[0]) not in joined for t in job.taps)]
+    # a pair both of whose ends the belt joins needs no hand of its own
+    keep = lambda p: not (p[0] in {s[0] for s in rest_s} and p[1] in {t[0] for t in rest_t})
+    plan = [h for p, got in hands.items() if keep(p) for h in got]
+    ridden = [p for p in ridden if keep(p)]
+    rest = None
+    if len(job.sources) == 1:
+        if rest_t or job.goals:
+            rest = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=rest_t,
+                          sources=list(job.sources), drops=dict(job.drops),
+                          owners=list(job.owners))
+    elif rest_s:
+        rest = NetJob(job.net, taps=rest_t, sources=rest_s, drops=dict(job.drops),
+                      owners=list(job.owners))
+    if not plan and not ridden:
+        return None
+    return plan, ridden, rest
+
+
+def _direct_how(plan, ridden, shared):
+    """The report words for a net's direct hands: its own and the ones it shares."""
+    words = []
+    if plan:
+        words.append(f"{len(plan)} inserter{'s' if len(plan) > 1 else ''} (direct insertion)")
+    if ridden:
+        whose = " and ".join(f"{o}'s" for o in dict.fromkeys(shared[p] for p in ridden))
+        if plan:
+            words.append(f"{len(ridden)} hand{'s' if len(ridden) > 1 else ''} shared with {whose}")
+        else:
+            words.append(f"its hand{'s are' if len(ridden) > 1 else ' is'} shared with {whose} "
+                         "(direct insertion)")
+    return ", ".join(words)
+
+
+def _ridden(cat, job, laid_by, items=None):
+    """{(driver, consumer): (net, key)} for the hands other nets laid (``laid_by``: {net: its
+    carriers}) that pick from one of ``job``'s driver machines and drop into one of its consumer
+    machines (Rory 11-11: one inserter when a source and a dest are a tile apart, whatever nets
+    want it). A hand into a machine takes what that machine takes, so it carries this net's items
+    too. One with a filter (a committed route's, ``_filter_loads``; a gated net's) is ridden only
+    when the filter holds every one of ``items`` (the net's): a filter is never widened."""
+    out = {}
+    srcs, dsts = dict(job.sources), dict(job.taps)
+    if not srcs or not dsts:
+        return out
+
+    def inside(t, r):
+        return r[0] <= t[0] < r[2] and r[1] <= t[1] < r[3]
+    for other in sorted(laid_by):
+        for e in laid_by[other]:
+            if not cat.has_entity(e.name) or cat.kind(e.name) != "inserter":
+                continue
+            if "filter" in e.attrs and (not items or not set(items) <= set(
+                    str(e.attrs["filter"]).split("|"))):
+                continue
+            pd = armsmod.tiles(e.name, e.dir, e.attrs, (math.floor(e.x), math.floor(e.y)))
+            if pd is None:
+                continue
+            for sk, sr in srcs.items():
+                if not inside(pd[0], sr):
+                    continue
+                for tk, tr in dsts.items():
+                    if inside(pd[1], tr):
+                        out.setdefault((sk, tk), (other, e.key))
+    return out
+
+
+def _with_rider(e, net):
+    """Hand ``e`` carrying ``net`` too: a copy, its ``net=`` the nets joined as a pair's hands
+    are (``fkpmod.hand_net``)."""
+    names = fkpmod.net_names(e.attrs.get("net")) + [net]
+    return fkpmod.Entity(e.key, e.name, e.x, e.y, e.dir,
+                         dict(e.attrs, net=fkpmod.hand_net("+".join(names))))
 
 
 def _hub_job(cat, job, blocked, spans, clear, box, limit):
@@ -1447,50 +1593,26 @@ def _hub_job(cat, job, blocked, spans, clear, box, limit):
     # when the belt tree for the consumers left can't get out (the direct inserters and other
     # nets' claims took every side of the driver), the whole net is laid as a tree, as before 1.4
     ends = set(job.ends())
-    if len(job.sources) == 1 and not job.starts and job.taps:
-        (sk, src), = job.sources
-        taken, direct, rest = set(), [], []
-        for key, rect in job.taps:
-            got = _direct_link(src, rect, grid, taken | ends, _link_k(job.net, sk, key))
-            if got:
-                direct += got
-                taken |= _tiles_of(got)
-            else:
-                rest.append((key, rect))
-        if direct:
-            n = f"{len(direct)} inserter{'s' if len(direct) > 1 else ''} (direct insertion)"
-            if not rest and not job.goals:
-                return direct, n
-            sub = NetJob(job.net, starts=list(job.starts), goals=list(job.goals), taps=rest,
-                         sources=list(job.sources), drops=dict(job.drops), owners=list(job.owners))
-            if sub.mode == "hub":
-                plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
-            else:
-                plan, how = _tree_job(cat, sub, set(blocked) | taken, spans, clear, box, limit)
-            if plan is not None:
-                return direct + plan, f"{n}, then {how}"
-            return _hub_search(cat, job, blocked, spans, clear, box, limit)
-    if len(job.taps) == 1 and len(job.sources) > 1 and not job.starts and not job.goals:
-        # several machine drivers beside one consumer machine: each hands to it by an inserter
-        # of its own (1.4); only the drivers left are laid as a belt tree into it
-        (tk, dst), = job.taps
-        taken, direct, rest = set(), [], []
-        for key, rect in job.sources:
-            got = _direct_link(rect, dst, grid, taken | ends, _link_k(job.net, key, tk))
-            if got:
-                direct += got
-                taken |= _tiles_of(got)
-            else:
-                rest.append((key, rect))
-        if direct:
-            n = f"{len(direct)} inserter{'s' if len(direct) > 1 else ''} (direct insertion)"
-            if not rest:
-                return direct, n
-            sub = NetJob(job.net, taps=list(job.taps), sources=rest, drops=dict(job.drops), owners=list(job.owners))
+    # several machine drivers beside one consumer machine: each hands to it by an inserter of its
+    # own (1.4), and only the drivers left are laid as a belt tree into it; Rory 11-11: several of
+    # each, every pair a hand fits, and a pair another net's hand already joins (``job.shared``)
+    # is joined (``_direct_plan``)
+    job.rode = []
+    got = _direct_plan(job, grid, ends)
+    if got is not None:
+        direct, ridden, sub = got
+        n = _direct_how(direct, ridden, job.shared)
+        if sub is None:
+            job.rode = ridden
+            return direct, n
+        taken = _tiles_of(direct)
+        if sub.mode == "hub":
             plan, how = _hub_search(cat, sub, set(blocked) | taken, spans, clear, box, limit)
-            if plan is not None:
-                return direct + plan, f"{n}, then {how}"
-            return _hub_search(cat, job, blocked, spans, clear, box, limit)
+        else:
+            plan, how = _tree_job(cat, sub, set(blocked) | taken, spans, clear, box, limit)
+        if plan is not None:
+            job.rode = ridden
+            return direct + plan, f"{n}, then {how}"
     return _hub_search(cat, job, blocked, spans, clear, box, limit)
 
 
@@ -3240,17 +3362,28 @@ def _filter_loads(flat, lay, cat):
         if "inserter" not in e.name or not e.owner.startswith("~") or "filter" in e.attrs:
             continue
         net = flat.nets.get(e.attrs.get("net"))
+        items = net.items if net is not None else ()
+        names = fkpmod.net_names(e.attrs.get("net"))
+        if net is None and len(names) > 1 and all(n in flat.nets for n in names) \
+                and any(via == "drop" and d in flat.machines for d, via in g.succ.get(key, ())):
+            # Rory 11-11: a hand several nets share, from a machine into a machine (a requester
+            # hub's hand into an assembler that takes two of its items): filtered to every
+            # item of its nets, so it moves what each would have moved by a hand of its own.
+            # One net's items alone would starve the others. (A lane pair's hand onto its belt
+            # is left as it was.)
+            items = list(dict.fromkeys(i for n in names for i in flat.nets[n].items))
+            net = flat.nets[names[0]]
         if net is None:
             continue
         for src, via in g.pred.get(key, ()):
             m = flat.machines.get(src)
             if via != "pickup" or m is None:
                 continue
-            mine = [i for i in net.items if i in m.makes]
+            mine = [i for i in items if i in m.makes]
             if not mine or set(m.makes) <= set(mine):
                 continue
             if len(mine) > _FILTERS.get(e.name, 0):
-                out.append(f"  unfiltered {net.name}: {key} is a {e.name}, which "
+                out.append(f"  unfiltered {e.attrs.get('net')}: {key} is a {e.name}, which "
                            + (f"takes {_FILTERS[e.name]} filters, and the net has {len(mine)}"
                               if e.name in _FILTERS else "can't filter")
                            + f", so it loads everything {m.inst} holds onto the belt and can "
@@ -3760,7 +3893,7 @@ def _negotiate(flat, cat, js, order, ribs, base_ents, net_frames, claims, rib_of
         for other, tiles in claims.items():
             if other != net and rib_of.get(other) != net:
                 out |= tiles
-        return out
+        return out - claims.get(net, set())      # Rory 11-11: a hand two nets share
 
     for key in order:
         if key not in ribs:
@@ -4119,8 +4252,10 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             tiles = ((x, y) for x in range(x0, x1) for y in range(y0, y1) if (x, y) in claim_at)
         else:
             tiles = (t for t in claim_at if x0 <= t[0] < x1 and y0 <= t[1] < y1)
+        # Rory 11-11: a hand two nets share is claimed by both (``_direct_claims``): neither
+        # keeps out of it (one claimer: as before, the tile is kept out of unless it is the net's)
         return {t for t in tiles
-                if any(o != net and rib_of.get(o) != net for o in claim_at[t])}
+                if not any(o == net or rib_of.get(o) == net for o in claim_at[t])}
 
     def avoid(net):
         """``avoid_of`` in the box of ``net`` (a net, or a ribbon's key)."""
@@ -4129,6 +4264,12 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
     # -- the routing state every unit adds to ------------------------------------------------------
     ents = list(base.entities.values())          # the ground: the layout and every carrier laid
     added, failed, how, swaps, rlines = {}, {}, {}, [], {}
+    # Rory 11-11: driver machine -> the nets it drives (whose hands a net may ride on), and
+    # net -> the nets whose hands it rode on (``lay_net``)
+    by_source, riders = {}, {}
+    for n, j in js.items():
+        for sk, _r in j.sources:
+            by_source.setdefault(sk, []).append(n)
 
     # -- FK_NEGOTIATE=1 (3.0.1): negotiation proposes a unit's routes; ``lay_net`` lays a
     # proposed route when it still fits the ground, so seeds, holds, the memo and the group try
@@ -4211,14 +4352,17 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             taken = {t for e in ents for t in fkpmod.tiles_of(cat, e)}
             if any(fkpmod.tiles_of(cat, e) & taken for e in offer[0]):
                 offer = None                  # the ground changed under it: searched as any net
+        job, hands = js[net], ridable(net)
+        if hands:
+            job = _replace(job, shared={p: o for p, (o, _k) in hands.items()})
         if offer is not None:
             got, why = offer
         else:
             got, why = (None, failed.get(net)) if promo else \
-                _route_one(cat, js[net], ents, fnet, js, bnet, limit, terrain, av, allow=joints)
+                _route_one(cat, job, ents, fnet, js, bnet, limit, terrain, av, allow=joints)
         if got is None and promo:
             # once more, crossing other nets' straight belts by promoting them
-            prom = _route_promoted(cat, js[net], ents, fnet, js, bnet, limit, terrain, av,
+            prom = _route_promoted(cat, job, ents, fnet, js, bnet, limit, terrain, av,
                                    joints)
             if prom is not None:
                 got, why, mine = prom
@@ -4234,7 +4378,46 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
             got = _serving_only(flat, cat, js[net], ents, got)
         added[net] = got
         how[net] = why
+        # Rory 11-11: the hands this net rides on carry it too (``net=`` of both, as a pair's
+        # hands are), so connect and the judge see it served there. A copy in place of the hand
+        # (in the owner's carriers and on the ground): a group try that is undone gets the
+        # untagged hand back with the rest
+        rode = [hands[p] for p in getattr(job, "rode", ()) if p in hands] if offer is None else []
+        if rode:
+            new_of = {}
+            for owner, key in rode:
+                if owner in added:
+                    i = next(i for i, e in enumerate(added[owner]) if e.key == key)
+                    new_of[key] = _with_rider(added[owner][i], net)
+                    added[owner] = added[owner][:i] + [new_of[key]] + added[owner][i + 1:]
+                elif owner in standing_of:
+                    # a route that stands (route --only stale): the rider of the build that laid
+                    # it has no carrier of its own to keep, so it rides again
+                    mine = standing_of[owner]
+                    i = next(i for i, e in enumerate(mine) if e.key == key)
+                    new_of[key] = mine[i] = _with_rider(mine[i], net)
+                    base.entities[key] = new_of[key]
+            ents = [new_of.get(e.key, e) for e in ents]
+            riders.setdefault(net, set()).update(o for o, _k in rode)
         return ents + got
+
+    def ridable(net):
+        """``_ridden`` over the nets of ``net``'s unit, laid this run or standing, that share a
+        driver machine with it (Rory 11-11): a hand of theirs into a consumer of ``net`` carries
+        ``net`` too. A
+        wide net, a pin or an m2m net lays hands of its own; a lane pair rides by its machine
+        drivers and consumers (``pairs._direct``)."""
+        job = js[net]
+        if not job.sources or not job.taps or job.wide or job.pin \
+                or job.m2m is not None or job.straight:
+            return {}
+        u = _unit(net, sealed)
+        others = {o for sk, _r in job.sources for o in by_source.get(sk, ())
+                  if o != net and (o in added or o in standing_of) and o not in rib_of
+                  and _unit(o, sealed) == u}
+        items = [i for m in fkpmod.net_names(net) if m in flat.nets for i in flat.nets[m].items]
+        return _ridden(cat, job, {o: added[o] if o in added else standing_of[o]
+                                  for o in others}, items) if others else {}
 
     def inside(other, unit):
         """True when net ``other`` belongs to compile unit ``unit`` or to a unit nested in it (the
@@ -4700,7 +4883,7 @@ def _route_layout(flat, lay, cat, bounds=None, margin=4, retries=None, limit=600
         for e in added.get(net, ()):
             new.add(e)
     _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain, swaps,
-            (ribs, rib_of, rib_lines, net_frames, claims, joints))
+            (ribs, rib_of, rib_lines, net_frames, claims, joints), riders)
     for net in sorted(failed):
         if net in rib_of or net in remembered or js[net].fluid:
             continue          # a ribbon's net is never tried alone (it would be a loose belt)
@@ -5002,12 +5185,17 @@ def _abuts(job):
 
 
 def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, terrain,
-            swaps=None, ribbons=None):
+            swaps=None, ribbons=None, rode=()):
     """Judge the belt routes laid this run; re-route a net that leaks or does not connect around
     the tiles at fault (promoting other nets' belts when nothing else routes, into ``swaps``),
     else refuse it (its carriers go, the judge's line is the reason). A ribbon's net (2.1,
     ``ribbons``: the ribbons, net -> ribbon, their report lines, net_frames, claims, joints) is
-    re-routed with its whole ribbon, or the whole ribbon is refused."""
+    re-routed with its whole ribbon, or the whole ribbon is refused.
+
+    ``rode``: the nets that rode on another net's hand (Rory 11-11). One the judge finds apart
+    (that hand went: its net was refused, or laid again with a hand of its own) is routed again
+    as a net of its own, which lays its own hand; any other net found apart with no tile at
+    fault is refused, as before."""
     avoid = {}
     ribs, rib_of, rib_lines, net_frames, claims, joints = ribbons or ({}, {}, {}, None, {}, ())
     for round_ in range(_REPAIRS + 1):
@@ -5059,7 +5247,7 @@ def _repair(flat, new, cat, js, order, added, failed, how, frames, box, limit, t
             for e in added.pop(net):
                 del new.entities[e.key]
             how.pop(net, None)
-            if round_ == _REPAIRS or not tiles:
+            if round_ == _REPAIRS or (not tiles and net not in rode):
                 failed[net] = reason
                 continue
             avoid.setdefault(net, set()).update(tiles)
