@@ -958,7 +958,7 @@ circuits belt-switch: gated net bay/tap_: 1 carrier if=iron-plate>0 on bay/sw
 ```
 
 ```
-belt-switch: 116 nets: 116 connected, 0 open, 0 unrouted; 0 SPILL; 672 entities, 618 edges, 0 underground pairs
+belt-switch: 116 nets: 116 connected, 0 open, 0 unrouted; 0 SPILL; 672 entities, 617 edges, 0 underground pairs
 ```
 
 A gated net whose route has no inserter or pump is switched at its trunk belt, the first belt
@@ -1318,7 +1318,7 @@ net is connected and lays nothing, and a build that says `0 routed, 85 kept, 33 
 searched nothing.
 
 ```
-red-chain: 127 nets: 127 connected, 0 open, 0 unrouted; 0 SPILL; 1003 entities, 904 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs
+red-chain: 127 nets: 127 connected, 0 open, 0 unrouted; 0 SPILL; 1003 entities, 903 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs
 ```
 
 `fk rates red-chain.fk`: the two output nets carry `red_a ... 2.832` and `red_b ... 1.844` red
@@ -1362,7 +1362,7 @@ frame; `p1` did not change inside, so its three nets are laid from the store whe
 `PlasPair`'s fourth net and every other route stand (`79 kept`). `RedMod` and `PlasPair` get new
 store entries (a key holds its children's keys), and none of `RedMod`'s own eleven nets is
 touched. The build ends `red-chain: 127 nets: 127 connected, 0 open, 0 unrouted; 0 SPILL; 1004
-entities, 905 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs`.
+entities, 904 edges, 9 underground pairs; 42 fluid boxes, 37 fluid joins, 2 pipe-to-ground pairs`.
 That is the warning's claim, measured: the change reached exactly the module it was made in. Had
 the cell moved to where its plastic belt has no column left (`p2 = Plas2 @(13, 0)` does it), the
 failure would have been `PlasPair`'s too, a `no-route` line naming its net, and the fix inside
