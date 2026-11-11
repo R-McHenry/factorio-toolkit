@@ -35,8 +35,7 @@ from kickoff import setup_v1  # noqa: E402
 from fkcore import gateway  # noqa: E402
 import join  # noqa: E402
 
-MAPGEN = os.environ.get("FK_MAPGEN") or os.path.join(os.path.dirname(ROOT), "v4-hand", "kickoff",
-                                                     "map-gen-w3.json")
+MAPGEN = os.path.join(ROOT, "kickoff", "commons", "map-gen-w3.json")
 BASE = os.path.join(ROOT, "out", "rehearsal-commons")
 #: inside the kit roboport's construction reach (8,8 +- 55), beside its logistic square
 ANN, BOB = (36, -24, 68, 8), (68, -24, 100, 8)
