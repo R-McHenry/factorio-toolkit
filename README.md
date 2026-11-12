@@ -54,3 +54,8 @@ python -m unittest tests.test_flow                   # one module at a time, nev
 
 With the game link (`FK_LINK=on`, on the game host): `alone`, `standin`, `lab`, `robots`,
 `read-terrain --entities`, `look --source world`, `measure`, `capture`, `sim`, `map`.
+
+## License
+
+MIT: see [LICENSE](LICENSE). Factorio itself belongs to Wube Software and is not part of this
+repository.
