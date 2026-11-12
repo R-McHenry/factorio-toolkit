@@ -202,6 +202,28 @@ class SmeltTest(unittest.TestCase):
         self.assertEqual(taps - {"inserter"}, set())        # its own taps: the lowest rung
 
 
+class RouteHandTest(unittest.TestCase):
+    # FRICTION 11-11 (the bootstrap stages): `route --hand inserter` fixes every tap, and the
+    # hands step said "0 short hands" while one plain hand held a whole line
+    def setUp(self):
+        avail._snapshot, avail._notes = avail.Snapshot(), []
+        self.addCleanup(lambda: setattr(avail, "_snapshot", avail.Snapshot()))
+
+    def test_a_hand_route_named_is_left_and_said_too_thin(self):
+        code = Codebase(self, GEARS.format(extra=""), KIT)
+        code.write("small.build.fkb", SCRIPT.format(mode="minimize")
+                   .replace("--hand any", "--hand inserter"))
+        rc, ctx = code.run()
+        self.assertEqual(rc, 0)
+        txt = code.text("hands")
+        self.assertIn("left as the design or `route --hand` named them", txt)
+        self.assertIn("carry less than their connector needs", txt)
+        self.assertIn("`route --hand any` lets this step raise them", txt)
+        taps = {e.name for e in ctx.layouts["gear"].entities.values()
+                if e.owner.startswith("~") and CAT.kind(e.name) == "inserter"}
+        self.assertEqual(taps - {"inserter", "long-handed-inserter"}, set())   # not raised
+
+
 class UnbuildableTest(unittest.TestCase):
     def setUp(self):
         avail._snapshot, avail._notes = avail.Snapshot(), []

@@ -43,7 +43,9 @@ A change to the game's rules goes in FAIR-PLAY.md and nowhere else.
   test_literal_ports, test_friction_30, test_circuits, test_cover, test_rail_signals,
   test_terrain, test_robots, test_robots_reach, test_terrain_flow, test_apply, test_sense,
   test_own, test_surface, test_placements, test_frame, test_hull, test_territory, test_layout,
-  test_placer_mixed, test_connect, test_pair_ports, test_cleanpaste, test_pair_leak, test_gateway_link, test_gateway, test_commons_join, plus the branch's own new tests.
+  test_placer_mixed, test_connect, test_pair_ports, test_cleanpaste, test_pair_leak, test_gateway_link, test_gateway, test_commons_join, test_boot_friction, test_rekind,
+  test_reach_offline, test_module_overlap, test_direct_share, test_power_grid, test_examples_docs,
+  plus the branch's own new tests.
 - **Core ideas:**
   - a net is a declared object (name, items, drivers -> consumers), and machines join nets;
   - one source owns every tile;

@@ -118,19 +118,45 @@ def joins(grid, left, right, pair, ends=(), most=_JOINS):
 
 
 def _direct(cat, job, grid):
-    """Machines only, each driver beside each consumer: one inserter each, or None."""
+    """Machine drivers, machine consumers: one inserter from each driver into each consumer it
+    stands beside. -> (plan, ridden, rest) or None when no consumer is joined so. ``ridden``:
+    the (driver, consumer) pairs another net's hand already joins (``NetJob.shared``, Rory 11-11);
+    ``rest``: the pair's job for the consumers left (some driver hands to them by no inserter),
+    for the lane search, or None.
+
+    Rory 11-11 (a requester hub's ``split:`` net): a machine that drives both nets of the pair is
+    one driver (one hand into a consumer carries both nets), and a consumer joined to every
+    driver by a hand takes nothing from the belt: only the rest go to the lane search. It was all
+    or nothing, two hands from one chest into each assembler, so the hub's pairs never went
+    direct and found no trunk among its assemblers."""
     left, right, pair = job.parts
     if left.starts or right.starts or pair.goals or not pair.taps:
         return None
-    out, taken = [], set(job.ends())
-    for _k, src in left.sources + right.sources:
-        for _t, dst in pair.taps:
+    shared = getattr(job, "shared", None) or {}
+    sources = list({k: (k, r) for k, r in left.sources + right.sources}.values())
+    hands, ridden, apart, taken = [], [], set(), set(job.ends())
+    for sk, src in sources:
+        for tk, dst in pair.taps:
+            if (sk, tk) in shared:
+                ridden.append((sk, tk))
+                continue
             got = routemod._direct_pair(src, dst, grid, taken)
             if got is None:
-                return None
+                apart.add(tk)
+                continue
             taken.add((int(got["x"] // 1), int(got["y"] // 1)))
-            out.append(got)
-    return out
+            hands.append((tk, got))
+    rest = [t for t in pair.taps if t[0] in apart]
+    if len(rest) == len(pair.taps):
+        return None
+    plan = [h for tk, h in hands if tk not in apart]
+    ridden = [p for p in ridden if p[1] not in apart]
+    if not rest:
+        return plan, ridden, None
+    part = routemod._replace(pair, taps=rest)
+    sub = routemod._replace(job, taps=list(left.taps) + list(right.taps) + rest,
+                            parts=(left, right, part), shared={})
+    return plan, ridden, sub
 
 
 def route(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), spans=None,
@@ -300,12 +326,25 @@ def route_lanes(cat, job, ents, frames, js, box, limit, terrain=(), avoid=(), sp
         (set(avoid) - set(job.ends()))
     grid = routemod._Bounded(blocked, box, routemod._ug_spans(cat, ents) if spans is None
                              else spans)
+    job.rode = []
     direct = _direct(cat, job, grid)
     if direct is not None:
-        laid = routemod._carriers(job, direct, net)
+        plan, ridden, rest = direct
+        laid = routemod._carriers(job, plan, net)
         for e in laid:
             e.attrs["net"] = fkpmod.hand_net(net)
-        return laid, f"{len(laid)} inserters (direct insertion), no belt"
+        n = routemod._direct_how(plan, ridden, job.shared) if ridden else \
+            f"{len(laid)} inserters (direct insertion)"
+        if rest is None:
+            job.rode = ridden
+            return laid, (f"{n}, no belt" if plan or not ridden else n)
+        # the consumers left by the lane goal, the direct hands standing; when they find no way
+        # the whole pair is searched as before (the hands may have taken its way out)
+        got, how = route_lanes(cat, rest, list(ents) + laid, frames, js, box, limit, terrain,
+                               avoid, spans, allow)
+        if got is not None:
+            job.rode = ridden
+            return got + routemod._fresh_keys(laid, net, {e.key for e in got}), f"{n}, then {how}"
     cands = joins(grid, left, right, pair, job.ends())
     if not cands:
         return None, (f"no free tile roots the trunk of {left.net} and {right.net}, reached from "

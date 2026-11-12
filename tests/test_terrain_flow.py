@@ -114,6 +114,30 @@ class TerrainFlowTest(unittest.TestCase):
                       "iron-ore #1", terr)
         self.assertIn("2 trees, 0 rocks", terr)
 
+    def test_a_kept_route_on_newly_blocked_ground_is_taken_up(self):
+        # FRICTION 11-11 (the bootstrap stages): a roboport entered in the terrain after the route
+        # was laid; the committed route stood on it, and the paste put an underground on it
+        script = os.path.join(self.dir, "t.build.fkb")
+        with open(script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(SCRIPT.replace("route\n", "route --only stale\n"))
+        code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        belts = sorted((e for k, e in ctx.layouts["iron"].entities.items()
+                        if k.startswith("~plates/") and e.name == "transport-belt"),
+                       key=lambda e: fkp.natural_key(e.key))
+        mid = belts[len(belts) // 2]
+        rock = frozenset(fkp.tiles_of(CAT, mid))
+        import dataclasses
+        terrain.save(dataclasses.replace(self.t, entities=self.t.entities | rock, entities_read={
+            "tick": 1, "area": [-10, -10, 110, 90], "count": 1, "names": {"roboport": 1}}),
+                     os.path.join(self.dir, "map.terrain.json"))
+        code, ctx = self.build()
+        self.assertEqual(code, 0, ctx.log)
+        lay = ctx.layouts["iron"]
+        self.assertFalse({k for k, e in lay.entities.items()
+                          if k.startswith("~") and fkp.tiles_of(CAT, e) & rock})
+        self.assertIn("patched   plates:", self.read("route.txt"))   # main kept b42 on it
+
     def test_without_the_terrain_the_plate_route_crosses_it(self):
         # the same layout routed blind: the terrain is what keeps the route off the lake
         code, ctx = self.build()

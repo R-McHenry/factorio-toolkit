@@ -523,6 +523,13 @@ class PatchTest(unittest.TestCase):
         now = {(e.name, e.x, e.y, e.dir) for e in r.layout.entities.values()
                if e.owner == "~plates"}
         self.assertEqual(now, {(e.name, e.x, e.y, e.dir) for e in old["plates"]})
+        # FRICTION 11-11 (the bootstrap stages): `--retry-failed always` lays it again whole
+        # rather than hold it (a port moved, and w_cu stood 1 of 4 pairs through every retry)
+        with mock.patch.object(route._Patch, "add_consumer", return_value=None):
+            r = route.route_layout(flat, lay, CAT, patch=old, retry="always")
+        self.assertNotIn("plates", r.failed)
+        self.assertIn("plates", r.routed)
+        self.assertIn("patching it failed", r.again["plates"])
 
 
 class RedgreenTest(unittest.TestCase):

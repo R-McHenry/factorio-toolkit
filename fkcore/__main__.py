@@ -140,7 +140,9 @@ use the game link, and only with FK_LINK=on)
                                           trees and rocks counted) into GAME_DIR/<name>.terrain.json;
                                           --entities (3.1): what stands there and the design
                                           does not own becomes blocked tiles too, so the design
-                                          routes round it (only when asked; the file says when)
+                                          routes round it (only when asked; the file says when);
+                                          it also records every roboport on the surface, and
+                                          floorplan judges robot reach against them offline
     robots GAME_DIR [--area X0,Y0,X1,Y1] [--force F]
                                           3.1: the roboports that stand against the design's
                                           logistic chests: covered chests, redundant roboports,
@@ -1862,7 +1864,7 @@ def _read_terrain(a):
     if len(area) != 4 or area[2] <= area[0] or area[3] <= area[1]:
         print(f"error: --area X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0, got {a.area}", file=sys.stderr)
         return 2
-    owned = None
+    owned, force, grid_at = None, "player", None
     if a.entities:
         # 3.1: the design's tiles (the diff's business) and the toolkit's own record are not
         # obstacles; everything else built in the area is
@@ -1870,6 +1872,9 @@ def _read_terrain(a):
         cat = Catalog.load()
         try:
             sf, _lay, _path, composed = look.composed(a.game, cat)
+            force = sf.force_name or force
+            # 3.5 (PLAN-POWER P1, Rory 11-11): the surface's ``power grid X,Y`` names the grid
+            grid_at = sf.power_grid if sf.name == a.surface else None
             record = own.load(a.game, sf.name) if sf.name == a.surface else None
             owned = terrain.owned_tiles(composed if sf.name == a.surface else None,
                                         (record or {}).values(), cat)
@@ -1880,7 +1885,9 @@ def _read_terrain(a):
     try:
         with link.connect() as r:
             data = terrain.read(r, a.surface, area)
-            ents = terrain.read_entities(r, a.surface, area, owned) if a.entities else None
+            ents = (terrain.read_entities(r, a.surface, area, owned, force=force,
+                                          grid_at=grid_at)
+                    if a.entities else None)
     except (OSError, link.LinkError) as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
@@ -2110,6 +2117,9 @@ def main(argv=None):
                         "--with 'route --again NET'")
     b.add_argument("--confirm", action="store_true",
                    help="take up what stands built on DNP pieces (diff and apply --confirm)")
+    b.add_argument("--fresh", action="store_true",
+                   help="read nothing of the builds before (committed .fkp, last routes, failure "
+                        "memo, compiled store): a module's test from a clean slate")
     sp = sub.add_parser("step", help="3.0: one step of the build script alone, on what the steps "
                                        "before it left (fk route NET, fk place)")
     sp.add_argument("script")
@@ -2535,7 +2545,7 @@ def main(argv=None):
                 with open(a.script, encoding="utf-8") as fh:
                     have = {ln.cmd for ln in flow.parse(fh.read(), a.script)}
                 extra += [f"{s} --confirm" for s in ("diff", "apply") if s in have]
-            code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra)
+            code, _ctx = flow.run(a.script, a.frm, a.to, cat, extra=extra, fresh=a.fresh)
         except (flow.FlowError, surfacemod.SurfaceError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

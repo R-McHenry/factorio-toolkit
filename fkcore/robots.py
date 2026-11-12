@@ -211,14 +211,24 @@ def reach(rows, standing, cat):
     the paste gives its construction area once it is inside one that stands (robots build it) and
     its logistic square meets that network's (it joins it, and its robots work from it), and so on
     outward. -> the rows out of reach, the paste's roboports among them first."""
+    ports, todo = _grow(rows, standing, cat)
+    out = [row for row in rows if not _built(ports, float(row[2]), float(row[3]))]
+    return sorted(out, key=lambda row: (row not in todo, natural_key(row[0] or "")))
+
+
+def _built(ports, x, y):
+    return any(abs(x - px) <= cr and abs(y - py) <= cr for px, py, _lr, cr in ports)
+
+
+def _grow(rows, standing, cat):
+    """The areas ``standing`` [(x, y, lr, cr)] gives, grown by the roboports among ``rows`` that
+    join it (:func:`reach`): -> ([(x, y, lr, cr)] every roboport that works, [the roboport rows
+    that never join]))."""
     ports = [(float(x), float(y), float(lr), float(cr)) for x, y, lr, cr in standing]
 
     def radii(name):
         row = cat.entity(name) if cat.has_entity(name) else {}
         return float(row.get("logistic_radius") or 0), float(row.get("construction_radius") or 0)
-
-    def built(x, y):
-        return any(abs(x - px) <= cr and abs(y - py) <= cr for px, py, _lr, cr in ports)
 
     todo = [row for row in rows if cat.has_entity(row[1]) and cat.kind(row[1]) == "roboport"]
     grew = True
@@ -227,14 +237,13 @@ def reach(rows, standing, cat):
         for row in list(todo):
             _key, name, x, y = row
             lr, cr = radii(name)
-            if built(float(x), float(y)) and any(
+            if _built(ports, float(x), float(y)) and any(
                     abs(float(x) - px) <= lr + plr and abs(float(y) - py) <= lr + plr
                     for px, py, plr, _cr in ports):
                 ports.append((float(x), float(y), lr, cr))
                 todo.remove(row)
                 grew = True
-    out = [row for row in rows if not built(float(row[2]), float(row[3]))]
-    return sorted(out, key=lambda row: (row not in todo, natural_key(row[0] or "")))
+    return ports, todo
 
 
 def lua_roboports(surface, force, tag):
@@ -556,6 +565,76 @@ def report(standing, chests, cat, area=None, roboport="roboport") -> StandingRep
                 again = True
     return StandingReport(tuple(area) if area else None, list(standing), chests, covered,
                           redundant, minimal(chests, cat, roboport), nets)
+
+
+#: how many rows out of reach a plot's check names one by one
+_FAR_SHOWN = 4
+
+
+def check_reach(s, standing, cat, read=""):
+    """(lines, checks): every entity the composed surface ``s`` lays (DNP ones are never pasted)
+    against the roboports that stood when the terrain was read (``standing`` [Standing], map
+    coordinates), grown by the design's own roboports that join them (:func:`reach`). No game:
+    Rory 2026-11-11, "roboport reach should be easy to do in the toolkit without the game". The
+    bootstrap's stage was built clean (256 nets, 0 checks) while Sci's feed belts stood as ghosts
+    for 200k ticks past every construction area, and S4's provider sat outside every logistic
+    area (FRICTION 11-11).
+
+    Checks: ``out-of-reach`` per plot (rows outside every construction area: robots never build
+    them; ``stop_on out-of-reach`` holds the build), and ``no-robots`` per logistic chest or
+    ``logistic=`` gate outside every logistic area (a gate there reads no network, so it never
+    fires: Robo1's makers stood idle in v-s7c). Offline it cannot tell a row that already stands
+    from one to lay, nor whether a roboport the design adds has power yet: the diff's ``REACH``
+    judges the ghosts against the live read."""
+    seeds = [(p.x, p.y, p.lr, p.cr) for p in standing if p.powered]
+    off = [p for p in standing if not p.powered]
+    rows = [(k, e.name, float(e.x), float(e.y), e) for k, e in sorted(
+        s.entities.items(), key=lambda kv: natural_key(kv[0]))
+        if cat.has_entity(e.name) and not e.attrs.get("dnp")]
+    ports, never = _grow([r[:4] for r in rows], seeds, cat)
+    mine = len(ports) - len(seeds)
+    lines = [f"robots (offline, the roboports{(' ' + read) if read else ''}): {len(seeds)} stand "
+             f"with power" + (f", {len(off)} without" if off else "")
+             + f"; the design's own add {mine}"
+             + (f", {len(never)} of them out of reach themselves" if never else "")]
+    checks = []
+
+    def at(r):
+        return f"{r[0].split(':', 1)[-1]} ({r[1]} {fkp.fmt(r[2])},{fkp.fmt(r[3])})"
+
+    by_plot = {}
+    for r in rows:
+        by_plot.setdefault(r[4].plot, []).append(r)
+    for plot in sorted(by_plot, key=lambda p: (p is None, p or "")):
+        mine_rows = by_plot[plot]
+        far = [r for r in mine_rows if not _built(ports, r[2], r[3])]
+        logi = [r for r in mine_rows if r[1] in LOGISTIC_CHESTS or r[4].attrs.get("logistic")]
+        unserved = [r for r in logi if not any(_inside(r[2], r[3], px, py, lr)
+                                               for px, py, lr, _cr in ports)]
+        where = plot or "shared infra"
+        lines.append(f"  {where}: {len(mine_rows) - len(far)}/{len(mine_rows)} in a construction "
+                     f"area" + (f", {len(logi) - len(unserved)}/{len(logi)} logistic chests and "
+                                f"gates in a logistic area" if logi else ""))
+        if far:
+            xs, ys = [r[2] for r in far], [r[3] for r in far]
+            ports_far = [r for r in far if cat.kind(r[1]) == "roboport"]
+            checks.append(Check(
+                "out-of-reach", f"{s.name} {where}",
+                f"{len(far)} of its {len(mine_rows)} entities are outside every construction area "
+                f"(map {fkp.fmt(min(xs))}..{fkp.fmt(max(xs))}, {fkp.fmt(min(ys))}.."
+                f"{fkp.fmt(max(ys))}): robots never build them ("
+                + ", ".join(at(r) for r in far[:_FAR_SHOWN])
+                + (" ..." if len(far) > _FAR_SHOWN else "") + ")"
+                + (f"; {len(ports_far)} of them are roboports, which bring no robots where none "
+                   "reach them" if ports_far else "")
+                + "; a roboport within reach first, or `stop_on out-of-reach` holds the build"))
+        for r in unserved:
+            what = ("its logistic= gate reads no network, so it never fires"
+                    if r[4].attrs.get("logistic") else "robots will not serve it")
+            checks.append(Check("no-robots", f"{s.name} {r[0]}",
+                                f"{r[1]} at {fkp.fmt(r[2])},{fkp.fmt(r[3])} is outside every "
+                                f"logistic area: {what}"))
+    return lines, checks
 
 
 def check_surface(s, cat):

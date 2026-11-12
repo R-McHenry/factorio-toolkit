@@ -49,8 +49,10 @@ the game codebase and writes ``out/`` and, in write_layout, the ``.fkp`` files.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -118,6 +120,7 @@ class Ctx:
     echo: object = None                              # the run's echo, for a long step's progress
     models: dict = field(default_factory=dict)       # factory -> (flat, its rates.solve), reused
     compiled: str | None = None                      # the compiled-module store (PLAN-3.0 §4)
+    fresh: bool = False                              # fk build --fresh: nothing read of before
 
     def model(self, factory):
         """The nominal rate model of ``flats[factory]``, solved once per flat (2.1.27: hands, tier
@@ -325,6 +328,45 @@ def _read_roboports(ctx, r):
     return [tuple(float(v) for v in p[:4]) for p in rows if len(p) >= 4]
 
 
+def _reach_mask(t, cat, lines, checks):
+    """``read_terrain <name> --reach`` (3.4): the terrain with every tile of its area outside the
+    construction areas of the roboports that stood with power at the last ``read-terrain
+    --entities`` blocked, and every tile under a tree or rock whose box reaches out of them (no
+    robot may fly to it, so its deconstruction never runs). Routes, poles and placements then stay
+    where robots build. The bootstrap's S6 laid 94 rows north of Sci where no roboport reached,
+    and Test 3's S6 belts under two trees past the area's edge (FRICTION 11-11; its
+    reachmask.py). The design's own new roboports do not widen it: lay those first, read again.
+    -> (terrain, tiles added)."""
+    from . import robots
+    rows = terrainmod.roboports(t)
+    if rows is None:
+        checks.append(Check("no-terrain", "--reach", "the terrain has no roboports read: "
+                            "`fk read-terrain ... --entities` records them; nothing blocked"))
+        return t, 0
+    ports = [(p.x, p.y, p.cr) for p in robots.standing_rows(rows, cat) if p.powered]
+
+    def inside(x, y):
+        return any(abs(x - px) <= r and abs(y - py) <= r for px, py, r in ports)
+    x0, y0, x1, y1 = t.area
+    far = {(x, y) for x in range(x0, x1) for y in range(y0, y1)
+           if not inside(x + 0.5, y + 0.5)}
+    trees = set()
+    for r in t.removable.values():
+        for tx, ty in r["at"]:
+            h = 1.0 if r["type"] == "rock" else 0.5
+            if all(inside(tx + sx * h, ty + sy * h) for sx in (-1, 1) for sy in (-1, 1)):
+                continue
+            trees |= {(x, y) for x in range(math.floor(tx - h), math.floor(tx + h) + 1)
+                      for y in range(math.floor(ty - h), math.floor(ty + h) + 1)
+                      if x0 <= x < x1 and y0 <= y < y1}
+    add = (far | trees) - set(t.entities)
+    t = terrainmod.with_entities(t, set(t.entities) | add, t.entities_read)
+    lines.append(f"  --reach: {len(far)} tiles outside the construction areas of {len(ports)} "
+                 f"powered roboports, {len(trees - far)} more under trees and rocks that reach "
+                 "out of them: blocked")
+    return t, len(add)
+
+
 def _factories(ctx):
     if ctx.surface is None:
         raise FlowError("no surface read yet: the script needs read_surface first")
@@ -362,13 +404,14 @@ def s_read_surface(ctx, args):
                     note.split(": ", 1)[-1]) for note in sf.design_notes]
     for p in sf.places.values():
         prev = os.path.join(ctx.root, f"{p.module}.fkp")
-        if os.path.exists(prev):
+        if os.path.exists(prev) and not ctx.fresh:     # fk build --fresh: as if none were there
             ctx.previous[p.factory] = fkp.load(prev)
     return lines, checks
 
 
 def s_read_terrain(ctx, args):
-    name = args[0] if args else "none"
+    o = _opts(args)
+    name = (o.get("_") or ["none"])[0]
     if name == "none":
         return ["terrain none: no ore, water or cliffs constrain the layout (a paper surface)"], []
     path = os.path.join(ctx.root, f"{name}.terrain.json")
@@ -376,9 +419,11 @@ def s_read_terrain(ctx, args):
         return [f"terrain {name}: no {name}.terrain.json in the game codebase"], [
             Check("no-terrain", name, "no terrain file; the layout is not checked against the ground")]
     t = terrainmod.load(path)
+    lines, checks = terrainmod.summary(t, name), []
+    if o.get("reach"):
+        t, _more = _reach_mask(t, ctx.cat, lines, checks)
     ctx.ground = t
     ctx.terrain = set(t.blocked)
-    lines, checks = terrainmod.summary(t, name), []
     if ctx.surface is None:
         return lines, checks
     if t.surface != ctx.surface.name:
@@ -637,8 +682,26 @@ def _pinned_covers(new, prev, cat):
     return kept
 
 
+def _overlap_pairs(o):
+    """``place --overlap a+b,c+d``: the pairs of sealed modules the build script lets overlap
+    -> {frozenset({a, b})}."""
+    v = o.get("overlap")
+    if not v:
+        return set()
+    if v is True:
+        raise FlowError("place --overlap names pairs of sealed instances: --overlap a+b[,c+d]")
+    out = set()
+    for part in str(v).split(","):
+        two = [x.strip() for x in part.split("+") if x.strip()]
+        if len(two) != 2:
+            raise FlowError(f"place --overlap {part!r}: a pair is two instance paths, a+b")
+        out.add(frozenset(two))
+    return out
+
+
 def s_place(ctx, args):
     lines, checks = [], []
+    allowed = _overlap_pairs(_opts(args))
     for p in _factories(ctx):
         flat = ctx.flats[p.factory]
         ground, placed, mixed = None, [], []
@@ -666,30 +729,95 @@ def s_place(ctx, args):
         lines += [f"  placed {line}" for line in placed]
         checks += [Check("no-position", p.factory, n) for n in notes]
         checks += [Check(code, f"{p.factory} {path}", msg) for code, path, msg in mixed]
-        checks += _overlap_checks(p.factory, flat, lay, ctx.cat)
+        olines, ochecks = _overlap_report(p.factory, flat, lay, ctx.cat, allowed)
+        lines += olines
+        checks += ochecks
         checks += _invariant_checks(p.factory, fkp.invariants(lay, ctx.cat))
     return lines, checks
 
 
-def _overlap_checks(factory, flat, lay, cat):
-    """``overlap`` (2.0.75, warn): two sealed modules whose frames share tiles. Both route there,
-    the first laid in the way of the next; only two entities on one tile stop the build."""
+def _shared_text(box, n):
+    x0, y0, x1, y1 = box
+    # 41-hull: the shared tiles' count and box; a box overlap reads as before
+    what = f"{x1 - x0}x{y1 - y0} tiles" if n == (x1 - x0) * (y1 - y0) else \
+        f"{n} tiles in {x1 - x0}x{y1 - y0}"
+    return f"{what} at {x0},{y0}..{x1 - 1},{y1 - 1}"
+
+
+def _clashes(flat, lay, cat, a, b):
+    """[(tile, a's key, b's key)]: the tiles where an entity of sealed module ``a`` and one of
+    ``b`` both stand."""
+    at = {}
+    for k, e in lay.entities.items():
+        if k.startswith(a + "/") and cat.has_entity(e.name):
+            for t in fkp.tiles_of(cat, e):
+                at[t] = k
     out = []
+    for k, e in sorted(lay.entities.items(), key=lambda kv: fkp.natural_key(kv[0])):
+        if k.startswith(b + "/") and cat.has_entity(e.name):
+            for t in sorted(fkp.tiles_of(cat, e)):
+                if t in at:
+                    out.append((t, at[t], k))
+    return out
+
+
+#: how many tiles of an allowed overlap's clash the checks name one by one
+_SHOW_CLASH = 6
+
+
+def _overlap_report(factory, flat, lay, cat, allowed=()):
+    """(lines, checks). ``overlap`` (2.0.75, warn): two sealed modules whose frames share tiles.
+    Both route there, the first laid in the way of the next; only two entities on one tile stop
+    the build. 3.4 (Rory 11-11: "Overlapping frames should be a warning, and placement in modules
+    needs a way to be aware of overlapped stuff ... best for the build script to define it case by
+    case"): two declared frames that share tiles warn too while their hulls don't yet (Blue1 on
+    Sci's top rows, FRICTION 11-11); a pair the script names (``place --overlap a+b``) overlaps on
+    purpose, for compaction: a line in place of the warning, and ``overlap-clash`` names each
+    tile where both modules' entities stand."""
+    out, lines = [], []
     pairs = expand.frame_overlaps(flat, lay, cat)
-    if not pairs:
-        return out
+    hull = {frozenset((a, b)) for a, b, _box, _n in pairs}
+    declared = [q for q in expand.frame_overlaps(flat, lay, cat, claims=True)
+                if frozenset(q[:2]) not in hull]
+    named = {frozenset(q[:2]) for q in pairs + declared}
+    for pair in sorted(allowed, key=sorted):
+        if pair not in named:
+            lines.append(f"  place --overlap {'+'.join(sorted(pair))}: "
+                         + ("no such pair of placed sealed modules"
+                            if not pair <= set(flat.sealed) else "their frames do not overlap"))
+    if not pairs and not declared:
+        return lines, out
     try:
         edges = expand.port_edges(flat, lay, cat)
     except Exception:                           # the router reports a port it can't place
         edges = {}
-    for a, b, (x0, y0, x1, y1), n in pairs:
-        # 41-hull: the shared tiles' count and box; a box overlap reads as before
-        what = f"{x1 - x0}x{y1 - y0} tiles" if n == (x1 - x0) * (y1 - y0) else \
-            f"{n} tiles in {x1 - x0}x{y1 - y0}"
+    for a, b, box, n in declared:
+        if frozenset((a, b)) in allowed:
+            lines.append(f"  {a} and {b} overlap by the script's leave (place --overlap): their "
+                         f"declared frames share {_shared_text(box, n)}")
+            continue
         out.append(Check("overlap", f"{factory} {a}",
-                         f"its frame and {b}'s share {what} at "
-                         f"{x0},{y0}..{x1 - 1},{y1 - 1}: both modules' routes may use them, and "
-                         "each is in the way of the other's"))
+                         f"its declared frame and {b}'s share {_shared_text(box, n)}; their "
+                         "built hulls don't yet, so what either grows there meets the other "
+                         f"(`place --overlap {a}+{b}` when it is meant)"))
+    for a, b, box, n in pairs:
+        if frozenset((a, b)) in allowed:
+            clash = _clashes(flat, lay, cat, a, b)
+            lines.append(f"  {a} and {b} overlap by the script's leave (place --overlap): "
+                         f"{_shared_text(box, n)}, routed by both, each in the other's way; "
+                         f"{len(clash)} tiles where both lay an entity")
+            for t, ka, kb in clash[:_SHOW_CLASH]:
+                out.append(Check("overlap-clash", f"{factory} {t[0]},{t[1]}",
+                                 f"{ka} and {kb} both stand on it: move one module, or its "
+                                 "entity inside its source"))
+            if len(clash) > _SHOW_CLASH:
+                out.append(Check("overlap-clash", f"{factory} {a}+{b}",
+                                 f"... and {len(clash) - _SHOW_CLASH} more tiles"))
+        else:
+            out.append(Check("overlap", f"{factory} {a}",
+                             f"its frame and {b}'s share {_shared_text(box, n)}: both modules' "
+                             "routes may use them, and each is in the way of the other's "
+                             f"(`place --overlap {a}+{b}` when it is meant)"))
         for mine, other in ((a, b), (b, a)):
             ob = expand.frame_shape_of(flat, lay, other, cat)
             for key, pe in sorted(edges.items()):
@@ -698,7 +826,12 @@ def _overlap_checks(factory, flat, lay, cat):
                     out.append(Check("overlap", f"{factory} {mine}",
                                      f"port {key.rsplit('/', 1)[-1]} opens at {tx},{ty}, inside "
                                      f"{other}'s frame: a net from outside both can't reach it"))
-    return out
+    return lines, out
+
+
+def _overlap_checks(factory, flat, lay, cat, allowed=()):
+    """The checks of :func:`_overlap_report` alone."""
+    return _overlap_report(factory, flat, lay, cat, allowed)[1]
 
 
 def _pinned_routes(flat, new, prev, cat):
@@ -716,7 +849,22 @@ def _pinned_routes(flat, new, prev, cat):
     replay: a chest moved a tile onto fe_pl4's trunk re-laid its 137 belts)."""
     if prev is None:
         return {}, {}
-    old = route.jobs(flat, prev, cat) if prev.insts else {}
+    # FRICTION 11-11 (the bootstrap stages): an instance whose kind changed (Seed -> Literal, a
+    # Stack's LabCell -> LabCell3) has new attach points, and its old routes lead to the old ones.
+    # The old layout's jobs are read without it (the new kind's geometry on the old layout crashed:
+    # "Literal has no fragment geometry yet"), and every net with an end on it or inside it is
+    # routed again (pinned, a cell's feeds came back partly-connected even with --reroute)
+    rekind = {p: (prev.insts[p].kind, r.kind) for p, r in new.insts.items()
+              if p in prev.insts and prev.insts[p].kind != r.kind}
+
+    def under(path):
+        return next((q for q in rekind if path == q or path.startswith(q + "/")), None)
+
+    view = prev
+    if rekind:
+        view = copy.copy(prev)
+        view.insts = {p: r for p, r in prev.insts.items() if under(p) is None}
+    old = route.jobs(flat, view, cat) if view.insts else {}
     now = route.jobs(flat, new, cat)
     taken = set()
     for e in new.entities.values():
@@ -728,6 +876,12 @@ def _pinned_routes(flat, new, prev, cat):
             by_net.setdefault(e.owner[1:], []).append(e)
     for net, ents in sorted(by_net.items()):
         if net not in now:
+            continue
+        hit = under(net) or next((under(o.rsplit(".", 1)[0]) for o in now[net].owners
+                                  if under(o.rsplit(".", 1)[0])), None)
+        if hit is not None:
+            was, kind = rekind[hit]
+            again[net] = f"{hit} changed kind since the committed .fkp ({was} -> {kind})"
             continue
         moved = now[net].moved_ends(old[net]) if net in old and now[net].fluid else []
         if moved:
@@ -1014,7 +1168,7 @@ def s_route(ctx, args):
     # its game's); --store DIR elsewhere, --store none (or --compiled no) to lay every module
     # afresh; --reuse-lab reads the lab builds' own stores too
     store = str(o["store"]) or ctx.compiled or os.path.join(ctx.out, "compiled")
-    if store.lower() in ("none", "no", "off") or str(o["compiled"]) == "no":
+    if store.lower() in ("none", "no", "off") or str(o["compiled"]) == "no" or ctx.fresh:
         store = None
     else:
         if not os.path.isabs(store):
@@ -1038,9 +1192,14 @@ def s_route(ctx, args):
                                                o["module"])
         elif o["only"] == "stale":
             pinned, again = _pinned_routes(flat, lay, ctx.previous.get(factory), ctx.cat)
-            pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
-        # 3.0, the design database: the net files the last route step left (fkcore.design)
-        recs = design.read_all(ctx.out, factory)
+            if not ctx.fresh:
+                pinned, again = _with_last_routes(ctx, factory, flat, lay, pinned, again)
+        # 3.0, the design database: the net files the last route step left (fkcore.design);
+        # none for fk build --fresh (Rory 11-11: a module's test from a clean slate, one flag)
+        recs = {} if ctx.fresh else design.read_all(ctx.out, factory)
+        if ctx.fresh:
+            lines.append(f"{factory}: fresh (fk build --fresh): no committed .fkp, last route, "
+                         "failure memo or compiled module read; every net laid anew")
         for net, rec in sorted(recs.items()):
             if rec["status"] == "unrouted" and rec["why"].startswith(design.UNROUTED_BY_YOU):
                 pinned.pop(net, None)
@@ -1600,12 +1759,20 @@ def s_cover_power(ctx, args):
     the committed poles stay where they still fit and new ones go only where coverage is missing;
     ``--fresh`` lays every pole anew, as before. 3.1 (Rory 11-08: the world never feeds a step):
     what the diff found built does not reach here; a pinned pole of another kind than ``--pole``
-    is laid again in the new kind, and what stands is the diff's difference."""
+    is laid again in the new kind, and what stands is the diff's difference.
+
+    3.5 (PLAN-POWER P1+P2, Rory 11-11): ``--pole`` is a comma list of the kinds allowed, first
+    preferred (``any``: the avail pick, then the other buildable kinds), mixed where the first
+    has no spot or cannot join (``power.PowerProblem``); and with a grid read (the surface's
+    ``power grid X,Y``, ``read-terrain --entities``) the grid's poles near each plot are the
+    cover's roots, so a plot's poles wire back to the world's grid."""
+    from . import power as powermod
     o = _opts(args, pole="medium-electric-pole")
-    pole, _note = availmod.choose("pole", o["pole"], need=_need(ctx, "electric-pole"))
-    if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
-        raise FlowError(f"--pole {pole}: not an electric pole (small-electric-pole, "
-                        "medium-electric-pole, big-electric-pole, substation), or any")
+    try:
+        kinds = powermod.parse_kinds(o["pole"], ctx.cat, need=_need(ctx, "electric-pole"))
+    except ValueError as exc:
+        raise FlowError(str(exc)) from None
+    pole, more = kinds[0], kinds[1:]
     try:
         from . import cover
     except ImportError:
@@ -1613,15 +1780,26 @@ def s_cover_power(ctx, args):
             Check("NO_POWER", "all factories", "no power coverage step yet")]
     from . import domains
     lines, checks = [], []
+    grid = terrainmod.grid(ctx.ground)
     for factory, lay in list(ctx.layouts.items()):
         keep_out = _frame_blocked(ctx, factory, lay.size) | _empty_slots(ctx, factory, lay)
+        roots = ()
+        if grid is not None and ctx.surface is not None and factory in ctx.surface.places:
+            p = ctx.surface.places[factory]
+            roots = powermod.grid_roots(grid, p, lay.size or terrainmod.frame_size(p), ctx.cat,
+                                        kinds)
+        prob = powermod.PowerProblem(kinds, roots, frozenset(keep_out), grid)
+        if grid is not None:
+            lines.append(f"{factory}: {powermod.grid_text(grid)}: {len(roots)} of its poles "
+                         "in reach of the plot, the cover's roots")
         doms = domains.active(ctx.flats.get(factory))
         if doms is not None:
             # 2.1: two power lines or more are domains, each its own network (fkcore.domains)
             prev = ctx.previous.get(factory)
             new, dlines, dchecks = domains.cover_domains(
                 ctx.flats[factory], lay, ctx.cat, doms, pole, keep_out=keep_out,
-                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"))
+                pinned_of=lambda owner: [] if o.get("fresh") is True else _own(prev, owner, "p"),
+                more=prob.more, roots=prob.roots)
             ctx.layouts[factory] = new
             lines += [f"{factory}: {ln}" for ln in dlines]
             checks += [Check(c.code, f"{factory} {c.where}", c.msg) for c in dchecks]
@@ -1635,13 +1813,14 @@ def s_cover_power(ctx, args):
             # unit's poles depend only on what stands in it); ``--flat`` for the one-pass cover
             pinned = []
             poles, rep = cover.cover_power_units(lay, ctx.cat, units, pole=pole,
-                                                 keep_out=keep_out)
+                                                 keep_out=keep_out, more=prob.more,
+                                                 roots=prob.roots)
         else:
             poles, rep = cover.cover_power(lay, ctx.cat, pole=pole, keep_out=keep_out,
-                                           pinned=pinned)
+                                           pinned=pinned, more=prob.more, roots=prob.roots)
         # 2.1.26: the poles just laid, not a second cover_power (the live world's took ~30 s each)
         new = cover.apply_cover(lay, ctx.cat, pole=pole, keep_out=keep_out, pinned=pinned,
-                                poles=poles)
+                                poles=poles, more=prob.more)
         ctx.layouts[factory] = new
         if units:
             lines.append(f"{factory}: by unit: {rep.units[0]} sealed modules laid, "
@@ -1758,13 +1937,19 @@ def s_floorplan(ctx, args):
                            entities=ents)
     ctx.surface_lay = surfacemod.floorplan(sf, infra)
     ctx.composed = compose.compose(ctx.surface_lay, ctx.layouts, ctx.cat)
+    from . import power as powermod
+    grid = terrainmod.grid(ctx.ground)
+    # 3.5 (P1, Rory 11-11): the world grid's poles, for the wire networks below (never laid)
+    grid_rows = powermod.grid_rows(grid, ctx.cat) if grid is not None else []
     if o.get("bridge_power"):
         from . import cover
         pole = o["bridge_power"] if isinstance(o["bridge_power"], str) else "medium-electric-pole"
-        pole, _note = availmod.choose("pole", pole, need=_need(ctx, "electric-pole"))
-        if not ctx.cat.has_entity(pole) or ctx.cat.kind(pole) != "electric-pole":
-            raise FlowError(f"--bridge-power {pole}: not an electric pole (small-electric-pole, "
-                            "medium-electric-pole, big-electric-pole, substation), or any")
+        try:
+            kinds = powermod.parse_kinds(pole, ctx.cat, need=_need(ctx, "electric-pole"),
+                                         flag="--bridge-power")
+        except ValueError as exc:
+            raise FlowError(str(exc)) from None
+        pole = kinds[0]
         s = ctx.composed
         keep = set()
         for p in s.plots.values():
@@ -1774,7 +1959,8 @@ def s_floorplan(ctx, args):
         for m in s.marks.values():
             keep |= {(int(x), int(y)) for x, y in m.tiles}
         keep |= ctx.terrain                          # no bridge pole on water or a cliff
-        poles, blines = cover.bridge(list(s.entities.values()), ctx.cat, keep, pole)
+        poles, blines = cover.bridge(list(s.entities.values()) + grid_rows, ctx.cat, keep, pole,
+                                     more=kinds[1:], grid={e.key for e in grid_rows})
         if poles and "bridge" not in ctx.surface_lay.covers:
             ctx.surface_lay.covers["bridge"] = fkp.Cover("bridge", "power", {"pole": pole})
         for e in poles:
@@ -1797,7 +1983,7 @@ def s_floorplan(ctx, args):
         from . import cover
     except ImportError:
         cover = None
-    if cover is not None:
+    if cover is not None and grid is None:
         nets = cover.networks(list(s.entities.values()), ctx.cat)
         lines.append(f"power: {len(nets)} wire network{'s' if len(nets) != 1 else ''}, "
                      f"{sum(1 for n in nets if n['sources'])} with generation")
@@ -1812,9 +1998,45 @@ def s_floorplan(ctx, args):
                 checks.append(Check("NO_POWER", f"{sf.name} {name}",
                                     "its grid reaches no generator (bridge it: floorplan "
                                     "--bridge-power)"))
+    elif cover is not None:
+        # 3.5 (P1, Rory 11-11: "look at that grid as the global power stat"): a plot whose poles
+        # wire to a pole of the world grid is on it, whatever generator the design holds
+        gkeys = {e.key for e in grid_rows}
+        nets = cover.networks(list(s.entities.values()) + grid_rows, ctx.cat)
+        named = powermod.grid_text(grid)
+        lines.append(f"power: {len(nets)} wire network{'s' if len(nets) != 1 else ''}, "
+                     f"{sum(1 for n in nets if n['sources'])} with generation; {named}")
+        for name in sorted(s.plots):
+            mine = {k for k in s.entities if k.startswith(f"{sf.name}:{name}/")
+                    and ctx.cat.kind(s.entities[k].name) == "electric-pole"}
+            on_grid = any(gkeys & set(n["poles"]) for n in nets if mine & set(n["poles"]))
+            powered = any(n["sources"] for n in nets if mine & set(n["poles"]))
+            lines.append(f"  {name}: {len(mine)} poles, "
+                         + (f"on {named}" if on_grid else
+                            "on a grid with generation, not the world grid's" if powered else
+                            f"NOT on the world grid #{grid.get('id')} or a grid with generation"))
+            if mine and not (on_grid or powered):
+                checks.append(Check("NO_POWER", f"{sf.name} {name}",
+                                    f"its poles reach neither a generator nor {named} (cover "
+                                    "power bridges to the grid's poles in reach of the plot; "
+                                    "else bridge it: floorplan --bridge-power)"))
+        if (grid.get("stats") or {}):
+            slines, schecks = powermod.short(
+                {n: ctx.layouts[n] for n in sorted(s.plots) if n in ctx.layouts}, ctx.cat, grid,
+                sf.name)
+            lines += slines
+            checks += schecks
     _write_domains(ctx, s)
     from . import robots
-    rlines, rchecks = robots.check_surface(s, ctx.cat)
+    ports = terrainmod.roboports(ctx.ground)
+    if ports is not None:
+        # 3.4 (Rory 11-11): reach from every roboport the terrain read found, no game needed
+        er = ctx.ground.entities_read
+        rlines, rchecks = robots.check_reach(
+            s, robots.standing_rows(ports, ctx.cat), ctx.cat,
+            read=f"read-terrain --entities found at tick {er.get('tick')}")
+    else:
+        rlines, rchecks = robots.check_surface(s, ctx.cat)
     return lines + rlines, checks + rchecks + _invariant_checks(sf.name, s.problems)
 
 
@@ -2341,13 +2563,30 @@ def s_report_bom(ctx, args):
         lines = [f"stock from {o['stock']}"]
     else:
         lines = ["stock none: needs only"]
-    checks = []
+    # FRICTION 11-11 (the bootstrap's S5): the stages ran on the kit's long-handed inserters until
+    # they ran out, and two hands stood as ghosts (one the refinery maker's): the bill now says
+    # which items nothing built in the design makes
+    made = set()
+    for flat in ctx.flats.values():
+        is_dnp = getattr(flat, "is_dnp", lambda _k: False)
+        for m in flat.machines.values():
+            if not is_dnp(m.inst):
+                made |= set(m.makes)
+    checks, unmade = [], []
     for name in sorted(need, key=lambda n: (-need[n], n)):
         have = None if stock is None else int(stock.get(name, 0))
-        lines.append(f"  {name:<28} {need[name]:>5}" + ("" if have is None else f"  have {have}"))
+        maker = name in made or not ctx.cat.is_item(name)
+        if not maker:
+            unmade.append(name)
+        lines.append(f"  {name:<28} {need[name]:>5}" + ("" if have is None else f"  have {have}")
+                     + ("" if maker else "  no maker"))
         if have is not None and have < need[name]:
-            checks.append(Check("short-stock", name, f"need {need[name]}, have {have}"))
+            checks.append(Check("short-stock", name, f"need {need[name]}, have {have}"
+                                + ("" if maker else ", and nothing built in the design makes it")))
     lines.append(f"  {'total':<28} {sum(need.values()):>5}")
+    if unmade:
+        lines.append(f"  no maker: {len(unmade)} of the {len(need)} items come only from stock or "
+                     "the network (nothing built in the design makes them)")
     return lines, checks
 
 
@@ -2772,18 +3011,22 @@ def with_options(lines, extra):
 
 
 def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None,
-        compiled=None) -> tuple:
+        compiled=None, fresh=False) -> tuple:
     """Run ``script`` (a .fkb path). -> (exit code, Ctx). 0 = ran to the end (or to ``to``), 1 =
     stopped by a stop_on check, 2 = malformed script or source. ``link``: an open game link the
     steps use instead of opening their own (``fkcore.lab``, 2.0.3), and the caller closes.
     ``extra``: options for this build only (``with_options``). ``compiled``: the compiled-module
     store the route step uses when its line names none (``fkcore.lab``: the game folder's).
+    ``fresh`` (``fk build --fresh``, Rory 11-11): the build reads nothing of the builds before it
+    (the committed .fkp, the last route step's nets, the failure memo, the compiled store), so a
+    module is tested as if from a clean slate: the route is path-dependent, and a module that
+    routed on top of its own last routes could fail built anew (the bootstrap's Oil2).
 
     2.1.19: the whole build reads the source as it began (``fkcore.snapshot``). A file edited
     while it runs is left for the next build, and the build says which ones were."""
     with snapshot.held() as snap:
         try:
-            return _run(script, frm, to, cat, echo, link, extra, compiled)
+            return _run(script, frm, to, cat, echo, link, extra, compiled, fresh)
         finally:
             moved = snapshot.changed(snap)
             if moved:
@@ -2793,12 +3036,13 @@ def run(script, frm=None, to=None, cat=None, echo=print, link=None, extra=None,
                      "build began; build again to lay the new source")
 
 
-def _run(script, frm, to, cat, echo, link, extra, compiled=None):
+def _run(script, frm, to, cat, echo, link, extra, compiled=None, fresh=False):
     root = os.path.dirname(os.path.abspath(script))
     with open(script, encoding="utf-8") as fh:
         lines = with_options(parse(fh.read(), script), extra)
     ctx = Ctx(root, script, cat or Catalog.load(), os.path.join(root, "out"))
     ctx.compiled = compiled
+    ctx.fresh = bool(fresh)
     ctx.echo = echo
     availmod.use(root)          # what the game can build, as the host last read it (out/avail.json)
     if link is not None:
@@ -2810,6 +3054,9 @@ def _run(script, frm, to, cat, echo, link, extra, compiled=None):
     names = [ln.cmd for ln in lines]
     first = _at(names, frm) if frm else 0
     last = _at(names, to) if to else len(lines) - 1
+    if ctx.fresh and first > 0:
+        raise FlowError("fk build --fresh lays everything anew: it takes no --from but the first "
+                        "step")
     os.makedirs(ctx.out, exist_ok=True)
     # the source as the run begins, before any step reads it: a file edited while the run goes
     # on makes its checkpoints stale, never the other way round

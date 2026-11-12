@@ -87,6 +87,10 @@ class CoverReport:
     existing: int                  # poles already in the layout (wire nodes)
     checks: list = field(default_factory=list)      # [Check]: NO_POWER, POWER_SPLIT
     pinned: int = 0                # of ``poles``, the committed ones kept where they stand (1.7)
+    dnp: int = 0                   # of ``poles``, the ones only DNP pieces need: laid, not built
+    allowed: tuple = ()            # 3.5 (Rory 11-11): the kinds --pole allows, first preferred
+    by_kind: dict = field(default_factory=dict)     # of ``poles``, how many of each kind
+    grid: int = 0                  # 3.5: the world grid's poles in reach, the cover's roots
 
     @property
     def ok(self):
@@ -98,10 +102,19 @@ class CoverReport:
     def summary(self):
         s = "" if self.components == 1 else "s"
         kept = f"{self.pinned} kept where they stand, " if self.pinned else ""
-        return (f"cover {self.owner} power pole={self.pole}: {len(self.poles)} poles "
-                f"({kept}{self.bridges} bridging, {self.existing} existing); "
+        # one kind allowed: the line as before 3.5 (goldens); several: the poles of each kind
+        mixed = len(self.allowed) > 1
+        kinds = (", ".join(f"{self.by_kind[k]} {k}" for k in self.allowed if self.by_kind.get(k))
+                 or "none laid") + "; " if mixed else ""
+        pole = ",".join(self.allowed) if mixed else self.pole
+        return (f"cover {self.owner} power pole={pole}: {len(self.poles)} poles "
+                f"({kinds}{kept}{self.bridges} bridging, {self.existing} existing"
+                + (f"; {self.dnp} only for DNP pieces, laid out, not built" if self.dnp else "")
+                + "); "
                 f"{self.covered}/{self.total} electric entities covered; "
-                f"{self.components} wire component{s}")
+                f"{self.components} wire component{s}"
+                + (f"; roots: {self.grid} pole{'s' if self.grid != 1 else ''} of the world grid"
+                   + (", joined" if self.components == 1 else "") if self.grid else ""))
 
 
 @dataclass
@@ -115,6 +128,8 @@ class _Node:
     spot: tuple | None = None
     bridge: bool = False
     dom: object = None             # 2.1: its power domain (codec.pole_domain); wired only within
+    name: str | None = None        # 3.5: a new pole's kind when not the cover's first (--pole a,b)
+    grid: object = None            # 3.5: a world grid root's network id: one component per id
 
 
 # -- geometry -------------------------------------------------------------------------------------
@@ -147,8 +162,11 @@ def networks(ents, cat):
     ents = sorted(ents, key=lambda e: natural_key(e.key))
     poles = [e for e in ents if cat.kind(e.name) == "electric-pole"]
     from .codec import pole_domain
+    # 3.5: the world grid's poles (power.grid_rows, keys grid#<id>/p<i>) are one network by id
     nodes = [_Node(float(e.x), float(e.y), cat.pole_supply(e.name), cat.pole_reach(e.name), e.key,
-                   dom=pole_domain({"src": e.key, "attrs": e.attrs})) for e in poles]
+                   dom=pole_domain({"src": e.key, "attrs": e.attrs}),
+                   grid=e.key.split("/", 1)[0] if e.key.startswith("grid#") else None)
+             for e in poles]
     sources = [(e.key, _rect(fkp.tiles_of(cat, e))) for e in ents
                if cat.kind(e.name) in GRID_SOURCE_TYPES]
     out = []
@@ -186,6 +204,18 @@ def _groups(nodes):
                     ri, rj = find(i), find(j)
                     if ri != rj:
                         parent[max(ri, rj)] = min(ri, rj)
+    # 3.5 (Rory 11-11, the world grid as a global parameter): the grid's poles are one network
+    # by the game's own id, wired outside the frame where the cover sees only those in reach
+    first = {}
+    for i, n in enumerate(nodes):
+        if n.grid is None:
+            continue
+        if n.grid not in first:
+            first[n.grid] = i
+            continue
+        ri, rj = find(i), find(first[n.grid])
+        if ri != rj:
+            parent[max(ri, rj)] = min(ri, rj)
     grouped = {}
     for i in range(len(nodes)):
         grouped.setdefault(find(i), []).append(i)
@@ -276,15 +306,24 @@ class _Ground:
 
 
 # -- bridging (v4 _search_links) ------------------------------------------------------------------
-def bridge(ents, cat, keep_out=(), pole="medium-electric-pole", owner="bridge"):
+def bridge(ents, cat, keep_out=(), pole="medium-electric-pole", owner="bridge", more=(),
+           grid=()):
     """Shared infrastructure (CORE-V1.md §6.2): new poles joining every wire network that reaches
     no grid source to one that does, on free tiles outside ``keep_out`` (a surface passes every
     plot's and claim's tiles: a bridge stands only in sanctioned space). -> (poles, lines).
 
     The fewest-pole chain per network is :func:`_search_links` (v4's BFS); a network joined becomes
-    a source for the next. Keys continue ``<owner>/p<k>`` after the owner's existing poles."""
+    a source for the next. Keys continue ``<owner>/p<k>`` after the owner's existing poles.
+
+    3.5 (Rory 11-11): ``more``, the later kinds ``--bridge-power a,b`` allows, for a network the
+    first kind's chain cannot reach; ``grid``, the keys among ``ents`` of the world grid's poles
+    (``power.grid_rows``): a network holding one is fed, whatever generator it reaches."""
     ents = sorted(ents, key=lambda e: natural_key(e.key))
     nets = networks(ents, cat)
+    grid = set(grid)
+    for n in nets:
+        if grid & set(n["poles"]) and not n["sources"]:
+            n["sources"] = ["the world grid"]
     if not any(n["sources"] for n in nets):
         return [], ["no wire network reaches a grid source: nothing to bridge to"]
     by_key = {e.key: e for e in ents}
@@ -308,18 +347,26 @@ def bridge(ents, cat, keep_out=(), pole="medium-electric-pole", owner="bridge"):
         if net["sources"]:
             continue
         targets = nodes(net["poles"])
-        path = _search_links(ground, sources, targets, supply, reach)
+        path, kind, g = _search_links(ground, sources, targets, supply, reach), pole, ground
+        for other in more if path is None else ():
+            g = _Ground(taken, ground.keep_out, None, cat.size(other))
+            g.placed = ground.placed             # one set of tiles poles stand on, any kind
+            path, kind = _search_links(g, sources, targets, cat.pole_supply(other),
+                                       cat.pole_reach(other)), other
+            if path is not None:
+                break
         where = f"the network of {net['poles'][0]} ({len(net['poles'])} poles)"
         if path is None:
             lines.append(f"cannot bridge {where}: no chain of free sanctioned tiles reaches it")
             continue
         for node in path:
-            ground.place(node.spot)
-            poles.append(fkp.Entity(f"{owner}/p{k}", pole, _clean(node.x), _clean(node.y)))
+            g.place(node.spot)
+            poles.append(fkp.Entity(f"{owner}/p{k}", kind, _clean(node.x), _clean(node.y)))
             node.key = f"{owner}/p{k}"
             k += 1
         sources += path + targets
-        lines.append(f"bridged {where} with {len(path)} pole{'s' if len(path) != 1 else ''}")
+        lines.append(f"bridged {where} with {len(path)} pole{'s' if len(path) != 1 else ''}"
+                     + (f" ({kind})" if kind != pole else ""))
     return poles, lines
 
 
@@ -442,7 +489,7 @@ def _check_args(lay, cat, pole, owner):
 
 
 def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=(),
-                only=None, deny=(), attrs=None, frame=None):
+                only=None, deny=(), attrs=None, frame=None, more=(), roots=()):
     """``(poles, report)``: the poles to add to ``lay`` and a :class:`CoverReport`.
 
     ``frame`` (2.1.35): the box (x0, y0, x1, y1) new poles stand in, in place of the layout's
@@ -460,14 +507,29 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     nodes. ``deny``: the tile rectangles of other domains' machines, which no new pole's supply
     area may reach (an entity that only such spots could power is a ``domain-overlap`` line).
     ``attrs``: the new poles' attrs (``domain=NAME``).
+
+    3.5 (PLAN-POWER P2, Rory 11-11: "if multiple are allowed they can always be mixed"):
+    ``more``, the later kinds ``--pole a,b`` allows, in order. The cover lays ``pole``; a load no
+    free spot of it powers goes to the next kind, that load alone (FRICTION 11-11, "cover power:
+    all 25 spots taken": the sim's powerfix.py put in the other kind by hand), and a component
+    no chain of ``pole`` joins is bridged with the next. With no ``more`` nothing changes.
+
+    3.5 (P1, Rory 11-11: "world power is a type of global parameter"): ``roots``, the world
+    grid's standing poles near the frame (``power.Root``, in this layout's frame). They are wire
+    nodes and power what their supply reaches; every root of one grid id is one component, which
+    is the main one the cover bridges to; they are never laid, moved, pruned or returned.
     """
     _check_args(lay, cat, pole, owner)
+    more = tuple(dict.fromkeys(k for k in more if k != pole))
+    for k in more:
+        if not cat.has_entity(k) or cat.kind(k) != "electric-pole":
+            raise ValueError(f"{k} is not an electric pole in the catalog")
     s, wire = cat.pole_supply(pole), cat.pole_reach(pole)
     rows = sorted(lay.entities.values(), key=lambda e: natural_key(e.key))
     rows = [e for e in rows if not _is_own_pole(e, owner, cat)]
 
     # Tiles taken, existing poles as wire nodes, and the entities that need power.
-    taken, existing, electric = {}, [], []
+    taken, existing, electric, unbuilt = {}, [], [], set()
     for e in rows:
         try:
             tiles = fkp.tiles_of(cat, e)
@@ -480,20 +542,43 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
             continue                                 # another domain's: its tiles stay taken
         if kind == "electric-pole" and e.attrs.get("dnp"):
             # 2.0.63: a DNP pole is never built, so it powers nothing; its tiles stay taken. What
-            # a DNP piece would power still gets its poles, ready for when it is built
+            # a DNP piece would power still gets its poles, ready for when it is built (and DNP
+            # themselves while only DNP pieces need them: _dnp_poles)
             continue
         if kind == "electric-pole":
             existing.append(_Node(float(e.x), float(e.y), cat.pole_supply(e.name),
                                   cat.pole_reach(e.name), key=e.key))
         elif _needs_power(cat, e):
+            if e.attrs.get("dnp"):
+                unbuilt.add(len(electric))
             electric.append((e.key, _rect(tiles)))
+    # the world grid's poles: wire roots that stand in the world (their tiles are taken), first,
+    # so that their component is the main one every other is bridged to
+    grid_nodes = []
+    for r in roots:
+        try:
+            for t in sorted(cat.tiles(r.name, float(r.x), float(r.y), 0)):
+                taken.setdefault(t, r.key)
+        except (KeyError, ValueError):
+            continue
+        grid_nodes.append(_Node(float(r.x), float(r.y), cat.pole_supply(r.name),
+                                cat.pole_reach(r.name), key=r.key, grid=r.grid))
     ground = _Ground(taken, {(math.floor(x), math.floor(y)) for x, y in keep_out}, lay.size,
                      cat.size(pole), deny, s)
     if frame is not None:
         ground.bounds = tuple(frame)
+    # 3.5: a ground per allowed kind (its footprint and supply), sharing the tiles poles stand on
+    grounds = {pole: ground}
+    for k in more:
+        gk = _Ground(taken, ground.keep_out, lay.size, cat.size(k), deny, cat.pole_supply(k))
+        gk.bounds, gk.placed = ground.bounds, ground.placed
+        grounds[k] = gk
 
-    # The committed poles of this kind that still fit: kept as they stand (wire nodes, prunable
-    # last).
+    def ground_of(n):
+        return grounds.get(n.name or pole, ground)
+
+    # The committed poles of an allowed kind that still fit: kept as they stand (wire nodes,
+    # prunable last). One of another kind is laid again (3.1).
     kept, names = [], {}
     for e in sorted(pinned, key=lambda e: natural_key(e.key)):
         try:
@@ -501,15 +586,17 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         except (KeyError, ValueError):
             continue
         spot = (min(x for x, _y in tiles), min(y for _x, y in tiles))
-        if e.name != pole:
+        if e.name not in grounds:
             continue
-        if not ground.free(spot):
+        if not grounds[e.name].free(spot):
             continue
-        ground.place(spot)
+        grounds[e.name].place(spot)
         kept.append(_Node(float(e.x), float(e.y), cat.pole_supply(e.name), cat.pole_reach(e.name),
-                          key=e.key, spot=spot))
+                          key=e.key, spot=spot, name=None if e.name == pole else e.name))
         names[e.key] = e.name
     keep_keys = {n.key for n in kept}
+    own_poles = existing
+    existing = grid_nodes + existing
     fixed = len(existing)                        # the layout's own wire nodes, never pruned
     existing = existing + kept
 
@@ -518,35 +605,48 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
 
     # 1. Cover: greedy over the free spots that power entities the existing poles do not.
     pending = [i for i, (_k, rect) in enumerate(electric) if not powered(rect, existing)]
-    candidates = {}
-    for i in pending:
-        for spot in ground.spots_powering(electric[i][1], s):
-            if ground.free(spot):
-                candidates.setdefault(spot, set()).add(i)
     ref = None
-    if existing:
-        ref = (sum(n.x for n in existing) / len(existing),
-               sum(n.y for n in existing) / len(existing))
-    chosen, left = [], set(pending)
-    while left:
-        best, best_key = None, None
-        for spot, covers in candidates.items():
-            count = len(covers & left)
-            if count == 0 or not ground.free(spot):
-                continue
-            dist = 0.0
-            if ref is not None:
-                cx, cy = ground.centre(spot)
-                dist = (cx - ref[0]) ** 2 + (cy - ref[1]) ** 2
-            key = (count, -dist, -spot[1], -spot[0])
-            if best_key is None or key > best_key:
-                best, best_key = spot, key
-        if best is None:
+    # the tie-break's centroid is the design's own poles' (a root may stand far outside)
+    near = own_poles + kept
+    if near:
+        ref = (sum(n.x for n in near) / len(near),
+               sum(n.y for n in near) / len(near))
+
+    def greedy(g, sup, reach, todo, kind=None):
+        candidates = {}
+        for i in sorted(todo):
+            for spot in g.spots_powering(electric[i][1], sup):
+                if g.free(spot):
+                    candidates.setdefault(spot, set()).add(i)
+        got, left = [], set(todo)
+        while left:
+            best, best_key = None, None
+            for spot, covers in candidates.items():
+                count = len(covers & left)
+                if count == 0 or not g.free(spot):
+                    continue
+                dist = 0.0
+                if ref is not None:
+                    cx, cy = g.centre(spot)
+                    dist = (cx - ref[0]) ** 2 + (cy - ref[1]) ** 2
+                key = (count, -dist, -spot[1], -spot[0])
+                if best_key is None or key > best_key:
+                    best, best_key = spot, key
+            if best is None:
+                break
+            g.place(best)
+            cx, cy = g.centre(best)
+            got.append(_Node(cx, cy, sup, reach, spot=best, name=kind))
+            left -= candidates[best]
+        return got, left
+
+    chosen, left = greedy(ground, s, wire, pending)
+    # 1b. The kind ladder (P2): what the first kind has no free spot for, the next kinds, in order
+    for k in more:
+        if not left:
             break
-        ground.place(best)
-        cx, cy = ground.centre(best)
-        chosen.append(_Node(cx, cy, s, wire, spot=best))
-        left -= candidates[best]
+        got, left = greedy(grounds[k], cat.pole_supply(k), cat.pole_reach(k), left, k)
+        chosen += got
 
     # 2. Bridge: join every component to the main one while some chain of free spots can.
     nodes = existing + chosen
@@ -578,10 +678,24 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
             if path:
                 added = path
                 break
+        for k in more if added is None else ():
+            # 3.5: a component no chain of the first kind joins, with the next kind (a smaller
+            # footprint through a gap, a longer reach across one)
+            for d, _first, other in ranked:
+                path = _search_links(grounds[k], [nodes[i] for i in main],
+                                     [nodes[i] for i in other], cat.pole_supply(k),
+                                     cat.pole_reach(k))
+                if path:
+                    for n in path:
+                        n.name = k
+                    added = path
+                    break
+            if added is not None:
+                break
         if added is None:
             break
         for n in added:
-            ground.place(n.spot)
+            ground_of(n).place(n.spot)
             nodes.append(n)
         groups = _groups(nodes)
 
@@ -604,7 +718,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
         if len(regrouped) > len(groups):
             continue
         nodes, groups = rest, regrouped
-        ground.lift(n.spot)
+        ground_of(n).lift(n.spot)
         pruned += 1
         # A neighbour kept only to join this one may be idle now: it is looked at again.
         order += [m for m in rest if m.spot is not None and _wired(m, n)
@@ -614,7 +728,7 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     new = sorted((n for n in nodes if n.spot is not None and n.key not in keep_keys),
                  key=lambda n: (n.spot[1], n.spot[0]))
     top = max([int(k.rsplit("/p", 1)[1]) for k in keep_keys] + [-1]) + 1
-    poles = [Entity(f"{owner}/p{top + k}", pole, n.x, n.y, None, dict(attrs or {}))
+    poles = [Entity(f"{owner}/p{top + k}", n.name or pole, n.x, n.y, None, dict(attrs or {}))
              for k, n in enumerate(new)]
     key_of = {id(n): e.key for n, e in zip(new, poles)}
     for n in nodes:
@@ -623,6 +737,15 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
     still = [n for n in nodes if n.key in keep_keys]
     poles += [Entity(n.key, names.get(n.key, pole), n.x, n.y, None, dict(attrs or {}))
               for n in still]
+    dnp_poles = 0
+    if unbuilt:
+        built = [rect for i, (_k, rect) in enumerate(electric) if i not in unbuilt]
+        idle = _dnp_poles(nodes, fixed, built, powered)
+        for e, n in [(e, n) for n, e in zip(new, poles)] + [(e, n) for n, e in
+                                                             zip(still, poles[len(new):])]:
+            if id(n) in idle:
+                e.attrs["dnp"] = 1
+                dnp_poles += 1
     uncovered, checks = [], []
     for key, rect in electric:
         if not powered(rect, nodes):
@@ -630,6 +753,8 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
             # 3.1.3 crash on plasticcol's edge beacon (fk-run2 FRICTION.md, PLAN-ORGANIC D3)
             reason = _why_not(ground, rect, s, pole, lay.size, frame,
                               sealed=lay.size is None and frame is not None)
+            if more:
+                reason += f"; no free spot of {', '.join(more)} powers it either"
             uncovered.append((key, reason))
             checks.append(Check("domain-overlap" if "another power domain" in reason
                                 else "NO_POWER", key, reason))
@@ -641,16 +766,117 @@ def cover_power(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(
                                            else "")
         checks.append(Check("power-split", f"cover {owner}",
                             f"{shown} ({len(keys)} pole{'s' if len(keys) != 1 else ''}) cannot be "
-                            f"wired to the main grid: no chain of free spots at most "
-                            f"{fkp.fmt(wire)} tiles apart joins them"))
+                            f"wired to the {'world' if grid_nodes else 'main'} grid: no chain of "
+                            f"free spots at most {fkp.fmt(wire)} tiles apart joins them"))
+    by_kind = {}
+    for e in poles:
+        by_kind[e.name] = by_kind.get(e.name, 0) + 1
     rep = CoverReport(owner, pole, [e.key for e in poles], len(electric),
                       len(electric) - len(uncovered), len(groups), uncovered, splits,
-                      sum(1 for n in new if n.bridge), pruned, fixed, checks, len(still))
+                      sum(1 for n in new if n.bridge), pruned, fixed - len(grid_nodes), checks,
+                      len(still), dnp_poles, (pole,) + more, by_kind, len(grid_nodes))
     return poles, rep
 
 
+def _dnp_poles(nodes, fixed, built, powered):
+    """{id(node)}: the cover's poles that only DNP pieces need (FRICTION 11-11: a bootstrap stage
+    of 1590 DNP rows and a 39-entity seed came with 94 poles, 4-22 of them needed). Kept: a greedy
+    cover of the built electric entities (``built``, tile rects) the layout's own poles
+    (``nodes[:fixed]``) do not power, and the shortest wire paths that join them to those poles,
+    or to each other where a component has none. The rest stay laid out, DNP, ready for when
+    their pieces are built."""
+    roots = nodes[:fixed]
+    root_ids = {id(n) for n in roots}
+    ours = nodes[fixed:]
+    left = [r for r in built if not powered(r, roots)]
+    need = []
+    while left:
+        best = max(ours, key=lambda n: sum(_overlap(r, n.x, n.y, n.supply) for r in left),
+                   default=None)
+        if best is None or not any(_overlap(r, best.x, best.y, best.supply) for r in left):
+            break
+        need.append(best)
+        left = [r for r in left if not _overlap(r, best.x, best.y, best.supply)]
+    keep = {id(n) for n in need}
+    for group in _groups(nodes):
+        members = [nodes[i] for i in group]
+        terms = [n for n in members if id(n) in keep]
+        if not terms:
+            continue
+        tree = {id(n) for n in members if id(n) in root_ids} or {id(terms[0])}
+        for _round in range(len(terms)):
+            if all(id(t) in tree for t in terms):
+                break
+            # breadth first from the tree to the nearest terminal not on it
+            prev, frontier, hit = {}, [n for n in members if id(n) in tree], None
+            seen = {id(n) for n in frontier}
+            while frontier and hit is None:
+                nxt = []
+                for a in frontier:
+                    for b in members:
+                        if id(b) in seen or not _wired(a, b):
+                            continue
+                        seen.add(id(b))
+                        prev[id(b)] = a
+                        if id(b) in keep and id(b) not in tree:
+                            hit = b
+                            break
+                        nxt.append(b)
+                    if hit is not None:
+                        break
+                frontier = nxt
+            if hit is None:
+                break
+            n = hit
+            while id(n) not in tree:
+                tree.add(id(n))
+                n = prev[id(n)]
+        keep |= tree
+    idle = {id(n) for n in ours if id(n) not in keep}
+    if _keeps_power(nodes, fixed, built, idle):
+        return idle
+    return _prune_safely(nodes, fixed, built)
+
+
+def _keeps_power(nodes, fixed, built, idle):
+    """Rory 11-11: "a system that automatically removes power poles needs to ensure that it never
+    causes something to de power". True when, without the ``idle`` poles: every built entity
+    (``built``, its rect: grid sources among them, so a generator stays on its grid) still stands
+    in a kept pole's supply area, and in every wire component of all the poles, the layout's own
+    poles and the kept poles that power something built are still one wire component."""
+    kept = [n for n in nodes if id(n) not in idle]
+    for r in built:
+        if not any(_overlap(r, n.x, n.y, n.supply) for n in kept) \
+                and any(_overlap(r, n.x, n.y, n.supply) for n in nodes):
+            return False                 # (one no pole powers at all is NO_POWER's, not ours)
+    root_ids = {id(n) for n in nodes[:fixed]}
+    now = {}
+    for k, group in enumerate(_groups(kept)):
+        for i in group:
+            now[id(kept[i])] = k
+    for group in _groups(nodes):
+        terms = {now[id(nodes[i])] for i in group
+                 if id(nodes[i]) in now and (id(nodes[i]) in root_ids
+                                             or any(_overlap(r, nodes[i].x, nodes[i].y,
+                                                             nodes[i].supply) for r in built))}
+        if len(terms) > 1:
+            return False
+    return True
+
+
+def _prune_safely(nodes, fixed, built):
+    """The slow road when the greedy pick fails :func:`_keeps_power`: the cover's poles one at a
+    time, newest first, each made DNP only when the check still holds without it."""
+    idle = set()
+    for n in reversed(nodes[fixed:]):
+        trial = idle | {id(n)}
+        if _keeps_power(nodes, fixed, built, trial):
+            idle = trial
+    return idle
+
+
 def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power", keep_out=(),
-                      attrs=None):
+                      attrs=None, more=(), roots=()):
     """2.1.35 (Rory 2026-11-07: power in the hierarchy, as the routing is): ``(poles, report)``
     as :func:`cover_power`, laid unit by unit. ``units``: [(path, (x0, y0, x1, y1), twin)] of the
     sealed modules, innermost first; ``twin`` is what makes two units alike (their kind and turn),
@@ -661,7 +887,11 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     same entities and keep-out in its frame) takes that one's poles, moved. A last pass over the
     whole layout powers what no unit could and joins the units' grids (the band and row
     backbones). The megabase grid's flat cover tried every spot of 6263 machines for each of its
-    600 poles: ten minutes."""
+    600 poles: ten minutes.
+
+    3.5 (Rory 11-11): ``more``, the later allowed kinds, for every unit's pass and the last one
+    (the same ladder as :func:`cover_power`); ``roots``, the world grid's poles, for the last
+    pass only: it is the one that joins the units' grids, so it joins them to the world's."""
     _check_args(lay, cat, pole, owner)
     from types import SimpleNamespace
     S = 32
@@ -750,7 +980,7 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
                                   entities={e.key: e for e in rows})
             only = own_keys | {p.key for p in kids}
             poles, urep = cover_power(sub, cat, pole=pole, owner=f"pw{i}", keep_out=ko,
-                                      only=only, attrs=attrs, frame=box)
+                                      only=only, attrs=attrs, frame=box, more=more)
             got = [Entity(f"{owner}~{i}/p{k}", p.name, p.x, p.y, None, dict(p.attrs))
                    for k, p in enumerate(poles)]
             laid += 1
@@ -769,7 +999,8 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     # the last pass: the whole layout, the units' poles standing as wire nodes
     whole = SimpleNamespace(name=lay.name, size=lay.size, insts=lay.insts, covers=lay.covers,
                             entities={**{e.key: e for e in own}, **{p.key: p for p in placed}})
-    last, rep = cover_power(whole, cat, pole=pole, owner=owner, keep_out=keep_out, attrs=attrs)
+    last, rep = cover_power(whole, cat, pole=pole, owner=owner, keep_out=keep_out, attrs=attrs,
+                            more=more, roots=roots)
     for path, box, k, why in nospot:
         x0, y0, x1, y1 = box
         rep.checks.append(Check(
@@ -781,6 +1012,9 @@ def cover_power_units(lay, cat, units, pole="medium-electric-pole", owner="power
     poles = [Entity(f"{owner}/p{k}", p.name, p.x, p.y, None, dict(p.attrs))
              for k, p in enumerate(allp)]
     rep.poles = [p.key for p in poles]
+    rep.by_kind = {}
+    for p in poles:
+        rep.by_kind[p.name] = rep.by_kind.get(p.name, 0) + 1
     rep.existing = max(0, rep.existing - len(placed))
     rep.units = (laid, reused)
     return poles, rep
@@ -831,17 +1065,25 @@ def _why_not(ground, rect, s, pole, size, frame=None, sealed=False):
 
 
 def apply_cover(lay, cat, pole="medium-electric-pole", owner="power", keep_out=(), pinned=(),
-                only=None, deny=(), attrs=None, poles=None):
+                only=None, deny=(), attrs=None, poles=None, more=(), roots=()):
     """A new Layout: ``lay`` without ``owner``'s previous poles, with the pinned ones that still
-    fit, the new ones and the record ``cover <owner> power pole=<pole>``. ``lay`` is not changed.
-    ``poles``: :func:`cover_power`'s, when the caller has them already."""
+    fit, the new ones and the record ``cover <owner> power pole=<pole>`` (3.5: and
+    ``poles=<a>,<b>`` when several kinds are allowed; ``pole`` stays the first, which circuits'
+    gap poles read). ``lay`` is not changed. ``poles``: :func:`cover_power`'s, when the caller
+    has them already."""
+    more = tuple(dict.fromkeys(k for k in more if k != pole))
     if poles is None:
-        poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned, only, deny, attrs)
+        poles, _rep = cover_power(lay, cat, pole, owner, keep_out, pinned, only, deny, attrs,
+                                  more=more, roots=roots)
     out = copy.deepcopy(lay)
     out.entities = {k: e for k, e in out.entities.items() if not _is_own_pole(e, owner, cat)}
     old = out.covers.get(owner)
     params = dict(old.params) if old is not None else {}
     params["pole"] = pole
+    if more:
+        params["poles"] = ",".join((pole,) + more)
+    else:
+        params.pop("poles", None)
     out.covers[owner] = fkp.Cover(owner, "power", params)
     for e in poles:
         out.add(e)

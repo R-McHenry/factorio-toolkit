@@ -124,3 +124,51 @@ agent joined it from a fresh Linux (WSL) with the invitation's three commands.
   - `fk replica` downloaded the headless server, pulled the save and started it paused with
     `mods: base`;
   - the test build was taken up again afterwards and the plot given back.
+
+## 3.4.2: the bootstrap's friction review (2026-11-11)
+
+The bootstrap sim's `lab-session\fk-boot-w3\FRICTION.md` (21 entries, S2-S7 on 3.2.9), and Rory's
+calls on it the same day. Branch `claude/62-boot-friction`, with `claude/63-direct-share` and
+`claude/64-power` merged into it. The review, entry by entry: `docs\notes-62-boot-friction.md`.
+
+- **Hands.** A hand with `filter=` stays at a rung that filters (fast, bulk, stack). `hands`
+  names the hands `route --hand` fixed that carry less than their connector needs.
+- **cover power.**
+  - A pole only DNP pieces need is laid out DNP. The reducer proves it depowers nothing: every
+    built entity stays powered, on one wire component with the layout's own poles. If the proof
+    fails, it prunes one pole at a time under the same check.
+  - PLAN-POWER P1: a surface line `power grid X,Y` names a standing pole, and
+    `read-terrain --entities` records its network (poles, last minute's watts, generator
+    capacity). Cover power wires to it, `NO_POWER` judges against it, and `power-short` weighs
+    the draw against its spare.
+  - PLAN-POWER P2: `--pole a,b` lists the allowed kinds in order (`any`: every kind that can be
+    built). They mix: a later kind only where the first has no spot or can't bridge.
+    `stop_on no-power` is the script's call, as before.
+- **Route.**
+  - Direct insertion. One hand per (source, consumer) pair across nets (`net=a+b`, filtered to
+    the union). N x M nets go direct where every driver reaches every consumer by hand, and
+    `split:` nets go direct consumer by consumer.
+  - Pinned routes:
+    - a re-kinded instance's nets are routed again;
+    - a committed carrier on ground the terrain now blocks is taken up;
+    - `--retry-failed always` lays a route whose new end can't be patched again whole;
+    - a patch branch that would stack two pieces on a tile is refused.
+  - `connect`: a port is fed only by a carrier that moves its items onto the port's belt. The
+    belt-switch and red-chain examples count one edge fewer: a roboport or pole stood on a port's
+    outside tile.
+- **Checks.**
+  - `crowded-ends`: more nets than side tiles. For a chest, it gives the one sushi net that
+    takes them all.
+  - `report_bom`: "no maker".
+  - Robot reach offline. `read-terrain --entities` records every roboport. Floorplan reports
+    `out-of-reach` per plot, and `no-robots` per logistic chest or `logistic=` gate.
+    `read_terrain map --reach` blocks the ground no roboport builds.
+  - `overlap` for declared frames whose hulls don't meet yet. `place --overlap a+b` marks a pair
+    as meant, with `overlap-clash` per tile both lay on.
+- **`fk build --fresh`:** nothing of the builds before is read.
+- **Measured:**
+  - the merge set plus the new modules: 785 tests;
+  - 1 failure, `test_power_domains` `test_the_example_builds_clean` (pair-leak lines), which
+    fails on 3.4.1 too.
+- **Not verified live:** the grid read's units (J/tick x 60), `get_max_energy_production`, and
+  the type filter's `fusion-generator`.

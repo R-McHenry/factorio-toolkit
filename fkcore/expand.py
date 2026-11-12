@@ -1448,17 +1448,21 @@ def frame_of(flat, lay, path, cat):
     return frame_shape_of(flat, lay, path, cat).box
 
 
-def frame_overlaps(flat, lay, cat):
+def frame_overlaps(flat, lay, cat, claims=False):
     """[(a, b, (x0, y0, x1, y1), n)]: every two placed sealed modules whose frames share tiles,
     neither inside the other, with the box of the shared tiles and their count ``n`` (2.0.75: a
     warning, never a stop; the router lets either module's nets use the shared tiles, each in the
     way of the other's). 41-hull: two polygons whose boxes meet but whose tiles do not are no
-    overlap; ``n`` is the box's area when both are boxes."""
+    overlap; ``n`` is the box's area when both are boxes. ``claims``: judge what each declares
+    (``claim_shape_of``, its territory or declaration) in place of its achieved hull (3.4: the
+    bootstrap's Blue1 sat on Sci's declared top rows while their hulls shared nothing yet, and
+    the build said nothing; FRICTION 11-11)."""
     shapes = {}
+    shape_of = claim_shape_of if claims else frame_shape_of
     for path in sorted(lay.insts, key=fkpmod.natural_key):
         if path in flat.insts and path in flat.sealed:
             try:
-                shapes[path] = frame_shape_of(flat, lay, path, cat)
+                shapes[path] = shape_of(flat, lay, path, cat)
             except FragmentError:
                 continue
     names, out = list(shapes), []

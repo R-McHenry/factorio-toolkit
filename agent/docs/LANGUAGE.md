@@ -173,7 +173,7 @@ module GearRib size 16x10 {
 | parameters | `module FurnaceCell<plate, ore=iron-ore> size 7x3`: a parameter without a default is required. `$p` stands for its value wherever a word may stand (a port's item, a net's `items`, a parameter value, a signal, a `set` value, inside a quoted string: `if="green.$in < $lo"`), never for an instance, net or port name, a position or the size. Values are words, numbers or lists; `ins=a\|b` is a list, `$ins[0]` one item of it; there is no arithmetic (chapter 6, 7) |
 | `duty=`, `dnp` | every module takes them; any other parameter it doesn't declare is refused |
 | `buffer` | `module LoopEnd buffer size 1x3 { ... }`: its ports are a buffer's ends (Buffers, below) |
-| overlap | two sealed frames may overlap: an `overlap` line, and the shared tiles are both modules' to route on |
+| overlap | two sealed frames may overlap: an `overlap` warning (declared frames that share tiles warn too, while the hulls don't meet), and the shared tiles are both modules' to route on; `place --overlap a+b` in the build script says a pair is meant (compaction): a line in place of the warning, and `overlap-clash` per tile both lay an entity on |
 | `shape` | `module Mod shape (0,0) (24,0) (24,12) (16,20) (8,20) (0,12) { ... }`: the frame as a closed polygon where `size WxH` stands, whole-number corners in tiles about the module's origin, its edges on tile boundaries; the tiles whose centres it holds are the frame, the rest of its box is the parent's ground. `@n12` is the shape's outermost tile in column 12; a column the shape does not reach is `port-off-frame` and the port moves to the nearest boundary tile of that side; a self-crossing or flat polygon is `bad-shape` and the module is read as its box. `@(x, y, rot r)` turns the polygon about its origin as it turns a box (chapter 6) |
 | the frame read | a sealed module's frame is read in three steps, each refining the last: the **hull** it achieved when it was last built (`out\frames.json`, written by the build: its machines and belts, one tile around, clipped to the frame it was built in; dropped when the module's inside changes), else the **territory** `fk layout` assigned the instance (`out\territories.json`), else the declaration. The parent's layout and build read the hull, so what a module leaves free is its parent's ground; `fk layout FILE MODULE` lays the inside out in the declared or assigned frame; `fk explain FILE INST` prints frame, territory and hull as rows of `#` and `.` (chapter 6) |
 | `fk explain FILE INST` | an instance as its entities and nets, with its size; a module's internals are its own and a parent change never re-routes them |
@@ -400,7 +400,9 @@ condition reads `each`.
 
 The build's `cover power` step lays the poles every factory needs and `floorplan --bridge-power`
 joins factories to the plant's grid: put no poles in the source (`Pole` pins one where a cell
-needs it).
+needs it). `cover power --pole a,b` allows several kinds, mixed where the first has no spot, and
+the surface file's `power grid X,Y` names the world's grid, whose poles the cover wires to
+(TOOLKIT.md).
 
 ```
 power main: cover all                 # everything no other domain names
